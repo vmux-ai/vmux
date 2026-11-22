@@ -324,7 +324,7 @@ fn references(
 fn rename(
     trigger: On<EditorRenameRequest>,
     views: Query<EditReadOnly>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();

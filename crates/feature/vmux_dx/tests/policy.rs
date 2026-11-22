@@ -1972,6 +1972,51 @@ fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
 }
 
 #[test]
+fn generic_input_traits_require_registered_canonical_implementors() {
+    for (registration, extra, payload, expected) in [
+        ("app.add_observer(accept::<Input>);", "", "", true),
+        ("", "", "", false),
+        ("app.add_observer(other);", "", "", false),
+        (
+            "",
+            "#[cfg(test)] mod tests { use super::*; struct FixturePlugin; impl Plugin for FixturePlugin { fn build(&self, app: &mut App) { app.add_observer(accept::<Input>); } } }",
+            "",
+            false,
+        ),
+        (
+            "app.add_observer(accept::<Input>);",
+            "struct Detached; impl Intent for Detached { fn delta(&self) -> u32 { 0 } }",
+            "",
+            false,
+        ),
+        (
+            "app.add_observer(accept::<Input>);",
+            "#[derive(EntityEvent)] struct Detached { #[event_target] entity: Entity } impl Intent for Detached { fn delta(&self) -> u32 { 0 } }",
+            "",
+            false,
+        ),
+        (
+            "app.add_observer(accept::<Input>);",
+            "struct Engine { rows: Vec<u32> }",
+            "engine: Engine,",
+            false,
+        ),
+    ] {
+        let source = format!(
+            "use bevy_app::{{App, Plugin, Update}}; use bevy_ecs::prelude::*; #[derive(Component)] struct State; #[derive(EntityEvent)] struct Input {{ #[event_target] entity: Entity, {payload} }} trait Intent {{ fn delta(&self) -> u32; }} impl Intent for Input {{ fn delta(&self) -> u32 {{ 1 }} }} fn accept<T: EntityEvent + Intent>(input: On<T>, state: Query<&mut State>) {{}} fn other(state: Query<&mut State>) {{}} {extra} struct HostPlugin; impl Plugin for HostPlugin {{ fn build(&self, app: &mut App) {{ {registration} }} }}"
+        );
+        let inventory = Inventory::fixture(&source);
+        let key = inventory.key("trait:Intent");
+        let entry = &inventory.entries[&key];
+        assert_eq!(
+            inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()),
+            expected,
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn reviewed_app_extensions_reference_only_their_actual_framework_composition() {
     for (binding, owner, installed, expected) in [
         ("use bevy_app::App;", "App", "Root", true),
@@ -11994,6 +12039,7 @@ impl Inventory {
                 self.registered(entry) || self.helper_owner(entry, &mut BTreeSet::new())
             }
             Kind::Struct | Kind::Enum => entry.ecs && self.used(entry),
+            Kind::Trait => self.registered_trait(entry, policy),
             Kind::Alias => {
                 self.used(entry)
                     && (self.component_alias(entry, policy, &mut visiting.clone())
@@ -12109,6 +12155,61 @@ impl Inventory {
             }
         }
         true
+    }
+
+    fn registered_trait(&self, entry: &Declaration, policy: &Policy) -> bool {
+        let mut callbacks = Vec::new();
+        for (key, endpoints) in &self.instantiated_systems {
+            let Some(callback) = self.entries.get(key) else {
+                continue;
+            };
+            if !self.registered(callback) || callback.generic_bindings.is_empty() {
+                continue;
+            }
+            for reference in &callback.reference_paths {
+                if self
+                    .resolve(&callback.namespace, reference, &mut BTreeSet::new())
+                    .is_some_and(|bound| bound.key == entry.key)
+                {
+                    callbacks.push(endpoints);
+                    break;
+                }
+            }
+        }
+        if callbacks.is_empty() {
+            return false;
+        }
+        let mut accepted = 0;
+        for implementation in self.entries.values() {
+            if !implementation.production {
+                continue;
+            }
+            let Some(interface) = &implementation.implemented_trait else {
+                continue;
+            };
+            if self
+                .resolve(&implementation.namespace, interface, &mut BTreeSet::new())
+                .is_none_or(|interface| interface.key != entry.key)
+            {
+                continue;
+            }
+            let Some(owner) = implementation.owner.as_ref().and_then(|owner| {
+                self.resolve(&implementation.namespace, owner, &mut BTreeSet::new())
+            }) else {
+                return false;
+            };
+            if !owner.ecs
+                || !self.used(owner)
+                || !callbacks
+                    .iter()
+                    .any(|endpoints| endpoints.contains(&owner.key))
+                || !self.canonical(owner, policy, &mut BTreeSet::new())
+            {
+                return false;
+            }
+            accepted += 1;
+        }
+        accepted > 0
     }
 
     fn indexed_result(&self, entry: &Declaration) -> bool {

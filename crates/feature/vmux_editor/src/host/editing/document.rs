@@ -88,7 +88,7 @@ fn apply<T: Intent>(
         Option<&super::FileViewport>,
     )>,
     preview: PreviewAccess,
-    mut clipboard: Option<NonSendMut<super::ClipboardHandle>>,
+    mut clipboard: crate::host::delivery::Clipboard,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -109,9 +109,7 @@ fn apply<T: Intent>(
         core.viewport.sync(viewport);
     }
     if T::CLIPBOARD_REGISTER
-        && let Some(clipboard) = clipboard.as_mut()
-        && let Some(cb) = clipboard.0.as_mut()
-        && let Ok(text) = cb.get_text()
+        && let Some(text) = clipboard.read(entity)
         && text != core.registers.clipboard_shadow
     {
         core.registers.clipboard_shadow.clone_from(&text);

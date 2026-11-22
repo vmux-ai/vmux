@@ -1,4 +1,5 @@
 use crate::host::editor::Edit;
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use ropey::Rope;
@@ -142,7 +143,7 @@ impl Reindent {
 fn file_set(
     trigger: On<UiInput<FileShapeSet>>,
     mut views: Query<Edit>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;

@@ -24,8 +24,34 @@ impl Plugin for InputPlugin {
         app.add_observer(decode::<KeyInputRequest>)
             .add_observer(decode::<ExInputRequest>);
         #[cfg(test)]
-        app.add_observer(decode::<ParsedFixtureRequest>);
+        app.add_plugins(ParsedInputPlugin);
     }
+}
+
+#[cfg(test)]
+struct ParsedInputPlugin;
+
+#[cfg(test)]
+impl Plugin for ParsedInputPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_observer(decode_fixture);
+    }
+}
+
+#[cfg(test)]
+fn decode_fixture(
+    trigger: On<ParsedFixtureRequest>,
+    documents: Query<(
+        EditCore,
+        Option<&Editor>,
+        Option<&EditorKeymap>,
+        &mut crate::keymap::vim::VimKeymap,
+    )>,
+    modes: Query<&SharedFileViewMode>,
+    preview: PreviewAccess,
+    commands: Commands,
+) {
+    decode(trigger, documents, modes, preview, commands);
 }
 
 #[derive(EntityEvent)]

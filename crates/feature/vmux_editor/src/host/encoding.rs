@@ -59,7 +59,7 @@ fn reopen_with(
 fn save_with(
     trigger: On<UiInput<FileEncodingSaveRequest>>,
     mut editors: Query<Edit>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;

@@ -1,4 +1,5 @@
 use crate::host::editor::EditReadOnly;
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::event::{OutlineEvent, OutlineRow};
@@ -150,7 +151,7 @@ type DirtyOutline = (
 
 fn emit_markdown(
     query: Query<(Entity, EditReadOnly, &FileView), DirtyOutline>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     for (entity, edit, file) in &query {

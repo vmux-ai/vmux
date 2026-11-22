@@ -1,4 +1,5 @@
 use crate::host::editor::{Edit, EditReadOnly};
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::FileUiStateWrite;
@@ -134,7 +135,7 @@ impl DocumentRenderRequest {
 fn render_document(
     request: On<DocumentRenderRequest>,
     mut files: Query<(&FileView, &FileDocumentRevision, Edit, &FileViewport), With<PageReady>>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     let entity = request.entity;

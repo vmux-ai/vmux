@@ -215,7 +215,7 @@ fn drain_file_changes(
 
 fn reload_changed_files(
     files: Query<(Entity, &FileView, Option<EditReadOnly>), With<FileReloadRequested>>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut lsp_changes: Option<MessageWriter<vmux_lsp::CloseDocument>>,
     mut commands: Commands,
 ) {

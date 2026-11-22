@@ -79,13 +79,14 @@ enum FilePanelSource {
     #[default]
     None,
     References,
-    Completion(CompletionSource),
+    Completion,
 }
 
 #[derive(Component, Default)]
 pub(super) struct FilePanel {
     origin: Option<LspOrigin>,
     source: FilePanelSource,
+    completion: Option<CompletionSource>,
     state: FilePanelState,
 }
 
@@ -94,6 +95,7 @@ impl FilePanel {
         let returning_focus =
             matches!(&self.source, FilePanelSource::References) && self.state.content.is_some();
         self.source = FilePanelSource::References;
+        self.completion = None;
         self.state.content = (!items.is_empty()).then_some(FilePanelContent::References { items });
         self.state.selected = 0;
         if self.state.content.is_some() {
@@ -112,7 +114,8 @@ impl FilePanel {
     ) {
         let returning_focus =
             matches!(&self.source, FilePanelSource::References) && self.state.content.is_some();
-        self.source = FilePanelSource::Completion(CompletionSource {
+        self.source = FilePanelSource::Completion;
+        self.completion = Some(CompletionSource {
             items,
             replace_from_col,
             line,
@@ -125,7 +128,10 @@ impl FilePanel {
     }
 
     fn refresh(&mut self, edit: &EditReadOnlyItem<'_, '_>) -> bool {
-        let FilePanelSource::Completion(source) = &self.source else {
+        let FilePanelSource::Completion = &self.source else {
+            return false;
+        };
+        let Some(source) = self.completion.as_ref() else {
             return false;
         };
         let content = source.content(edit);
@@ -211,6 +217,7 @@ impl FilePanel {
         }
         let focused_references = matches!(self.source, FilePanelSource::References);
         self.source = FilePanelSource::None;
+        self.completion = None;
         self.state.content = None;
         self.state.selected = 0;
         if focused_references {
@@ -225,6 +232,7 @@ impl FilePanel {
             return false;
         }
         self.source = FilePanelSource::None;
+        self.completion = None;
         self.state.content = None;
         self.state.selected = 0;
         true

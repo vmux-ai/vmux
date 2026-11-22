@@ -231,7 +231,7 @@ impl PendingGoto {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct GotoActions<'w, 's> {
-    browsers: Option<NonSend<'w, Browsers>>,
+    browsers: crate::host::delivery::Surface<'w, 's>,
     commands: Commands<'w, 's>,
 }
 
@@ -244,9 +244,9 @@ impl GotoActions<'_, '_> {
         utf16_col: u32,
         viewport: &mut FileViewport,
     ) {
-        let Some(browsers) = self.browsers.as_deref() else {
+        if !self.browsers.available() {
             return;
-        };
+        }
         let line = (line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
         let line_text = edit
             .core
@@ -264,7 +264,7 @@ impl GotoActions<'_, '_> {
         edit.core.set_caret(caret);
         if let Some(top) = viewport.autoscroll(edit)
             && let Some(scroll) = viewport.set_top(top)
-            && browsers.can_emit_to(&entity)
+            && self.browsers.can_emit_to(&entity)
         {
             self.commands
                 .trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
@@ -524,7 +524,7 @@ fn apply_goto(
     mut lsp_closes: Option<MessageWriter<crate::lsp::manager::LspDocumentCloseRequest>>,
     mut actions: GotoActions,
 ) {
-    if actions.browsers.is_none() {
+    if !actions.browsers.available() {
         return;
     }
     for goto in messages.read() {
@@ -597,7 +597,7 @@ fn apply_pending_goto(
     mut views: Query<(Entity, Edit, &mut FileViewport, &PendingGoto)>,
     mut actions: GotoActions,
 ) {
-    if actions.browsers.is_none() {
+    if !actions.browsers.available() {
         return;
     }
     for (entity, mut edit, mut viewport, pending) in &mut views {

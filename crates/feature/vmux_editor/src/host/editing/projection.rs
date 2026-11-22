@@ -1,6 +1,6 @@
 use super::document::Edited;
 use super::*;
-use bevy::prelude::{App, Commands, NonSend, NonSendMut, On, Plugin, Query};
+use bevy::prelude::{App, Commands, On, Plugin, Query};
 
 pub(super) struct ProjectionPlugin;
 
@@ -13,8 +13,8 @@ impl Plugin for ProjectionPlugin {
 fn project(
     trigger: On<Edited>,
     mut views: Query<(Edit, &mut FileViewport, &mut vmux_git::GitDiffSource)>,
-    mut clipboard: NonSendMut<ClipboardHandle>,
-    browsers: NonSend<Browsers>,
+    mut clipboard: crate::host::delivery::Clipboard,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -35,8 +35,7 @@ fn project(
         edit.hl.invalidate_from(line.saturating_sub(1));
     }
     if let Some(value) = event.outcome.yank.as_ref()
-        && let Some(cb) = clipboard.0.as_mut()
-        && cb.set_text(value.text.clone()).is_ok()
+        && clipboard.write(entity, value.text.clone())
     {
         edit.core.registers.clipboard_shadow.clone_from(&value.text);
     }

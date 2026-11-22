@@ -1,6 +1,6 @@
 use super::document::Edited;
 use super::*;
-use bevy::prelude::{App, Commands, Entity, EntityEvent, NonSend, NonSendMut, On, Plugin, Query};
+use bevy::prelude::{App, Commands, Entity, EntityEvent, On, Plugin, Query};
 
 pub(super) struct EffectsPlugin;
 
@@ -96,7 +96,7 @@ fn save(
     mut views: Query<Edit>,
     preview: PreviewAccess,
     mut self_writes: NonSendMut<SelfWrites>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -176,7 +176,7 @@ fn save(
 fn paste(
     trigger: On<PasteRequest>,
     documents: Query<&crate::edit::document::Revision>,
-    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut clipboard: crate::host::delivery::Clipboard,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -186,10 +186,7 @@ fn paste(
     if event.document.is_some_and(|id| id != revision.identity) {
         return;
     }
-    let Some(cb) = clipboard.0.as_mut() else {
-        return;
-    };
-    let Ok(text) = cb.get_text() else {
+    let Some(text) = clipboard.read(event.entity) else {
         return;
     };
     commands.trigger(super::document::PasteTextRequest {
@@ -202,7 +199,7 @@ fn paste(
 fn scroll(
     trigger: On<ScrollRequest>,
     mut views: Query<(Edit, &mut FileViewport)>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -234,7 +231,7 @@ fn scroll(
 fn scroll_cursor(
     trigger: On<ScrollCursorRequest>,
     mut views: Query<(Edit, &mut FileViewport)>,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     let event = trigger.event();
