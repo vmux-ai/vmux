@@ -211,7 +211,9 @@ impl CompilerInputs {
             let syn::ImplItem::Fn(function) = item else {
                 continue;
             };
-            if Self::constructor(function, name) && Self::enabled(&function.attrs, false) {
+            if Self::constructor(function, name)
+                && Self::enabled(&function.attrs, false, Some(true))
+            {
                 proof.project(function)?;
             }
         }
@@ -228,7 +230,7 @@ impl CompilerInputs {
             {
                 proof.bindings.clear();
                 proof.uncertain = false;
-                if Self::enabled(&function.attrs, false) {
+                if Self::enabled(&function.attrs, false, Some(true)) {
                     proof.visit_item_fn(function);
                 }
             }
@@ -302,7 +304,7 @@ impl CompilerInputs {
         for item in &file.items {
             if let Item::Static(item) = item
                 && Self::testing(&item.attrs)
-                && Self::enabled(&item.attrs, false)
+                && Self::enabled(&item.attrs, false, Some(true))
                 && self.unit_mutex(item)
             {
                 self.mutexes.insert(item.ident.to_string());
@@ -1032,10 +1034,10 @@ impl CompilerInputs {
     }
 
     fn effect_enabled(&mut self, attributes: &[syn::Attribute]) -> bool {
-        if Self::enabled(attributes, false) {
+        if Self::enabled(attributes, false, Some(true)) {
             return true;
         }
-        if !self.harness.is_empty() && Self::enabled(attributes, true) {
+        if !self.harness.is_empty() && Self::enabled(attributes, true, Some(true)) {
             self.unknown();
         }
         false
@@ -1139,7 +1141,7 @@ impl CompilerInputs {
         }
     }
 
-    fn enabled(attributes: &[syn::Attribute], unknown: bool) -> bool {
+    fn enabled(attributes: &[syn::Attribute], unknown: bool, testing: Option<bool>) -> bool {
         for attribute in attributes {
             if attribute.path().is_ident("ignore") {
                 return false;
@@ -1159,7 +1161,7 @@ impl CompilerInputs {
                 else {
                     return false;
                 };
-                match Self::condition(&condition) {
+                match Self::condition(&condition, testing) {
                     Some(false) => continue,
                     None => return unknown,
                     Some(true) => {
@@ -1167,7 +1169,7 @@ impl CompilerInputs {
                         for value in values.iter().skip(1) {
                             nested.push(syn::parse_quote!(#[#value]));
                         }
-                        if !Self::enabled(&nested, unknown) {
+                        if !Self::enabled(&nested, unknown, testing) {
                             return false;
                         }
                     }
@@ -1179,7 +1181,7 @@ impl CompilerInputs {
                 let Ok(condition) = syn::parse2::<Expr>(list.tokens.clone()) else {
                     return false;
                 };
-                if !Self::condition(&condition).unwrap_or(unknown) {
+                if !Self::condition(&condition, testing).unwrap_or(unknown) {
                     return false;
                 }
             }
@@ -1187,15 +1189,15 @@ impl CompilerInputs {
         true
     }
 
-    fn condition(expression: &Expr) -> Option<bool> {
+    fn condition(expression: &Expr, testing: Option<bool>) -> Option<bool> {
         match expression {
-            Expr::Path(value) if value.path.is_ident("test") => Some(true),
+            Expr::Path(value) if value.path.is_ident("test") => testing,
             Expr::Call(call) => {
                 let Expr::Path(function) = call.func.as_ref() else {
                     return None;
                 };
                 if function.path.is_ident("not") && call.args.len() == 1 {
-                    return Some(!Self::condition(call.args.first()?)?);
+                    return Some(!Self::condition(call.args.first()?, testing)?);
                 }
                 let all = function.path.is_ident("all");
                 if !all && !function.path.is_ident("any") {
@@ -1203,7 +1205,7 @@ impl CompilerInputs {
                 }
                 let mut unknown = false;
                 for argument in &call.args {
-                    match Self::condition(argument) {
+                    match Self::condition(argument, testing) {
                         Some(value) if value != all => return Some(!all),
                         Some(_) => {}
                         None => unknown = true,
@@ -1362,7 +1364,17 @@ impl Compilation {
         let mut main = prefix;
         main.push(parts[0].clone());
         main.push("main.rs".into());
-        vec![file, main]
+        let mut paths = vec![file, main];
+        if group == "bin"
+            && manifest
+                .get("package")
+                .and_then(|package| package.get("name"))
+                .and_then(toml::Value::as_str)
+                == Some(name)
+        {
+            paths.push(vec!["src".into(), "main.rs".into()]);
+        }
+        paths
     }
 }
 
@@ -1370,7 +1382,7 @@ impl<'ast> Visit<'ast> for CompilerInputs {
     fn visit_expr(&mut self, expression: &'ast Expr) {
         let attributes = Self::expression_attributes(expression);
         let enabled = if self.harness.is_empty() {
-            Self::enabled(attributes, true)
+            Self::enabled(attributes, true, None)
         } else {
             self.effect_enabled(attributes)
         };
@@ -1388,9 +1400,13 @@ impl<'ast> Visit<'ast> for CompilerInputs {
     }
 
     fn visit_impl_item_fn(&mut self, function: &'ast syn::ImplItemFn) {
+        if self.harness.is_empty() {
+            visit::visit_impl_item_fn(self, function);
+            return;
+        }
         if Self::constructor(function, &self.harness)
             || function.sig.asyncness.is_some()
-            || !Self::enabled(&function.attrs, false)
+            || !Self::enabled(&function.attrs, false, Some(true))
         {
             return;
         }
@@ -1430,6 +1446,14 @@ impl<'ast> Visit<'ast> for CompilerInputs {
     }
 
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+        if self.method.is_empty()
+            && !self.constructor
+            && !self.methods.contains_key(&call.method.to_string())
+            && let Expr::Path(receiver) = call.receiver.as_ref()
+            && let Some(receiver) = receiver.path.get_ident()
+        {
+            self.bindings.remove(&receiver.to_string());
+        }
         if Self::guarded(call)
             && let Expr::Call(operation) = call.receiver.as_ref()
             && self.filesystem(operation, true)
@@ -1573,6 +1597,13 @@ impl<'ast> Visit<'ast> for CompilerInputs {
         self.mutexes = mutexes;
     }
 
+    fn visit_stmt(&mut self, statement: &'ast Stmt) {
+        if !self.harness.is_empty() && matches!(statement, Stmt::Item(Item::Fn(_))) {
+            return;
+        }
+        visit::visit_stmt(self, statement);
+    }
+
     fn visit_expr_assign(&mut self, assignment: &'ast syn::ExprAssign) {
         self.unknown();
         if let Expr::Path(path) = assignment.left.as_ref()
@@ -1655,9 +1686,13 @@ impl<'ast> Visit<'ast> for CompilerInputs {
                         continue;
                     }
                     let Some(compilations) = self.methods.get(&call.method.to_string()) else {
+                        invalid.insert(receiver.to_string());
                         continue;
                     };
                     for input in &inputs.elems {
+                        if !Self::enabled(Self::expression_attributes(input), false, Some(true)) {
+                            continue;
+                        }
                         let Expr::Tuple(tuple) = input else {
                             continue;
                         };
@@ -1733,7 +1768,7 @@ impl<'ast> Visit<'ast> for CompilerInputs {
             self.unknown();
             return;
         }
-        if !Self::enabled(&item.attrs, true) {
+        if !Self::enabled(&item.attrs, true, None) {
             return;
         }
         let mut override_path = None;

@@ -1156,33 +1156,182 @@ fn compiler_inputs_do_not_admit_calls_removed_by_cfg() {
 
 #[test]
 fn compiler_inputs_find_ordinary_include_modules_inside_unexecuted_bodies() {
-    for asynchronous in [false, true] {
+    for body in [
+        "closure",
+        "async",
+        "local_function",
+        "production",
+        "production_item",
+    ] {
         let fixture = CompilerInputFixture::new();
+        assert!(
+            CompilerInputs::read(fixture.0.path())
+                .unwrap()
+                .owner(&fixture.input("private"))
+                .is_some()
+        );
         let source = fixture
             .0
             .path()
             .join("crates/feature/vmux_dx/lints/src/registrations.rs");
         let mut file = syn::parse_file(&std::fs::read_to_string(&source).unwrap()).unwrap();
-        let item = if asynchronous {
-            syn::parse_quote!(
+        let item = match body {
+            "async" => syn::parse_quote!(
                 fn ordinary() {
                     let _future = async {
                         include!("../ui/private.rs");
                     };
                 }
-            )
-        } else {
-            syn::parse_quote!(
+            ),
+            "closure" => syn::parse_quote!(
                 fn ordinary() {
                     let _closure = || {
                         include!("../ui/private.rs");
                     };
                 }
-            )
+            ),
+            "local_function" => syn::parse_quote!(
+                fn ordinary() {
+                    fn unused() {
+                        include!("../ui/private.rs");
+                    }
+                }
+            ),
+            "production" => syn::parse_quote!(
+                fn ordinary() {
+                    #[cfg(not(test))]
+                    {
+                        include!("../ui/private.rs");
+                    }
+                }
+            ),
+            "production_item" => syn::parse_quote!(
+                #[cfg(not(test))]
+                mod ordinary {
+                    include!("../ui/private.rs");
+                }
+            ),
+            _ => unreachable!(),
         };
         file.items.push(item);
         std::fs::write(source, file.to_token_stream().to_string()).unwrap();
-        assert!(CompilerInputs::read(fixture.0.path()).is_err());
+        let error = CompilerInputs::read(fixture.0.path())
+            .err()
+            .expect("ordinary module refusal");
+        assert!(
+            error.contains("Compiler input is also a Rust module"),
+            "{body}: {error}"
+        );
+        assert!(error.contains("private.rs"), "{body}: {error}");
+    }
+}
+
+#[test]
+fn compiler_inputs_do_not_credit_uncalled_local_function_writes() {
+    let fixture = CompilerInputFixture::new();
+    let source = fixture
+        .0
+        .path()
+        .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+    let original = std::fs::read_to_string(&source).unwrap();
+    assert!(
+        CompilerInputs::read(fixture.0.path())
+            .unwrap()
+            .owner(&fixture.input("private"))
+            .is_some()
+    );
+    let replacement = original.replace(
+        "std::fs::write(self.directory.path().join(\"examples\").join(format!(\"{name}.rs\")), source).unwrap();",
+        "let destination = self.directory.path().join(\"examples\").join(format!(\"{name}.rs\")); fn unused(destination: std::path::PathBuf, source: &str) { std::fs::write(destination, source).unwrap(); }",
+    );
+    assert_ne!(replacement, original);
+    std::fs::write(source, replacement).unwrap();
+    let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
+    assert!(inputs.owner(&fixture.input("private")).is_none());
+}
+
+#[test]
+fn compiler_inputs_refuse_stale_manifest_evidence_after_an_intervening_fixture_call() {
+    for call in [
+        "",
+        "fixture.prepare();",
+        "#[cfg(any())] fixture.prepare();",
+        "before_loop",
+    ] {
+        let fixture = CompilerInputFixture::new();
+        let source = fixture
+            .0
+            .path()
+            .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+        let original = std::fs::read_to_string(&source).unwrap();
+        let replacement = original.replace("    fn check(&self", "    fn prepare(&self) { std::fs::write(self.directory.path().join(\"Cargo.toml\"), \"[package]\\nname=\\\"compiler-fixture\\\"\\nversion=\\\"0.0.0\\\"\\n[[example]]\\nname=\\\"private\\\"\\npath=\\\"examples/other.rs\\\"\\n\").unwrap(); }\n    fn check(&self");
+        let replacement = if call == "before_loop" {
+            replacement.replace(
+                "let fixture = Fixture::new();",
+                "let fixture = Fixture::new(); fixture.prepare();",
+            )
+        } else {
+            replacement.replace(
+                "fixture.check(name, source, expected);",
+                &format!("{call} fixture.check(name, source, expected);"),
+            )
+        };
+        std::fs::write(source, replacement).unwrap();
+        let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
+        assert_eq!(
+            inputs.owner(&fixture.input("private")).is_some(),
+            !matches!(call, "fixture.prepare();" | "before_loop"),
+            "{call}"
+        );
+    }
+}
+
+#[test]
+fn compiler_inputs_skip_disabled_literal_tuples_and_keep_enabled_siblings() {
+    for cfg in ["any()", "feature = \"unproved\""] {
+        let fixture = CompilerInputFixture::new();
+        let source = fixture
+            .0
+            .path()
+            .join("crates/feature/vmux_dx/lints/src/registrations.rs");
+        let original = std::fs::read_to_string(&source).unwrap();
+        let replacement = original.replace(
+            "(\"private\", include_str!",
+            &format!("#[cfg({cfg})] (\"private\", include_str!"),
+        );
+        assert_ne!(original, replacement);
+        std::fs::write(source, replacement).unwrap();
+        let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
+        assert!(inputs.owner(&fixture.input("private")).is_none(), "{cfg}");
+        assert!(inputs.owner(&fixture.input("unrelated")).is_some(), "{cfg}");
+    }
+}
+
+#[test]
+fn compiler_inputs_recognize_the_automatic_package_binary_and_explicit_overrides() {
+    for explicit in [false, true] {
+        let fixture = CompilerInputFixture::new();
+        let root = fixture.0.path().join("crates/feature/vmux_dx/lints");
+        let source = root.join("src/registrations.rs");
+        let original = std::fs::read_to_string(&source).unwrap();
+        let replacement = original
+            .replace(
+                "join(\"examples\").join(format!(\"{name}.rs\"))",
+                "join(\"src/main.rs\")",
+            )
+            .replace("\"--example\", name", "\"--bin\", \"compiler-fixture\"");
+        assert_ne!(original, replacement);
+        std::fs::write(source, replacement).unwrap();
+        if explicit {
+            let manifest = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
+            std::fs::write(
+                root.join("Cargo.toml"),
+                format!("{manifest}\n[[bin]]\nname=\"compiler-fixture\"\npath=\"src/other.rs\"\n"),
+            )
+            .unwrap();
+        }
+        let inputs = CompilerInputs::read(fixture.0.path()).unwrap();
+        assert_eq!(inputs.owner(&fixture.input("private")).is_some(), !explicit);
     }
 }
 

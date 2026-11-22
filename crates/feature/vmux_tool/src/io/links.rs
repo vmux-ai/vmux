@@ -346,22 +346,49 @@ impl LinkPaths {
     }
 
     fn scoped_source(source: &Path) -> Result<PathBuf, String> {
-        for ancestor in source.ancestors() {
-            match ancestor.canonicalize() {
-                Ok(resolved) => {
-                    let suffix = source
-                        .strip_prefix(ancestor)
-                        .map_err(|error| error.to_string())?;
-                    return Ok(
-                        vmux_path::PathIdentity::lexical(resolved.join(suffix)).into_path_buf()
-                    );
+        let mut candidate = source.to_path_buf();
+        for _ in 0..128 {
+            let mut replacement = None;
+            for ancestor in candidate.ancestors() {
+                let suffix = candidate
+                    .strip_prefix(ancestor)
+                    .map_err(|error| error.to_string())?;
+                match ancestor.canonicalize() {
+                    Ok(resolved) => {
+                        return Ok(
+                            vmux_path::PathIdentity::lexical(resolved.join(suffix)).into_path_buf()
+                        );
+                    }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::NotFound | ErrorKind::NotADirectory
+                        ) => {}
+                    Err(error) => return Err(error.to_string()),
                 }
-                Err(error)
-                    if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {}
-                Err(error) => return Err(error.to_string()),
+                match std::fs::symlink_metadata(ancestor) {
+                    Ok(metadata) if metadata.is_symlink() => {
+                        let destination =
+                            std::fs::read_link(ancestor).map_err(|error| error.to_string())?;
+                        let parent = ancestor.parent().ok_or("link source has no parent")?;
+                        replacement = Some(parent.join(destination).join(suffix));
+                        break;
+                    }
+                    Ok(_) => return Err("link source ancestor could not be resolved".into()),
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::NotFound | ErrorKind::NotADirectory
+                        ) => {}
+                    Err(error) => return Err(error.to_string()),
+                }
             }
+            let Some(replacement) = replacement else {
+                return Err("link source has no resolvable ancestor".into());
+            };
+            candidate = replacement;
         }
-        Err("link source has no resolvable ancestor".into())
+        Err("link source symlink expansion exceeds 128".into())
     }
 
     fn name(&self) -> Result<std::ffi::OsString, String> {
@@ -976,6 +1003,52 @@ mod tests {
             .is_err()
         );
         assert!(target.symlink_metadata().is_err());
+    }
+
+    #[test]
+    fn isolated_missing_source_restoration_resolves_dangling_symlink_destinations() {
+        for kind in ["external", "internal", "cycle"] {
+            let directory = tempfile::tempdir().unwrap();
+            let copied = directory.path().join("copied");
+            std::fs::create_dir_all(copied.join("home")).unwrap();
+            let packages = copied.join("packages");
+            let destination = match kind {
+                "external" => directory.path().join("external-absent"),
+                "internal" => copied.join("absent"),
+                "cycle" => packages.clone(),
+                _ => unreachable!(),
+            };
+            std::os::unix::fs::symlink(&destination, &packages).unwrap();
+            let target = copied.join("home/file");
+            let result = LinkPath {
+                source: packages.join("shell/file"),
+                source_may_be_missing: true,
+                target: target.clone(),
+                boundary: Some(copied),
+                receipt: PathReceipt::default(),
+            }
+            .run();
+            if kind == "internal" {
+                result.unwrap();
+                assert_eq!(
+                    vmux_path::PathIdentity::lexical(
+                        target
+                            .parent()
+                            .unwrap()
+                            .join(std::fs::read_link(&target).unwrap())
+                    ),
+                    vmux_path::PathIdentity::lexical(destination.join("shell/file"))
+                );
+            } else {
+                assert!(result.is_err(), "{kind}");
+                assert!(target.symlink_metadata().is_err(), "{kind}");
+                if kind == "external" {
+                    std::fs::create_dir_all(destination.join("shell")).unwrap();
+                    std::fs::write(destination.join("shell/file"), b"live").unwrap();
+                    assert!(target.symlink_metadata().is_err());
+                }
+            }
+        }
     }
 
     #[test]
