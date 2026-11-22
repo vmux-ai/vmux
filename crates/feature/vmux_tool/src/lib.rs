@@ -86,8 +86,6 @@ mod homebrew_inventory;
 #[cfg(all(host, ui))]
 mod host;
 #[cfg(host)]
-pub mod inventory;
-#[cfg(host)]
 pub mod io;
 mod manifest;
 mod mcp;
@@ -123,6 +121,8 @@ mod registry;
 mod route;
 pub mod state;
 mod storage;
+#[cfg(host)]
+pub(crate) mod tool_inventory;
 #[cfg(ui)]
 mod ui;
 
@@ -176,7 +176,7 @@ impl Plugin for ToolRuntimePlugin {
         }
         #[cfg(host)]
         app.add_plugins((
-            inventory::InventoryPlugin,
+            tool_inventory::InventoryPlugin,
             package::PackageChangePlugin,
             apply::ApplyPlugin,
             McpRegistryPlugin,

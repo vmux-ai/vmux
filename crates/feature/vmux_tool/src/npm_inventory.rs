@@ -268,11 +268,11 @@ mod tests {
         let registry = app
             .world_mut()
             .spawn((
-                crate::inventory::Registry::default(),
+                crate::tool_inventory::Registry::default(),
                 crate::catalog::Catalog::default(),
                 store.clone(),
                 crate::ToolsManifest::default(),
-                crate::inventory::Sequence::default(),
+                crate::tool_inventory::Sequence::default(),
             ))
             .id();
         app.world_mut().spawn((
@@ -281,10 +281,11 @@ mod tests {
             crate::observation::Handler,
             crate::observation::PackageProvider,
         ));
-        app.world_mut().trigger(crate::inventory::RefreshRequest {
-            entity: registry,
-            refresh_catalogs: true,
-        });
+        app.world_mut()
+            .trigger(crate::tool_inventory::RefreshRequest {
+                entity: registry,
+                refresh_catalogs: true,
+            });
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !app
             .world()

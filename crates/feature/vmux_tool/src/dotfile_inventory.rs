@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use vmux_ecs::{EntityTarget, JobRequest, JobResult, Operation, OperationRetained, OperationState};
 
-use crate::inventory::{Manifest, Scan};
 use crate::io::{InspectLink, ReadDirectory};
 use crate::observation::{Accepted, Finished, Observation, ObserveProviderRequest, ObservedTool};
 use crate::state::{ToolOperationKind, ToolStatus};
+use crate::tool_inventory::{Manifest, Scan};
 use crate::{ToolProviderId, ToolStore, ToolTaskSet};
 
 pub(crate) struct DotfileInventoryPlugin;
@@ -470,21 +470,22 @@ mod tests {
         let registry = app
             .world_mut()
             .spawn((
-                crate::inventory::Registry::default(),
+                crate::tool_inventory::Registry::default(),
                 crate::catalog::Catalog::default(),
                 store.clone(),
                 crate::ToolsManifest::default(),
-                crate::inventory::Sequence::default(),
+                crate::tool_inventory::Sequence::default(),
             ))
             .id();
         app.world_mut().spawn((
             ToolProviderId(crate::state::ToolProvider::new("dotfiles")),
             crate::observation::Handler,
         ));
-        app.world_mut().trigger(crate::inventory::RefreshRequest {
-            entity: registry,
-            refresh_catalogs: false,
-        });
+        app.world_mut()
+            .trigger(crate::tool_inventory::RefreshRequest {
+                entity: registry,
+                refresh_catalogs: false,
+            });
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !app
             .world()

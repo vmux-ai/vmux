@@ -239,8 +239,7 @@ fn commit(
             ));
             continue;
         }
-        let formulae = manifest.add_packages("homebrew-formula", &document.formulae);
-        let casks = manifest.add_packages("homebrew-cask", &document.casks);
+        let (formulae, casks) = document.apply(&mut manifest);
         commands.entity(entity).insert((
             BrewPlan { formulae, casks },
             crate::storage::BrewfileTemplate(source.clone()),
@@ -322,6 +321,12 @@ pub struct BrewfileImport {
 }
 
 impl BrewfileImport {
+    pub(crate) fn apply(&self, manifest: &mut ToolsManifest) -> (usize, usize) {
+        let formulae = manifest.add_packages("homebrew-formula", &self.formulae);
+        let casks = manifest.add_packages("homebrew-cask", &self.casks);
+        (formulae, casks)
+    }
+
     pub fn parse(source: &str) -> Self {
         let mut import = Self::default();
         for line in source.lines() {

@@ -237,7 +237,7 @@ fn commit(
             ));
             continue;
         }
-        let packages = manifest.add_packages("npm", &document.packages);
+        let packages = document.apply(&mut manifest);
         commands.entity(entity).insert((
             NpmPlan { packages },
             crate::storage::WriteRequest {
@@ -315,6 +315,10 @@ pub struct NpmManifest {
 }
 
 impl NpmManifest {
+    pub(crate) fn apply(&self, manifest: &mut ToolsManifest) -> usize {
+        manifest.add_packages("npm", &self.packages)
+    }
+
     pub fn parse(source: &str) -> Result<Self, String> {
         let document: serde_json::Value =
             serde_json::from_str(source).map_err(|error| error.to_string())?;

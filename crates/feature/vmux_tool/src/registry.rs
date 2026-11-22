@@ -3,10 +3,9 @@ use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use serde::Serialize;
 use serde_json::Value;
-use std::marker::PhantomData;
 use vmux_api::protocol::{AgentCommandTool, AgentRequest};
 use vmux_ecs::{HostShell, JsonArguments, RegistrationOrder};
-use vmux_feature::manifest::{FeatureManifest, Tool as ToolEntry, ToolAvailability};
+use vmux_feature::manifest::{FeatureManifest, ToolAvailability};
 
 use vmux_api::JsonSchema;
 
@@ -17,24 +16,25 @@ impl Plugin for ToolRegistryPlugin {
         app.configure_sets(
             Startup,
             (
-                ToolStartupSet::Registry,
-                ToolStartupSet::RegistryFlush,
-                ToolStartupSet::Manifest,
-                ToolStartupSet::ManifestFlush,
-                ToolStartupSet::Binding,
+                ToolStartupRegistrySet,
+                ToolStartupRegistryFlushSet,
+                ToolStartupManifestSet,
+                ToolStartupManifestFlushSet,
+                ToolStartupBindingSet,
             )
                 .chain(),
         )
-        .add_systems(Startup, spawn.in_set(ToolStartupSet::Registry))
+        .add_systems(Startup, spawn.in_set(ToolStartupRegistrySet))
         .add_systems(
             Startup,
-            bevy_ecs::schedule::ApplyDeferred.in_set(ToolStartupSet::RegistryFlush),
+            bevy_ecs::schedule::ApplyDeferred.in_set(ToolStartupRegistryFlushSet),
         )
-        .add_systems(Startup, register.in_set(ToolStartupSet::Manifest))
+        .add_systems(Startup, register.in_set(ToolStartupManifestSet))
         .add_systems(
             Startup,
-            bevy_ecs::schedule::ApplyDeferred.in_set(ToolStartupSet::ManifestFlush),
+            bevy_ecs::schedule::ApplyDeferred.in_set(ToolStartupManifestFlushSet),
         )
+        .add_systems(Startup, bind.in_set(ToolStartupBindingSet))
         .configure_sets(
             Update,
             (
@@ -52,6 +52,7 @@ impl Plugin for ToolRegistryPlugin {
             Update,
             bevy_ecs::schedule::ApplyDeferred.in_set(ToolResolveFlush),
         )
+        .add_systems(Update, parse.in_set(ToolRequestSet))
         .add_systems(
             Update,
             bevy_ecs::schedule::ApplyDeferred.in_set(ToolRequestFlush),
@@ -60,29 +61,42 @@ impl Plugin for ToolRegistryPlugin {
             Update,
             bevy_ecs::schedule::ApplyDeferred.in_set(ToolDispatchFlush),
         );
-        for input in inventory::iter::<ToolInputRegistration> {
-            (input.register)(app);
-        }
     }
 }
 
+#[derive(Component, Clone, Copy)]
 pub struct ToolInputRegistration {
-    register: fn(&mut App),
+    name: &'static str,
+    parse: fn(Entity, &Name, &JsonArguments, &mut Commands),
 }
 
 impl ToolInputRegistration {
     pub const fn of<T: ToolInput>() -> Self {
         Self {
-            register: register_input::<T>,
+            name: T::NAME,
+            parse: parse_input::<T>,
         }
     }
 }
 
 inventory::collect!(ToolInputRegistration);
 
-fn register_input<T: ToolInput>(app: &mut App) {
-    app.add_systems(Startup, bind::<T>.in_set(ToolStartupSet::Binding))
-        .add_systems(Update, parse::<T>.in_set(ToolRequestSet));
+fn parse_input<T: ToolInput>(
+    request: Entity,
+    name: &Name,
+    arguments: &JsonArguments,
+    commands: &mut Commands,
+) {
+    match arguments.parse::<T>(name.as_str()) {
+        Ok(arguments) => {
+            commands.entity(request).insert(arguments);
+        }
+        Err(message) => {
+            commands
+                .entity(request)
+                .insert(ToolDispatchError::new(message));
+        }
+    }
 }
 
 pub trait ToolInput: Component + serde::de::DeserializeOwned {
@@ -100,61 +114,47 @@ fn register(
 ) {
     for feature in &features {
         for entry in feature.tools.iter().cloned() {
-            let seed = ToolSeed::from(entry);
             let order = next_order.0;
             next_order.0 += 1;
             let mut entity = commands.spawn((
                 RegisteredTool,
-                Name::new(seed.name),
-                ToolAliases(seed.aliases),
-                ToolDescription(seed.description),
-                ToolInputSchema(seed.input_schema),
-                ToolAccess(seed.availability),
+                Name::new(entry.name),
+                ToolAliases(entry.aliases),
+                ToolDescription(entry.description),
+                ToolInputSchema(
+                    serde_json::to_value(entry.input_schema)
+                        .expect("tool manifest input schema serializes"),
+                ),
+                ToolAccess(entry.availability),
                 RegistrationOrder(order),
             ));
-            if seed.shell_aware {
+            if entry.shell_aware {
                 entity.insert(ShellAware);
             }
         }
     }
 }
 
-#[derive(Component)]
-struct ToolBinding<T>(PhantomData<fn() -> T>);
-
-fn bind<T>(tools: Query<(Entity, &Name), With<RegisteredTool>>, mut commands: Commands)
-where
-    T: ToolInput,
-{
-    let Some((tool_entity, _)) = tools.iter().find(|(_, name)| name.as_str() == T::NAME) else {
-        return;
-    };
-    commands
-        .entity(tool_entity)
-        .insert(ToolBinding::<T>(PhantomData));
+fn bind(tools: Query<(Entity, &Name), With<RegisteredTool>>, mut commands: Commands) {
+    for input in inventory::iter::<ToolInputRegistration> {
+        let Some((tool_entity, _)) = tools.iter().find(|(_, name)| name.as_str() == input.name)
+        else {
+            continue;
+        };
+        commands.entity(tool_entity).insert(*input);
+    }
 }
 
-fn parse<T>(
+fn parse(
     calls: Query<(Entity, &Name, &JsonArguments, &ToolTarget), Added<ToolCall>>,
-    tools: Query<(), With<ToolBinding<T>>>,
+    tools: Query<&ToolInputRegistration>,
     mut commands: Commands,
-) where
-    T: ToolInput,
-{
+) {
     for (request, name, arguments, target) in &calls {
-        if !tools.contains(target.entity()) {
+        let Ok(binding) = tools.get(target.entity()) else {
             continue;
-        }
-        match arguments.parse::<T>(name.as_str()) {
-            Ok(arguments) => {
-                commands.entity(request).insert(arguments);
-            }
-            Err(message) => {
-                commands
-                    .entity(request)
-                    .insert(ToolDispatchError::new(message));
-            }
-        }
+        };
+        (binding.parse)(request, name, arguments, &mut commands);
     }
 }
 
@@ -165,13 +165,19 @@ pub struct ToolResolveSet;
 struct ToolResolveFlush;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
-enum ToolStartupSet {
-    Registry,
-    RegistryFlush,
-    Manifest,
-    ManifestFlush,
-    Binding,
-}
+struct ToolStartupRegistrySet;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+struct ToolStartupRegistryFlushSet;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+struct ToolStartupManifestSet;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+struct ToolStartupManifestFlushSet;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+struct ToolStartupBindingSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub struct ToolRequestSet;
@@ -193,16 +199,21 @@ pub struct ToolDefinition {
     pub input_schema: JsonSchema,
 }
 
-type ToolEntity<'w> = (
-    Entity,
-    &'w Name,
-    &'w ToolAliases,
-    &'w ToolDescription,
-    &'w ToolInputSchema,
-    &'w ToolAccess,
-    &'w RegistrationOrder,
-    Option<&'w ShellAware>,
-);
+type RegisteredTools<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Name,
+        &'static ToolAliases,
+        &'static ToolDescription,
+        &'static ToolInputSchema,
+        &'static ToolAccess,
+        &'static RegistrationOrder,
+        Option<&'static ShellAware>,
+    ),
+    With<RegisteredTool>,
+>;
 
 #[derive(Component, Clone, Copy)]
 pub struct ToolCatalogRequest;
@@ -235,7 +246,7 @@ fn catalogs(
         ),
         Added<ToolCatalogRequest>,
     >,
-    tools: Query<ToolEntity<'static>, With<RegisteredTool>>,
+    tools: RegisteredTools,
     mut commands: Commands,
 ) {
     for (request_entity, shell, acp_session, acp_terminals) in &requests {
@@ -246,7 +257,7 @@ fn catalogs(
             }
             let mut description = description.0.clone();
             if shell_aware.is_some() {
-                description.push_str(&ShellNote::for_shell(
+                description.push_str(&ToolDescription::shell_note(
                     shell.map_or("", |shell| shell.0.as_str()),
                 ));
             }
@@ -255,7 +266,8 @@ fn catalogs(
                 ToolDefinition {
                     name: name.as_str().to_string(),
                     description,
-                    input_schema: schema.0.clone(),
+                    input_schema: JsonSchema::try_from(schema.0.clone())
+                        .expect("registered tool input schema is valid"),
                 },
             ));
         }
@@ -282,7 +294,7 @@ fn invocations(
         ),
         Added<ToolInvocation>,
     >,
-    tools: Query<ToolEntity<'static>, With<RegisteredTool>>,
+    tools: RegisteredTools,
     mut commands: Commands,
 ) {
     for (request_entity, requested_name, _, acp_session, acp_terminals, command_fallback) in
@@ -374,64 +386,8 @@ struct ToolAliases(pub(crate) Vec<String>);
 #[derive(Component)]
 struct ToolDescription(pub(crate) String);
 
-#[derive(Component)]
-struct ToolInputSchema(pub(crate) JsonSchema);
-
-#[derive(Component)]
-struct ToolAccess(pub(crate) ToolAvailability);
-
-#[derive(Component)]
-struct ShellAware;
-
-#[derive(Component, Clone, Debug)]
-pub struct ToolDispatchError(pub(crate) String);
-
-impl ToolDispatchError {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
-    }
-
-    pub fn message(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Component, Default)]
-struct NextToolOrder(u32);
-
-#[derive(Clone, Copy, Component)]
-pub struct ToolCall;
-
-pub type AddedTool<T> = (With<ToolCall>, Added<T>);
-
-type ToolTarget = vmux_ecs::EntityTarget<RegisteredTool>;
-
-struct ToolSeed {
-    name: String,
-    aliases: Vec<String>,
-    description: String,
-    input_schema: JsonSchema,
-    availability: ToolAvailability,
-    shell_aware: bool,
-}
-
-impl From<ToolEntry> for ToolSeed {
-    fn from(entry: ToolEntry) -> Self {
-        ToolSeed {
-            name: entry.name,
-            aliases: entry.aliases,
-            description: entry.description,
-            input_schema: entry.input_schema,
-            availability: entry.availability,
-            shell_aware: entry.shell_aware,
-        }
-    }
-}
-
-pub struct ShellNote;
-
-impl ShellNote {
-    pub fn for_shell(shell: &str) -> String {
+impl ToolDescription {
+    fn shell_note(shell: &str) -> String {
         let base = shell
             .rsplit('/')
             .next()
@@ -461,6 +417,38 @@ impl ShellNote {
         )
     }
 }
+
+#[derive(Component)]
+struct ToolInputSchema(pub(crate) Value);
+
+#[derive(Component)]
+struct ToolAccess(pub(crate) ToolAvailability);
+
+#[derive(Component)]
+struct ShellAware;
+
+#[derive(Component, Clone, Debug)]
+pub struct ToolDispatchError(pub(crate) String);
+
+impl ToolDispatchError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+
+    pub fn message(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Component, Default)]
+struct NextToolOrder(u32);
+
+#[derive(Clone, Copy, Component)]
+pub struct ToolCall;
+
+pub type AddedTool<T> = (With<ToolCall>, Added<T>);
+
+type ToolTarget = vmux_ecs::EntityTarget<RegisteredTool>;
 
 #[cfg(test)]
 mod tests {
