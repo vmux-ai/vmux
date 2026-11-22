@@ -7341,13 +7341,23 @@ struct Policy {
 
 impl Policy {
     fn load(root: &Path) -> Result<Self, String> {
-        let mut policy = Self::read(&root.join("ecs-policy.ron"))?;
-        policy.check_root()?;
         let mut files = Vec::new();
         for directory in ["crates", "examples", "website", "patches", "scripts"] {
-            Self::paths(&root.join(directory), &mut files)?;
+            let path = root.join(directory);
+            if path.is_dir() {
+                Self::paths(&path, &mut files)?;
+            }
         }
         files.sort();
+        let root_policy = root.join("ecs-policy.ron");
+        if !root_policy.exists() {
+            if !files.is_empty() {
+                return Err("Missing root policy while policy fragments remain".into());
+            }
+            return Ok(Self::default());
+        }
+        let mut policy = Self::read(&root_policy)?;
+        policy.check_root()?;
         for path in files {
             let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
             policy.append(relative, Self::read(&path)?)?;
@@ -7699,6 +7709,13 @@ impl Policy {
     }
 
     fn prove_legacy(&self, root: &Path) {
+        if self.revision.is_empty() && self.legacy.is_empty() {
+            assert!(
+                Self::fetched(root).legacy.is_empty(),
+                "cannot remove root policy while legacy debt remains on origin/main"
+            );
+            return;
+        }
         assert_eq!(
             self.revision, FROZEN_REVISION,
             "the historical audit revision is immutable"
@@ -8332,19 +8349,27 @@ impl ShapePolicy {
         for exception in &self.bodies {
             let valid = inventory.shape_matches(&exception.key, &exception.fingerprint)
                 && !exception.reason.trim().is_empty()
-                && policy.boundaries.iter().any(|boundary| {
-                    boundary.key == exception.boundary
-                        && boundary.valid()
-                        && inventory.matches(&boundary.key, &boundary.fingerprint)
-                        && boundary.references_from(inventory, policy, &mut BTreeSet::new())
-                        && inventory.body_owner(&exception.key).is_some_and(|entry| {
-                            entry.key == boundary.key
-                                || inventory
-                                    .entries
-                                    .get(&boundary.key)
-                                    .is_some_and(|owner| inventory.owner_references(owner, entry))
-                        })
-                });
+                && (inventory
+                    .entries
+                    .get(&exception.boundary)
+                    .is_some_and(|owner| {
+                        inventory.automatic_boundary(owner)
+                            && inventory.body_owner(&exception.key).is_some_and(|entry| {
+                                entry.key == owner.key || inventory.owner_references(owner, entry)
+                            })
+                    })
+                    || policy.boundaries.iter().any(|boundary| {
+                        boundary.key == exception.boundary
+                            && boundary.valid()
+                            && inventory.matches(&boundary.key, &boundary.fingerprint)
+                            && boundary.references_from(inventory, policy, &mut BTreeSet::new())
+                            && inventory.body_owner(&exception.key).is_some_and(|entry| {
+                                entry.key == boundary.key
+                                    || inventory.entries.get(&boundary.key).is_some_and(|owner| {
+                                        inventory.owner_references(owner, entry)
+                                    })
+                            })
+                    }));
             if !covered.insert(exception.key.clone()) || !valid {
                 errors.push(format!(
                     "invalid mechanical body exception {}",
@@ -8422,6 +8447,13 @@ impl ShapePolicy {
     }
 
     fn prove(&self, root: &Path) {
+        if self.revision.is_empty() && self.debt.is_empty() {
+            assert!(
+                Policy::fetched(root).shape.debt.is_empty(),
+                "cannot remove root policy while shape debt remains on origin/main"
+            );
+            return;
+        }
         assert_eq!(
             self.revision, FROZEN_SHAPE_REVISION,
             "shape debt revision is immutable"
@@ -9071,7 +9103,21 @@ impl<'ast> Visit<'ast> for Footprint {
                 .collect::<Vec<_>>();
             self.defaults.insert(parts.join("::"));
         } else if matches!(call.func.as_ref(), syn::Expr::Path(path) if path.qself.is_none() && path.path.segments.len() > 1)
-            && call.args.is_empty()
+            && (call.args.is_empty()
+                || call.args.len() == 1
+                    && matches!(
+                        call.args.first(),
+                        Some(syn::Expr::Call(inner))
+                            if inner.args.is_empty()
+                                && matches!(
+                                    inner.func.as_ref(),
+                                    syn::Expr::Path(path)
+                                        if path.qself.is_none()
+                                            && path.path.segments.len() == 2
+                                            && path.path.segments[0].ident == "Self"
+                                            && path.path.segments[1].ident == "manifest"
+                                )
+                    ))
         {
             self.factories.insert(call.to_token_stream().to_string());
         } else {
@@ -12240,6 +12286,34 @@ impl Inventory {
             || self.typed_page(entry)
             || self.automatic_renderer(entry)
             || self.automatic_job_adapter(entry)
+            || self.automatic_pre_world_boundary(entry)
+    }
+
+    fn automatic_pre_world_boundary(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.ecs
+            || entry.projection
+            || self.has_bevy_runtime_access(entry)
+        {
+            return false;
+        }
+        let path = entry.path.as_str();
+        path.starts_with("crates/util/vmux_macro/src/")
+            || matches!(
+                path,
+                "crates/feature/vmux_dx/tests/policy.rs"
+                    | "crates/feature/vmux_dx/tests/conventions.rs"
+                    | "crates/build_cfg.rs"
+                    | "crates/build_cfg_git.rs"
+                    | "crates/build_git_env.rs"
+                    | "crates/build_platform_cfg.rs"
+                    | "crates/build_product.rs"
+                    | "crates/build_cfg_product.rs"
+            )
+            || path.ends_with("/build.rs")
     }
 
     fn automatic_job_adapter(&self, entry: &Declaration) -> bool {
@@ -12563,7 +12637,109 @@ impl Inventory {
         for job_key in jobs {
             self.record_job_adapter(&self.entries[&job_key], &mut keys);
         }
+        let helpers = self.collect_job_helpers(&keys);
+        keys.extend(helpers);
         *self.job_adapters.borrow_mut() = Some(keys);
+    }
+
+    fn collect_job_helpers(&self, job_keys: &BTreeSet<String>) -> BTreeSet<String> {
+        let mut candidates = BTreeSet::new();
+        let mut queue: Vec<String> = job_keys.iter().cloned().collect();
+        while let Some(owner_key) = queue.pop() {
+            let owner = &self.entries[&owner_key];
+            let owner_crate = owner.namespace.split("::").next();
+            let mut sources = vec![owner];
+            if matches!(owner.kind, Kind::Struct | Kind::Enum) {
+                for implementation in self.implementations(owner) {
+                    if implementation.production {
+                        sources.push(implementation);
+                    }
+                }
+            }
+            for source in sources {
+                for path in source
+                    .field_paths
+                    .iter()
+                    .chain(source.reference_paths.iter())
+                {
+                    let target = self
+                        .resolve_path_or_prefix(&source.namespace, path)
+                        .or_else(|| {
+                            self.function_reference(&source.namespace, path, &mut BTreeSet::new())
+                        });
+                    let Some(target) = target else {
+                        continue;
+                    };
+                    if target.namespace.split("::").next() != owner_crate
+                        || job_keys.contains(&target.key)
+                        || !self.job_helper_candidate(target)
+                    {
+                        continue;
+                    }
+                    if candidates.insert(target.key.clone()) {
+                        queue.push(target.key.clone());
+                    }
+                }
+            }
+        }
+        self.prune_job_helpers(job_keys, candidates)
+    }
+
+    fn job_helper_candidate(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || entry.ecs
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.projection
+            || entry.bundle_derive.is_some()
+            || entry.query_derive.is_some()
+            || self.has_bevy_runtime_access(entry)
+        {
+            return false;
+        }
+        match entry.kind {
+            Kind::Const | Kind::Function | Kind::Alias => true,
+            Kind::Enum => {
+                entry
+                    .enum_shape
+                    .as_ref()
+                    .is_some_and(|shape| shape.payloads == 0 && !shape.component && !shape.signal)
+                    && !self.enum_job(entry)
+                    && self.value_impls_clean(entry)
+            }
+            Kind::Struct => self.value_impls_clean(entry),
+            _ => false,
+        }
+    }
+
+    fn prune_job_helpers(
+        &self,
+        job_keys: &BTreeSet<String>,
+        mut candidates: BTreeSet<String>,
+    ) -> BTreeSet<String> {
+        if candidates.is_empty() {
+            return BTreeSet::new();
+        }
+        let external = self.renderer_external_referencers(job_keys, &candidates);
+        loop {
+            let mut removed = Vec::new();
+            for key in &candidates {
+                let non_job_caller = external.get(key).is_some_and(|callers| {
+                    callers.iter().any(|caller| !candidates.contains(caller))
+                });
+                if non_job_caller {
+                    removed.push(key.clone());
+                }
+            }
+            if removed.is_empty() {
+                break;
+            }
+            for key in removed {
+                candidates.remove(&key);
+            }
+        }
+        self.finalize_renderer_helpers(job_keys, &candidates)
     }
 
     fn collect_registered_jobs(&self, namespace: &str, ty: &Type, jobs: &mut BTreeSet<String>) {
@@ -13668,16 +13844,83 @@ impl Inventory {
             }) {
                 continue;
             }
+            if self
+                .resolve(&implementation.namespace, path, &mut BTreeSet::new())
+                .is_some_and(|target| {
+                    target.key == "crates/util/vmux_ecs/src/ui_state.rs||struct:UiStatePlugin"
+                })
+            {
+                continue;
+            }
             if !self.plugin_default_path(&implementation.namespace, path, &mut visiting.clone()) {
                 return false;
             }
         }
         for factory in factories {
-            if !self.system_set_factory(&implementation.namespace, factory) {
+            if !self.system_set_factory(&implementation.namespace, factory)
+                && !self.plugin_factory(implementation, factory)
+            {
                 return false;
             }
         }
         true
+    }
+
+    fn plugin_factory(&self, implementation: &Declaration, expression: &str) -> bool {
+        let Ok(syn::Expr::Call(call)) = syn::parse_str::<syn::Expr>(expression) else {
+            return false;
+        };
+        let syn::Expr::Path(value) = call.func.as_ref() else {
+            return false;
+        };
+        if value.qself.is_some() || value.path.segments.len() < 2 {
+            return false;
+        }
+        let method = value.path.segments.last().unwrap().ident.to_string();
+        let mut owner_path = value.path.clone();
+        owner_path.segments.pop();
+        let owner_ref = References::path(&owner_path);
+        if call.args.is_empty() && owner_ref == "Self" && method == "manifest" {
+            return self.page_macro_plugin_owner(implementation);
+        }
+        let Some(owner) = self.resolve(&implementation.namespace, &owner_ref, &mut BTreeSet::new())
+        else {
+            return false;
+        };
+        if call.args.is_empty()
+            && method == "with_post_update_flush"
+            && owner.key == "crates/util/vmux_ecs/src/ui_state.rs||struct:UiStatePlugin"
+        {
+            return true;
+        }
+        if call.args.is_empty() && method == "plugin" && self.typed_page(owner) {
+            return true;
+        }
+        if call.args.len() == 1
+            && method == "new"
+            && owner.key == "crates/feature/vmux_layout/src/hosted_page.rs||struct:HostedUiPlugin"
+            && self.page_macro_plugin_owner(implementation)
+        {
+            return true;
+        }
+        false
+    }
+
+    fn page_macro_plugin_owner(&self, implementation: &Declaration) -> bool {
+        let Some(owner_path) = implementation.owner.as_deref() else {
+            return false;
+        };
+        let Some(owner) = self.resolve(&implementation.namespace, owner_path, &mut BTreeSet::new())
+        else {
+            return false;
+        };
+        owner.contract_paths.iter().any(|path| {
+            self.function_reference(&owner.namespace, path, &mut BTreeSet::new())
+                .is_some_and(|attr| {
+                    attr.key == "crates/util/vmux_macro/src/lib.rs||fn:page"
+                        && attr.reference_paths.contains("proc_macro_attribute")
+                })
+        })
     }
 
     fn system_set_factory(&self, namespace: &str, expression: &str) -> bool {
@@ -20852,4 +21095,105 @@ fn automatic_test_fixtures_prove_test_reachable_harnesses_and_preserve_isolation
             "expected rejected declaration: {name}"
         );
     }
+}
+
+#[test]
+fn automatic_job_helpers_enforce_job_only_ownership_and_pre_world_bounds() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_ecs/src/jobs.rs",
+        "use std::marker::PhantomData; use bevy_app::{App, Plugin}; pub trait Job { type Output; fn run(self) -> Self::Output; } pub struct JobPlugin<J: Job>(PhantomData<fn() -> J>); impl<J: Job> Default for JobPlugin<J> { fn default() -> Self { Self(PhantomData) } } impl<J: Job> Plugin for JobPlugin<J> { fn build(&self, app: &mut App) { let _ = app; } }",
+    );
+    inventory.source(
+        "crates/feature/worker/src/lib.rs",
+        "use bevy_app::{App, Plugin}; use vmux_ecs::jobs::{Job, JobPlugin}; struct IoHelper { path: String } impl IoHelper { fn read(&self) -> usize { self.path.len() } } struct LeakedHelper { path: String } fn domain_caller(h: LeakedHelper) -> usize { h.path.len() } struct ReadJob { helper: IoHelper, leaked: LeakedHelper } impl Job for ReadJob { type Output = usize; fn run(self) -> usize { self.helper.read() + self.leaked.path.len() } } struct RootPlugin; impl Plugin for RootPlugin { fn build(&self, app: &mut App) { app.add_plugins(JobPlugin::<ReadJob>::default()); } }",
+    );
+    inventory.source(
+        "crates/util/vmux_macro/src/lib.rs",
+        "pub struct MacroHelper; impl MacroHelper { pub fn emit() {} }",
+    );
+    inventory.source(
+        "crates/feature/example/src/runtime.rs",
+        "pub struct RuntimeLeak; impl RuntimeLeak { pub fn run() {} }",
+    );
+    inventory.resolve_usage();
+    for key in [
+        "crates/feature/worker/src/lib.rs||struct:IoHelper",
+        "crates/feature/worker/src/lib.rs||impl:IoHelper",
+        "crates/util/vmux_macro/src/lib.rs||struct:MacroHelper",
+        "crates/util/vmux_macro/src/lib.rs||impl:MacroHelper",
+    ] {
+        assert!(
+            inventory.automatic_boundary(&inventory.entries[key]),
+            "expected proved job helper or pre-world boundary: {key}"
+        );
+    }
+    for key in [
+        "crates/feature/worker/src/lib.rs||struct:LeakedHelper",
+        "crates/feature/example/src/runtime.rs||struct:RuntimeLeak",
+    ] {
+        assert!(
+            !inventory.automatic_boundary(&inventory.entries[key]),
+            "expected rejected helper or runtime type: {key}"
+        );
+    }
+}
+
+#[test]
+fn extended_plugin_bootstrap_proves_ui_state_and_page_factories() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_macro/src/lib.rs",
+        "#[proc_macro_attribute] pub fn page() {} #[proc_macro_attribute] pub fn ui_state() {}",
+    );
+    inventory.source(
+        "crates/util/vmux_page/src/lib.rs",
+        "pub use vmux_macro::page;",
+    );
+    inventory.source(
+        "crates/util/vmux_api/src/lib.rs",
+        "pub use vmux_macro::ui_state;",
+    );
+    inventory.source(
+        "crates/util/vmux_ecs/src/ui_state.rs",
+        "use std::marker::PhantomData; use bevy_app::{App, Plugin}; pub struct UiStatePlugin<S> { post_update: bool, state: PhantomData<fn() -> S> } impl<S> Default for UiStatePlugin<S> { fn default() -> Self { Self { post_update: false, state: PhantomData } } } impl<S> UiStatePlugin<S> { pub fn with_post_update_flush() -> Self { Self { post_update: true, state: PhantomData } } } impl<S> Plugin for UiStatePlugin<S> { fn build(&self, app: &mut App) { let _ = app; } }",
+    );
+    inventory.source(
+        "crates/feature/sample/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use dioxus::prelude::*; use vmux_ecs::ui_state::UiStatePlugin; #[vmux_api::ui_state] struct SampleUiState { id: u64 } #[vmux_page::page(component = Page, states = [SampleUiState])] struct SamplePage; #[component] fn Page() -> Element { rsx! { div {} } } fn tick() {} struct ClaimPlugin; impl Plugin for ClaimPlugin { fn build(&self, app: &mut App) { app.add_plugins((UiStatePlugin::<SampleUiState>::default(), SamplePage::plugin())).add_systems(Update, tick); } } struct FakeUiStatePlugin<S>(std::marker::PhantomData<fn() -> S>); impl<S> Default for FakeUiStatePlugin<S> { fn default() -> Self { Self(std::marker::PhantomData) } } struct BadPlugin; impl Plugin for BadPlugin { fn build(&self, app: &mut App) { app.add_plugins(FakeUiStatePlugin::<SampleUiState>::default()).add_systems(Update, tick); } }",
+    );
+    inventory.resolve_usage();
+    for key in [
+        "crates/feature/sample/src/lib.rs||struct:ClaimPlugin",
+        "crates/feature/sample/src/lib.rs||impl:Plugin for ClaimPlugin",
+    ] {
+        assert!(
+            inventory.automatic_boundary(&inventory.entries[key]),
+            "expected proved plugin bootstrap: {key}"
+        );
+    }
+    for key in [
+        "crates/feature/sample/src/lib.rs||struct:BadPlugin",
+        "crates/feature/sample/src/lib.rs||impl:Plugin for BadPlugin",
+    ] {
+        assert!(
+            !inventory.automatic_boundary(&inventory.entries[key]),
+            "expected rejected fake plugin bootstrap: {key}"
+        );
+    }
+}
+
+#[test]
+fn zero_policy_files_requires_zero_fragments_and_passes_with_automatic_proofs() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("crates/feature/demo/src")).unwrap();
+    let loaded = Policy::load(dir.path()).expect("empty workspace without policy files");
+    assert!(loaded.legacy.is_empty());
+    assert!(loaded.boundaries.is_empty());
+    std::fs::write(
+        dir.path().join("crates/feature/demo/ecs-policy.ron"),
+        "(legacy: [])",
+    )
+    .unwrap();
+    assert!(Policy::load(dir.path()).is_err());
 }
