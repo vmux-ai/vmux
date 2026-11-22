@@ -53,6 +53,9 @@ pub struct Dotfile;
 #[derive(Component)]
 pub struct Discovered;
 
+#[derive(Component)]
+pub struct Managed;
+
 #[derive(Bundle)]
 pub struct ObservedTool {
     pub id: Id,

@@ -63,6 +63,7 @@ impl AcpSessions {
             ),
         )
     }
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         &self,
         sid: String,
@@ -77,7 +78,40 @@ impl AcpSessions {
         mcp_args: Vec<String>,
         resume: Option<String>,
     ) -> Result<(), String> {
-        let mcp_servers = AcpMcpServers::from_sources(mcp_command, mcp_args);
+        self.spawn_with_mcp(
+            sid,
+            agent_id,
+            command,
+            args,
+            env,
+            cwd,
+            anchor,
+            processes,
+            mcp_command,
+            mcp_args,
+            Vec::new(),
+            resume,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_with_mcp(
+        &self,
+        sid: String,
+        agent_id: String,
+        command: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+        cwd: PathBuf,
+        anchor: ProcessId,
+        processes: ProcessRuntime,
+        mcp_command: Option<String>,
+        mcp_args: Vec<String>,
+        managed_mcp_servers: Vec<vmux_api::protocol::ManagedMcpServer>,
+        resume: Option<String>,
+    ) -> Result<(), String> {
+        let mcp_servers = AcpMcpServers::from_sources(mcp_command, mcp_args, managed_mcp_servers);
         let (response, receiver) = oneshot::channel();
         self.spawns
             .send(SpawnAcpSession {
@@ -89,7 +123,7 @@ impl AcpSessions {
                 cwd,
                 anchor,
                 processes,
-                mcp_servers: mcp_servers.0,
+                mcp_servers,
                 resume,
                 response: Some(response),
             })

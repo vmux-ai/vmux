@@ -4,6 +4,26 @@ use super::{
 };
 use crate::{ProcessId, TermCursor, TermLine, TermSelectionRange};
 
+#[vmux_api::contract(Copy, Default, Eq)]
+pub enum ManagedMcpTransport {
+    #[default]
+    Stdio,
+    Http,
+    Sse,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ManagedMcpServer {
+    pub name: String,
+    pub transport: ManagedMcpTransport,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    pub cwd: Option<String>,
+    pub url: Option<String>,
+    pub headers: Vec<(String, String)>,
+}
+
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ClientMessage {
     CreateProcess {
@@ -157,6 +177,19 @@ pub enum ClientMessage {
         request_id: AgentRequestId,
         sid: String,
         cwd: String,
+    },
+    SpawnAcpAgentWithMcp {
+        sid: String,
+        agent_id: String,
+        command: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+        cwd: String,
+        anchor: ProcessId,
+        mcp_command: Option<String>,
+        mcp_args: Vec<String>,
+        managed_mcp_servers: Vec<ManagedMcpServer>,
+        resume_acp_session_id: Option<String>,
     },
 }
 

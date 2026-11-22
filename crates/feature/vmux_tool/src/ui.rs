@@ -4,10 +4,10 @@ use std::collections::BTreeSet;
 
 use crate::extension::ExtensionManager;
 use crate::state::{
-    ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
-    ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind,
-    ToolOperationNotice, ToolProvider, ToolProviderMetadata, ToolStatus, ToolUninstallRequest,
-    ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsUiState,
+    McpRegisterRequest, ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest,
+    ToolInstallRequest, ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey,
+    ToolOperationKind, ToolOperationNotice, ToolProvider, ToolProviderMetadata, ToolStatus,
+    ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsUiState,
 };
 use dioxus::prelude::*;
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
@@ -428,6 +428,11 @@ fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Elemen
                             root: snapshot.root.clone(),
                         }
                     }
+                    if !view.mcp_config.is_empty() {
+                        McpRegistryCard {
+                            config_path: view.mcp_config.clone(),
+                        }
+                    }
                     if let Some(result) = notice {
                         {
                             rsx! {
@@ -525,6 +530,91 @@ fn ToolSection(
                             pending: pending.clone(),
                             onselect,
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn McpRegistryCard(config_path: String) -> Element {
+    let mut id = use_signal(String::new);
+    let mut transport = use_signal(|| "http".to_string());
+    let mut target = use_signal(String::new);
+    let mut args = use_signal(String::new);
+    let mut bearer_env = use_signal(String::new);
+    let open_path = config_path.clone();
+    let is_stdio = transport() == "stdio";
+    let can_submit = !id().trim().is_empty() && !target().trim().is_empty();
+    rsx! {
+        div { class: "flex flex-col gap-3 rounded-2xl bg-foreground/[0.035] p-4 ring-1 ring-inset ring-foreground/10",
+            div { class: "flex items-center gap-3",
+                div { class: "min-w-0 flex-1",
+                    div { class: "font-medium text-foreground/95", {translate("tools-provider-mcp-servers")} }
+                    div { class: "truncate font-mono text-xs text-muted-foreground/70", "{config_path}" }
+                }
+                ManagerButton {
+                    variant: ManagerButtonVariant::Secondary,
+                    disabled: config_path.is_empty(),
+                    onclick: move |_| open_tool_file(open_path.clone()),
+                    {translate("common-open")}
+                }
+            }
+            div { class: "grid grid-cols-1 gap-2 sm:grid-cols-12",
+                input {
+                    class: "sm:col-span-3 rounded-lg bg-background px-2.5 py-1.5 text-xs text-foreground ring-1 ring-inset ring-foreground/12 focus:outline-none focus:ring-primary/50",
+                    placeholder: "server-id",
+                    value: "{id}",
+                    oninput: move |event| id.set(event.value()),
+                }
+                select {
+                    class: "sm:col-span-2 rounded-lg bg-background px-2 py-1.5 text-xs text-foreground ring-1 ring-inset ring-foreground/12 focus:outline-none focus:ring-primary/50",
+                    value: "{transport}",
+                    onchange: move |event| transport.set(event.value()),
+                    option { value: "http", "http" }
+                    option { value: "stdio", "stdio" }
+                    option { value: "sse", "sse" }
+                }
+                input {
+                    class: "sm:col-span-4 rounded-lg bg-background px-2.5 py-1.5 text-xs text-foreground ring-1 ring-inset ring-foreground/12 focus:outline-none focus:ring-primary/50",
+                    placeholder: if is_stdio { "npx" } else { "https://mcp.example.com/mcp" },
+                    value: "{target}",
+                    oninput: move |event| target.set(event.value()),
+                }
+                if is_stdio {
+                    input {
+                        class: "sm:col-span-2 rounded-lg bg-background px-2.5 py-1.5 text-xs text-foreground ring-1 ring-inset ring-foreground/12 focus:outline-none focus:ring-primary/50",
+                        placeholder: "-y @scope/mcp",
+                        value: "{args}",
+                        oninput: move |event| args.set(event.value()),
+                    }
+                } else {
+                    input {
+                        class: "sm:col-span-2 rounded-lg bg-background px-2.5 py-1.5 text-xs text-foreground ring-1 ring-inset ring-foreground/12 focus:outline-none focus:ring-primary/50",
+                        placeholder: "TOKEN_ENV",
+                        value: "{bearer_env}",
+                        oninput: move |event| bearer_env.set(event.value()),
+                    }
+                }
+                div { class: "sm:col-span-1 flex justify-end",
+                    ManagerButton {
+                        variant: ManagerButtonVariant::Primary,
+                        disabled: !can_submit,
+                        onclick: move |_| {
+                            let _ = send(&McpRegisterRequest {
+                                id: id(),
+                                transport: transport(),
+                                target: target(),
+                                args: args(),
+                                bearer_token_env_var: bearer_env(),
+                            });
+                            id.set(String::new());
+                            target.set(String::new());
+                            args.set(String::new());
+                            bearer_env.set(String::new());
+                        },
+                        {translate("common-add")}
                     }
                 }
             }

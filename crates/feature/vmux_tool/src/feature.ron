@@ -59,6 +59,7 @@
                 "ToolUnlinkRequest",
                 "ToolApplyRequest",
                 "ToolImportRequest",
+                "McpRegisterRequest",
             ],
         ),
     ],
@@ -72,6 +73,71 @@
                 commands: [
                     (id: "tool.status", name: "status"),
                     (id: "tool.apply", name: "apply"),
+                    (
+                        id: "tool.mcp",
+                        name: "mcp",
+                        about: Some("Manage unified MCP server configuration"),
+                        subcommand_required: true,
+                        commands: [
+                            (
+                                id: "tool.mcp.list",
+                                name: "list",
+                                arguments: [
+                                    (id: "cwd", long: Some("cwd"), value_name: Some("DIRECTORY")),
+                                ],
+                            ),
+                            (
+                                id: "tool.mcp.add",
+                                name: "add",
+                                arguments: [
+                                    (id: "id", index: Some(1), required: true, value_name: Some("ID")),
+                                    (id: "command", long: Some("command"), value_name: Some("COMMAND")),
+                                    (id: "args", long: Some("args"), value_name: Some("ARGS")),
+                                    (id: "cwd", long: Some("cwd"), value_name: Some("DIRECTORY")),
+                                    (id: "url", long: Some("url"), value_name: Some("URL")),
+                                    (id: "transport", long: Some("transport"), value_name: Some("TRANSPORT")),
+                                    (id: "bearer_env", long: Some("bearer-env"), value_name: Some("ENV_VAR")),
+                                    (id: "project", long: Some("project"), value_name: Some("DIRECTORY")),
+                                    (id: "local", long: Some("local"), value_name: Some("DIRECTORY")),
+                                ],
+                            ),
+                            (
+                                id: "tool.mcp.remove",
+                                name: "remove",
+                                arguments: [
+                                    (id: "id", index: Some(1), required: true, value_name: Some("ID")),
+                                    (id: "project", long: Some("project"), value_name: Some("DIRECTORY")),
+                                    (id: "local", long: Some("local"), value_name: Some("DIRECTORY")),
+                                ],
+                            ),
+                            (
+                                id: "tool.mcp.enable",
+                                name: "enable",
+                                arguments: [
+                                    (id: "id", index: Some(1), required: true, value_name: Some("ID")),
+                                    (id: "project", long: Some("project"), value_name: Some("DIRECTORY")),
+                                    (id: "local", long: Some("local"), value_name: Some("DIRECTORY")),
+                                ],
+                            ),
+                            (
+                                id: "tool.mcp.disable",
+                                name: "disable",
+                                arguments: [
+                                    (id: "id", index: Some(1), required: true, value_name: Some("ID")),
+                                    (id: "project", long: Some("project"), value_name: Some("DIRECTORY")),
+                                    (id: "local", long: Some("local"), value_name: Some("DIRECTORY")),
+                                ],
+                            ),
+                            (
+                                id: "tool.mcp.trust",
+                                name: "trust",
+                                arguments: [
+                                    (id: "id", index: Some(1), required: true, value_name: Some("ID")),
+                                    (id: "cwd", long: Some("cwd"), value_name: Some("DIRECTORY")),
+                                ],
+                            ),
+                        ],
+                    ),
                     (
                         id: "tool.import",
                         name: "import",

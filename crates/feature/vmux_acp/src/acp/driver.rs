@@ -11,18 +11,18 @@ use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::SessionConfigOptionCategory;
 use agent_client_protocol::schema::v1::{
     AudioContent, CancelNotification, ContentBlock, CreateTerminalRequest, CreateTerminalResponse,
-    ImageContent, Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
-    LoadSessionRequest, McpServer, McpServerStdio, NewSessionRequest, PermissionOption,
-    PermissionOptionId, PromptCapabilities, PromptRequest, ReadTextFileRequest,
-    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
-    SelectedPermissionOutcome, SessionConfigOption, SessionId, SessionModeState,
-    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
-    TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    EnvVariable, HttpHeader, ImageContent, Implementation, InitializeRequest, KillTerminalRequest,
+    KillTerminalResponse, LoadSessionRequest, McpCapabilities, McpServer, McpServerHttp,
+    McpServerSse, McpServerStdio, NewSessionRequest, PermissionOption, PermissionOptionId,
+    PromptCapabilities, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
+    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
+    SessionConfigOption, SessionId, SessionModeState, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, TerminalExitStatus, TerminalId,
+    TerminalOutputRequest, TerminalOutputResponse, TextContent, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
-use agent_client_protocol::{Client, Responder};
+use agent_client_protocol::{Agent, Client, ConnectionTo, Responder};
 use base64::Engine;
 use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -40,8 +40,8 @@ use super::{
     AcpStatusInbox, AcpTranscriptInbox,
 };
 use vmux_api::protocol::{
-    AgentAttachment, AgentPromptEnvelope, AgentRunStatus, ApprovalDecision, ServiceMessage,
-    SharedEvent,
+    AgentAttachment, AgentPromptEnvelope, AgentRunStatus, ApprovalDecision, ManagedMcpServer,
+    ManagedMcpTransport, ServiceMessage, SharedEvent,
 };
 #[cfg(test)]
 use vmux_api::session::AssistantBlock;
@@ -60,17 +60,103 @@ const ACP_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 const STDERR_TAIL_CAPACITY: usize = 50;
 const STDERR_TAIL_SHOWN: usize = 8;
 
-pub(super) struct AcpMcpServers(pub(super) Vec<McpServer>);
+#[derive(Default)]
+pub(super) struct AcpMcpServers {
+    builtin: Option<McpServer>,
+    managed: Vec<ManagedMcpServer>,
+}
 
 impl AcpMcpServers {
-    pub(super) fn from_sources(mcp_command: Option<String>, mcp_args: Vec<String>) -> Self {
+    pub(super) fn from_sources(
+        mcp_command: Option<String>,
+        mcp_args: Vec<String>,
+        managed_mcp_servers: Vec<ManagedMcpServer>,
+    ) -> Self {
+        let builtin = mcp_command.map(|command| {
+            McpServer::Stdio(McpServerStdio::new("vmux", PathBuf::from(command)).args(mcp_args))
+        });
+        let managed = managed_mcp_servers
+            .into_iter()
+            .filter(|server| !server.name.trim().is_empty() && server.name != "vmux")
+            .collect();
+        Self { builtin, managed }
+    }
+
+    pub(super) fn for_capabilities(&self, capabilities: &McpCapabilities) -> Vec<McpServer> {
         let mut servers = Vec::new();
-        if let Some(command) = mcp_command {
-            servers.push(McpServer::Stdio(
-                McpServerStdio::new("vmux", PathBuf::from(command)).args(mcp_args),
-            ));
+        if let Some(builtin) = &self.builtin {
+            servers.push(builtin.clone());
         }
-        Self(servers)
+        for server in &self.managed {
+            match server.transport {
+                ManagedMcpTransport::Stdio => {
+                    if server.cwd.is_some() {
+                        tracing::warn!(
+                            target: "acp",
+                            server = %server.name,
+                            "skipping stdio MCP server with cwd; ACP v1 does not support stdio cwd"
+                        );
+                        continue;
+                    }
+                    let Some(command) = &server.command else {
+                        continue;
+                    };
+                    let env = server
+                        .env
+                        .iter()
+                        .map(|(name, value)| EnvVariable::new(name.clone(), value.clone()))
+                        .collect();
+                    servers.push(McpServer::Stdio(
+                        McpServerStdio::new(server.name.clone(), PathBuf::from(command))
+                            .args(server.args.clone())
+                            .env(env),
+                    ));
+                }
+                ManagedMcpTransport::Http => {
+                    if !capabilities.http {
+                        tracing::warn!(
+                            target: "acp",
+                            server = %server.name,
+                            "skipping HTTP MCP server; agent does not advertise mcp_capabilities.http"
+                        );
+                        continue;
+                    }
+                    let Some(url) = &server.url else {
+                        continue;
+                    };
+                    let headers = server
+                        .headers
+                        .iter()
+                        .map(|(name, value)| HttpHeader::new(name.clone(), value.clone()))
+                        .collect();
+                    servers.push(McpServer::Http(
+                        McpServerHttp::new(server.name.clone(), url.clone()).headers(headers),
+                    ));
+                }
+                ManagedMcpTransport::Sse => {
+                    if !capabilities.sse {
+                        tracing::warn!(
+                            target: "acp",
+                            server = %server.name,
+                            "skipping SSE MCP server; agent does not advertise mcp_capabilities.sse"
+                        );
+                        continue;
+                    }
+                    let Some(url) = &server.url else {
+                        continue;
+                    };
+                    let headers = server
+                        .headers
+                        .iter()
+                        .map(|(name, value)| HttpHeader::new(name.clone(), value.clone()))
+                        .collect();
+                    servers.push(McpServer::Sse(
+                        McpServerSse::new(server.name.clone(), url.clone()).headers(headers),
+                    ));
+                }
+            }
+        }
+        servers
     }
 }
 
@@ -842,10 +928,10 @@ impl AcpDriver {
         command: String,
         args: Vec<String>,
         env: Vec<(String, String)>,
-        mcp_servers: Vec<McpServer>,
+        mcp_servers: AcpMcpServers,
         resume: Option<String>,
         shared: Arc<AcpShared>,
-        mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
+        input_rx: mpsc::UnboundedReceiver<AcpInput>,
     ) {
         let agent_cwd = shared.cwd();
         let mut launch = Command::new(&command);
@@ -877,516 +963,7 @@ impl AcpDriver {
             tokio::spawn(drain_stderr(stderr, shared.clone()));
         }
         let transport = agent_client_protocol::ByteStreams::new(stdin, stdout);
-
-        let perm_shared = shared.clone();
-        let update_shared = shared.clone();
-        let main_shared = shared.clone();
-        let create_shared = shared.clone();
-        let output_shared = shared.clone();
-        let wait_shared = shared.clone();
-        let kill_shared = shared.clone();
-        let release_shared = shared.clone();
-        let read_shared = shared.clone();
-        let write_shared = shared.clone();
-
-        let result = Client
-        .builder()
-        .on_receive_request(
-            async move |req: RequestPermissionRequest,
-                        responder: Responder<RequestPermissionResponse>,
-                        _cx| {
-                let call_id = req.tool_call.tool_call_id.to_string();
-                let Some((name, args_json)) = resolve_approval_details(&req, &perm_shared).await
-                else {
-                    tracing::warn!(
-                        target: "acp",
-                        sid = %perm_shared.sid,
-                        call_id = %call_id,
-                        "ACP permission request omitted tool identity; cancelling"
-                    );
-                    return responder.respond(RequestPermissionResponse::new(
-                        RequestPermissionOutcome::Cancelled,
-                    ));
-                };
-                if AcpToolName(&name).permissionless() {
-                    let outcome =
-                        match AcpPermissionOptions(&req.options).select(ApprovalDecision::Allow) {
-                            Some(id) => RequestPermissionOutcome::Selected(
-                                SelectedPermissionOutcome::new(id),
-                            ),
-                            None => RequestPermissionOutcome::Cancelled,
-                        };
-                    return responder.respond(RequestPermissionResponse::new(outcome));
-                }
-                let (tx, rx) = oneshot::channel();
-                perm_shared
-                    .pending_perms
-                    .lock()
-                    .unwrap()
-                    .insert(call_id.clone(), tx);
-                perm_shared
-                    .projection
-                    .approval_requested(RemoteApproval {
-                        call_id: call_id.clone(),
-                        name: name.clone(),
-                        args: vmux_api::json::JsonValue::parse_or_string(&args_json),
-                    });
-                let decision = rx.await.unwrap_or(ApprovalDecision::Deny);
-                perm_shared.projection.approval_resolved(call_id);
-                let outcome = match AcpPermissionOptions(&req.options).select(decision) {
-                    Some(id) => {
-                        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(id))
-                    }
-                    None => RequestPermissionOutcome::Cancelled,
-                };
-                responder.respond(RequestPermissionResponse::new(outcome))
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            async move |req: ReadTextFileRequest,
-                        responder: Responder<ReadTextFileResponse>,
-                        _cx| {
-                let scope = AcpFsScope {
-                    cwd: read_shared.cwd(),
-                };
-                match scope.read(&req) {
-                    Ok(content) => responder.respond(ReadTextFileResponse::new(content)),
-                    Err(err) => responder.respond_with_internal_error(err),
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            async move |req: WriteTextFileRequest,
-                        responder: Responder<WriteTextFileResponse>,
-                        _cx| {
-                let scope = AcpFsScope {
-                    cwd: write_shared.cwd(),
-                };
-                match scope.write(&req) {
-                    Ok(()) => responder.respond(WriteTextFileResponse::new()),
-                    Err(err) => responder.respond_with_internal_error(err),
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            async move |req: CreateTerminalRequest,
-                        responder: Responder<CreateTerminalResponse>,
-                        _cx| {
-                match create_terminal(&create_shared, req).await {
-                    Ok(resp) => responder.respond(resp),
-                    Err(err) => responder.respond_with_internal_error(err),
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            async move |req: TerminalOutputRequest,
-                        responder: Responder<TerminalOutputResponse>,
-                        _cx| {
-                match terminal_output(&output_shared, req).await {
-                    Ok(resp) => responder.respond(resp),
-                    Err(err) => responder.respond_with_internal_error(err),
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            async move |req: WaitForTerminalExitRequest,
-                        responder: Responder<WaitForTerminalExitResponse>,
-                        _cx| {
-                match wait_for_terminal_exit(&wait_shared, req).await {
-                    Ok(resp) => responder.respond(resp),
-                    Err(err) => responder.respond_with_internal_error(err),
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            async move |req: KillTerminalRequest,
-                        responder: Responder<KillTerminalResponse>,
-                        _cx| {
-                match kill_terminal(&kill_shared, req).await {
-                    Ok(resp) => responder.respond(resp),
-                    Err(err) => responder.respond_with_internal_error(err),
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            async move |req: ReleaseTerminalRequest,
-                        responder: Responder<ReleaseTerminalResponse>,
-                        _cx| {
-                match release_terminal(&release_shared, req).await {
-                    Ok(resp) => responder.respond(resp),
-                    Err(err) => responder.respond_with_internal_error(err),
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_notification(
-            async move |note: SessionNotification, _cx| {
-                update_shared
-                    .projection
-                    .transcript(AcpTranscriptInput::Update(Box::new(note.update)));
-                Ok(())
-            },
-            agent_client_protocol::on_receive_notification!(),
-        )
-        .connect_with(transport, async move |cx| {
-            let mut init = InitializeRequest::new(ProtocolVersion::V1);
-            init.client_capabilities.fs.read_text_file = true;
-            init.client_capabilities.fs.write_text_file = true;
-            init.client_capabilities.terminal = true;
-            let init_resp =
-                match tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(init).block_task())
-                    .await
-                {
-                    Ok(Ok(resp)) => resp,
-                    Ok(Err(err)) => {
-                        main_shared.fail_startup(format!(
-                            "agent failed to start: {err}{}",
-                            main_shared.stderr_detail()
-                        ));
-                        return Ok(());
-                    }
-                    Err(_) => {
-                        main_shared.fail_startup(format!(
-                            "agent did not start within {}s{}",
-                            ACP_STARTUP_TIMEOUT.as_secs(),
-                            main_shared.stderr_detail()
-                        ));
-                        return Ok(());
-                    }
-                };
-            tracing::info!(target: "acp", sid = %main_shared.sid, "initialize answered");
-            let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
-
-            if let Some(name) = AcpAgentInfo(init_resp.agent_info.as_ref()).display_name() {
-                main_shared.projection.agent_info(name);
-            }
-
-            let resume_requested = resume.is_some();
-            if resume_requested {
-                main_shared
-                    .projection
-                    .transcript(AcpTranscriptInput::BeginHistoryReplay);
-            }
-            let loaded_session =
-                load_requested_session(resume, init_resp.agent_capabilities.load_session, |sid| {
-                    let mut load = LoadSessionRequest::new(sid, main_shared.cwd());
-                    load.mcp_servers = mcp_servers.clone();
-                    let shared = main_shared.clone();
-                    let cx = cx.clone();
-                    async move {
-                        let answered = tokio::time::timeout(
-                            ACP_STARTUP_TIMEOUT,
-                            cx.send_request(load).block_task(),
-                        )
-                        .await;
-                        let Ok(loaded) = answered else {
-                            tracing::warn!(
-                                target: "acp",
-                                "session/load did not answer within {}s",
-                                ACP_STARTUP_TIMEOUT.as_secs()
-                            );
-                            return Err("session/load timed out".to_string());
-                        };
-                        let response = loaded.map_err(|err| err.to_string())?;
-                        let config_options = response.config_options.as_deref().unwrap_or_default();
-                        shared.projection.config_state(AcpConfigStateInput {
-                            config_options: config_options.to_vec(),
-                            modes: response.modes.clone(),
-                        });
-                        Ok(())
-                    }
-                })
-                .await;
-            let mut session_id = match loaded_session {
-                Ok(session_id) => session_id,
-                Err(error) => {
-                    tracing::warn!(target: "acp", sid = %main_shared.sid, %error, "session resume failed");
-                    if resume_requested {
-                        main_shared.projection.transcript(AcpTranscriptInput::FinishHistoryReplay(false));
-                    }
-                    main_shared.fail_startup(error);
-                    return Ok(());
-                }
-            };
-            if resume_requested {
-                main_shared
-                    .projection
-                    .transcript(AcpTranscriptInput::FinishHistoryReplay(session_id.is_some()));
-            }
-            if let Some(sid) = &session_id {
-                main_shared.emit(ServiceMessage::AcpSessionCreated {
-                    sid: main_shared.sid.clone(),
-                    acp_session_id: sid.to_string(),
-                });
-            }
-            if session_id.is_none() {
-                let ensured = ensure_session(&mut session_id, || {
-                    let mut new_session = NewSessionRequest::new(main_shared.cwd());
-                    new_session.mcp_servers = mcp_servers.clone();
-                    let shared = main_shared.clone();
-                    let cx = cx.clone();
-                    async move {
-                        match tokio::time::timeout(
-                            ACP_STARTUP_TIMEOUT,
-                            cx.send_request(new_session).block_task(),
-                        )
-                        .await
-                        {
-                            Ok(Ok(response)) => {
-                                let config_options =
-                                    response.config_options.as_deref().unwrap_or_default();
-                                shared.projection.config_state(AcpConfigStateInput {
-                                    config_options: config_options.to_vec(),
-                                    modes: response.modes.clone(),
-                                });
-                                Ok(response.session_id)
-                            }
-                            Ok(Err(err)) => Err(err.to_string()),
-                            Err(_) => Err(format!(
-                                "no answer within {}s{}",
-                                ACP_STARTUP_TIMEOUT.as_secs(),
-                                shared.stderr_detail()
-                            )),
-                        }
-                    }
-                })
-                .await;
-                match ensured {
-                    Ok((sid, created)) => {
-                        if created {
-                            main_shared.emit(ServiceMessage::AcpSessionCreated {
-                                sid: main_shared.sid.clone(),
-                                acp_session_id: sid.to_string(),
-                            });
-                        }
-                    }
-                    Err(err) => {
-                        main_shared.projection.status(AgentRunStatus::Errored(format!(
-                            "acp session/new failed: {err}"
-                        )));
-                        return Ok(());
-                    }
-                }
-            }
-            main_shared.mark_startup_ready();
-
-            while let Some(input) = input_rx.recv().await {
-                match input {
-                    AcpInput::User {
-                        text,
-                        context,
-                        attachments,
-                        preferred_mode,
-                    } => {
-                        main_shared.cancel_requested.store(false, Ordering::SeqCst);
-                        main_shared.projection.status(AgentRunStatus::Streaming);
-                        let ensured = ensure_session(&mut session_id, || {
-                            let mut new_session = NewSessionRequest::new(main_shared.cwd());
-                            new_session.mcp_servers = mcp_servers.clone();
-                            let shared = main_shared.clone();
-                            let cx = cx.clone();
-                            async move {
-                                cx.send_request(new_session)
-                                    .block_task()
-                                    .await
-                                    .map(|response| {
-                                        let config_options =
-                                            response.config_options.as_deref().unwrap_or_default();
-                                        shared.projection.config_state(AcpConfigStateInput {
-                                            config_options: config_options.to_vec(),
-                                            modes: response.modes.clone(),
-                                        });
-                                        response.session_id
-                                    })
-                            }
-                        })
-                        .await;
-                        let (active_session_id, created) = match ensured {
-                            Ok(value) => value,
-                            Err(err) => {
-                                main_shared.projection.status(AgentRunStatus::Errored(format!(
-                                    "acp session/new failed: {err}"
-                                )));
-                                continue;
-                            }
-                        };
-                        if created {
-                            main_shared.emit(ServiceMessage::AcpSessionCreated {
-                                sid: main_shared.sid.clone(),
-                                acp_session_id: active_session_id.to_string(),
-                            });
-                        }
-                        let available_mode = main_shared
-                            .projection
-                            .selection_snapshot()
-                            .await
-                            .configs
-                            .into_iter()
-                            .find(|config| config.category.as_deref() == Some("mode"));
-                        if let Some(mode_id) = preferred_mode
-                            && let Some(mode) = available_mode
-                            && mode.current_value != mode_id
-                            && mode.values.iter().any(|option| option.value == mode_id)
-                        {
-                            if let Some(config_id) = mode.config_id.as_ref() {
-                                match cx
-                                    .send_request(SetSessionConfigOptionRequest::new(
-                                        active_session_id.clone(),
-                                        config_id.clone(),
-                                        mode_id.clone(),
-                                    ))
-                                    .block_task()
-                                    .await
-                                {
-                                    Ok(response) => main_shared.projection.selected_config(
-                                        AcpSelectedConfigInput {
-                                            config_id: Some(config_id.clone()),
-                                            value: mode_id.clone(),
-                                            config_options: response.config_options,
-                                        },
-                                    ),
-                                    Err(error) => tracing::warn!(target: "acp", sid = %main_shared.sid, "initial mode selection failed: {error}"),
-                                }
-                            } else {
-                                match cx
-                                    .send_request(SetSessionModeRequest::new(
-                                        active_session_id.clone(),
-                                        mode_id.clone(),
-                                    ))
-                                    .block_task()
-                                    .await
-                                {
-                                    Ok(_) => main_shared.projection.selected_config(
-                                        AcpSelectedConfigInput {
-                                            config_id: None,
-                                            value: mode_id.clone(),
-                                            config_options: Vec::new(),
-                                        },
-                                    ),
-                                    Err(error) => tracing::warn!(target: "acp", sid = %main_shared.sid, "initial mode selection failed: {error}"),
-                                }
-                            }
-                        }
-                        let cx_prompt = cx.clone();
-                        let shared = main_shared.clone();
-                        let prompt_capabilities = prompt_capabilities.clone();
-                        cx.spawn(async move {
-                            let prompt = PromptRequest::new(
-                                active_session_id,
-                                prompt_content_blocks(
-                                    &text,
-                                    context.as_deref(),
-                                    &attachments,
-                                    &prompt_capabilities,
-                                )
-                                .await,
-                            );
-                            let errored = match cx_prompt.send_request(prompt).block_task().await {
-                                Ok(_) => None,
-                                Err(err) => Some(err.to_string()),
-                            };
-                            let cancelled = shared.cancel_requested.swap(false, Ordering::SeqCst);
-                            shared
-                                .projection
-                                .transcript(AcpTranscriptInput::Snapshot);
-                            shared.projection.status(
-                                PromptCompletion {
-                                    cancelled,
-                                    error: errored,
-                                }
-                                .status(),
-                            );
-                            Ok(())
-                        })?;
-                    }
-                    AcpInput::Approve { call_id, decision } => {
-                        if let Some(tx) = main_shared.pending_perms.lock().unwrap().remove(&call_id)
-                        {
-                            let _ = tx.send(decision);
-                        }
-                    }
-                    AcpInput::SetConfig {
-                        request_id,
-                        config_id,
-                        value,
-                    } => {
-                        let Some(sid) = session_id.clone() else {
-                            main_shared.publish_config_selection_result(
-                                request_id,
-                                config_id.as_deref(),
-                                &value,
-                                false,
-                            );
-                            continue;
-                        };
-                        let result = if let Some(config_id) = config_id.as_ref() {
-                            cx.send_request(SetSessionConfigOptionRequest::new(
-                                sid,
-                                config_id.clone(),
-                                value.clone(),
-                            ))
-                            .block_task()
-                            .await
-                            .map(|response| response.config_options)
-                        } else {
-                            cx.send_request(SetSessionModeRequest::new(sid, value.clone()))
-                                .block_task()
-                                .await
-                                .map(|_| Vec::new())
-                        };
-                        match result {
-                            Ok(config_options) => {
-                                main_shared.projection.selected_config(AcpSelectedConfigInput {
-                                    config_id: config_id.clone(),
-                                    value: value.clone(),
-                                    config_options,
-                                });
-                                main_shared.publish_config_selection_result(
-                                    request_id,
-                                    config_id.as_deref(),
-                                    &value,
-                                    true,
-                                );
-                            }
-                            Err(err) => {
-                                main_shared.publish_config_selection_result(
-                                    request_id,
-                                    config_id.as_deref(),
-                                    &value,
-                                    false,
-                                );
-                                tracing::warn!(target: "acp", sid = %main_shared.sid, "session config selection failed: {err}");
-                            }
-                        }
-                    }
-                    AcpInput::Cancel => {
-                        main_shared.cancel_requested.store(true, Ordering::SeqCst);
-                        for (_id, tx) in main_shared.pending_perms.lock().unwrap().drain() {
-                            let _ = tx.send(ApprovalDecision::Deny);
-                        }
-                        if let Some(sid) = &session_id {
-                            let _ = cx.send_notification(CancelNotification::new(sid.clone()));
-                        }
-                    }
-                    AcpInput::Close => {
-                        if let Some(sid) = &session_id {
-                            let _ = cx.send_notification(CancelNotification::new(sid.clone()));
-                        }
-                        break;
-                    }
-                }
-            }
-            Ok(())
-        })
-        .await;
-
+        let result = Self::connect(transport, mcp_servers, resume, shared.clone(), input_rx).await;
         if let Err(err) = result {
             shared.projection.status(AgentRunStatus::Errored(format!(
                 "acp connection ended: {err}{}",
@@ -1394,6 +971,629 @@ impl AcpDriver {
             )));
         }
         child.stop().await;
+    }
+
+    async fn connect(
+        transport: agent_client_protocol::ByteStreams<
+            tokio_util::compat::Compat<tokio::process::ChildStdin>,
+            tokio_util::compat::Compat<tokio::process::ChildStdout>,
+        >,
+        mcp_servers: AcpMcpServers,
+        resume: Option<String>,
+        shared: Arc<AcpShared>,
+        input_rx: mpsc::UnboundedReceiver<AcpInput>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        let perm_shared = shared.clone();
+        let update_shared = shared.clone();
+        let main_shared = shared.clone();
+        let read_shared = shared.clone();
+        let write_shared = shared.clone();
+        let create_shared = shared.clone();
+        let output_shared = shared.clone();
+        let wait_shared = shared.clone();
+        let kill_shared = shared.clone();
+        let release_shared = shared;
+        Client
+            .builder()
+            .on_receive_request(
+                async move |req: RequestPermissionRequest,
+                            responder: Responder<RequestPermissionResponse>,
+                            _cx| {
+                    Self::handle_permission(req, responder, &perm_shared).await
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |req: ReadTextFileRequest,
+                            responder: Responder<ReadTextFileResponse>,
+                            _cx| {
+                    Self::handle_read_file(req, responder, &read_shared)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |req: WriteTextFileRequest,
+                            responder: Responder<WriteTextFileResponse>,
+                            _cx| {
+                    Self::handle_write_file(req, responder, &write_shared)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |req: CreateTerminalRequest,
+                            responder: Responder<CreateTerminalResponse>,
+                            _cx| match create_terminal(&create_shared, req).await {
+                    Ok(resp) => responder.respond(resp),
+                    Err(err) => responder.respond_with_internal_error(err),
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |req: TerminalOutputRequest,
+                            responder: Responder<TerminalOutputResponse>,
+                            _cx| match terminal_output(&output_shared, req).await {
+                    Ok(resp) => responder.respond(resp),
+                    Err(err) => responder.respond_with_internal_error(err),
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |req: WaitForTerminalExitRequest,
+                            responder: Responder<WaitForTerminalExitResponse>,
+                            _cx| match wait_for_terminal_exit(&wait_shared, req)
+                    .await
+                {
+                    Ok(resp) => responder.respond(resp),
+                    Err(err) => responder.respond_with_internal_error(err),
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |req: KillTerminalRequest,
+                            responder: Responder<KillTerminalResponse>,
+                            _cx| match kill_terminal(&kill_shared, req).await {
+                    Ok(resp) => responder.respond(resp),
+                    Err(err) => responder.respond_with_internal_error(err),
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |req: ReleaseTerminalRequest,
+                            responder: Responder<ReleaseTerminalResponse>,
+                            _cx| match release_terminal(&release_shared, req).await
+                {
+                    Ok(resp) => responder.respond(resp),
+                    Err(err) => responder.respond_with_internal_error(err),
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_notification(
+                async move |note: SessionNotification, _cx| {
+                    update_shared
+                        .projection
+                        .transcript(AcpTranscriptInput::Update(Box::new(note.update)));
+                    Ok(())
+                },
+                agent_client_protocol::on_receive_notification!(),
+            )
+            .connect_with(transport, async move |cx| {
+                Self::drive_session(cx, mcp_servers, resume, main_shared, input_rx).await
+            })
+            .await
+    }
+
+    fn handle_read_file(
+        req: ReadTextFileRequest,
+        responder: Responder<ReadTextFileResponse>,
+        shared: &Arc<AcpShared>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        let scope = AcpFsScope { cwd: shared.cwd() };
+        match scope.read(&req) {
+            Ok(content) => responder.respond(ReadTextFileResponse::new(content)),
+            Err(err) => responder.respond_with_internal_error(err),
+        }
+    }
+
+    fn handle_write_file(
+        req: WriteTextFileRequest,
+        responder: Responder<WriteTextFileResponse>,
+        shared: &Arc<AcpShared>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        let scope = AcpFsScope { cwd: shared.cwd() };
+        match scope.write(&req) {
+            Ok(()) => responder.respond(WriteTextFileResponse::new()),
+            Err(err) => responder.respond_with_internal_error(err),
+        }
+    }
+
+    async fn handle_permission(
+        req: RequestPermissionRequest,
+        responder: Responder<RequestPermissionResponse>,
+        perm_shared: &Arc<AcpShared>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        let call_id = req.tool_call.tool_call_id.to_string();
+        let Some((name, args_json)) = resolve_approval_details(&req, perm_shared).await else {
+            tracing::warn!(
+                target: "acp",
+                sid = %perm_shared.sid,
+                call_id = %call_id,
+                "ACP permission request omitted tool identity; cancelling"
+            );
+            return responder.respond(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Cancelled,
+            ));
+        };
+        if AcpToolName(&name).permissionless() {
+            let outcome = match AcpPermissionOptions(&req.options).select(ApprovalDecision::Allow) {
+                Some(id) => RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(id)),
+                None => RequestPermissionOutcome::Cancelled,
+            };
+            return responder.respond(RequestPermissionResponse::new(outcome));
+        }
+        let (tx, rx) = oneshot::channel();
+        perm_shared
+            .pending_perms
+            .lock()
+            .unwrap()
+            .insert(call_id.clone(), tx);
+        perm_shared.projection.approval_requested(RemoteApproval {
+            call_id: call_id.clone(),
+            name,
+            args: vmux_api::json::JsonValue::parse_or_string(&args_json),
+        });
+        let decision = rx.await.unwrap_or(ApprovalDecision::Deny);
+        perm_shared.projection.approval_resolved(call_id);
+        let outcome = match AcpPermissionOptions(&req.options).select(decision) {
+            Some(id) => RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(id)),
+            None => RequestPermissionOutcome::Cancelled,
+        };
+        responder.respond(RequestPermissionResponse::new(outcome))
+    }
+
+    async fn drive_session(
+        cx: ConnectionTo<Agent>,
+        mcp_servers: AcpMcpServers,
+        resume: Option<String>,
+        shared: Arc<AcpShared>,
+        mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        let Some((mut session_id, prompt_capabilities, mcp_servers)) =
+            Self::initialize_session(&cx, &mcp_servers, resume, &shared).await
+        else {
+            return Ok(());
+        };
+        shared.mark_startup_ready();
+        while let Some(input) = input_rx.recv().await {
+            match input {
+                AcpInput::User {
+                    text,
+                    context,
+                    attachments,
+                    preferred_mode,
+                } => {
+                    Self::handle_user_input(
+                        &cx,
+                        &mut session_id,
+                        &mcp_servers,
+                        &prompt_capabilities,
+                        &shared,
+                        text,
+                        context,
+                        attachments,
+                        preferred_mode,
+                    )
+                    .await?;
+                }
+                AcpInput::Approve { call_id, decision } => {
+                    if let Some(tx) = shared.pending_perms.lock().unwrap().remove(&call_id) {
+                        let _ = tx.send(decision);
+                    }
+                }
+                AcpInput::SetConfig {
+                    request_id,
+                    config_id,
+                    value,
+                } => {
+                    Self::handle_set_config(
+                        &cx,
+                        session_id.as_ref(),
+                        &shared,
+                        request_id,
+                        config_id,
+                        value,
+                    )
+                    .await;
+                }
+                AcpInput::Cancel => {
+                    shared.cancel_requested.store(true, Ordering::SeqCst);
+                    for (_id, tx) in shared.pending_perms.lock().unwrap().drain() {
+                        let _ = tx.send(ApprovalDecision::Deny);
+                    }
+                    if let Some(sid) = &session_id {
+                        let _ = cx.send_notification(CancelNotification::new(sid.clone()));
+                    }
+                }
+                AcpInput::Close => {
+                    if let Some(sid) = &session_id {
+                        let _ = cx.send_notification(CancelNotification::new(sid.clone()));
+                    }
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn initialize_session(
+        cx: &ConnectionTo<Agent>,
+        mcp_servers: &AcpMcpServers,
+        resume: Option<String>,
+        shared: &Arc<AcpShared>,
+    ) -> Option<(Option<SessionId>, PromptCapabilities, Vec<McpServer>)> {
+        let mut init = InitializeRequest::new(ProtocolVersion::V1);
+        init.client_capabilities.fs.read_text_file = true;
+        init.client_capabilities.fs.write_text_file = true;
+        init.client_capabilities.terminal = true;
+        let init_resp =
+            match tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(init).block_task())
+                .await
+            {
+                Ok(Ok(resp)) => resp,
+                Ok(Err(err)) => {
+                    shared.fail_startup(format!(
+                        "agent failed to start: {err}{}",
+                        shared.stderr_detail()
+                    ));
+                    return None;
+                }
+                Err(_) => {
+                    shared.fail_startup(format!(
+                        "agent did not start within {}s{}",
+                        ACP_STARTUP_TIMEOUT.as_secs(),
+                        shared.stderr_detail()
+                    ));
+                    return None;
+                }
+            };
+        tracing::info!(target: "acp", sid = %shared.sid, "initialize answered");
+        let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
+        let mcp_servers =
+            mcp_servers.for_capabilities(&init_resp.agent_capabilities.mcp_capabilities);
+        if let Some(name) = AcpAgentInfo(init_resp.agent_info.as_ref()).display_name() {
+            shared.projection.agent_info(name);
+        }
+        let session_id = Self::load_or_create_session(
+            cx,
+            resume,
+            init_resp.agent_capabilities.load_session,
+            &mcp_servers,
+            shared,
+        )
+        .await?;
+        Some((session_id, prompt_capabilities, mcp_servers))
+    }
+
+    async fn load_or_create_session(
+        cx: &ConnectionTo<Agent>,
+        resume: Option<String>,
+        load_supported: bool,
+        mcp_servers: &[McpServer],
+        shared: &Arc<AcpShared>,
+    ) -> Option<Option<SessionId>> {
+        let resume_requested = resume.is_some();
+        if resume_requested {
+            shared
+                .projection
+                .transcript(AcpTranscriptInput::BeginHistoryReplay);
+        }
+        let loaded_session = load_requested_session(resume, load_supported, |sid| {
+            let mut load = LoadSessionRequest::new(sid, shared.cwd());
+            load.mcp_servers = mcp_servers.to_vec();
+            let shared = shared.clone();
+            let cx = cx.clone();
+            async move {
+                let answered =
+                    tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(load).block_task())
+                        .await;
+                let Ok(loaded) = answered else {
+                    tracing::warn!(
+                        target: "acp",
+                        "session/load did not answer within {}s",
+                        ACP_STARTUP_TIMEOUT.as_secs()
+                    );
+                    return Err("session/load timed out".to_string());
+                };
+                let response = loaded.map_err(|err| err.to_string())?;
+                let config_options = response.config_options.as_deref().unwrap_or_default();
+                shared.projection.config_state(AcpConfigStateInput {
+                    config_options: config_options.to_vec(),
+                    modes: response.modes.clone(),
+                });
+                Ok(())
+            }
+        })
+        .await;
+        let mut session_id = match loaded_session {
+            Ok(session_id) => session_id,
+            Err(error) => {
+                tracing::warn!(target: "acp", sid = %shared.sid, %error, "session resume failed");
+                if resume_requested {
+                    shared
+                        .projection
+                        .transcript(AcpTranscriptInput::FinishHistoryReplay(false));
+                }
+                shared.fail_startup(error);
+                return None;
+            }
+        };
+        if resume_requested {
+            shared
+                .projection
+                .transcript(AcpTranscriptInput::FinishHistoryReplay(
+                    session_id.is_some(),
+                ));
+        }
+        if let Some(sid) = &session_id {
+            shared.emit(ServiceMessage::AcpSessionCreated {
+                sid: shared.sid.clone(),
+                acp_session_id: sid.to_string(),
+            });
+            return Some(session_id);
+        }
+        Self::create_initial_session(cx, &mut session_id, mcp_servers, shared).await
+    }
+
+    async fn create_initial_session(
+        cx: &ConnectionTo<Agent>,
+        session_id: &mut Option<SessionId>,
+        mcp_servers: &[McpServer],
+        shared: &Arc<AcpShared>,
+    ) -> Option<Option<SessionId>> {
+        let ensured = ensure_session(session_id, || {
+            let mut new_session = NewSessionRequest::new(shared.cwd());
+            new_session.mcp_servers = mcp_servers.to_vec();
+            let shared = shared.clone();
+            let cx = cx.clone();
+            async move {
+                match tokio::time::timeout(
+                    ACP_STARTUP_TIMEOUT,
+                    cx.send_request(new_session).block_task(),
+                )
+                .await
+                {
+                    Ok(Ok(response)) => {
+                        let config_options = response.config_options.as_deref().unwrap_or_default();
+                        shared.projection.config_state(AcpConfigStateInput {
+                            config_options: config_options.to_vec(),
+                            modes: response.modes.clone(),
+                        });
+                        Ok(response.session_id)
+                    }
+                    Ok(Err(err)) => Err(err.to_string()),
+                    Err(_) => Err(format!(
+                        "no answer within {}s{}",
+                        ACP_STARTUP_TIMEOUT.as_secs(),
+                        shared.stderr_detail()
+                    )),
+                }
+            }
+        })
+        .await;
+        match ensured {
+            Ok((sid, created)) => {
+                if created {
+                    shared.emit(ServiceMessage::AcpSessionCreated {
+                        sid: shared.sid.clone(),
+                        acp_session_id: sid.to_string(),
+                    });
+                }
+                Some(session_id.clone())
+            }
+            Err(err) => {
+                shared.projection.status(AgentRunStatus::Errored(format!(
+                    "acp session/new failed: {err}"
+                )));
+                None
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_user_input(
+        cx: &ConnectionTo<Agent>,
+        session_id: &mut Option<SessionId>,
+        mcp_servers: &[McpServer],
+        prompt_capabilities: &PromptCapabilities,
+        shared: &Arc<AcpShared>,
+        text: String,
+        context: Option<String>,
+        attachments: Vec<AgentAttachment>,
+        preferred_mode: Option<String>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        shared.cancel_requested.store(false, Ordering::SeqCst);
+        shared.projection.status(AgentRunStatus::Streaming);
+        let ensured = ensure_session(session_id, || {
+            let mut new_session = NewSessionRequest::new(shared.cwd());
+            new_session.mcp_servers = mcp_servers.to_vec();
+            let shared = shared.clone();
+            let cx = cx.clone();
+            async move {
+                cx.send_request(new_session)
+                    .block_task()
+                    .await
+                    .map(|response| {
+                        let config_options = response.config_options.as_deref().unwrap_or_default();
+                        shared.projection.config_state(AcpConfigStateInput {
+                            config_options: config_options.to_vec(),
+                            modes: response.modes.clone(),
+                        });
+                        response.session_id
+                    })
+            }
+        })
+        .await;
+        let (active_session_id, created) = match ensured {
+            Ok(value) => value,
+            Err(err) => {
+                shared.projection.status(AgentRunStatus::Errored(format!(
+                    "acp session/new failed: {err}"
+                )));
+                return Ok(());
+            }
+        };
+        if created {
+            shared.emit(ServiceMessage::AcpSessionCreated {
+                sid: shared.sid.clone(),
+                acp_session_id: active_session_id.to_string(),
+            });
+        }
+        Self::apply_preferred_mode(cx, &active_session_id, preferred_mode, shared).await;
+        let cx_prompt = cx.clone();
+        let shared = shared.clone();
+        let prompt_capabilities = prompt_capabilities.clone();
+        cx.spawn(async move {
+            let prompt = PromptRequest::new(
+                active_session_id,
+                prompt_content_blocks(
+                    &text,
+                    context.as_deref(),
+                    &attachments,
+                    &prompt_capabilities,
+                )
+                .await,
+            );
+            let errored = match cx_prompt.send_request(prompt).block_task().await {
+                Ok(_) => None,
+                Err(err) => Some(err.to_string()),
+            };
+            let cancelled = shared.cancel_requested.swap(false, Ordering::SeqCst);
+            shared.projection.transcript(AcpTranscriptInput::Snapshot);
+            shared.projection.status(
+                PromptCompletion {
+                    cancelled,
+                    error: errored,
+                }
+                .status(),
+            );
+            Ok(())
+        })
+    }
+
+    async fn apply_preferred_mode(
+        cx: &ConnectionTo<Agent>,
+        active_session_id: &SessionId,
+        preferred_mode: Option<String>,
+        shared: &Arc<AcpShared>,
+    ) {
+        let Some(mode_id) = preferred_mode else {
+            return;
+        };
+        let available_mode = shared
+            .projection
+            .selection_snapshot()
+            .await
+            .configs
+            .into_iter()
+            .find(|config| config.category.as_deref() == Some("mode"));
+        let Some(mode) = available_mode else {
+            return;
+        };
+        if mode.current_value == mode_id
+            || !mode.values.iter().any(|option| option.value == mode_id)
+        {
+            return;
+        }
+        if let Some(config_id) = mode.config_id.as_ref() {
+            match cx
+                .send_request(SetSessionConfigOptionRequest::new(
+                    active_session_id.clone(),
+                    config_id.clone(),
+                    mode_id.clone(),
+                ))
+                .block_task()
+                .await
+            {
+                Ok(response) => shared.projection.selected_config(AcpSelectedConfigInput {
+                    config_id: Some(config_id.clone()),
+                    value: mode_id,
+                    config_options: response.config_options,
+                }),
+                Err(error) => {
+                    tracing::warn!(target: "acp", sid = %shared.sid, "initial mode selection failed: {error}");
+                }
+            }
+        } else {
+            match cx
+                .send_request(SetSessionModeRequest::new(
+                    active_session_id.clone(),
+                    mode_id.clone(),
+                ))
+                .block_task()
+                .await
+            {
+                Ok(_) => shared.projection.selected_config(AcpSelectedConfigInput {
+                    config_id: None,
+                    value: mode_id,
+                    config_options: Vec::new(),
+                }),
+                Err(error) => {
+                    tracing::warn!(target: "acp", sid = %shared.sid, "initial mode selection failed: {error}");
+                }
+            }
+        }
+    }
+
+    async fn handle_set_config(
+        cx: &ConnectionTo<Agent>,
+        session_id: Option<&SessionId>,
+        shared: &Arc<AcpShared>,
+        request_id: u64,
+        config_id: Option<String>,
+        value: String,
+    ) {
+        let Some(sid) = session_id.cloned() else {
+            shared.publish_config_selection_result(request_id, config_id.as_deref(), &value, false);
+            return;
+        };
+        let result = if let Some(config_id) = config_id.as_ref() {
+            cx.send_request(SetSessionConfigOptionRequest::new(
+                sid,
+                config_id.clone(),
+                value.clone(),
+            ))
+            .block_task()
+            .await
+            .map(|response| response.config_options)
+        } else {
+            cx.send_request(SetSessionModeRequest::new(sid, value.clone()))
+                .block_task()
+                .await
+                .map(|_| Vec::new())
+        };
+        match result {
+            Ok(config_options) => {
+                shared.projection.selected_config(AcpSelectedConfigInput {
+                    config_id: config_id.clone(),
+                    value: value.clone(),
+                    config_options,
+                });
+                shared.publish_config_selection_result(
+                    request_id,
+                    config_id.as_deref(),
+                    &value,
+                    true,
+                );
+            }
+            Err(err) => {
+                shared.publish_config_selection_result(
+                    request_id,
+                    config_id.as_deref(),
+                    &value,
+                    false,
+                );
+                tracing::warn!(target: "acp", sid = %shared.sid, "session config selection failed: {err}");
+            }
+        }
     }
 }
 
@@ -2867,5 +3067,59 @@ mod tests {
         .await
         .expect("release");
         poll.abort();
+    }
+
+    #[test]
+    fn capability_filtering_reserves_vmux_and_honors_agent_mcp_capabilities() {
+        let servers = AcpMcpServers::from_sources(
+            Some("/bin/vmux".into()),
+            vec!["mcp".into()],
+            vec![
+                ManagedMcpServer {
+                    name: "vmux".into(),
+                    transport: ManagedMcpTransport::Stdio,
+                    command: Some("evil".into()),
+                    ..Default::default()
+                },
+                ManagedMcpServer {
+                    name: "stdio-ok".into(),
+                    transport: ManagedMcpTransport::Stdio,
+                    command: Some("npx".into()),
+                    args: vec!["-y".into(), "server".into()],
+                    env: vec![("K".into(), "V".into())],
+                    ..Default::default()
+                },
+                ManagedMcpServer {
+                    name: "stdio-cwd".into(),
+                    transport: ManagedMcpTransport::Stdio,
+                    command: Some("npx".into()),
+                    cwd: Some("/tmp".into()),
+                    ..Default::default()
+                },
+                ManagedMcpServer {
+                    name: "linear-vmx".into(),
+                    transport: ManagedMcpTransport::Http,
+                    url: Some("https://mcp.linear.app/mcp".into()),
+                    headers: vec![("Authorization".into(), "Bearer tok".into())],
+                    ..Default::default()
+                },
+                ManagedMcpServer {
+                    name: "legacy-sse".into(),
+                    transport: ManagedMcpTransport::Sse,
+                    url: Some("https://example.com/sse".into()),
+                    ..Default::default()
+                },
+            ],
+        );
+
+        let stdio_only = servers.for_capabilities(&McpCapabilities::default());
+        assert_eq!(stdio_only.len(), 2);
+        assert!(matches!(&stdio_only[0], McpServer::Stdio(s) if s.name == "vmux"));
+        assert!(matches!(&stdio_only[1], McpServer::Stdio(s) if s.name == "stdio-ok"));
+
+        let http_and_sse = servers.for_capabilities(&McpCapabilities::new().http(true).sse(true));
+        assert_eq!(http_and_sse.len(), 4);
+        assert!(matches!(&http_and_sse[2], McpServer::Http(s) if s.name == "linear-vmx"));
+        assert!(matches!(&http_and_sse[3], McpServer::Sse(s) if s.name == "legacy-sse"));
     }
 }

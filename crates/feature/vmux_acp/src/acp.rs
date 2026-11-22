@@ -5,7 +5,7 @@ use bevy::prelude::{
 pub(crate) use catalog_driver::{CatalogDriver, CatalogRequest};
 pub use driver::AcpInput;
 use driver::{
-    AcpConfigStateInput, AcpProjectionSenders, AcpSelectedConfigInput, AcpShared,
+    AcpConfigStateInput, AcpMcpServers, AcpProjectionSenders, AcpSelectedConfigInput, AcpShared,
     AcpTranscriptInput,
 };
 use projection_driver::AcpProjector;
@@ -22,8 +22,6 @@ use vmux_ecs::service::{AbortTask, Shutdown, ShutdownComplete, ShutdownPending};
 use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
 use vmux_session::SessionId;
-
-use agent_client_protocol::schema::v1::McpServer;
 
 mod agent_process;
 mod catalog_driver;
@@ -123,7 +121,7 @@ struct SpawnAcpSession {
     cwd: PathBuf,
     anchor: ProcessId,
     processes: ProcessRuntime,
-    mcp_servers: Vec<McpServer>,
+    mcp_servers: AcpMcpServers,
     resume: Option<String>,
     response: Option<oneshot::Sender<()>>,
 }

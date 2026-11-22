@@ -43,22 +43,33 @@ impl Plugin for ToolCliPlugin {
             .add_systems(
                 Update,
                 (
-                    route,
-                    execute_status,
-                    status_cancelled,
-                    status_discovered,
-                    status_reported,
-                    execute_apply,
-                    execute_homebrew_import,
-                    execute_npm_import,
-                    execute_dotfile_import,
-                    execute_adopt,
-                    execute_unlink,
-                    complete_dotfiles,
-                    complete_available,
-                    complete_adoption,
-                    complete_physical,
-                    complete_imports,
+                    (
+                        route,
+                        route_mcp_read,
+                        route_mcp_write,
+                        execute_status,
+                        status_cancelled,
+                        status_discovered,
+                        status_reported,
+                        execute_apply,
+                        execute_homebrew_import,
+                        execute_npm_import,
+                        execute_dotfile_import,
+                        execute_adopt,
+                        execute_unlink,
+                    )
+                        .chain(),
+                    (
+                        complete_dotfiles,
+                        complete_available,
+                        complete_adoption,
+                        complete_physical,
+                        complete_imports,
+                        complete_mcp_list,
+                        advance_mcp_trust,
+                        complete_mcp_mutation,
+                    )
+                        .chain(),
                 )
                     .chain(),
             );
@@ -124,6 +135,217 @@ struct DotfileAdoptRequest {
 
 #[derive(Component)]
 struct DotfileUnlinkRequest(String);
+
+#[derive(Component)]
+struct WaitingMcpList;
+
+#[derive(Component)]
+struct WaitingMcpTrust {
+    id: String,
+    trust_path: PathBuf,
+}
+
+#[derive(Component)]
+struct WaitingMcpMutation;
+
+#[derive(Component)]
+struct McpCliTarget;
+
+impl McpCliTarget {
+    fn for_invocation(invocation: &CliInvocation, store: &ToolStore) -> PathBuf {
+        if let Some(dir) = invocation.value_os("local") {
+            let root = crate::McpWorkspaceRoot::resolve(&PathBuf::from(dir))
+                .map(|workspace| workspace.primary_root)
+                .unwrap_or_else(|| PathBuf::from(dir));
+            return root.join(".vmux").join("mcp.local.ron");
+        }
+        if let Some(dir) = invocation.value_os("project") {
+            let root = crate::McpWorkspaceRoot::resolve(&PathBuf::from(dir))
+                .map(|workspace| workspace.checkout_root)
+                .unwrap_or_else(|| PathBuf::from(dir));
+            return root.join(".vmux").join("mcp.ron");
+        }
+        store.mcp_config_path()
+    }
+
+    fn build_spec(invocation: &CliInvocation) -> Result<crate::McpServerSpec, String> {
+        if let Some(command) = invocation.value("command") {
+            let args = invocation
+                .value("args")
+                .map(|raw| raw.split_whitespace().map(str::to_string).collect())
+                .unwrap_or_default();
+            let cwd = invocation.value("cwd").map(str::to_string);
+            return Ok(crate::McpServerSpec::Stdio {
+                command: command.to_string(),
+                args,
+                env: Default::default(),
+                cwd,
+                enabled: true,
+                agents: Vec::new(),
+            });
+        }
+        if let Some(url) = invocation.value("url") {
+            let bearer = invocation.value("bearer_env").map(str::to_string);
+            let transport = invocation
+                .value("transport")
+                .unwrap_or("http")
+                .to_ascii_lowercase();
+            return match transport.as_str() {
+                "sse" => Ok(crate::McpServerSpec::Sse {
+                    url: url.to_string(),
+                    headers: Default::default(),
+                    header_env: Default::default(),
+                    bearer_token_env_var: bearer,
+                    auth: crate::McpAuthSpec::None,
+                    enabled: true,
+                    agents: Vec::new(),
+                }),
+                "http" => Ok(crate::McpServerSpec::Http {
+                    url: url.to_string(),
+                    headers: Default::default(),
+                    header_env: Default::default(),
+                    bearer_token_env_var: bearer,
+                    auth: crate::McpAuthSpec::None,
+                    enabled: true,
+                    agents: Vec::new(),
+                }),
+                other => Err(format!("unsupported MCP transport: {other}")),
+            };
+        }
+        Err("either --command or --url is required".to_string())
+    }
+}
+
+fn route_mcp_read(
+    invocations: Query<(Entity, &CliInvocation, Option<&ToolStore>), Added<CliInvocation>>,
+    mut commands: Commands,
+) {
+    for (entity, invocation, store) in &invocations {
+        let store = store.cloned().unwrap_or_else(ToolStore::current);
+        let profile_dir = vmux_profile::ProfilePaths::current().profile();
+        let mut target = commands.entity(entity);
+        match invocation.command.as_str() {
+            "tool.mcp.list" => {
+                let cwd = invocation
+                    .value_os("cwd")
+                    .map(PathBuf::from)
+                    .or_else(|| std::env::current_dir().ok());
+                target.insert((
+                    WaitingMcpList,
+                    crate::McpResolveRequest {
+                        config_dir: store.config_dir().to_path_buf(),
+                        profile_dir,
+                        cwd,
+                        agent_id: None,
+                        env: Vec::new(),
+                    },
+                ));
+            }
+            "tool.mcp.trust" => {
+                let Some(id) = invocation.value("id") else {
+                    target.insert(CliResult(Err("MCP server ID is required".into())));
+                    continue;
+                };
+                let cwd = invocation
+                    .value_os("cwd")
+                    .map(PathBuf::from)
+                    .or_else(|| std::env::current_dir().ok());
+                target.insert((
+                    WaitingMcpTrust {
+                        id: id.to_string(),
+                        trust_path: profile_dir.join("mcp-trust.ron"),
+                    },
+                    crate::McpResolveRequest {
+                        config_dir: store.config_dir().to_path_buf(),
+                        profile_dir,
+                        cwd,
+                        agent_id: None,
+                        env: Vec::new(),
+                    },
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn route_mcp_write(
+    invocations: Query<(Entity, &CliInvocation, Option<&ToolStore>), Added<CliInvocation>>,
+    mut commands: Commands,
+) {
+    for (entity, invocation, store) in &invocations {
+        let store = store.cloned().unwrap_or_else(ToolStore::current);
+        let mut target = commands.entity(entity);
+        match invocation.command.as_str() {
+            "tool.mcp.add" => {
+                let Some(id) = invocation.value("id") else {
+                    target.insert(CliResult(Err("MCP server ID is required".into())));
+                    continue;
+                };
+                match McpCliTarget::build_spec(invocation) {
+                    Ok(spec) => {
+                        let path = McpCliTarget::for_invocation(invocation, &store);
+                        target.insert((
+                            WaitingMcpMutation,
+                            McpCliTarget,
+                            crate::McpSaveEntry {
+                                path,
+                                id: id.to_string(),
+                                entry: crate::McpServerOverride::Define(spec),
+                                summary: format!("saved MCP server {id}"),
+                            },
+                        ));
+                    }
+                    Err(error) => {
+                        target.insert(CliResult(Err(error)));
+                    }
+                }
+            }
+            "tool.mcp.remove" => {
+                let Some(id) = invocation.value("id") else {
+                    target.insert(CliResult(Err("MCP server ID is required".into())));
+                    continue;
+                };
+                let path = McpCliTarget::for_invocation(invocation, &store);
+                target.insert((
+                    WaitingMcpMutation,
+                    McpCliTarget,
+                    crate::McpDeleteEntry {
+                        path,
+                        id: id.to_string(),
+                        summary: format!("removed MCP server {id}"),
+                        ignore_missing: false,
+                    },
+                ));
+            }
+            "tool.mcp.enable" | "tool.mcp.disable" => {
+                let Some(id) = invocation.value("id") else {
+                    target.insert(CliResult(Err("MCP server ID is required".into())));
+                    continue;
+                };
+                let enable = invocation.command == "tool.mcp.enable";
+                let path = McpCliTarget::for_invocation(invocation, &store);
+                let entry = if enable {
+                    crate::McpServerOverride::Enable
+                } else {
+                    crate::McpServerOverride::Disable
+                };
+                let verb = if enable { "enabled" } else { "disabled" };
+                target.insert((
+                    WaitingMcpMutation,
+                    McpCliTarget,
+                    crate::McpSaveEntry {
+                        path,
+                        id: id.to_string(),
+                        entry,
+                        summary: format!("{verb} MCP server {id}"),
+                    },
+                ));
+            }
+            _ => {}
+        }
+    }
+}
 
 fn route(
     invocations: Query<(Entity, &CliInvocation, Option<&ToolStore>), Added<CliInvocation>>,
@@ -769,6 +991,103 @@ fn complete_available(
     }
 }
 
+fn complete_mcp_list(
+    requests: Query<(Entity, &crate::McpResolveResult), (With<WaitingMcpList>, Without<CliResult>)>,
+    mut commands: Commands,
+) {
+    for (entity, result) in &requests {
+        for warning in &result.diagnostics {
+            eprintln!("warning: {warning}");
+        }
+        if result.servers.is_empty() {
+            println!("no MCP servers configured");
+        } else {
+            for server in &result.servers {
+                let status = if !server.trusted {
+                    "untrusted"
+                } else if server.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                };
+                println!(
+                    "{} · {} · {} · {} · {}",
+                    server.id,
+                    server.spec.transport_label(),
+                    status,
+                    server.source.label(),
+                    server.spec.target_summary()
+                );
+            }
+        }
+        commands
+            .entity(entity)
+            .insert(CliResult::default())
+            .remove::<(WaitingMcpList, crate::McpResolveResult)>();
+    }
+}
+
+fn advance_mcp_trust(
+    requests: Query<(Entity, &WaitingMcpTrust, &crate::McpResolveResult), Without<CliResult>>,
+    mut commands: Commands,
+) {
+    for (entity, trust, result) in &requests {
+        let Some(server) = result.servers.iter().find(|server| server.id == trust.id) else {
+            commands
+                .entity(entity)
+                .insert(CliResult(Err(format!(
+                    "MCP server not found: {}",
+                    trust.id
+                ))))
+                .remove::<(WaitingMcpTrust, crate::McpResolveResult)>();
+            continue;
+        };
+        let (Some(repo_root), Some(digest)) = (&server.repo_root, &server.digest) else {
+            println!("{} does not require workspace trust", trust.id);
+            commands
+                .entity(entity)
+                .insert(CliResult::default())
+                .remove::<(WaitingMcpTrust, crate::McpResolveResult)>();
+            continue;
+        };
+        commands
+            .entity(entity)
+            .remove::<(WaitingMcpTrust, crate::McpResolveResult)>()
+            .insert((
+                WaitingMcpMutation,
+                crate::McpApproveTrust {
+                    trust_path: trust.trust_path.clone(),
+                    repo_root: repo_root.clone(),
+                    id: trust.id.clone(),
+                    digest: digest.clone(),
+                },
+            ));
+    }
+}
+
+fn complete_mcp_mutation(
+    requests: Query<
+        (Entity, &crate::McpMutationResult),
+        (With<WaitingMcpMutation>, Without<CliResult>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, outcome) in &requests {
+        let result = match &outcome.0 {
+            Ok(message) => {
+                println!("{message}");
+                CliResult::default()
+            }
+            Err(error) => CliResult(Err(error.clone())),
+        };
+        commands.entity(entity).insert(result).remove::<(
+            WaitingMcpMutation,
+            McpCliTarget,
+            crate::McpMutationResult,
+        )>();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1410,5 +1729,103 @@ mod tests {
         }
         assert!(!store.root().exists());
         assert!(!store.is_busy());
+    }
+
+    #[test]
+    fn cli_mcp_commands_add_disable_and_remove_servers_in_ron() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(
+            directory.path().join("config"),
+            directory.path().join("home"),
+        );
+        let repo = directory.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let mut app = App::new();
+        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolCliPlugin));
+
+        let add = app
+            .world_mut()
+            .spawn((
+                store.clone(),
+                CliInvocation {
+                    command: "tool.mcp.add".into(),
+                    arguments: BTreeMap::from([
+                        ("id".into(), vec![OsString::from("linear-vmx")]),
+                        (
+                            "url".into(),
+                            vec![OsString::from("https://mcp.linear.app/mcp")],
+                        ),
+                    ]),
+                },
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().get::<CliResult>(add).is_none() {
+            app.update();
+            assert!(Instant::now() < deadline, "tool.mcp.add did not complete");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.world().get::<CliResult>(add).unwrap().0, Ok(0));
+        let global =
+            crate::McpConfigFile::parse(&std::fs::read_to_string(store.mcp_config_path()).unwrap())
+                .unwrap();
+        assert!(global.servers.contains_key("linear-vmx"));
+
+        let disable = app
+            .world_mut()
+            .spawn((
+                store.clone(),
+                CliInvocation {
+                    command: "tool.mcp.disable".into(),
+                    arguments: BTreeMap::from([
+                        ("id".into(), vec![OsString::from("linear-vmx")]),
+                        ("project".into(), vec![repo.clone().into_os_string()]),
+                    ]),
+                },
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().get::<CliResult>(disable).is_none() {
+            app.update();
+            assert!(
+                Instant::now() < deadline,
+                "tool.mcp.disable did not complete"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.world().get::<CliResult>(disable).unwrap().0, Ok(0));
+        let project = crate::McpConfigFile::parse(
+            &std::fs::read_to_string(repo.join(".vmux/mcp.ron")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            project.servers.get("linear-vmx"),
+            Some(&crate::McpServerOverride::Disable)
+        );
+
+        let remove = app
+            .world_mut()
+            .spawn((
+                store.clone(),
+                CliInvocation {
+                    command: "tool.mcp.remove".into(),
+                    arguments: BTreeMap::from([("id".into(), vec![OsString::from("linear-vmx")])]),
+                },
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().get::<CliResult>(remove).is_none() {
+            app.update();
+            assert!(
+                Instant::now() < deadline,
+                "tool.mcp.remove did not complete"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.world().get::<CliResult>(remove).unwrap().0, Ok(0));
+        let global =
+            crate::McpConfigFile::parse(&std::fs::read_to_string(store.mcp_config_path()).unwrap())
+                .unwrap();
+        assert!(!global.servers.contains_key("linear-vmx"));
     }
 }

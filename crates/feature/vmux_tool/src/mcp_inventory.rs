@@ -6,6 +6,7 @@ use vmux_ecs::{EntityTarget, JobRequest, JobResult, Operation, OperationRetained
 
 use crate::inventory::{Manifest, Scan};
 use crate::io::ReadFile;
+use crate::mcp_config::{McpConfigFile, McpLayerInput, McpResolvedServer};
 use crate::observation::{
     Accepted, Diagnostics, Finished, Observation, ObserveProviderRequest, ObservedTool,
 };
@@ -31,6 +32,12 @@ struct Source(PathBuf);
 
 #[derive(Component)]
 struct SourceFile;
+
+#[derive(Component)]
+struct GlobalConfigFile;
+
+#[derive(Component)]
+struct GlobalConfig(McpConfigFile);
 
 #[derive(Component)]
 struct SourceDone;
@@ -61,6 +68,21 @@ fn observe(
     commands
         .entity(request.observation)
         .insert((Accepted, Observing, Diagnostics::default()));
+    let global_path = store.mcp_config_path();
+    commands.spawn((
+        Name::new("Vmux MCP configuration"),
+        Operation::bundle("tool.mcp.observe").unwrap().running(),
+        OperationRetained,
+        ChildOf(request.observation),
+        EntityTarget::<Observation>::new(request.observation),
+        Source(global_path.clone()),
+        SourceFile,
+        GlobalConfigFile,
+        JobRequest(ReadFile {
+            path: global_path,
+            limit: 1024 * 1024,
+        }),
+    ));
     for path in [
         ".codex/config.toml",
         ".claude.json",
@@ -93,17 +115,49 @@ fn read(
             &ChildOf,
             &OperationState,
             &JobResult<ReadFile>,
+            Has<GlobalConfigFile>,
         ),
         Without<SourceDone>,
     >,
     mut diagnostics: Query<&mut Diagnostics>,
     mut commands: Commands,
 ) {
-    for (entity, source, parent, state, result) in &sources {
+    for (entity, source, parent, state, result, is_global) in &sources {
         if *state != OperationState::Running {
             continue;
         }
         commands.entity(entity).remove::<JobResult<ReadFile>>();
+        if is_global {
+            let parsed = match &result.0 {
+                Ok(Ok(bytes)) => match &bytes.0 {
+                    Some(bytes) => std::str::from_utf8(bytes)
+                        .map_err(|error| error.to_string())
+                        .and_then(McpConfigFile::parse)
+                        .map(Some),
+                    None => Ok(None),
+                },
+                Ok(Err(error)) | Err(error) => Err(error.clone()),
+            };
+            commands
+                .entity(entity)
+                .insert((SourceDone, OperationState::Succeeded));
+            match parsed {
+                Ok(Some(config)) => {
+                    commands
+                        .entity(parent.parent())
+                        .insert(GlobalConfig(config));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    if let Ok(mut diagnostics) = diagnostics.get_mut(parent.parent()) {
+                        diagnostics
+                            .0
+                            .push(format!("MCP Servers: {}: {error}", source.0.display()));
+                    }
+                }
+            }
+            continue;
+        }
         let result = match &result.0 {
             Ok(Ok(bytes)) => match &bytes.0 {
                 Some(bytes) => std::str::from_utf8(bytes)
@@ -209,7 +263,10 @@ fn decode(
 }
 
 fn publish(
-    observations: Query<(Entity, &ChildOf, &OperationState), (With<Observing>, Without<Finished>)>,
+    observations: Query<
+        (Entity, &ChildOf, &OperationState, Option<&GlobalConfig>),
+        (With<Observing>, Without<Finished>),
+    >,
     sources: Query<(&ChildOf, Has<SourceDone>), With<SourceFile>>,
     definitions: Query<(
         &crate::observation::Id,
@@ -220,7 +277,7 @@ fn publish(
     manifests: Query<&Manifest>,
     mut commands: Commands,
 ) {
-    for (entity, parent, state) in &observations {
+    for (entity, parent, state, global) in &observations {
         if *state != OperationState::Running {
             continue;
         }
@@ -233,13 +290,23 @@ fn publish(
         let Ok(manifest) = manifests.get(parent.parent()) else {
             continue;
         };
+        let layer = McpLayerInput {
+            legacy: McpConfigFile::from_legacy(&manifest.desired.mcp),
+            global: global.map(|config| config.0.clone()).unwrap_or_default(),
+            ..Default::default()
+        };
+        let managed_servers: BTreeMap<String, McpResolvedServer> = layer
+            .resolve()
+            .into_iter()
+            .map(|server| (server.id.clone(), server))
+            .collect();
         let mut names = BTreeSet::new();
         for (id, _, _, owner) in &definitions {
             if owner.parent() == entity {
                 names.insert(id.0.clone());
             }
         }
-        names.extend(manifest.desired.mcp.servers.keys().cloned());
+        names.extend(managed_servers.keys().cloned());
         for name in names {
             let mut external = None;
             let mut paths = Vec::new();
@@ -255,31 +322,43 @@ fn publish(
                 }
                 paths.push(source.0.to_string_lossy().into_owned());
             }
-            let managed = manifest.desired.mcp.servers.contains_key(&name);
-            let Some(definition) = manifest.desired.mcp.servers.get(&name).or(external) else {
-                continue;
-            };
-            let detail = definition.description(&paths.join(", "), managed, conflict);
-            commands.spawn((
-                ObservedTool::new(
-                    name.clone(),
-                    name,
-                    None,
-                    None,
-                    detail,
-                    if conflict {
+            let sources_text = paths.join(", ");
+            let (detail, status, operations, managed) =
+                if let Some(resolved) = managed_servers.get(&name) {
+                    let status = if conflict {
                         ToolStatus::Conflict
-                    } else {
+                    } else if resolved.enabled {
                         ToolStatus::Installed
-                    },
-                    if managed {
-                        vec![ToolOperationKind::Forget]
                     } else {
-                        Vec::new()
-                    },
-                ),
+                        ToolStatus::Available
+                    };
+                    (
+                        resolved.detail(&sources_text, conflict),
+                        status,
+                        vec![ToolOperationKind::Forget],
+                        true,
+                    )
+                } else if let Some(definition) = external {
+                    (
+                        definition.description(&sources_text, false, conflict),
+                        if conflict {
+                            ToolStatus::Conflict
+                        } else {
+                            ToolStatus::Installed
+                        },
+                        Vec::new(),
+                        false,
+                    )
+                } else {
+                    continue;
+                };
+            let mut item = commands.spawn((
+                ObservedTool::new(name.clone(), name, None, None, detail, status, operations),
                 ChildOf(entity),
             ));
+            if managed {
+                item.insert(crate::observation::Managed);
+            }
         }
         commands.entity(entity).insert(Finished { error: None });
     }

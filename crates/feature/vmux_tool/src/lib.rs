@@ -15,6 +15,16 @@ pub use dotfiles::*;
 pub use homebrew::*;
 pub use manifest::*;
 pub use mcp::*;
+#[cfg(host)]
+pub use mcp_config::{
+    McpAuthSpec, McpConfigFile, McpConfigScope, McpLayerInput, McpResolvedServer,
+    McpServerOverride, McpServerPatch, McpServerSpec, McpTrustStore, McpWorkspaceRoot,
+};
+#[cfg(host)]
+pub use mcp_registry::{
+    McpApproveTrust, McpDeleteEntry, McpMutationResult, McpRegistryPlugin, McpResolveRequest,
+    McpResolveResult, McpSaveEntry,
+};
 pub use npm::*;
 #[cfg(host)]
 pub use package::ToolPackageDrain;
@@ -76,7 +86,11 @@ pub mod io;
 mod manifest;
 mod mcp;
 #[cfg(host)]
+pub mod mcp_config;
+#[cfg(host)]
 mod mcp_inventory;
+#[cfg(host)]
+pub mod mcp_registry;
 mod npm;
 #[cfg(host)]
 mod npm_inventory;
@@ -153,6 +167,7 @@ impl Plugin for ToolRuntimePlugin {
             inventory::InventoryPlugin,
             package::PackageChangePlugin,
             apply::ApplyPlugin,
+            mcp_registry::McpRegistryPlugin,
         ));
         #[cfg(host)]
         if !app.is_plugin_added::<io::ObservationIoPlugin>() {

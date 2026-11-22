@@ -10,6 +10,9 @@ pub(super) struct InstallPlugin;
 
 impl Plugin for InstallPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_tool::McpRegistryPlugin>() {
+            app.add_plugins(vmux_tool::McpRegistryPlugin);
+        }
         app.add_plugins(package::PackagePreparationPlugin)
             .add_message::<super::AcpPackageChanged>()
             .add_observer(cancel)
@@ -24,6 +27,7 @@ impl Plugin for InstallPlugin {
                     prepared,
                     environment,
                     resolve,
+                    prepare_mcp,
                     deliver,
                 )
                     .chain(),
@@ -316,9 +320,12 @@ fn invalidate(
             || !waiter.matches(sid, agent)
             || !jobs.get(waiter.job).is_ok_and(|key| context.accepts(key))
         {
-            commands
-                .entity(entity)
-                .remove::<(AcpInstallWaiter, AcpLaunchStarted)>();
+            commands.entity(entity).remove::<(
+                AcpInstallWaiter,
+                AcpLaunchStarted,
+                vmux_tool::McpResolveRequest,
+                vmux_tool::McpResolveResult,
+            )>();
         }
     }
 }
@@ -434,7 +441,50 @@ fn resolve(
     }
 }
 
+fn prepare_mcp(
+    profile: CurrentProfile,
+    jobs: Query<&AcpInstallJob>,
+    waiters: Query<
+        (Entity, &SessionId, &AgentId, &Cwd, &AcpInstallWaiter),
+        (
+            With<Session>,
+            Without<crate::host::navigation_driver::RetryRequested>,
+            Without<vmux_tool::McpResolveRequest>,
+            Without<vmux_tool::McpResolveResult>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    let Some(paths) = profile.paths() else {
+        return;
+    };
+    for (entity, sid, agent, cwd, waiter) in &waiters {
+        if !waiter.matches(sid, agent) {
+            continue;
+        }
+        let Ok(job) = jobs.get(waiter.job) else {
+            continue;
+        };
+        let Some(outcome) = &job.outcome else {
+            continue;
+        };
+        let Ok(launch) = &outcome.launch else {
+            continue;
+        };
+        commands
+            .entity(entity)
+            .insert(vmux_tool::McpResolveRequest {
+                config_dir: paths.config(),
+                profile_dir: paths.profile(),
+                cwd: Some(cwd.0.clone()),
+                agent_id: Some(agent.0.clone()),
+                env: launch.env.clone(),
+            });
+    }
+}
+
 fn deliver(
+    profile: CurrentProfile,
     connected: Option<Single<(), With<ServiceConnected>>>,
     settings: Option<Res<AppSettings>>,
     wake: Option<Res<vmux_ecs::JobWake>>,
@@ -448,6 +498,7 @@ fn deliver(
             &ProcessAnchor,
             Option<&AcpSessionId>,
             &AcpInstallWaiter,
+            Option<&vmux_tool::McpResolveResult>,
             &mut RunState,
         ),
         (
@@ -458,6 +509,7 @@ fn deliver(
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
+    let has_profile = profile.paths().is_some();
     for (job_entity, mut job, related) in &mut jobs {
         let Some(outcome) = &job.outcome else {
             continue;
@@ -468,14 +520,26 @@ fn deliver(
         let has_waiters = related.iter().any(|entity| {
             waiters
                 .get(*entity)
-                .is_ok_and(|(_, sid, agent, _, _, _, waiter, _)| waiter.matches(sid, agent))
+                .is_ok_and(|(_, sid, agent, _, _, _, waiter, _, _)| waiter.matches(sid, agent))
         });
         if has_waiters && outcome.launch.is_ok() && connected.is_none() {
             continue;
         }
+        let waiting_mcp = has_profile
+            && outcome.launch.is_ok()
+            && related.iter().any(|entity| {
+                waiters
+                    .get(*entity)
+                    .is_ok_and(|(_, sid, agent, _, _, _, waiter, resolved, _)| {
+                        waiter.matches(sid, agent) && resolved.is_none()
+                    })
+            });
+        if waiting_mcp {
+            continue;
+        }
         let outcome = job.outcome.take().unwrap();
         for entity in related {
-            let Ok((_, sid, agent, cwd, anchor, resume, waiter, mut state)) =
+            let Ok((_, sid, agent, cwd, anchor, resume, waiter, resolved, mut state)) =
                 waiters.get_mut(entity)
             else {
                 continue;
@@ -485,6 +549,9 @@ fn deliver(
             }
             match &outcome.launch {
                 Ok(launch) => {
+                    let managed_mcp_servers = resolved
+                        .map(|result| result.managed.clone())
+                        .unwrap_or_default();
                     service_requests.write(ServiceRequest(launch.message_for(
                         sid,
                         agent,
@@ -492,16 +559,21 @@ fn deliver(
                         anchor,
                         resume,
                         settings.as_deref(),
+                        managed_mcp_servers,
                     )));
                     *state = RunState::Idle;
                     commands
                         .entity(entity)
                         .insert(AcpSpawnQueued)
-                        .remove::<AcpInstallWaiter>();
+                        .remove::<(AcpInstallWaiter, vmux_tool::McpResolveResult)>();
                 }
                 Err(message) => {
                     *state = RunState::Errored(message.clone());
-                    commands.entity(entity).remove::<AcpInstallWaiter>();
+                    commands.entity(entity).remove::<(
+                        AcpInstallWaiter,
+                        vmux_tool::McpResolveRequest,
+                        vmux_tool::McpResolveResult,
+                    )>();
                 }
             }
         }
@@ -519,6 +591,8 @@ fn cancel(trigger: On<Remove, ProcessAnchor>, mut commands: Commands) {
             AcpLaunchStarted,
             AcpSpawnQueued,
             AcpInstallRequest,
+            vmux_tool::McpResolveRequest,
+            vmux_tool::McpResolveResult,
         )>();
     }
 }
