@@ -287,108 +287,48 @@ mod tests {
                 .map(|invocation| invocation.id)
                 .collect()
         }
-    }
 
-    fn test_settings_with_leader(key: &str) -> AppSettings {
-        AppSettings {
-            browser: BrowserSettings {
-                startup_url: "about:blank".to_string(),
-                ..Default::default()
-            },
-            layout: LayoutSettings {
-                radius: 0.0,
-                window: WindowSettings { padding: 0.0 },
-                pane: PaneSettings::default(),
-                side_sheet: SideSheetSettings::default(),
-                focus_ring: FocusRingSettings::default(),
-            },
-            shortcuts: ShortcutSettings {
-                leader: KeyComboDef {
-                    key: key.to_string(),
-                    ctrl: true,
-                    shift: false,
-                    alt: false,
-                    super_key: false,
+        fn settings_with_leader(key: &str) -> AppSettings {
+            AppSettings {
+                browser: BrowserSettings {
+                    startup_url: "about:blank".to_string(),
+                    ..Default::default()
                 },
-                ..Default::default()
-            },
-            terminal: None,
-            auto_update: false,
-            update_channel: Default::default(),
-            agent: vmux_setting::AgentSettings::default(),
-            spaces: Default::default(),
-            projects: Default::default(),
-            recording: Default::default(),
-            editor: Default::default(),
-            appearance: Default::default(),
+                layout: LayoutSettings {
+                    radius: 0.0,
+                    window: WindowSettings { padding: 0.0 },
+                    pane: PaneSettings::default(),
+                    side_sheet: SideSheetSettings::default(),
+                    focus_ring: FocusRingSettings::default(),
+                },
+                shortcuts: ShortcutSettings {
+                    leader: KeyComboDef {
+                        key: key.to_string(),
+                        ctrl: true,
+                        shift: false,
+                        alt: false,
+                        super_key: false,
+                    },
+                    ..Default::default()
+                },
+                terminal: None,
+                auto_update: false,
+                update_channel: Default::default(),
+                agent: vmux_setting::AgentSettings::default(),
+                spaces: Default::default(),
+                projects: Default::default(),
+                recording: Default::default(),
+                editor: Default::default(),
+                appearance: Default::default(),
+            }
         }
-    }
 
-    fn split_settings_with_leader(key: &str) -> AppSettings {
-        let mut settings = test_settings_with_leader(key);
-        settings.shortcuts.bindings.push(ShortcutEntry {
-            command: "split_v".into(),
-            binding: ShortcutDef::Leader(KeyComboDef {
-                key: "%".into(),
-                ctrl: false,
-                shift: false,
-                alt: false,
-                super_key: false,
-            }),
-            when: None,
-        });
-        settings.shortcuts.bindings.push(ShortcutEntry {
-            command: "split_h".into(),
-            binding: ShortcutDef::Leader(KeyComboDef {
-                key: "\"".into(),
-                ctrl: false,
-                shift: false,
-                alt: false,
-                super_key: false,
-            }),
-            when: None,
-        });
-        settings
-    }
-
-    fn current_settings_with_leader(key: &str) -> AppSettings {
-        let mut settings = split_settings_with_leader(key);
-        settings.shortcuts.bindings.push(ShortcutEntry {
-            command: "toggle_pane".into(),
-            binding: ShortcutDef::Leader(KeyComboDef {
-                key: "o".into(),
-                ctrl: false,
-                shift: false,
-                alt: false,
-                super_key: false,
-            }),
-            when: None,
-        });
-        settings.shortcuts.bindings.push(ShortcutEntry {
-            command: "close_pane".into(),
-            binding: ShortcutDef::Leader(KeyComboDef {
-                key: "x".into(),
-                ctrl: false,
-                shift: false,
-                alt: false,
-                super_key: false,
-            }),
-            when: None,
-        });
-        settings
-    }
-
-    fn tab_settings_with_leader(key: &str) -> AppSettings {
-        let mut settings = test_settings_with_leader(key);
-        for (command, second) in [
-            ("open_in_new_tab", "c"),
-            ("next_tab", "n"),
-            ("prev_tab", "p"),
-        ] {
+        fn split_settings_with_leader(key: &str) -> AppSettings {
+            let mut settings = Self::settings_with_leader(key);
             settings.shortcuts.bindings.push(ShortcutEntry {
-                command: command.into(),
+                command: "split_v".into(),
                 binding: ShortcutDef::Leader(KeyComboDef {
-                    key: second.into(),
+                    key: "%".into(),
                     ctrl: false,
                     shift: false,
                     alt: false,
@@ -396,37 +336,97 @@ mod tests {
                 }),
                 when: None,
             });
+            settings.shortcuts.bindings.push(ShortcutEntry {
+                command: "split_h".into(),
+                binding: ShortcutDef::Leader(KeyComboDef {
+                    key: "\"".into(),
+                    ctrl: false,
+                    shift: false,
+                    alt: false,
+                    super_key: false,
+                }),
+                when: None,
+            });
+            settings
         }
-        settings
-    }
 
-    fn press(app: &mut App, key: KeyCode) {
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(key);
-    }
+        fn current_settings_with_leader(key: &str) -> AppSettings {
+            let mut settings = Self::split_settings_with_leader(key);
+            settings.shortcuts.bindings.push(ShortcutEntry {
+                command: "toggle_pane".into(),
+                binding: ShortcutDef::Leader(KeyComboDef {
+                    key: "o".into(),
+                    ctrl: false,
+                    shift: false,
+                    alt: false,
+                    super_key: false,
+                }),
+                when: None,
+            });
+            settings.shortcuts.bindings.push(ShortcutEntry {
+                command: "close_pane".into(),
+                binding: ShortcutDef::Leader(KeyComboDef {
+                    key: "x".into(),
+                    ctrl: false,
+                    shift: false,
+                    alt: false,
+                    super_key: false,
+                }),
+                when: None,
+            });
+            settings
+        }
 
-    fn release(app: &mut App, key: KeyCode) {
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .release(key);
-    }
+        fn tab_settings_with_leader(key: &str) -> AppSettings {
+            let mut settings = Self::settings_with_leader(key);
+            for (command, second) in [
+                ("open_in_new_tab", "c"),
+                ("next_tab", "n"),
+                ("prev_tab", "p"),
+            ] {
+                settings.shortcuts.bindings.push(ShortcutEntry {
+                    command: command.into(),
+                    binding: ShortcutDef::Leader(KeyComboDef {
+                        key: second.into(),
+                        ctrl: false,
+                        shift: false,
+                        alt: false,
+                        super_key: false,
+                    }),
+                    when: None,
+                });
+            }
+            settings
+        }
 
-    fn clear_input_frame(app: &mut App) {
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .clear();
+        fn press(app: &mut App, key: KeyCode) {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+        }
+
+        fn release(app: &mut App, key: KeyCode) {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .release(key);
+        }
+
+        fn clear_input_frame(app: &mut App) {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .clear();
+        }
     }
 
     #[test]
     fn fallback_prefix_does_not_survive_keymap_removal_and_reattachment() {
         let mut app = ShortcutFixture::app(None);
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
-        clear_input_frame(&mut app);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::clear_input_frame(&mut app);
         let (owner, map) = {
             let world = app.world_mut();
             let mut maps = world.query::<(Entity, &Keymap)>();
@@ -435,7 +435,7 @@ mod tests {
         };
         app.world_mut().entity_mut(owner).remove::<Keymap>();
         app.world_mut().entity_mut(owner).insert(map);
-        press(&mut app, KeyCode::KeyH);
+        ShortcutFixture::press(&mut app, KeyCode::KeyH);
         app.update();
         assert!(ShortcutFixture::invocations(&mut app).is_empty());
     }
@@ -447,17 +447,17 @@ mod tests {
             .world_mut()
             .spawn((Window::default(), vmux_ecs::Active))
             .id();
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
-        clear_input_frame(&mut app);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::clear_input_frame(&mut app);
         app.world_mut()
             .entity_mut(first)
             .remove::<vmux_ecs::Active>();
         app.world_mut().spawn((Window::default(), vmux_ecs::Active));
-        press(&mut app, KeyCode::KeyH);
+        ShortcutFixture::press(&mut app, KeyCode::KeyH);
         app.update();
         assert!(ShortcutFixture::invocations(&mut app).is_empty());
     }
@@ -469,13 +469,13 @@ mod tests {
             text_entry_owns_keys: true,
             ..Default::default()
         });
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
-        clear_input_frame(&mut app);
-        press(&mut app, KeyCode::KeyH);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::clear_input_frame(&mut app);
+        ShortcutFixture::press(&mut app, KeyCode::KeyH);
         app.update();
         assert!(ShortcutFixture::invocations(&mut app).is_empty());
     }
@@ -484,14 +484,14 @@ mod tests {
     fn leader_h_emits_select_pane_left() {
         let mut app = ShortcutFixture::app(None);
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
 
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
-        clear_input_frame(&mut app);
-        press(&mut app, KeyCode::KeyH);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::clear_input_frame(&mut app);
+        ShortcutFixture::press(&mut app, KeyCode::KeyH);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["select_pane_left"]);
@@ -501,14 +501,14 @@ mod tests {
     fn leader_l_emits_select_pane_right() {
         let mut app = ShortcutFixture::app(None);
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
 
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
-        clear_input_frame(&mut app);
-        press(&mut app, KeyCode::KeyL);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::clear_input_frame(&mut app);
+        ShortcutFixture::press(&mut app, KeyCode::KeyL);
         app.update();
 
         assert_eq!(
@@ -521,14 +521,14 @@ mod tests {
     fn leader_j_emits_select_pane_down() {
         let mut app = ShortcutFixture::app(None);
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
 
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
-        clear_input_frame(&mut app);
-        press(&mut app, KeyCode::KeyJ);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::clear_input_frame(&mut app);
+        ShortcutFixture::press(&mut app, KeyCode::KeyJ);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["select_pane_down"]);
@@ -538,14 +538,14 @@ mod tests {
     fn leader_k_emits_select_pane_up() {
         let mut app = ShortcutFixture::app(None);
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
 
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
-        clear_input_frame(&mut app);
-        press(&mut app, KeyCode::KeyK);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::clear_input_frame(&mut app);
+        ShortcutFixture::press(&mut app, KeyCode::KeyK);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["select_pane_up"]);
@@ -555,14 +555,14 @@ mod tests {
     fn leader_s_emits_space_open_command() {
         let mut app = ShortcutFixture::app(None);
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
 
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
-        clear_input_frame(&mut app);
-        press(&mut app, KeyCode::KeyS);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::clear_input_frame(&mut app);
+        ShortcutFixture::press(&mut app, KeyCode::KeyS);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["space_open"]);
@@ -572,9 +572,9 @@ mod tests {
     fn leader_chord_emits_when_prefix_and_key_arrive_in_same_frame() {
         let mut app = ShortcutFixture::app(None);
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
-        press(&mut app, KeyCode::KeyS);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::KeyS);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["space_open"]);
@@ -584,11 +584,11 @@ mod tests {
     fn leader_chord_emits_when_prefix_is_released_before_same_frame_update() {
         let mut app = ShortcutFixture::app(None);
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyS);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyS);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["space_open"]);
@@ -601,14 +601,14 @@ mod tests {
             (KeyCode::KeyM, "mirror_panes"),
         ] {
             let mut app = ShortcutFixture::app(None);
-            press(&mut app, KeyCode::ControlLeft);
-            press(&mut app, KeyCode::KeyB);
+            ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+            ShortcutFixture::press(&mut app, KeyCode::KeyB);
             app.update();
 
-            release(&mut app, KeyCode::KeyB);
-            release(&mut app, KeyCode::ControlLeft);
-            clear_input_frame(&mut app);
-            press(&mut app, key);
+            ShortcutFixture::release(&mut app, KeyCode::KeyB);
+            ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
+            ShortcutFixture::clear_input_frame(&mut app);
+            ShortcutFixture::press(&mut app, key);
             app.update();
 
             assert_eq!(ShortcutFixture::invocations(&mut app), [expected]);
@@ -617,19 +617,19 @@ mod tests {
 
     #[test]
     fn configured_leader_s_survives_prefix_release_frame() {
-        let mut app = ShortcutFixture::app(Some(test_settings_with_leader("b")));
+        let mut app = ShortcutFixture::app(Some(ShortcutFixture::settings_with_leader("b")));
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        press(&mut app, KeyCode::KeyS);
+        ShortcutFixture::press(&mut app, KeyCode::KeyS);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["space_open"]);
@@ -637,20 +637,20 @@ mod tests {
 
     #[test]
     fn configured_split_v_legacy_binding_emits_right_split() {
-        let mut app = ShortcutFixture::app(Some(split_settings_with_leader("b")));
+        let mut app = ShortcutFixture::app(Some(ShortcutFixture::split_settings_with_leader("b")));
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        press(&mut app, KeyCode::ShiftLeft);
-        press(&mut app, KeyCode::Digit5);
+        ShortcutFixture::press(&mut app, KeyCode::ShiftLeft);
+        ShortcutFixture::press(&mut app, KeyCode::Digit5);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["split_v"]);
@@ -658,19 +658,20 @@ mod tests {
 
     #[test]
     fn configured_leader_x_overrides_the_default_stack_close() {
-        let mut app = ShortcutFixture::app(Some(current_settings_with_leader("b")));
+        let mut app =
+            ShortcutFixture::app(Some(ShortcutFixture::current_settings_with_leader("b")));
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        press(&mut app, KeyCode::KeyX);
+        ShortcutFixture::press(&mut app, KeyCode::KeyX);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["close_pane"]);
@@ -678,20 +679,20 @@ mod tests {
 
     #[test]
     fn configured_split_h_legacy_binding_emits_bottom_split() {
-        let mut app = ShortcutFixture::app(Some(split_settings_with_leader("b")));
+        let mut app = ShortcutFixture::app(Some(ShortcutFixture::split_settings_with_leader("b")));
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        press(&mut app, KeyCode::ShiftLeft);
-        press(&mut app, KeyCode::Quote);
+        ShortcutFixture::press(&mut app, KeyCode::ShiftLeft);
+        ShortcutFixture::press(&mut app, KeyCode::Quote);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["split_h"]);
@@ -699,19 +700,19 @@ mod tests {
 
     #[test]
     fn leader_n_emits_tab_next() {
-        let mut app = ShortcutFixture::app(Some(tab_settings_with_leader("b")));
+        let mut app = ShortcutFixture::app(Some(ShortcutFixture::tab_settings_with_leader("b")));
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        press(&mut app, KeyCode::KeyN);
+        ShortcutFixture::press(&mut app, KeyCode::KeyN);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["next_tab"]);
@@ -719,19 +720,19 @@ mod tests {
 
     #[test]
     fn leader_p_emits_tab_previous() {
-        let mut app = ShortcutFixture::app(Some(tab_settings_with_leader("b")));
+        let mut app = ShortcutFixture::app(Some(ShortcutFixture::tab_settings_with_leader("b")));
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        press(&mut app, KeyCode::KeyP);
+        ShortcutFixture::press(&mut app, KeyCode::KeyP);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["prev_tab"]);
@@ -739,19 +740,19 @@ mod tests {
 
     #[test]
     fn leader_c_emits_open_in_new_tab() {
-        let mut app = ShortcutFixture::app(Some(tab_settings_with_leader("b")));
+        let mut app = ShortcutFixture::app(Some(ShortcutFixture::tab_settings_with_leader("b")));
 
-        press(&mut app, KeyCode::ControlLeft);
-        press(&mut app, KeyCode::KeyB);
+        ShortcutFixture::press(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::press(&mut app, KeyCode::KeyB);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        release(&mut app, KeyCode::KeyB);
-        release(&mut app, KeyCode::ControlLeft);
+        ShortcutFixture::release(&mut app, KeyCode::KeyB);
+        ShortcutFixture::release(&mut app, KeyCode::ControlLeft);
         app.update();
-        clear_input_frame(&mut app);
+        ShortcutFixture::clear_input_frame(&mut app);
 
-        press(&mut app, KeyCode::KeyC);
+        ShortcutFixture::press(&mut app, KeyCode::KeyC);
         app.update();
 
         assert_eq!(ShortcutFixture::invocations(&mut app), ["open_in_new_tab"]);

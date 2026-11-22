@@ -125,13 +125,6 @@ mod tests {
     #[derive(Resource, Default)]
     struct Rejected(Vec<String>);
 
-    const CTRL: Modifiers = Modifiers {
-        ctrl: true,
-        shift: false,
-        alt: false,
-        super_key: false,
-    };
-
     struct Seam;
 
     impl Seam {
@@ -144,7 +137,12 @@ mod tests {
                     Binding {
                         shortcut: Shortcut::Direct(KeyCombo {
                             key: KeyCode::KeyX,
-                            modifiers: CTRL,
+                            modifiers: Modifiers {
+                                ctrl: true,
+                                shift: false,
+                                alt: false,
+                                super_key: false,
+                            },
                         }),
                         command: "stack_close".to_string(),
                         when: None,
