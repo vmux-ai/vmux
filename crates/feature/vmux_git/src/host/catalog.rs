@@ -50,7 +50,7 @@ impl CatalogContext {
 
     fn retry_failed(
         controller: &GitPageControllerState,
-        state: &mut Mut<super::state::GitState>,
+        state: &mut super::state::GitState,
         patches: &mut Vec<GitCatalogPatch>,
     ) {
         let mut retried = false;
@@ -67,10 +67,7 @@ impl CatalogContext {
                 continue;
             }
             let progress = crate::state::GitCatalogProgress::default();
-            *state
-                .bypass_change_detection()
-                .snapshot
-                .catalog_mut(catalog) = progress;
+            *state.snapshot.catalog_mut(catalog) = progress;
             patches.push(GitCatalogPatch {
                 catalog,
                 offset: 0,
@@ -81,7 +78,7 @@ impl CatalogContext {
             retried = true;
         }
         if retried && !state.snapshot.has_failed_catalog() {
-            state.bypass_change_detection().snapshot.message.clear();
+            state.snapshot.message.clear();
             if let Some(patch) = patches.last_mut() {
                 patch.message = Some(String::new());
             }
@@ -95,19 +92,15 @@ impl CatalogContext {
         offset: usize,
         repo_root: &str,
         current_branch: &str,
-        state: &mut Mut<super::state::GitState>,
+        state: &mut super::state::GitState,
         revision: &mut super::state::GitCatalogRevision,
         patches: &mut Vec<GitCatalogPatch>,
-        commands: &mut Commands,
-    ) {
+    ) -> (GitJob, GitForegroundRead, GitRepository, CatalogJob) {
         let progress = crate::state::GitCatalogProgress {
             loading: true,
             ..state.snapshot.catalog(catalog)
         };
-        *state
-            .bypass_change_detection()
-            .snapshot
-            .catalog_mut(catalog) = progress;
+        *state.snapshot.catalog_mut(catalog) = progress;
         patches.push(GitCatalogPatch {
             catalog,
             offset: u32::try_from(offset).unwrap_or(u32::MAX),
@@ -115,7 +108,7 @@ impl CatalogContext {
             progress,
             message: None,
         });
-        commands.spawn((
+        (
             GitJob::new(entity),
             GitForegroundRead,
             GitRepository::at(repo_root.to_string()),
@@ -127,7 +120,7 @@ impl CatalogContext {
                 revision: state.snapshot.nonce,
                 generation: revision.start(catalog),
             },
-        ));
+        )
     }
 }
 
@@ -177,7 +170,11 @@ fn sync_catalogs(mut pages: ChangedCatalogPages, mut commands: Commands) {
         };
         let next_context = CatalogContext::from_controller(&controller);
         if context != Some(&next_context) {
-            CatalogContext::retry_failed(&controller, &mut state, &mut patches);
+            CatalogContext::retry_failed(
+                &controller,
+                state.bypass_change_detection(),
+                &mut patches,
+            );
             commands.entity(entity).insert(next_context);
         }
         let branch_files_pending = controller.focused_panel == GitPanel::Branches
@@ -194,17 +191,16 @@ fn sync_catalogs(mut pages: ChangedCatalogPages, mut commands: Commands) {
         }
         let local_branches = state.snapshot.local_branches;
         if !local_branches.loaded && !local_branches.loading && !local_branches.failed {
-            CatalogContext::queue_catalog(
+            commands.spawn(CatalogContext::queue_catalog(
                 entity,
                 GitCatalog::LocalBranches,
                 0,
                 &repo_root,
                 &current_branch,
-                &mut state,
+                state.bypass_change_detection(),
                 &mut revision,
                 &mut patches,
-                &mut commands,
-            );
+            ));
         }
         let commits = state.snapshot.commits;
         if selected_commit_missing
@@ -215,34 +211,32 @@ fn sync_catalogs(mut pages: ChangedCatalogPages, mut commands: Commands) {
             && !commits.loading
             && !commits.failed
         {
-            CatalogContext::queue_catalog(
+            commands.spawn(CatalogContext::queue_catalog(
                 entity,
                 GitCatalog::Commits,
                 commit_offset,
                 &repo_root,
                 &current_branch,
-                &mut state,
+                state.bypass_change_detection(),
                 &mut revision,
                 &mut patches,
-                &mut commands,
-            );
+            ));
         }
         for catalog in CatalogContext::requested_catalogs(&controller, has_staged) {
             let progress = state.snapshot.catalog(catalog);
             if progress.loaded || progress.loading || progress.failed {
                 continue;
             }
-            CatalogContext::queue_catalog(
+            commands.spawn(CatalogContext::queue_catalog(
                 entity,
                 catalog,
                 0,
                 &repo_root,
                 &current_branch,
-                &mut state,
+                state.bypass_change_detection(),
                 &mut revision,
                 &mut patches,
-                &mut commands,
-            );
+            ));
         }
         for patch in patches {
             commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(

@@ -651,193 +651,6 @@ impl GitPageControllerState {
             None
         }
     }
-    fn dispatch_file_key(
-        &mut self,
-        webview: Entity,
-        key: &str,
-        repository: &GitRepositorySnapshot,
-        commands: &mut Commands,
-    ) {
-        match key {
-            "a" if self.operations.stage_all => commands.trigger(UiInput {
-                webview,
-                payload: GitStageAllRequest {
-                    path: repository.repo_root.clone(),
-                },
-            }),
-            "s" if self.operations.stash => commands.trigger(UiInput {
-                webview,
-                payload: GitStashPushRequest {
-                    repo_root: repository.repo_root.clone(),
-                },
-            }),
-            "A" if self.operations.amend => commands.trigger(UiInput {
-                webview,
-                payload: GitAmendRequest {
-                    repo_root: repository.repo_root.clone(),
-                },
-            }),
-            " " | "Space" if self.operations.toggle_stage => {
-                let Some(entry) = repository
-                    .files
-                    .iter()
-                    .find(|entry| entry.path_bytes == self.selected_path_bytes)
-                else {
-                    return;
-                };
-                let path = Path::new(&repository.repo_root)
-                    .join(&entry.path)
-                    .to_string_lossy()
-                    .into_owned();
-                if entry.unstaged {
-                    commands.trigger(UiInput {
-                        webview,
-                        payload: GitStageRequest {
-                            repo_root: repository.repo_root.clone(),
-                            path,
-                            path_bytes: entry.path_bytes.clone(),
-                        },
-                    });
-                } else if entry.staged {
-                    commands.trigger(UiInput {
-                        webview,
-                        payload: GitUnstageRequest {
-                            repo_root: repository.repo_root.clone(),
-                            path,
-                            path_bytes: entry.path_bytes.clone(),
-                        },
-                    });
-                }
-            }
-            "x" if self.operations.discard => {
-                let selected = self.selected_path_bytes.clone();
-                if let Some(payload) = self.discard_file(&selected, repository) {
-                    commands.trigger(UiInput { webview, payload });
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn dispatch_branch_key(
-        &mut self,
-        webview: Entity,
-        key: &str,
-        repository: &GitRepositorySnapshot,
-        commands: &mut Commands,
-    ) {
-        match key {
-            "c" if self.operations.checkout_branch => {
-                let Some(checkout) = self.operations.branch_checkout.clone() else {
-                    return;
-                };
-                if checkout.start_point.is_empty() {
-                    commands.trigger(UiInput {
-                        webview,
-                        payload: ProjectActivateRequest {
-                            path: repository.repo_root.clone(),
-                            branch: checkout.branch,
-                            checkout: checkout.checkout,
-                            pane_id: None,
-                        },
-                    });
-                } else {
-                    commands.trigger(UiInput {
-                        webview,
-                        payload: GitCreateBranchRequest {
-                            repo_root: repository.repo_root.clone(),
-                            branch: checkout.branch,
-                            start_point: checkout.start_point,
-                        },
-                    });
-                }
-            }
-            "r" if self.operations.rebase => commands.trigger(UiInput {
-                webview,
-                payload: GitRebaseRequest {
-                    repo_root: repository.repo_root.clone(),
-                    branch: self.selected_branch.clone(),
-                },
-            }),
-            "M" if self.operations.merge => commands.trigger(UiInput {
-                webview,
-                payload: GitMergeRequest {
-                    repo_root: repository.repo_root.clone(),
-                    branch: self.selected_branch.clone(),
-                },
-            }),
-            "f" if self.operations.fast_forward => commands.trigger(UiInput {
-                webview,
-                payload: GitFastForwardRequest {
-                    repo_root: repository.repo_root.clone(),
-                    branch: self.selected_branch.clone(),
-                },
-            }),
-            "n" if self.operations.create_branch => {
-                self.open_branch_prompt(GitBranchPrompt::Create {
-                    base: self.selected_branch.clone(),
-                });
-            }
-            "d" if self.operations.delete_branch => {
-                self.open_branch_prompt(GitBranchPrompt::Delete {
-                    branch: self.selected_branch.clone(),
-                });
-            }
-            _ => {}
-        }
-    }
-
-    fn dispatch_commit_or_stash_key(
-        &self,
-        webview: Entity,
-        key: &str,
-        repository: &GitRepositorySnapshot,
-        commands: &mut Commands,
-    ) {
-        match (self.focused_panel, key) {
-            (GitPanel::Commits, " " | "Space") if self.operations.checkout_commit => commands
-                .trigger(UiInput {
-                    webview,
-                    payload: GitCheckoutCommitRequest {
-                        repo_root: repository.repo_root.clone(),
-                        commit: self.selected_commit.clone(),
-                    },
-                }),
-            (GitPanel::Commits, "C" | "V") if self.operations.cherry_pick => {
-                commands.trigger(UiInput {
-                    webview,
-                    payload: GitCherryPickRequest {
-                        repo_root: repository.repo_root.clone(),
-                        commit: self.selected_commit.clone(),
-                    },
-                })
-            }
-            (GitPanel::Commits, "t") if self.operations.revert_commit => {
-                commands.trigger(UiInput {
-                    webview,
-                    payload: GitRevertRequest {
-                        repo_root: repository.repo_root.clone(),
-                        commit: self.selected_commit.clone(),
-                    },
-                })
-            }
-            (GitPanel::Stash, "g") if self.operations.stash_pop => commands.trigger(UiInput {
-                webview,
-                payload: GitStashPopRequest {
-                    repo_root: repository.repo_root.clone(),
-                    reference: self.selected_stash.clone(),
-                },
-            }),
-            (GitPanel::Stash, "d") if self.operations.stash_drop => commands.trigger(UiInput {
-                webview,
-                payload: GitStashDropRequest {
-                    repo_root: repository.repo_root.clone(),
-                    reference: self.selected_stash.clone(),
-                },
-            }),
-            _ => {}
-        }
-    }
 
     fn reconcile_branch_selection(
         &mut self,
@@ -888,18 +701,227 @@ impl GitPageControllerState {
             self.selected_branch_path_bytes.clear();
         }
     }
+}
 
-    fn dispatch_key(
-        &mut self,
-        revision: &mut SelectionRevealRevision,
+#[derive(SystemParam)]
+struct GitKeyDispatcher<'w, 's> {
+    pages: Query<
+        'w,
+        's,
+        (
+            &'static GitState,
+            &'static mut GitPageControllerState,
+            &'static mut SelectionRevealRevision,
+        ),
+    >,
+    commands: Commands<'w, 's>,
+}
+
+impl GitKeyDispatcher<'_, '_> {
+    fn dispatch_file_key(
+        controller: &mut GitPageControllerState,
         webview: Entity,
-        request: &GitKeyRequest,
-        state: &GitState,
+        key: &str,
+        repository: &GitRepositorySnapshot,
         commands: &mut Commands,
     ) {
+        match key {
+            "a" if controller.operations.stage_all => commands.trigger(UiInput {
+                webview,
+                payload: GitStageAllRequest {
+                    path: repository.repo_root.clone(),
+                },
+            }),
+            "s" if controller.operations.stash => commands.trigger(UiInput {
+                webview,
+                payload: GitStashPushRequest {
+                    repo_root: repository.repo_root.clone(),
+                },
+            }),
+            "A" if controller.operations.amend => commands.trigger(UiInput {
+                webview,
+                payload: GitAmendRequest {
+                    repo_root: repository.repo_root.clone(),
+                },
+            }),
+            " " | "Space" if controller.operations.toggle_stage => {
+                let Some(entry) = repository
+                    .files
+                    .iter()
+                    .find(|entry| entry.path_bytes == controller.selected_path_bytes)
+                else {
+                    return;
+                };
+                let path = Path::new(&repository.repo_root)
+                    .join(&entry.path)
+                    .to_string_lossy()
+                    .into_owned();
+                if entry.unstaged {
+                    commands.trigger(UiInput {
+                        webview,
+                        payload: GitStageRequest {
+                            repo_root: repository.repo_root.clone(),
+                            path,
+                            path_bytes: entry.path_bytes.clone(),
+                        },
+                    });
+                } else if entry.staged {
+                    commands.trigger(UiInput {
+                        webview,
+                        payload: GitUnstageRequest {
+                            repo_root: repository.repo_root.clone(),
+                            path,
+                            path_bytes: entry.path_bytes.clone(),
+                        },
+                    });
+                }
+            }
+            "x" if controller.operations.discard => {
+                let selected = controller.selected_path_bytes.clone();
+                if let Some(payload) = controller.discard_file(&selected, repository) {
+                    commands.trigger(UiInput { webview, payload });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn dispatch_branch_key(
+        controller: &mut GitPageControllerState,
+        webview: Entity,
+        key: &str,
+        repository: &GitRepositorySnapshot,
+        commands: &mut Commands,
+    ) {
+        match key {
+            "c" if controller.operations.checkout_branch => {
+                let Some(checkout) = controller.operations.branch_checkout.clone() else {
+                    return;
+                };
+                if checkout.start_point.is_empty() {
+                    commands.trigger(UiInput {
+                        webview,
+                        payload: ProjectActivateRequest {
+                            path: repository.repo_root.clone(),
+                            branch: checkout.branch,
+                            checkout: checkout.checkout,
+                            pane_id: None,
+                        },
+                    });
+                } else {
+                    commands.trigger(UiInput {
+                        webview,
+                        payload: GitCreateBranchRequest {
+                            repo_root: repository.repo_root.clone(),
+                            branch: checkout.branch,
+                            start_point: checkout.start_point,
+                        },
+                    });
+                }
+            }
+            "r" if controller.operations.rebase => commands.trigger(UiInput {
+                webview,
+                payload: GitRebaseRequest {
+                    repo_root: repository.repo_root.clone(),
+                    branch: controller.selected_branch.clone(),
+                },
+            }),
+            "M" if controller.operations.merge => commands.trigger(UiInput {
+                webview,
+                payload: GitMergeRequest {
+                    repo_root: repository.repo_root.clone(),
+                    branch: controller.selected_branch.clone(),
+                },
+            }),
+            "f" if controller.operations.fast_forward => commands.trigger(UiInput {
+                webview,
+                payload: GitFastForwardRequest {
+                    repo_root: repository.repo_root.clone(),
+                    branch: controller.selected_branch.clone(),
+                },
+            }),
+            "n" if controller.operations.create_branch => {
+                controller.open_branch_prompt(GitBranchPrompt::Create {
+                    base: controller.selected_branch.clone(),
+                });
+            }
+            "d" if controller.operations.delete_branch => {
+                controller.open_branch_prompt(GitBranchPrompt::Delete {
+                    branch: controller.selected_branch.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    fn dispatch_commit_or_stash_key(
+        controller: &GitPageControllerState,
+        webview: Entity,
+        key: &str,
+        repository: &GitRepositorySnapshot,
+        commands: &mut Commands,
+    ) {
+        match (controller.focused_panel, key) {
+            (GitPanel::Commits, " " | "Space") if controller.operations.checkout_commit => commands
+                .trigger(UiInput {
+                    webview,
+                    payload: GitCheckoutCommitRequest {
+                        repo_root: repository.repo_root.clone(),
+                        commit: controller.selected_commit.clone(),
+                    },
+                }),
+            (GitPanel::Commits, "C" | "V") if controller.operations.cherry_pick => commands
+                .trigger(UiInput {
+                    webview,
+                    payload: GitCherryPickRequest {
+                        repo_root: repository.repo_root.clone(),
+                        commit: controller.selected_commit.clone(),
+                    },
+                }),
+            (GitPanel::Commits, "t") if controller.operations.revert_commit => {
+                commands.trigger(UiInput {
+                    webview,
+                    payload: GitRevertRequest {
+                        repo_root: repository.repo_root.clone(),
+                        commit: controller.selected_commit.clone(),
+                    },
+                })
+            }
+            (GitPanel::Stash, "g") if controller.operations.stash_pop => {
+                commands.trigger(UiInput {
+                    webview,
+                    payload: GitStashPopRequest {
+                        repo_root: repository.repo_root.clone(),
+                        reference: controller.selected_stash.clone(),
+                    },
+                })
+            }
+            (GitPanel::Stash, "d") if controller.operations.stash_drop => {
+                commands.trigger(UiInput {
+                    webview,
+                    payload: GitStashDropRequest {
+                        repo_root: repository.repo_root.clone(),
+                        reference: controller.selected_stash.clone(),
+                    },
+                })
+            }
+            _ => {}
+        }
+    }
+
+    fn dispatch(&mut self, webview: Entity, request: &GitKeyRequest) {
+        let Ok((state, mut controller, mut revision)) = self.pages.get_mut(webview) else {
+            return;
+        };
+        let previous = controller.clone();
+        let current = controller.bypass_change_detection();
         if let Some(direction) = SelectionDirection::from_key(request) {
-            if let Some(effect) = self.move_selection(direction, state, revision) {
-                commands.trigger(UiStateWrite::<GitUiState>::from_event(webview, &effect));
+            if let Some(effect) = current.move_selection(direction, state, &mut revision) {
+                self.commands
+                    .trigger(UiStateWrite::<GitUiState>::from_event(webview, &effect));
+            }
+            if *controller != previous {
+                controller.set_changed();
             }
             return;
         }
@@ -911,28 +933,38 @@ impl GitPageControllerState {
             return;
         }
         if request.key == "?" {
-            self.shortcut_help_visible = !self.shortcut_help_visible;
-            return;
-        }
-        if request.key == "Tab" {
-            self.select_panel(self.focused_panel.next(request.modifiers.shift));
-            return;
-        }
-        if let Some(panel) = GitPanel::from_key(&request.key) {
-            self.select_panel(panel);
-            return;
-        }
-        let Some(repository) = state.repository() else {
-            return;
-        };
-        match self.focused_panel {
-            GitPanel::Files => self.dispatch_file_key(webview, &request.key, repository, commands),
-            GitPanel::Branches => {
-                self.dispatch_branch_key(webview, &request.key, repository, commands)
+            current.shortcut_help_visible = !current.shortcut_help_visible;
+        } else if request.key == "Tab" {
+            current.select_panel(current.focused_panel.next(request.modifiers.shift));
+        } else if let Some(panel) = GitPanel::from_key(&request.key) {
+            current.select_panel(panel);
+        } else if let Some(repository) = state.repository() {
+            match current.focused_panel {
+                GitPanel::Files => Self::dispatch_file_key(
+                    current,
+                    webview,
+                    &request.key,
+                    repository,
+                    &mut self.commands,
+                ),
+                GitPanel::Branches => Self::dispatch_branch_key(
+                    current,
+                    webview,
+                    &request.key,
+                    repository,
+                    &mut self.commands,
+                ),
+                GitPanel::Commits | GitPanel::Stash => Self::dispatch_commit_or_stash_key(
+                    current,
+                    webview,
+                    &request.key,
+                    repository,
+                    &mut self.commands,
+                ),
             }
-            GitPanel::Commits | GitPanel::Stash => {
-                self.dispatch_commit_or_stash_key(webview, &request.key, repository, commands)
-            }
+        }
+        if *controller != previous {
+            controller.set_changed();
         }
     }
 }
@@ -1615,30 +1647,8 @@ fn deliver_repository_probes(
     }
 }
 
-fn key_request(
-    trigger: On<UiInput<GitKeyRequest>>,
-    mut pages: Query<(
-        &GitState,
-        &mut GitPageControllerState,
-        &mut SelectionRevealRevision,
-    )>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let Ok((state, mut controller, mut revision)) = pages.get_mut(webview) else {
-        return;
-    };
-    let previous = controller.clone();
-    controller.bypass_change_detection().dispatch_key(
-        &mut revision,
-        webview,
-        &trigger.event().payload,
-        state,
-        &mut commands,
-    );
-    if *controller != previous {
-        controller.set_changed();
-    }
+fn key_request(trigger: On<UiInput<GitKeyRequest>>, mut dispatcher: GitKeyDispatcher) {
+    dispatcher.dispatch(trigger.event().webview, &trigger.event().payload);
 }
 
 fn panel_select_request(
