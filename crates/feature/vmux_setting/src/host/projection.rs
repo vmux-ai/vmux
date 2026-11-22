@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use vmux_ecs::PageMetadata;
 use vmux_ecs::page::PageReady;
 use vmux_ui::i18n::{Locale, TranslationValue};
@@ -42,6 +42,630 @@ pub(super) struct SettingsRenderProjection(SettingsUiState);
 impl SettingsRenderProjection {
     pub(super) fn field(&self, path: &str) -> Option<&SettingsRenderField> {
         self.0.fields.iter().find(|field| field.path == path)
+    }
+
+    fn build_state(
+        settings: &AppSettings,
+        schema: &SettingsSchema,
+        status: &UpdateCheckStatus,
+        locale: &Locale,
+        view: &SettingsViewState,
+    ) -> SettingsUiState {
+        let Ok(Value::Object(settings)) = serde_json::to_value(settings) else {
+            return SettingsUiState::default();
+        };
+        let mut fields = Vec::new();
+        let mut items = Vec::new();
+        let mut sections = Self::project_sections(
+            &settings,
+            schema,
+            status,
+            locale,
+            &view.drafts,
+            &mut fields,
+            &mut items,
+        );
+        let query = view.query.trim().to_lowercase();
+        if !query.is_empty() {
+            sections.retain(|section| section.search_text.contains(&query));
+        }
+        SettingsUiState {
+            query: view.query.clone(),
+            sections,
+            fields,
+            items,
+        }
+    }
+
+    fn project_sections(
+        settings: &Map<String, Value>,
+        schema: &SettingsSchema,
+        status: &UpdateCheckStatus,
+        locale: &Locale,
+        drafts: &BTreeMap<String, String>,
+        fields_out: &mut Vec<SettingsRenderField>,
+        items_out: &mut Vec<SettingsRenderItem>,
+    ) -> Vec<SettingsSection> {
+        let mut sections = Vec::new();
+        let mut consumed = HashSet::new();
+        for spec in &schema.sections {
+            if let Some(section) = Self::project_schema_section(
+                spec,
+                settings,
+                schema,
+                status,
+                locale,
+                drafts,
+                &mut consumed,
+                fields_out,
+                items_out,
+            ) {
+                sections.push(section);
+            }
+        }
+        Self::append_unclaimed_sections(
+            settings,
+            schema,
+            locale,
+            drafts,
+            &consumed,
+            &mut sections,
+            fields_out,
+            items_out,
+        );
+        sections
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn project_schema_section(
+        spec: &SectionSpec,
+        settings: &Map<String, Value>,
+        schema: &SettingsSchema,
+        status: &UpdateCheckStatus,
+        locale: &Locale,
+        drafts: &BTreeMap<String, String>,
+        consumed: &mut HashSet<String>,
+        fields_out: &mut Vec<SettingsRenderField>,
+        items_out: &mut Vec<SettingsRenderItem>,
+    ) -> Option<SettingsSection> {
+        let value = if spec.synthetic_keys.is_empty() {
+            let value = settings.get(&spec.root_path)?;
+            consumed.insert(spec.root_path.clone());
+            value.clone()
+        } else {
+            let mut object = Map::new();
+            for key in &spec.synthetic_keys {
+                let Some(value) = settings.get(key) else {
+                    continue;
+                };
+                object.insert(key.clone(), value.clone());
+                consumed.insert(key.clone());
+            }
+            if object.is_empty() {
+                return None;
+            }
+            Value::Object(object)
+        };
+        let search_text = Self::section_search_text(spec, &value, schema);
+        let mut visible = value;
+        if spec.id == "general"
+            && matches!(status, UpdateCheckStatus::Unavailable)
+            && let Some(object) = visible.as_object_mut()
+        {
+            object.remove("auto_update");
+            object.remove("update_channel");
+        }
+        let mut section_fields = Self::project_object_fields(
+            &visible,
+            &spec.root_path,
+            schema,
+            locale,
+            drafts,
+            fields_out,
+            items_out,
+        );
+        if spec.id == "general" {
+            section_fields.push(Self::push_field(
+                fields_out,
+                Self::update_check_field(status, locale),
+            ));
+        }
+        Some(SettingsSection {
+            id: spec.id.clone(),
+            title: spec.title.clone(),
+            description: spec.description.clone(),
+            search_text,
+            fields: section_fields,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn append_unclaimed_sections(
+        settings: &Map<String, Value>,
+        schema: &SettingsSchema,
+        locale: &Locale,
+        drafts: &BTreeMap<String, String>,
+        consumed: &HashSet<String>,
+        sections: &mut Vec<SettingsSection>,
+        fields_out: &mut Vec<SettingsRenderField>,
+        items_out: &mut Vec<SettingsRenderItem>,
+    ) {
+        let mut extra_scalars = Map::new();
+        for (key, value) in settings {
+            if consumed.contains(key) {
+                continue;
+            }
+            if value.is_object() {
+                let spec = SectionSpec {
+                    id: key.clone(),
+                    title: Self::title(key),
+                    description: None,
+                    synthetic_keys: Vec::new(),
+                    root_path: key.clone(),
+                    order: 0,
+                };
+                sections.push(SettingsSection {
+                    id: spec.id.clone(),
+                    title: spec.title.clone(),
+                    description: None,
+                    search_text: Self::section_search_text(&spec, value, schema),
+                    fields: Self::project_object_fields(
+                        value, key, schema, locale, drafts, fields_out, items_out,
+                    ),
+                });
+            } else {
+                extra_scalars.insert(key.clone(), value.clone());
+            }
+        }
+        if extra_scalars.is_empty() {
+            return;
+        }
+        let value = Value::Object(extra_scalars);
+        let spec = SectionSpec {
+            id: "general-extra".to_string(),
+            title: locale.translate("settings-other"),
+            description: None,
+            synthetic_keys: Vec::new(),
+            root_path: String::new(),
+            order: 0,
+        };
+        let section = SettingsSection {
+            id: spec.id.clone(),
+            title: spec.title.clone(),
+            description: None,
+            search_text: Self::section_search_text(&spec, &value, schema),
+            fields: Self::project_object_fields(
+                &value, "", schema, locale, drafts, fields_out, items_out,
+            ),
+        };
+        if sections.iter().any(|section| section.id == "general") {
+            sections.push(section);
+        } else {
+            sections.insert(0, section);
+        }
+    }
+
+    fn project_object_fields(
+        value: &Value,
+        parent_path: &str,
+        schema: &SettingsSchema,
+        locale: &Locale,
+        drafts: &BTreeMap<String, String>,
+        fields_out: &mut Vec<SettingsRenderField>,
+        items_out: &mut Vec<SettingsRenderItem>,
+    ) -> Vec<SettingsRenderFieldId> {
+        let Some(object) = value.as_object() else {
+            return Vec::new();
+        };
+        let mut fields = Vec::new();
+        for key in schema.ordered_keys(object, parent_path) {
+            let Some(field) = Self::project_field(
+                &key,
+                &object[&key],
+                parent_path,
+                schema,
+                locale,
+                drafts,
+                fields_out,
+                items_out,
+            ) else {
+                continue;
+            };
+            fields.push(field);
+        }
+        fields
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn project_field(
+        name: &str,
+        value: &Value,
+        parent_path: &str,
+        schema: &SettingsSchema,
+        locale: &Locale,
+        drafts: &BTreeMap<String, String>,
+        fields_out: &mut Vec<SettingsRenderField>,
+        items_out: &mut Vec<SettingsRenderItem>,
+    ) -> Option<SettingsRenderFieldId> {
+        let path = match parent_path.is_empty() {
+            true => name.to_string(),
+            false => format!("{parent_path}.{name}"),
+        };
+        let spec = schema.field(&path).cloned().unwrap_or_default();
+        if spec.omit {
+            return None;
+        }
+        let label = spec.label.clone().unwrap_or_else(|| Self::title(name));
+        let hint = spec.hint.clone();
+        let kind = if let Some(widget) = spec.widget {
+            match widget {
+                WidgetKind::Select => SettingsRenderFieldKind::Select {
+                    value: value.as_str().unwrap_or_default().to_string(),
+                    options: spec.options,
+                },
+                WidgetKind::LeaderKbd => SettingsRenderFieldKind::Chord {
+                    text: Self::chord_combo(value, locale),
+                },
+                WidgetKind::BindingsList => {
+                    let mut rows = Vec::new();
+                    if let Some(bindings) = value.as_array() {
+                        for (index, binding) in bindings.iter().enumerate() {
+                            rows.push(Self::project_binding_row(index, binding, locale));
+                        }
+                    }
+                    SettingsRenderFieldKind::Bindings { rows }
+                }
+            }
+        } else {
+            match value {
+                Value::Bool(value) => SettingsRenderFieldKind::Toggle { value: *value },
+                Value::Number(value) if value.is_u64() => SettingsRenderFieldKind::Integer {
+                    value: drafts
+                        .get(&path)
+                        .cloned()
+                        .unwrap_or_else(|| value.to_string()),
+                },
+                Value::Number(value) => SettingsRenderFieldKind::Number {
+                    value: drafts
+                        .get(&path)
+                        .cloned()
+                        .unwrap_or_else(|| value.to_string()),
+                    step: spec.step.unwrap_or(1.0),
+                },
+                Value::String(value) => SettingsRenderFieldKind::Text {
+                    value: drafts.get(&path).cloned().unwrap_or_else(|| value.clone()),
+                    placeholder: spec.placeholder,
+                },
+                Value::Object(_) => SettingsRenderFieldKind::Group {
+                    fields: Self::project_object_fields(
+                        value, &path, schema, locale, drafts, fields_out, items_out,
+                    ),
+                },
+                Value::Array(items) => SettingsRenderFieldKind::Array {
+                    items: Self::project_items(
+                        items, &path, schema, locale, drafts, fields_out, items_out,
+                    ),
+                },
+                Value::Null => return None,
+            }
+        };
+        Some(Self::push_field(
+            fields_out,
+            SettingsRenderField {
+                path,
+                label,
+                hint,
+                kind,
+            },
+        ))
+    }
+
+    fn project_items(
+        items: &[Value],
+        parent_path: &str,
+        schema: &SettingsSchema,
+        locale: &Locale,
+        drafts: &BTreeMap<String, String>,
+        fields_out: &mut Vec<SettingsRenderField>,
+        items_out: &mut Vec<SettingsRenderItem>,
+    ) -> Vec<SettingsRenderItemId> {
+        if !items.iter().all(Value::is_object) {
+            let mut projected = Vec::with_capacity(items.len());
+            for item in items {
+                projected.push(Self::push_item(
+                    items_out,
+                    SettingsRenderItem::Value {
+                        text: item.to_string(),
+                    },
+                ));
+            }
+            return projected;
+        }
+        let mut projected = Vec::with_capacity(items.len());
+        for (index, item) in items.iter().enumerate() {
+            let title = item
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    locale.translate_with(
+                        "settings-item-number",
+                        &[("number", TranslationValue::Number((index + 1) as i64))],
+                    )
+                });
+            let fields = Self::project_object_fields(
+                item,
+                &format!("{parent_path}[{index}]"),
+                schema,
+                locale,
+                drafts,
+                fields_out,
+                items_out,
+            );
+            projected.push(Self::push_item(
+                items_out,
+                SettingsRenderItem::Object { title, fields },
+            ));
+        }
+        projected
+    }
+
+    fn push_field(
+        fields_out: &mut Vec<SettingsRenderField>,
+        field: SettingsRenderField,
+    ) -> SettingsRenderFieldId {
+        let id = SettingsRenderFieldId(fields_out.len() as u32);
+        fields_out.push(field);
+        id
+    }
+
+    fn push_item(
+        items_out: &mut Vec<SettingsRenderItem>,
+        item: SettingsRenderItem,
+    ) -> SettingsRenderItemId {
+        let id = SettingsRenderItemId(items_out.len() as u32);
+        items_out.push(item);
+        id
+    }
+
+    fn update_check_field(status: &UpdateCheckStatus, locale: &Locale) -> SettingsRenderField {
+        let (button_label, hint, disabled) = match status {
+            UpdateCheckStatus::Idle => (
+                locale.translate("settings-check-updates"),
+                locale.translate("settings-check-updates-hint"),
+                false,
+            ),
+            UpdateCheckStatus::Unavailable => (
+                locale.translate("settings-update-unavailable"),
+                locale.translate("settings-update-unavailable-hint"),
+                true,
+            ),
+            UpdateCheckStatus::Checking => (
+                locale.translate("settings-update-checking"),
+                locale.translate("settings-update-checking-hint"),
+                true,
+            ),
+            UpdateCheckStatus::UpToDate => (
+                locale.translate("settings-update-check-again"),
+                locale.translate("settings-update-current"),
+                false,
+            ),
+            UpdateCheckStatus::Downloading { version } => (
+                locale.translate("settings-update-downloading"),
+                locale.translate_with(
+                    "settings-update-downloading-hint",
+                    &[("version", TranslationValue::String(version))],
+                ),
+                true,
+            ),
+            UpdateCheckStatus::Installing { version } => (
+                locale.translate("settings-update-installing"),
+                locale.translate_with(
+                    "settings-update-installing-hint",
+                    &[("version", TranslationValue::String(version))],
+                ),
+                true,
+            ),
+            UpdateCheckStatus::Ready { version } => (
+                locale.translate("settings-update-ready"),
+                locale.translate_with(
+                    "settings-update-ready-hint",
+                    &[("version", TranslationValue::String(version))],
+                ),
+                true,
+            ),
+            UpdateCheckStatus::Failed => (
+                locale.translate("settings-update-try-again"),
+                locale.translate("settings-update-failed"),
+                false,
+            ),
+        };
+        SettingsRenderField {
+            path: "software-update".to_string(),
+            label: locale.translate("settings-software-update"),
+            hint: Some(hint),
+            kind: SettingsRenderFieldKind::UpdateCheck {
+                button_label,
+                disabled,
+            },
+        }
+    }
+
+    fn title(value: &str) -> String {
+        let mut title = String::with_capacity(value.len());
+        let mut next_upper = true;
+        for character in value.chars() {
+            if character == '_' || character == '-' {
+                title.push(' ');
+                next_upper = true;
+            } else if next_upper {
+                title.extend(character.to_uppercase());
+                next_upper = false;
+            } else {
+                title.push(character);
+            }
+        }
+        title
+    }
+
+    fn project_binding_row(index: usize, binding: &Value, locale: &Locale) -> SettingsBindingRow {
+        let command = binding
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or("(unknown)")
+            .to_string();
+        let chord = binding
+            .get("binding")
+            .map(|binding| Self::chord_binding(binding, locale))
+            .unwrap_or_else(|| "(none)".to_string());
+        let edit_path = binding.get("binding").and_then(|binding| {
+            if binding.get("Direct").is_some() {
+                Some(format!("shortcuts.bindings[{index}].binding.Direct"))
+            } else if binding.get("Leader").is_some() {
+                Some(format!("shortcuts.bindings[{index}].binding.Leader"))
+            } else {
+                None
+            }
+        });
+        SettingsBindingRow {
+            command,
+            chord,
+            edit_path,
+        }
+    }
+
+    fn section_search_text(spec: &SectionSpec, value: &Value, schema: &SettingsSchema) -> String {
+        let mut search = String::new();
+        Self::push_search(&mut search, &spec.id);
+        Self::push_search(&mut search, &spec.title);
+        if let Some(description) = spec.description.as_deref() {
+            Self::push_search(&mut search, description);
+        }
+        Self::push_search(&mut search, &spec.root_path);
+        Self::push_search_value(&mut search, value, &spec.root_path, schema);
+        search
+    }
+
+    fn push_search_value(
+        search: &mut String,
+        value: &Value,
+        parent_path: &str,
+        schema: &SettingsSchema,
+    ) {
+        match value {
+            Value::Object(object) => {
+                for (key, value) in object {
+                    let path = match parent_path.is_empty() {
+                        true => key.clone(),
+                        false => format!("{parent_path}.{key}"),
+                    };
+                    Self::push_search(search, key);
+                    Self::push_search(search, &path);
+                    if let Some(spec) = schema.field(&path) {
+                        Self::push_search_spec(search, spec);
+                    }
+                    Self::push_search_value(search, value, &path, schema);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    Self::push_search_value(search, item, parent_path, schema);
+                }
+            }
+            Value::String(value) => Self::push_search(search, value),
+            Value::Number(value) => Self::push_search(search, &value.to_string()),
+            Value::Bool(value) => Self::push_search(search, &value.to_string()),
+            Value::Null => {}
+        }
+    }
+
+    fn push_search_spec(search: &mut String, spec: &FieldSpec) {
+        if let Some(label) = spec.label.as_deref() {
+            Self::push_search(search, label);
+        }
+        if let Some(description) = spec.description.as_deref() {
+            Self::push_search(search, description);
+        }
+        if let Some(hint) = spec.hint.as_deref() {
+            Self::push_search(search, hint);
+        }
+        if let Some(placeholder) = spec.placeholder.as_deref() {
+            Self::push_search(search, placeholder);
+        }
+        for option in &spec.options {
+            Self::push_search(search, &option.value);
+            Self::push_search(search, &option.label);
+        }
+    }
+
+    fn push_search(search: &mut String, value: &str) {
+        if value.is_empty() {
+            return;
+        }
+        if !search.is_empty() {
+            search.push('\n');
+        }
+        search.push_str(&value.to_lowercase());
+    }
+
+    fn chord_combo(combo: &Value, locale: &Locale) -> String {
+        let mut parts = Vec::new();
+        if combo.get("ctrl").and_then(Value::as_bool).unwrap_or(false) {
+            parts.push("Ctrl".to_string());
+        }
+        if combo
+            .get("super_key")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            parts.push("⌘".to_string());
+        }
+        if combo.get("alt").and_then(Value::as_bool).unwrap_or(false) {
+            parts.push("Alt".to_string());
+        }
+        if combo.get("shift").and_then(Value::as_bool).unwrap_or(false) {
+            parts.push("Shift".to_string());
+        }
+        if let Some(key) = combo.get("key").and_then(Value::as_str) {
+            let key = match key {
+                "ArrowLeft" => "←".to_string(),
+                "ArrowRight" => "→".to_string(),
+                "ArrowUp" => "↑".to_string(),
+                "ArrowDown" => "↓".to_string(),
+                "Tab" => "Tab".to_string(),
+                "Enter" => "↵".to_string(),
+                "Space" => "␣".to_string(),
+                key if key.len() == 1 => key.to_uppercase(),
+                key => key.to_string(),
+            };
+            parts.push(key);
+        }
+        if parts.is_empty() {
+            locale.translate("settings-none")
+        } else {
+            parts.join(" + ")
+        }
+    }
+
+    fn chord_binding(binding: &Value, locale: &Locale) -> String {
+        if let Some(direct) = binding.get("Direct") {
+            return Self::chord_combo(direct, locale);
+        }
+        if let Some(leader) = binding.get("Leader") {
+            return format!(
+                "{} → {}",
+                locale.translate("schema-leader"),
+                Self::chord_combo(leader, locale)
+            );
+        }
+        if let Some(chord) = binding.get("Chord").and_then(Value::as_array) {
+            let mut combinations = Vec::with_capacity(chord.len());
+            for combo in chord {
+                combinations.push(Self::chord_combo(combo, locale));
+            }
+            return combinations.join(" → ");
+        }
+        binding.to_string()
     }
 }
 
@@ -107,7 +731,8 @@ fn project_fields(
         {
             continue;
         }
-        let next = SettingsUiState::projected(&settings, &schema, &status.0, &locale, &view);
+        let next =
+            SettingsRenderProjection::build_state(&settings, &schema, &status.0, &locale, &view);
         if projection.0 != next {
             projection.0 = next;
         }
@@ -126,416 +751,6 @@ fn publish(
             entity,
             &projection.0,
         ));
-    }
-}
-
-impl SettingsUiState {
-    fn projected(
-        settings: &AppSettings,
-        schema: &SettingsSchema,
-        status: &UpdateCheckStatus,
-        locale: &Locale,
-        view: &SettingsViewState,
-    ) -> Self {
-        let Ok(Value::Object(settings)) = serde_json::to_value(settings) else {
-            return Self::default();
-        };
-        let mut render = SettingsRenderBuilder {
-            drafts: view.drafts.clone(),
-            ..Default::default()
-        };
-        let mut sections =
-            SettingsSection::projected(&settings, schema, status, locale, &mut render);
-        let query = view.query.trim().to_lowercase();
-        if !query.is_empty() {
-            sections.retain(|section| section.search_text.contains(&query));
-        }
-        Self {
-            query: view.query.clone(),
-            sections,
-            fields: render.fields,
-            items: render.items,
-        }
-    }
-}
-
-#[derive(Default)]
-struct SettingsRenderBuilder {
-    drafts: std::collections::BTreeMap<String, String>,
-    fields: Vec<SettingsRenderField>,
-    items: Vec<SettingsRenderItem>,
-}
-
-impl SettingsSection {
-    fn projected(
-        settings: &Map<String, Value>,
-        schema: &SettingsSchema,
-        status: &UpdateCheckStatus,
-        locale: &Locale,
-        render: &mut SettingsRenderBuilder,
-    ) -> Vec<Self> {
-        let mut sections = Vec::new();
-        let mut consumed = HashSet::new();
-
-        for spec in &schema.sections {
-            let value = if spec.synthetic_keys.is_empty() {
-                let Some(value) = settings.get(&spec.root_path) else {
-                    continue;
-                };
-                consumed.insert(spec.root_path.clone());
-                value.clone()
-            } else {
-                let mut object = Map::new();
-                for key in &spec.synthetic_keys {
-                    let Some(value) = settings.get(key) else {
-                        continue;
-                    };
-                    object.insert(key.clone(), value.clone());
-                    consumed.insert(key.clone());
-                }
-                if object.is_empty() {
-                    continue;
-                }
-                Value::Object(object)
-            };
-            let search_text = SettingsSearchText::section(spec, &value, schema);
-            let mut visible = value;
-            if spec.id == "general"
-                && matches!(status, UpdateCheckStatus::Unavailable)
-                && let Some(object) = visible.as_object_mut()
-            {
-                object.remove("auto_update");
-                object.remove("update_channel");
-            }
-            let mut fields = render.project_fields(&visible, &spec.root_path, schema, locale);
-            if spec.id == "general" {
-                fields.push(render.push_field(SettingsRenderField::update_check(status, locale)));
-            }
-            sections.push(Self {
-                id: spec.id.clone(),
-                title: spec.title.clone(),
-                description: spec.description.clone(),
-                search_text,
-                fields,
-            });
-        }
-
-        let mut extra_scalars = Map::new();
-        for (key, value) in settings {
-            if consumed.contains(key) {
-                continue;
-            }
-            if value.is_object() {
-                let spec = SectionSpec {
-                    id: key.clone(),
-                    title: SettingsRenderField::title(key),
-                    description: None,
-                    synthetic_keys: Vec::new(),
-                    root_path: key.clone(),
-                    order: 0,
-                };
-                sections.push(Self {
-                    id: spec.id.clone(),
-                    title: spec.title.clone(),
-                    description: None,
-                    search_text: SettingsSearchText::section(&spec, value, schema),
-                    fields: render.project_fields(value, key, schema, locale),
-                });
-            } else {
-                extra_scalars.insert(key.clone(), value.clone());
-            }
-        }
-
-        if !extra_scalars.is_empty() {
-            let value = Value::Object(extra_scalars);
-            let spec = SectionSpec {
-                id: "general-extra".to_string(),
-                title: locale.translate("settings-other"),
-                description: None,
-                synthetic_keys: Vec::new(),
-                root_path: String::new(),
-                order: 0,
-            };
-            let section = Self {
-                id: spec.id.clone(),
-                title: spec.title.clone(),
-                description: None,
-                search_text: SettingsSearchText::section(&spec, &value, schema),
-                fields: render.project_fields(&value, "", schema, locale),
-            };
-            if sections.iter().any(|section| section.id == "general") {
-                sections.push(section);
-            } else {
-                sections.insert(0, section);
-            }
-        }
-
-        sections
-    }
-}
-
-impl SettingsRenderBuilder {
-    fn project_fields(
-        &mut self,
-        value: &Value,
-        parent_path: &str,
-        schema: &SettingsSchema,
-        locale: &Locale,
-    ) -> Vec<SettingsRenderFieldId> {
-        let Some(object) = value.as_object() else {
-            return Vec::new();
-        };
-        let mut fields = Vec::new();
-        for key in schema.ordered_keys(object, parent_path) {
-            let Some(field) = self.project_field(&key, &object[&key], parent_path, schema, locale)
-            else {
-                continue;
-            };
-            fields.push(field);
-        }
-        fields
-    }
-
-    fn project_field(
-        &mut self,
-        name: &str,
-        value: &Value,
-        parent_path: &str,
-        schema: &SettingsSchema,
-        locale: &Locale,
-    ) -> Option<SettingsRenderFieldId> {
-        let path = match parent_path.is_empty() {
-            true => name.to_string(),
-            false => format!("{parent_path}.{name}"),
-        };
-        let spec = schema.field(&path).cloned().unwrap_or_default();
-        if spec.omit {
-            return None;
-        }
-        let label = spec
-            .label
-            .clone()
-            .unwrap_or_else(|| SettingsRenderField::title(name));
-        let hint = spec.hint.clone();
-        let kind = if let Some(widget) = spec.widget {
-            match widget {
-                WidgetKind::Select => SettingsRenderFieldKind::Select {
-                    value: value.as_str().unwrap_or_default().to_string(),
-                    options: spec.options,
-                },
-                WidgetKind::LeaderKbd => SettingsRenderFieldKind::Chord {
-                    text: KeyChordText::combo(value, locale),
-                },
-                WidgetKind::BindingsList => {
-                    let mut rows = Vec::new();
-                    if let Some(bindings) = value.as_array() {
-                        for (index, binding) in bindings.iter().enumerate() {
-                            rows.push(SettingsBindingRow::projected(index, binding, locale));
-                        }
-                    }
-                    SettingsRenderFieldKind::Bindings { rows }
-                }
-            }
-        } else {
-            match value {
-                Value::Bool(value) => SettingsRenderFieldKind::Toggle { value: *value },
-                Value::Number(value) if value.is_u64() => SettingsRenderFieldKind::Integer {
-                    value: self
-                        .drafts
-                        .get(&path)
-                        .cloned()
-                        .unwrap_or_else(|| value.to_string()),
-                },
-                Value::Number(value) => SettingsRenderFieldKind::Number {
-                    value: self
-                        .drafts
-                        .get(&path)
-                        .cloned()
-                        .unwrap_or_else(|| value.to_string()),
-                    step: spec.step.unwrap_or(1.0),
-                },
-                Value::String(value) => SettingsRenderFieldKind::Text {
-                    value: self
-                        .drafts
-                        .get(&path)
-                        .cloned()
-                        .unwrap_or_else(|| value.clone()),
-                    placeholder: spec.placeholder,
-                },
-                Value::Object(_) => SettingsRenderFieldKind::Group {
-                    fields: self.project_fields(value, &path, schema, locale),
-                },
-                Value::Array(items) => SettingsRenderFieldKind::Array {
-                    items: self.project_items(items, &path, schema, locale),
-                },
-                Value::Null => return None,
-            }
-        };
-        Some(self.push_field(SettingsRenderField {
-            path,
-            label,
-            hint,
-            kind,
-        }))
-    }
-
-    fn push_field(&mut self, field: SettingsRenderField) -> SettingsRenderFieldId {
-        let id = SettingsRenderFieldId(self.fields.len() as u32);
-        self.fields.push(field);
-        id
-    }
-
-    fn push_item(&mut self, item: SettingsRenderItem) -> SettingsRenderItemId {
-        let id = SettingsRenderItemId(self.items.len() as u32);
-        self.items.push(item);
-        id
-    }
-}
-
-impl SettingsRenderField {
-    fn update_check(status: &UpdateCheckStatus, locale: &Locale) -> Self {
-        let (button_label, hint, disabled) = match status {
-            UpdateCheckStatus::Idle => (
-                locale.translate("settings-check-updates"),
-                locale.translate("settings-check-updates-hint"),
-                false,
-            ),
-            UpdateCheckStatus::Unavailable => (
-                locale.translate("settings-update-unavailable"),
-                locale.translate("settings-update-unavailable-hint"),
-                true,
-            ),
-            UpdateCheckStatus::Checking => (
-                locale.translate("settings-update-checking"),
-                locale.translate("settings-update-checking-hint"),
-                true,
-            ),
-            UpdateCheckStatus::UpToDate => (
-                locale.translate("settings-update-check-again"),
-                locale.translate("settings-update-current"),
-                false,
-            ),
-            UpdateCheckStatus::Downloading { version } => (
-                locale.translate("settings-update-downloading"),
-                locale.translate_with(
-                    "settings-update-downloading-hint",
-                    &[("version", TranslationValue::String(version))],
-                ),
-                true,
-            ),
-            UpdateCheckStatus::Installing { version } => (
-                locale.translate("settings-update-installing"),
-                locale.translate_with(
-                    "settings-update-installing-hint",
-                    &[("version", TranslationValue::String(version))],
-                ),
-                true,
-            ),
-            UpdateCheckStatus::Ready { version } => (
-                locale.translate("settings-update-ready"),
-                locale.translate_with(
-                    "settings-update-ready-hint",
-                    &[("version", TranslationValue::String(version))],
-                ),
-                true,
-            ),
-            UpdateCheckStatus::Failed => (
-                locale.translate("settings-update-try-again"),
-                locale.translate("settings-update-failed"),
-                false,
-            ),
-        };
-        Self {
-            path: "software-update".to_string(),
-            label: locale.translate("settings-software-update"),
-            hint: Some(hint),
-            kind: SettingsRenderFieldKind::UpdateCheck {
-                button_label,
-                disabled,
-            },
-        }
-    }
-
-    fn title(value: &str) -> String {
-        let mut title = String::with_capacity(value.len());
-        let mut next_upper = true;
-        for character in value.chars() {
-            if character == '_' || character == '-' {
-                title.push(' ');
-                next_upper = true;
-            } else if next_upper {
-                title.extend(character.to_uppercase());
-                next_upper = false;
-            } else {
-                title.push(character);
-            }
-        }
-        title
-    }
-}
-
-impl SettingsRenderBuilder {
-    fn project_items(
-        &mut self,
-        items: &[Value],
-        parent_path: &str,
-        schema: &SettingsSchema,
-        locale: &Locale,
-    ) -> Vec<SettingsRenderItemId> {
-        if !items.iter().all(Value::is_object) {
-            let mut projected = Vec::with_capacity(items.len());
-            for item in items {
-                projected.push(self.push_item(SettingsRenderItem::Value {
-                    text: item.to_string(),
-                }));
-            }
-            return projected;
-        }
-        let mut projected = Vec::with_capacity(items.len());
-        for (index, item) in items.iter().enumerate() {
-            let title = item
-                .get("name")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| {
-                    locale.translate_with(
-                        "settings-item-number",
-                        &[("number", TranslationValue::Number((index + 1) as i64))],
-                    )
-                });
-            let fields =
-                self.project_fields(item, &format!("{parent_path}[{index}]"), schema, locale);
-            projected.push(self.push_item(SettingsRenderItem::Object { title, fields }));
-        }
-        projected
-    }
-}
-
-impl SettingsBindingRow {
-    fn projected(index: usize, binding: &Value, locale: &Locale) -> Self {
-        let command = binding
-            .get("command")
-            .and_then(Value::as_str)
-            .unwrap_or("(unknown)")
-            .to_string();
-        let chord = binding
-            .get("binding")
-            .map(|binding| KeyChordText::binding(binding, locale))
-            .unwrap_or_else(|| "(none)".to_string());
-        let edit_path = binding.get("binding").and_then(|binding| {
-            if binding.get("Direct").is_some() {
-                Some(format!("shortcuts.bindings[{index}].binding.Direct"))
-            } else if binding.get("Leader").is_some() {
-                Some(format!("shortcuts.bindings[{index}].binding.Leader"))
-            } else {
-                None
-            }
-        });
-        Self {
-            command,
-            chord,
-            edit_path,
-        }
     }
 }
 
@@ -563,161 +778,11 @@ impl SettingsSchema {
     }
 }
 
-#[derive(Default)]
-struct SettingsSearchText(String);
-
-impl SettingsSearchText {
-    fn section(spec: &SectionSpec, value: &Value, schema: &SettingsSchema) -> String {
-        let mut search = Self::default();
-        search.push(&spec.id);
-        search.push(&spec.title);
-        if let Some(description) = spec.description.as_deref() {
-            search.push(description);
-        }
-        search.push(&spec.root_path);
-        search.push_value(value, &spec.root_path, schema);
-        search.0
-    }
-
-    fn push_value(&mut self, value: &Value, parent_path: &str, schema: &SettingsSchema) {
-        match value {
-            Value::Object(object) => {
-                for (key, value) in object {
-                    let path = match parent_path.is_empty() {
-                        true => key.clone(),
-                        false => format!("{parent_path}.{key}"),
-                    };
-                    self.push(key);
-                    self.push(&path);
-                    if let Some(spec) = schema.field(&path) {
-                        self.push_spec(spec);
-                    }
-                    self.push_value(value, &path, schema);
-                }
-            }
-            Value::Array(items) => {
-                for item in items {
-                    self.push_value(item, parent_path, schema);
-                }
-            }
-            Value::String(value) => self.push(value),
-            Value::Number(value) => self.push(&value.to_string()),
-            Value::Bool(value) => self.push(&value.to_string()),
-            Value::Null => {}
-        }
-    }
-
-    fn push_spec(&mut self, spec: &FieldSpec) {
-        if let Some(label) = spec.label.as_deref() {
-            self.push(label);
-        }
-        if let Some(description) = spec.description.as_deref() {
-            self.push(description);
-        }
-        if let Some(hint) = spec.hint.as_deref() {
-            self.push(hint);
-        }
-        if let Some(placeholder) = spec.placeholder.as_deref() {
-            self.push(placeholder);
-        }
-        for option in &spec.options {
-            self.push(&option.value);
-            self.push(&option.label);
-        }
-    }
-
-    fn push(&mut self, value: &str) {
-        if value.is_empty() {
-            return;
-        }
-        if !self.0.is_empty() {
-            self.0.push('\n');
-        }
-        self.0.push_str(&value.to_lowercase());
-    }
-}
-
-struct KeyChordText;
-
-impl KeyChordText {
-    fn combo(combo: &Value, locale: &Locale) -> String {
-        let mut parts = Vec::new();
-        if combo.get("ctrl").and_then(Value::as_bool).unwrap_or(false) {
-            parts.push("Ctrl".to_string());
-        }
-        if combo
-            .get("super_key")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            parts.push("⌘".to_string());
-        }
-        if combo.get("alt").and_then(Value::as_bool).unwrap_or(false) {
-            parts.push("Alt".to_string());
-        }
-        if combo.get("shift").and_then(Value::as_bool).unwrap_or(false) {
-            parts.push("Shift".to_string());
-        }
-        if let Some(key) = combo.get("key").and_then(Value::as_str) {
-            let key = match key {
-                "ArrowLeft" => "←".to_string(),
-                "ArrowRight" => "→".to_string(),
-                "ArrowUp" => "↑".to_string(),
-                "ArrowDown" => "↓".to_string(),
-                "Tab" => "Tab".to_string(),
-                "Enter" => "↵".to_string(),
-                "Space" => "␣".to_string(),
-                key if key.len() == 1 => key.to_uppercase(),
-                key => key.to_string(),
-            };
-            parts.push(key);
-        }
-        if parts.is_empty() {
-            locale.translate("settings-none")
-        } else {
-            parts.join(" + ")
-        }
-    }
-
-    fn binding(binding: &Value, locale: &Locale) -> String {
-        if let Some(direct) = binding.get("Direct") {
-            return Self::combo(direct, locale);
-        }
-        if let Some(leader) = binding.get("Leader") {
-            return format!(
-                "{} → {}",
-                locale.translate("schema-leader"),
-                Self::combo(leader, locale)
-            );
-        }
-        if let Some(chord) = binding.get("Chord").and_then(Value::as_array) {
-            let mut combinations = Vec::with_capacity(chord.len());
-            for combo in chord {
-                combinations.push(Self::combo(combo, locale));
-            }
-            return combinations.join(" → ");
-        }
-        binding.to_string()
-    }
-}
-
 #[cfg(test)]
 mod projection_tests {
     use super::*;
     use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
     use vmux_api::{BinEvent, UiState as UiStateContract, UiStateFrame};
-
-    const MANIFESTS: [&str; 9] = [
-        include_str!("../feature.ron"),
-        include_str!("../../../vmux_acp/src/feature.ron"),
-        include_str!("../../../vmux_editor/src/feature.ron"),
-        include_str!("../../../vmux_input/src/feature.ron"),
-        include_str!("../../../vmux_layout/src/feature.ron"),
-        include_str!("../../../vmux_shortcut/src/feature.ron"),
-        include_str!("../../../vmux_space/src/feature.ron"),
-        include_str!("../../../vmux_terminal/src/feature.ron"),
-        include_str!("../../../../util/vmux_browser/src/feature.ron"),
-    ];
 
     #[derive(Resource, Default)]
     struct Emitted(Vec<SettingsUiState>);
@@ -809,12 +874,22 @@ mod projection_tests {
 
     #[test]
     fn feature_manifests_spawn_settings_components_and_compose_the_page_schema() {
+        let manifests = [
+            include_str!("../feature.ron"),
+            include_str!("../../../vmux_acp/src/feature.ron"),
+            include_str!("../../../vmux_editor/src/feature.ron"),
+            include_str!("../../../vmux_input/src/feature.ron"),
+            include_str!("../../../vmux_layout/src/feature.ron"),
+            include_str!("../../../vmux_shortcut/src/feature.ron"),
+            include_str!("../../../vmux_space/src/feature.ron"),
+            include_str!("../../../vmux_terminal/src/feature.ron"),
+            include_str!("../../../../util/vmux_browser/src/feature.ron"),
+        ];
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(AppSettings::default())
-            .add_systems(Update, project_schema);
+        app.add_plugins((MinimalPlugins, ProjectionPlugin))
+            .insert_resource(AppSettings::default());
         let page = app.world_mut().spawn(Settings).id();
-        for source in MANIFESTS {
+        for source in manifests {
             let feature = vmux_feature::manifest::FeatureManifest::parse(source);
             let settings = feature
                 .settings::<SettingsManifest>()
@@ -825,8 +900,8 @@ mod projection_tests {
 
         app.update();
 
-        let mut manifests = app.world_mut().query::<&SettingsManifest>();
-        assert_eq!(manifests.iter(app.world()).count(), MANIFESTS.len());
+        let mut loaded = app.world_mut().query::<&SettingsManifest>();
+        assert_eq!(loaded.iter(app.world()).count(), manifests.len());
         let schema = app
             .world()
             .get::<SettingsSchema>(page)
@@ -902,13 +977,16 @@ mod projection_tests {
             panic!("object");
         };
 
-        let mut render = SettingsRenderBuilder::default();
-        let sections = SettingsSection::projected(
+        let mut fields_out = Vec::new();
+        let mut items_out = Vec::new();
+        let sections = SettingsRenderProjection::project_sections(
             &settings,
             &schema,
             &UpdateCheckStatus::Idle,
             &Locale::from("en-US"),
-            &mut render,
+            &BTreeMap::new(),
+            &mut fields_out,
+            &mut items_out,
         );
 
         assert!(sections[0].search_text.contains("agent behavior"));

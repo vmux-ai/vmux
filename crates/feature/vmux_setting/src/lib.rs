@@ -6,12 +6,17 @@
 
 #[cfg(host)]
 pub use host::{
-    AcpAgentConfig, AgentSettings, AppSettings, AppearanceSettings, BookmarkDefaults,
-    BookmarkFolderSettings, BrowserSettings, ColorScheme, ColorSchemeChanged, DirSource,
-    KeyComboDef, ResolvedColorScheme, ResolvedScheme, SearchEngineSetting, SettingToolPlugin,
-    Settings, SettingsLoadSet, SettingsPlugin, SettingsRuntimePlugin, SettingsSaveRequest,
-    ShortcutDef, ShortcutEntry, ShortcutSettings, SpaceOverrides, SpaceProject, StartupDir,
-    SystemAppearance, TerminalSettings, TerminalTheme, UpdateChannel,
+    AcpAgentConfig, ActivateSpaceProject, AgentSettings, AppSettings, AppearanceSettings,
+    AssociateKnownProject, BookmarkDefaults, BookmarkFolderSettings, BrowserSettings, ColorScheme,
+    ColorSchemeChanged, DirSource, ForgetSpaceProject, KeyComboDef, KnownProject,
+    KnownProjectCheckout, KnownProjectId, KnownProjectLabel, KnownProjectOrder, KnownProjectPath,
+    RememberSpaceProject, RenameKnownProject, ResolvedColorScheme, ResolvedScheme,
+    SearchEngineSetting, SettingToolPlugin, Settings, SettingsLoadSet, SettingsPlugin,
+    SettingsPolicySet, SettingsRuntimePlugin, SettingsSaveRequest, ShortcutDef, ShortcutEntry,
+    ShortcutSettings, SpaceActiveProject, SpaceBindingCheckout, SpaceBindingOrder,
+    SpaceBindingProject, SpaceBindingTarget, SpaceOverrides, SpaceProject, SpaceProjectBinding,
+    SpaceSetting, SpaceSettingKey, SpaceSettings, SpaceStartupUrl, StartupDir, SystemAppearance,
+    TerminalSettings, TerminalTheme, UpdateChannel,
 };
 pub use state::{EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH};
 
