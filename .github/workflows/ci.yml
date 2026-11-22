@@ -515,6 +515,7 @@ jobs:
           cef-version: ${{ needs.plan.outputs.cef }}
           packaging: "false"
           fast-rust: "true"
+          cli: "build"
       - uses: ./.github/actions/cache-ecs-lints
       - name: Check typed registration fixtures
         if: runner.os == 'Linux' && needs.changes.outputs.tooling == 'true'

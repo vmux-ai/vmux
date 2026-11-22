@@ -30,6 +30,7 @@ impl Temporary {
         &self.path
     }
 
+    #[cfg(feature = "development")]
     pub fn retention(&self) -> Arc<AtomicBool> {
         self.retained.clone()
     }

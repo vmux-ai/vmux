@@ -15,6 +15,10 @@ inputs:
     description: Use the CI-only compile settings for type checks
     required: false
     default: "auto"
+  cli:
+    description: Build or consume the development CLI
+    required: false
+    default: "auto"
 runs:
   using: composite
   steps:
@@ -22,6 +26,7 @@ runs:
       with:
         targets: wasm32-unknown-unknown
         fast-rust: ${{ inputs.fast-rust }}
+        cli: ${{ inputs.cli }}
 
     - uses: Swatinem/rust-cache@v2
       with:
