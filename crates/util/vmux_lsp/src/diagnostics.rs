@@ -92,22 +92,21 @@ pub(crate) struct Ticket {
     alternate: Option<PathBuf>,
 }
 
-impl Ticket {
-    fn capture(lookup: &Lookup, server: Entity, path: &Path, transport: Uuid) -> Option<Self> {
-        if !lookup.transport_current(server, transport) {
+impl Lookup<'_, '_> {
+    fn capture_ticket(&self, server: Entity, path: &Path, transport: Uuid) -> Option<Ticket> {
+        if !self.transport_current(server, transport) {
             return None;
         }
         for exact in [true, false] {
             let mut found = None;
-            for (entity, candidate, document, parent, connection) in &lookup.documents {
+            for (entity, candidate, document, parent, connection) in &self.documents {
                 if parent.parent() != server || connection.0 != Some(transport) {
                     continue;
                 }
                 let matches = if exact {
                     candidate.0 == path
                 } else {
-                    lookup
-                        .diagnostic_paths
+                    self.diagnostic_paths
                         .get(entity)
                         .is_ok_and(|alternate| alternate.0 == path)
                 };
@@ -117,7 +116,7 @@ impl Ticket {
                 if found.is_some() {
                     return None;
                 }
-                found = Some(Self {
+                found = Some(Ticket {
                     document: entity,
                     server,
                     version: document.version,
@@ -132,24 +131,24 @@ impl Ticket {
         None
     }
 
-    pub(crate) fn current(&self, lookup: &Lookup) -> bool {
-        let Ok((_, _, document, parent, connection)) = lookup.documents.get(self.document) else {
+    pub(crate) fn ticket_current(&self, ticket: &Ticket) -> bool {
+        let Ok((_, _, document, parent, connection)) = self.documents.get(ticket.document) else {
             return false;
         };
-        if document.version != self.version
-            || parent.parent() != self.server
-            || connection.0 != Some(self.transport)
-            || !lookup.transport_current(self.server, self.transport)
+        if document.version != ticket.version
+            || parent.parent() != ticket.server
+            || connection.0 != Some(ticket.transport)
+            || !self.transport_current(ticket.server, ticket.transport)
         {
             return false;
         }
-        let Some(path) = &self.alternate else {
+        let Some(path) = &ticket.alternate else {
             return true;
         };
-        let Some(current) = Self::capture(lookup, self.server, path, self.transport) else {
+        let Some(current) = self.capture_ticket(ticket.server, path, ticket.transport) else {
             return false;
         };
-        current.document == self.document
+        current.document == ticket.document
     }
 }
 
@@ -176,7 +175,7 @@ fn receive(inboxes: Query<&DiagnosticsInbox>, lookup: Lookup, mut commands: Comm
             let (Some(server), Some(transport)) = (input.server, input.transport) else {
                 continue;
             };
-            let Some(ticket) = Ticket::capture(&lookup, server, &input.path, transport) else {
+            let Some(ticket) = lookup.capture_ticket(server, &input.path, transport) else {
                 continue;
             };
             commands.spawn((
@@ -196,7 +195,7 @@ fn receive(inboxes: Query<&DiagnosticsInbox>, lookup: Lookup, mut commands: Comm
 
 fn prune(tickets: Query<(Entity, &Ticket)>, lookup: Lookup, mut commands: Commands) {
     for (entity, ticket) in &tickets {
-        if !ticket.current(&lookup) {
+        if !lookup.ticket_current(ticket) {
             commands.entity(entity).remove::<(Diagnostics, Ticket)>();
         }
     }
@@ -216,7 +215,7 @@ fn apply(
         let Ok((_, mut pending, _)) = pending.get_mut(entity) else {
             continue;
         };
-        if pending.ticket.current(&lookup)
+        if lookup.ticket_current(&pending.ticket)
             && pending
                 .version
                 .is_none_or(|version| version == pending.ticket.version)

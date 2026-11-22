@@ -491,7 +491,7 @@ fn choose_item(
         };
         panel.origin
     };
-    let stale = origin.is_some_and(|origin| !origin.current(&panel_params.p0()));
+    let stale = origin.is_some_and(|origin| !panel_params.p0().origin_current(&origin));
     let mut panels = panel_params.p1();
     let Ok((mut panel, edit)) = panels.get_mut(entity) else {
         return;

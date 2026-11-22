@@ -349,27 +349,6 @@ pub struct Stamp {
     pub binding: uuid::Uuid,
 }
 
-impl Stamp {
-    pub fn current(&self, owner: Entity, lookup: &Lookup) -> bool {
-        let Ok((binding, generation)) = lookup.bindings.get(owner) else {
-            return false;
-        };
-        let Ok((_, _, document, parent, connection)) = lookup.documents.get(self.document) else {
-            return false;
-        };
-        binding.document() == self.document
-            && generation.0 == self.binding
-            && document.version == self.version
-            && parent.parent() == self.server
-            && connection.0 == Some(self.transport)
-            && lookup
-                .transports
-                .get(self.server)
-                .is_ok_and(|transport| transport.identity == self.transport)
-            && lookup.servers.contains(self.server)
-    }
-}
-
 #[derive(SystemParam)]
 pub struct Lookup<'w, 's> {
     servers: Query<'w, 's, (Entity, &'static ServerKey), With<Server>>,
@@ -393,6 +372,25 @@ pub struct Lookup<'w, 's> {
 }
 
 impl Lookup<'_, '_> {
+    pub fn stamp_current(&self, owner: Entity, stamp: &Stamp) -> bool {
+        let Ok((binding, generation)) = self.bindings.get(owner) else {
+            return false;
+        };
+        let Ok((_, _, document, parent, connection)) = self.documents.get(stamp.document) else {
+            return false;
+        };
+        binding.document() == stamp.document
+            && generation.0 == stamp.binding
+            && document.version == stamp.version
+            && parent.parent() == stamp.server
+            && connection.0 == Some(stamp.transport)
+            && self
+                .transports
+                .get(stamp.server)
+                .is_ok_and(|transport| transport.identity == stamp.transport)
+            && self.servers.contains(stamp.server)
+    }
+
     pub fn server_current(&self, server: Entity) -> bool {
         self.servers.contains(server) && self.transports.contains(server)
     }
@@ -400,7 +398,7 @@ impl Lookup<'_, '_> {
     pub fn diagnostics(&self, owner: Entity) -> Option<&Diagnostics> {
         let (binding, _) = self.bindings.get(owner).ok()?;
         let ticket = self.diagnostic_tickets.get(binding.document()).ok()?;
-        if !ticket.current(self) {
+        if !self.ticket_current(ticket) {
             return None;
         }
         self.diagnostics.get(binding.document()).ok()
@@ -546,7 +544,7 @@ fn cancel(
     mut commands: Commands,
 ) {
     for (entity, mut request, state) in &mut requests {
-        let current = request.stamp.current(request.owner, &lookup);
+        let current = lookup.stamp_current(request.owner, &request.stamp);
         let expired = request.since.elapsed() >= policy.timeout;
         let active = matches!(state, OperationState::Pending | OperationState::Running);
         if current && !expired && active {
@@ -566,7 +564,7 @@ fn cancel(
         commands.entity(entity).remove::<Request>();
     }
     for (entity, stamp, owner) in &responses {
-        if !stamp.current(owner.0, &lookup) {
+        if !lookup.stamp_current(owner.0, stamp) {
             commands.entity(entity).remove::<Response>();
         }
     }

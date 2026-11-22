@@ -530,7 +530,7 @@ fn apply_goto(
     for goto in messages.read() {
         if goto
             .origin
-            .is_some_and(|origin| !origin.current(&view_params.p0()))
+            .is_some_and(|origin| !view_params.p0().origin_current(&origin))
         {
             continue;
         }

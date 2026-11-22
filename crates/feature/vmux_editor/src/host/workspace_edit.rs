@@ -88,7 +88,7 @@ impl Command for ApplyWorkspaceEdit {
 fn apply(request: On<ApplyWorkspaceEdit>, mut edits: WorkspaceEdits) {
     let refusal = if request
         .origin
-        .is_some_and(|origin| !origin.current(&edits.manager))
+        .is_some_and(|origin| !edits.manager.origin_current(&origin))
     {
         Some("document changed since the edit was computed".to_string())
     } else if request

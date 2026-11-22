@@ -218,19 +218,6 @@ struct RequestStamp {
     buffer: uuid::Uuid,
 }
 
-impl RequestStamp {
-    fn current(&self, owner: Entity, manager: &LspManager) -> bool {
-        manager
-            .views
-            .get(owner)
-            .is_ok_and(|view| manager.lookup.document(owner, &view.path) == Some(self.core))
-            && manager
-                .editors
-                .get(owner)
-                .is_ok_and(|(_, editor)| editor.core.content_version() == self.buffer)
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct LspOrigin {
     owner: Entity,
@@ -250,10 +237,6 @@ struct BufferStamp {
 }
 
 impl LspOrigin {
-    pub(crate) fn current(&self, manager: &LspManager) -> bool {
-        self.stamp.current(self.owner, manager)
-    }
-
     pub(crate) fn server(&self) -> Entity {
         self.stamp.core.server
     }
@@ -290,7 +273,7 @@ where
     E: Event,
     for<'a> E::Trigger<'a>: Default,
 {
-    if !response.origin.current(&manager) {
+    if !manager.origin_current(&response.origin) {
         return;
     }
     if let Some(event) = response.event_mut().event.take() {
@@ -313,7 +296,7 @@ impl Command for GuardedOffer {
 }
 
 fn offer(mut request: On<GuardedOffer>, manager: LspManager, mut commands: Commands) {
-    if !request.origin.current(&manager) {
+    if !manager.origin_current(&request.origin) {
         return;
     }
     let origin = request.origin;
@@ -454,6 +437,20 @@ fn read_text(path: &Path) -> Option<String> {
 }
 
 impl LspManager<'_, '_> {
+    fn stamp_current(&self, owner: Entity, stamp: &RequestStamp) -> bool {
+        self.views
+            .get(owner)
+            .is_ok_and(|view| self.lookup.document(owner, &view.path) == Some(stamp.core))
+            && self
+                .editors
+                .get(owner)
+                .is_ok_and(|(_, editor)| editor.core.content_version() == stamp.buffer)
+    }
+
+    pub(crate) fn origin_current(&self, origin: &LspOrigin) -> bool {
+        self.stamp_current(origin.owner, &origin.stamp)
+    }
+
     fn buffer_snapshot(&self, source: Entity) -> BufferSnapshot {
         let mut buffers = Vec::new();
         for (owner, editor) in &self.editors {
@@ -1697,7 +1694,7 @@ fn cancel_requests(
     mut commands: Commands,
 ) {
     for (entity, request, state) in &requests {
-        if request.stamp.current(request.target, &manager) {
+        if manager.stamp_current(request.target, &request.stamp) {
             continue;
         }
         if matches!(state, OperationState::Pending | OperationState::Running) {
@@ -1950,7 +1947,7 @@ fn apply_semantic_tokens(
     for message in reader.read() {
         if message
             .origin
-            .is_some_and(|origin| !origin.current(&view_params.p0()))
+            .is_some_and(|origin| !view_params.p0().origin_current(&origin))
         {
             continue;
         }
@@ -2149,7 +2146,7 @@ fn file_code_action_pick(
     let Ok((editor, actions)) = views.get(entity) else {
         return;
     };
-    if !actions.1.current(&manager) {
+    if !manager.origin_current(&actions.1) {
         return;
     }
     let Some(action) = actions
