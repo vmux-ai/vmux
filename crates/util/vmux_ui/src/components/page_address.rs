@@ -23,21 +23,20 @@ pub fn PageBreadcrumbs(
     }));
     let source = use_ui_state::<PageAddressUiState>().state;
     let mut observed = use_signal(move || {
-        source
-            .peek()
-            .effect
-            .as_ref()
-            .map_or(0, |effect| effect.revision)
+        let state = source.peek();
+        let effect = state.effect.as_ref()?;
+        let address = state.address.as_ref()?;
+        if effect.matches(address) {
+            Some((effect.owner, effect.revision))
+        } else {
+            None
+        }
     });
     use_effect(move || {
         let effect = source.read().effect.clone();
         let Some(effect) = effect else {
             return;
         };
-        if effect.revision <= *observed.peek() {
-            return;
-        }
-        observed.set(effect.revision);
         if source
             .read()
             .address
@@ -46,6 +45,13 @@ pub fn PageBreadcrumbs(
         {
             return;
         }
+        if observed
+            .peek()
+            .is_some_and(|(owner, revision)| owner == effect.owner && effect.revision <= revision)
+        {
+            return;
+        }
+        observed.set(Some((effect.owner, effect.revision)));
         if let Some(onintent) = onintent {
             onintent.call(effect.intent);
         }
@@ -332,8 +338,158 @@ pub fn AddressSurface(url: String, onactivate: EventHandler<()>, children: Eleme
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hooks::UiStateBinding;
     use dioxus::core::{AttributeValue, Mutation};
     use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+    use std::cell::RefCell;
+    use std::future::Future;
+    use std::rc::Rc;
+    use std::task::{Context, Waker};
+    use vmux_api::address::AddressEffect;
+
+    #[derive(Clone, Default)]
+    struct EffectInputs(Rc<RefCell<Option<Signal<PageAddressUiState>>>>);
+
+    struct EffectFixture {
+        dom: VirtualDom,
+        inputs: EffectInputs,
+    }
+
+    impl EffectFixture {
+        fn new() -> Self {
+            let inputs = EffectInputs::default();
+            let mut dom = VirtualDom::new(EffectPage);
+            dom.provide_root_context(inputs.clone());
+            dom.rebuild_to_vec();
+            let mut fixture = Self { dom, inputs };
+            fixture.render();
+            fixture
+        }
+
+        fn publish(&mut self, state: PageAddressUiState) -> String {
+            self.inputs
+                .0
+                .borrow()
+                .expect("mounted effect input")
+                .set(state);
+            self.render()
+        }
+
+        fn render(&mut self) -> String {
+            for _ in 0..4 {
+                let mut context = Context::from_waker(Waker::noop());
+                let _ = std::pin::pin!(self.dom.wait_for_work()).poll(&mut context);
+                self.dom.render_immediate_to_vec();
+            }
+            dioxus_ssr::render(&self.dom)
+        }
+    }
+
+    #[component]
+    fn EffectPage() -> Element {
+        let state = use_signal(PageAddressUiState::default);
+        let error = use_signal(|| None::<String>);
+        let mut received = use_signal(Vec::<String>::new);
+        let inputs = use_context::<EffectInputs>();
+        use_hook(move || *inputs.0.borrow_mut() = Some(state));
+        use_context_provider(|| UiStateBinding { state, error });
+        let address = state.read().address.clone().unwrap_or_default();
+        let summary = received.read().join(",");
+        rsx! {
+            PageBreadcrumbs { state: address, onintent: move |intent| {
+                if let AddressIntent::Section { id } = intent {
+                    received.write().push(id);
+                }
+            } }
+            output { "received={summary}" }
+        }
+    }
+
+    #[test]
+    fn breadcrumb_delivery_keeps_order_per_owner_and_refuses_duplicates() {
+        let mut fixture = EffectFixture::new();
+        let address = PageAddress {
+            owner: 11,
+            url: "vmux://one/".into(),
+            revision: 1,
+            ..Default::default()
+        };
+        let first = PageAddressUiState {
+            address: Some(address.clone()),
+            effect: Some(AddressEffect {
+                owner: 11,
+                url: address.url.clone(),
+                address_revision: 1,
+                revision: 9,
+                intent: AddressIntent::Section { id: "one".into() },
+            }),
+        };
+        assert!(fixture.publish(first.clone()).contains("received=one"));
+        assert!(!fixture.publish(first.clone()).contains("received=one,one"));
+        let mut second = first;
+        second.address.as_mut().unwrap().owner = 22;
+        let effect = second.effect.as_mut().unwrap();
+        effect.owner = 22;
+        effect.revision = 1;
+        effect.intent = AddressIntent::Section { id: "two".into() };
+        assert!(fixture.publish(second.clone()).contains("received=one,two"));
+        assert!(!fixture.publish(second).contains("received=one,two,two"));
+    }
+
+    #[test]
+    fn mismatched_effect_cannot_poison_the_next_valid_delivery() {
+        let mut fixture = EffectFixture::new();
+        let address = PageAddress {
+            owner: 11,
+            url: "vmux://one/".into(),
+            revision: 1,
+            ..Default::default()
+        };
+        let mut state = PageAddressUiState {
+            address: Some(address.clone()),
+            effect: Some(AddressEffect {
+                owner: 99,
+                url: address.url.clone(),
+                address_revision: 1,
+                revision: 1000,
+                intent: AddressIntent::Section {
+                    id: "foreign".into(),
+                },
+            }),
+        };
+        assert!(!fixture.publish(state.clone()).contains("foreign"));
+        let effect = state.effect.as_mut().unwrap();
+        effect.owner = 11;
+        effect.revision = 1;
+        effect.intent = AddressIntent::Section { id: "valid".into() };
+        assert!(fixture.publish(state).contains("received=valid"));
+    }
+
+    #[test]
+    fn effect_waits_for_its_matching_address_before_becoming_observed() {
+        let mut fixture = EffectFixture::new();
+        let mut state = PageAddressUiState {
+            address: None,
+            effect: Some(AddressEffect {
+                owner: 11,
+                url: "vmux://one/".into(),
+                address_revision: 1,
+                revision: 1,
+                intent: AddressIntent::Section {
+                    id: "pending".into(),
+                },
+            }),
+        };
+        assert!(!fixture.publish(state.clone()).contains("pending"));
+        state.address = Some(PageAddress {
+            owner: 11,
+            url: "vmux://one/".into(),
+            revision: 1,
+            ..Default::default()
+        });
+        assert!(fixture.publish(state.clone()).contains("received=pending"));
+        assert!(!fixture.publish(state).contains("received=pending,pending"));
+    }
 
     #[component]
     fn ToolbarPage() -> Element {

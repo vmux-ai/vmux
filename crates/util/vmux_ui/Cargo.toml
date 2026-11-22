@@ -43,3 +43,4 @@ workspace = true
 serde_json = { workspace = true }
 dioxus-html = { version = "=0.7.9", features = ["serialize"] }
 dioxus-ssr = "=0.7.9"
+vmux_api = { path = "../vmux_api", features = ["bevy"] }
