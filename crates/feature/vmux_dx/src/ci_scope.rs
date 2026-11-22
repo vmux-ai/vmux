@@ -429,7 +429,7 @@ impl Workspace {
                 sdk |= consumer;
                 continue;
             }
-            if Selection::documentation(file) {
+            if Selection::documentation(file) || Selection::auxiliary_workflow(file) {
                 continue;
             }
             sdk |= Selection::framework(file);
@@ -613,8 +613,20 @@ impl Selection {
                 && path.extension().is_some_and(|extension| extension == "md"))
     }
 
+    fn auxiliary_workflow(path: &Path) -> bool {
+        path.starts_with(".github/workflows")
+            && !matches!(
+                path.to_str(),
+                Some(
+                    ".github/workflows/ci.yml"
+                        | ".github/workflows/nightly.yml"
+                        | ".github/workflows/build-cef.yml"
+                )
+            )
+    }
+
     fn global(path: &Path) -> bool {
-        if Self::documentation(path) || Scope::policy(path) {
+        if Self::documentation(path) || Scope::policy(path) || Self::auxiliary_workflow(path) {
             return false;
         }
         if path.file_name().is_some_and(|name| name == "Cargo.lock") {
@@ -1352,6 +1364,17 @@ mod tests {
             let selection = Workspace::fixture().select(&[path.into()]).unwrap();
             assert!(selection.workspace, "{path}");
             assert!(selection.lean, "{path}");
+        }
+        for path in [
+            ".github/workflows/compiler-cache.yml",
+            ".github/workflows/cache-maintenance.yml",
+            ".github/workflows/deploy-website.yml",
+            ".github/workflows/release.yml",
+        ] {
+            let selection = Workspace::fixture().select(&[path.into()]).unwrap();
+            assert!(!selection.workspace, "{path}");
+            assert!(selection.packages.is_empty(), "{path}");
+            assert!(selection.lint.is_empty(), "{path}");
         }
     }
 

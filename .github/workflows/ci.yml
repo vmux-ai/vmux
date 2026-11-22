@@ -140,7 +140,6 @@ jobs:
           predicate-quantifier: 'some-with-excludes'
           filters: |
             code:
-              - '.github/**'
               - 'packaging/**'
               - 'docs/architecture.md'
               - 'docs/dx/architecture.md'
@@ -170,7 +169,17 @@ jobs:
             website:
               - 'website/**'
               - 'docs/**'
-              - '.github/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/deploy-website.yml'
+              - '.github/actions/setup-ci/**'
+              - '.github/actions/setup-compiler-cache/**'
+              - '.github/actions/setup-rust/**'
+              - '.github/actions/setup-web/**'
+              - '.github/actions/prepare-ci/**'
+              - '.github/actions/cache-workspace/**'
+              - '.github/actions/save-workspace/**'
+              - '.github/actions/cache-sources/**'
+              - '.github/actions/save-sources/**'
               - '.cargo/**'
               - '.gitattributes'
               - '.env'
@@ -181,7 +190,6 @@ jobs:
               - 'tool-versions.env'
               - 'scripts/**'
             macos:
-              - '.github/**'
               - '.cargo/**'
               - '.gitattributes'
               - '.env'
@@ -208,7 +216,6 @@ jobs:
               - 'crates/feature/vmux_dx/src/native/ios.rs'
               - 'crates/app/vmux_cli/tests/dx.rs'
             macos_tooling:
-              - '.github/**'
               - '.cargo/**'
               - '.gitattributes'
               - '.env'
@@ -226,7 +233,6 @@ jobs:
               - '.github/actions/setup-rust/**'
               - '.github/workflows/ci.yml'
             ios:
-              - '.github/**'
               - '.cargo/**'
               - '.gitattributes'
               - '.env'
