@@ -46,17 +46,17 @@ impl Plugin for OperationPlugin {
             VaultCreateCloudFolderRequest,
             VaultChooseCloudFolderRequest,
         )>::default())
-            .add_observer(on_create)
-            .add_observer(on_connect)
-            .add_observer(on_sync)
-            .add_observer(on_connect_github)
-            .add_observer(on_connect_folder)
-            .add_observer(on_generate_recovery_key)
-            .add_observer(on_create_recovery_key)
-            .add_observer(on_unlock_recovery_key)
-            .add_observer(on_connect_cloud)
-            .add_observer(on_create_cloud_folder)
-            .add_observer(on_choose_cloud_folder)
+            .add_observer(queue_create)
+            .add_observer(queue_connect)
+            .add_observer(queue_sync)
+            .add_observer(queue_connect_github)
+            .add_observer(queue_connect_folder)
+            .add_observer(queue_generate_recovery_key)
+            .add_observer(queue_create_recovery_key)
+            .add_observer(queue_unlock_recovery_key)
+            .add_observer(queue_connect_cloud)
+            .add_observer(queue_create_cloud_folder)
+            .add_observer(queue_choose_cloud_folder)
             .add_systems(
                 Update,
                 (
@@ -139,6 +139,7 @@ fn cancel_superseded(
     pending: Query<
         (
             Entity,
+            &VaultOperationContext,
             Has<VaultOperationRequest<VaultConnectGithubRequest>>,
         ),
         With<PendingVaultOperation>,
@@ -154,6 +155,9 @@ fn cancel_superseded(
 ) {
     let mut latest = None;
     for (entity, context, github) in &incoming {
+        if context.target == VaultOperationTarget::Automatic {
+            continue;
+        }
         if latest.is_none_or(|(_, id, _)| context.operation_id > id) {
             latest = Some((entity, context.operation_id, github));
         }
@@ -169,14 +173,17 @@ fn cancel_superseded(
             commands.entity(entity).despawn();
         }
     }
-    for (entity, queued_github) in &pending {
+    for (entity, context, queued_github) in &pending {
+        if context.target == VaultOperationTarget::Automatic {
+            continue;
+        }
         if entity != latest && (connecting || (github && queued_github)) {
             commands.entity(entity).despawn();
         }
     }
 }
 
-fn on_create(trigger: On<UiInput<VaultCreateRequest>>, mut queue: VaultOperationQueue) {
+fn queue_create(trigger: On<UiInput<VaultCreateRequest>>, mut queue: VaultOperationQueue) {
     let Some(operation_id) = queue.next() else {
         return;
     };
@@ -193,7 +200,7 @@ fn on_create(trigger: On<UiInput<VaultCreateRequest>>, mut queue: VaultOperation
     ));
 }
 
-fn on_connect(trigger: On<UiInput<VaultConnectRequest>>, mut queue: VaultOperationQueue) {
+fn queue_connect(trigger: On<UiInput<VaultConnectRequest>>, mut queue: VaultOperationQueue) {
     let Some(operation_id) = queue.next() else {
         return;
     };
@@ -210,7 +217,7 @@ fn on_connect(trigger: On<UiInput<VaultConnectRequest>>, mut queue: VaultOperati
     ));
 }
 
-fn on_sync(trigger: On<UiInput<VaultSyncRequest>>, mut queue: VaultOperationQueue) {
+fn queue_sync(trigger: On<UiInput<VaultSyncRequest>>, mut queue: VaultOperationQueue) {
     let Some(operation_id) = queue.next() else {
         return;
     };
@@ -227,7 +234,7 @@ fn on_sync(trigger: On<UiInput<VaultSyncRequest>>, mut queue: VaultOperationQueu
     ));
 }
 
-fn on_connect_github(
+fn queue_connect_github(
     trigger: On<UiInput<VaultConnectGithubRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -247,7 +254,7 @@ fn on_connect_github(
     ));
 }
 
-fn on_connect_folder(
+fn queue_connect_folder(
     trigger: On<UiInput<VaultConnectFolderRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -267,7 +274,7 @@ fn on_connect_folder(
     ));
 }
 
-fn on_generate_recovery_key(
+fn queue_generate_recovery_key(
     trigger: On<UiInput<VaultGenerateRecoveryKeyRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -291,7 +298,7 @@ fn on_generate_recovery_key(
     ));
 }
 
-fn on_create_recovery_key(
+fn queue_create_recovery_key(
     trigger: On<UiInput<VaultCreateRecoveryKeyRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -311,7 +318,7 @@ fn on_create_recovery_key(
     ));
 }
 
-fn on_unlock_recovery_key(
+fn queue_unlock_recovery_key(
     trigger: On<UiInput<VaultUnlockRecoveryKeyRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -331,7 +338,7 @@ fn on_unlock_recovery_key(
     ));
 }
 
-fn on_connect_cloud(
+fn queue_connect_cloud(
     trigger: On<UiInput<VaultConnectCloudRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -351,7 +358,7 @@ fn on_connect_cloud(
     ));
 }
 
-fn on_create_cloud_folder(
+fn queue_create_cloud_folder(
     trigger: On<UiInput<VaultCreateCloudFolderRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -371,7 +378,7 @@ fn on_create_cloud_folder(
     ));
 }
 
-fn on_choose_cloud_folder(
+fn queue_choose_cloud_folder(
     trigger: On<UiInput<VaultChooseCloudFolderRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -1427,7 +1434,7 @@ fn drain(
     mut operations: Query<(
         Entity,
         &VaultOperationContext,
-        &vmux_ecs::OperationTarget,
+        &OperationTarget,
         &vmux_ecs::OperationTargetRevision,
         &mut VaultOperationTask,
         Has<VaultOperationRequest<VaultSyncRequest>>,
@@ -1624,5 +1631,48 @@ mod tests {
 
         assert!(subscriber.state.generated_recovery_key.is_empty());
         assert!(subscriber.state.recovery_upload_pending);
+    }
+
+    #[test]
+    fn automatic_sync_does_not_cancel_active_github_authorization() {
+        IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let mut app = App::new();
+        app.add_systems(Update, cancel_superseded);
+        let canceled = Arc::new(AtomicBool::new(false));
+        let (_sender, receiver) = mpsc::channel();
+        let active_github = app
+            .world_mut()
+            .spawn((
+                VaultOperationContext {
+                    operation_id: 1,
+                    target: VaultOperationTarget::Webview(Entity::PLACEHOLDER),
+                    kind: VaultOperationKind::ConnectGithub,
+                },
+                VaultOperationRequest::new(VaultConnectGithubRequest),
+                VaultOperationTask {
+                    task: IoTaskPool::get().spawn(async { Err(String::new()) }),
+                    progress: Mutex::new(receiver),
+                    canceled: canceled.clone(),
+                },
+            ))
+            .id();
+        let auto_sync = app
+            .world_mut()
+            .spawn((
+                PendingVaultOperation,
+                VaultOperationContext {
+                    operation_id: 2,
+                    target: VaultOperationTarget::Automatic,
+                    kind: VaultOperationKind::Sync,
+                },
+                VaultOperationRequest::new(VaultSyncRequest),
+            ))
+            .id();
+
+        app.update();
+
+        assert!(!canceled.load(Ordering::Acquire));
+        assert!(app.world().get_entity(active_github).is_ok());
+        assert!(app.world().get_entity(auto_sync).is_ok());
     }
 }

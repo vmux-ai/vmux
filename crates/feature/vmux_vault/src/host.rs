@@ -280,6 +280,12 @@ impl VaultRegistry {
         self.revision = self.revision.wrapping_add(1);
     }
 
+    pub(crate) fn invalidate(&mut self) {
+        self.dirty = true;
+        self.loaded = false;
+        self.generation = self.generation.wrapping_add(1);
+    }
+
     pub(crate) fn current(&self) -> bool {
         self.loaded && !self.dirty
     }

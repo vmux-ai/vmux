@@ -1,9 +1,10 @@
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
-use bevy::ecs::message::Messages;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_ecs::{Cwd, EntityTarget, Operation, OperationRetained, OperationTarget};
 use zeroize::Zeroizing;
@@ -22,26 +23,34 @@ impl Plugin for KeyAuthorityPlugin {
         app.add_message::<LockVault>().add_systems(
             Update,
             (
-                lock,
-                invalidate,
-                receive_load,
-                receive_observe,
-                receive_create,
-                receive_store,
-                materialize,
-                admit_reads,
-                admit_creates,
-                admit_stores,
-                submit_read,
-                submit_observe,
-                submit_generate,
-                submit_store,
-                drain_read,
-                drain_observe,
-                drain_generate,
-                drain_store,
-                respond,
-                cleanup,
+                (
+                    lock,
+                    retire_namespaces,
+                    retire_requests,
+                    receive_load,
+                    receive_observe,
+                    receive_create,
+                    receive_store,
+                    materialize,
+                    admit_reads,
+                    admit_creates,
+                    admit_stores,
+                )
+                    .chain(),
+                (
+                    submit_read,
+                    submit_observe,
+                    submit_generate,
+                    submit_store,
+                    drain_read,
+                    drain_observe,
+                    drain_generate,
+                    drain_store,
+                    adopt_jobs,
+                    deliver_replies,
+                    cleanup,
+                )
+                    .chain(),
             )
                 .chain()
                 .after(super::RuntimeSet)
@@ -117,59 +126,16 @@ struct AcceptedNamespaceGeneration(u64);
 struct UnlockedKey(Zeroizing<Vec<u8>>);
 
 #[derive(Component)]
-struct LockedSince(u64);
+struct Locked;
+
+#[derive(Component)]
+struct LockCutoff(u64);
 
 #[derive(Message)]
 pub struct LockVault(pub Entity);
 
 #[derive(Component)]
 struct KeyRequester(KeyOrigin);
-
-impl KeyOrigin {
-    fn valid(&self, world: &World) -> bool {
-        let Some(port) = world.get::<KeyPort>(self.operation) else {
-            return false;
-        };
-        port.origin == *self
-            && world
-                .get::<NamespaceGeneration>(self.namespace)
-                .is_some_and(|g| g.0 == self.generation)
-            && world.get::<KeyNamespace>(self.namespace).is_some()
-            && !world
-                .get::<KeyCanceled>(self.operation)
-                .is_some_and(|c| c.0.load(Ordering::Acquire))
-    }
-}
-
-impl KeyRequester {
-    fn valid(&self, world: &World, request: Entity) -> bool {
-        if !self.0.valid(world) {
-            return false;
-        }
-        let Some(permissions) = world.get::<KeyPermissions>(self.0.operation) else {
-            return false;
-        };
-        let allowed = (world.get::<LoadKey>(request).is_some() && permissions.load)
-            || (world.get::<ObserveKey>(request).is_some() && permissions.observe)
-            || (world.get::<CreateKey>(request).is_some() && permissions.create)
-            || (world.get::<StoreReply>(request).is_some() && permissions.store);
-        if !allowed {
-            return false;
-        }
-        if let Some(target) = world.get::<EntityTarget<VaultKey>>(request) {
-            if world.get::<KeyGeneration>(target.entity()).is_none() {
-                return false;
-            }
-            if world
-                .get::<LockedSince>(target.entity())
-                .is_some_and(|l| self.0.admission <= l.0)
-            {
-                return false;
-            }
-        }
-        true
-    }
-}
 
 #[derive(Component)]
 struct KeyReply(mpsc::Sender<Result<Zeroizing<Vec<u8>>, String>>);
@@ -217,27 +183,10 @@ struct KeyIo {
 }
 
 impl KeyIo {
-    fn current(&self, world: &World) -> bool {
-        world
-            .get::<NamespaceGeneration>(self.namespace)
-            .is_some_and(|g| g.0 == self.namespace_generation)
-            && world.get::<KeyNamespace>(self.namespace).is_some()
-            && world
-                .get::<KeyGeneration>(self.owner)
-                .is_some_and(|g| g.0 == self.generation)
-    }
-
-    fn accepted(&self, world: &mut World, job: Entity) -> bool {
-        if !self.current(world) {
-            return false;
+    fn notify(&self) {
+        if let Some(wake) = &self.wake {
+            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
         }
-        let mut query = world.query::<(Entity, &KeyWaiting, &KeyRequester)>();
-        for (entity, waiting, requester) in query.iter(world) {
-            if waiting.0 == job && requester.valid(world, entity) {
-                return true;
-            }
-        }
-        false
     }
 }
 
@@ -256,93 +205,242 @@ struct StoreReady;
 #[derive(Component)]
 struct StoreBuffer(Zeroizing<Vec<u8>>);
 
-fn lock(world: &mut World) {
-    let requests: Vec<_> = world
-        .resource_mut::<Messages<LockVault>>()
-        .drain()
-        .collect();
-    for LockVault(owner) in requests {
-        let Some(target) = world.get::<EntityTarget<KeyNamespace>>(owner) else {
-            continue;
+#[derive(SystemParam)]
+struct KeyAuthority<'w, 's> {
+    ports: Query<
+        'w,
+        's,
+        (
+            &'static KeyPort,
+            &'static KeyPermissions,
+            Option<&'static KeyCanceled>,
+        ),
+    >,
+    namespaces: Query<'w, 's, (&'static KeyNamespace, &'static NamespaceGeneration)>,
+    owners: Query<
+        'w,
+        's,
+        (
+            &'static VaultId,
+            &'static KeyGeneration,
+            Option<&'static LockCutoff>,
+        ),
+        With<VaultKey>,
+    >,
+    requests: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static KeyRequester,
+            Option<&'static EntityTarget<VaultKey>>,
+            Option<&'static KeyWaiting>,
+            Has<LoadKey>,
+            Has<ObserveKey>,
+            Has<CreateKey>,
+            Has<StoreReply>,
+        ),
+    >,
+    ios: Query<'w, 's, &'static KeyIo>,
+}
+
+impl KeyAuthority<'_, '_> {
+    fn origin_valid(&self, origin: KeyOrigin) -> bool {
+        let Ok((port, _, canceled)) = self.ports.get(origin.operation) else {
+            return false;
         };
-        let admission = world
-            .get::<KeyAdmission>(target.entity())
-            .map_or(0, |a| a.0);
-        let Some(mut generation) = world.get_mut::<KeyGeneration>(owner) else {
-            continue;
+        if port.origin != origin || canceled.is_some_and(|c| c.0.load(Ordering::Acquire)) {
+            return false;
+        }
+        self.namespaces
+            .get(origin.namespace)
+            .is_ok_and(|(_, generation)| generation.0 == origin.generation)
+    }
+
+    fn request_valid(&self, request: Entity) -> bool {
+        let Ok((_, requester, target, _, is_load, is_observe, is_create, is_store)) =
+            self.requests.get(request)
+        else {
+            return false;
         };
-        generation.0 = generation.0.wrapping_add(1);
-        world
-            .entity_mut(owner)
-            .remove::<UnlockedKey>()
-            .insert(LockedSince(admission));
+        if !self.origin_valid(requester.0) {
+            return false;
+        }
+        let Ok((_, permissions, _)) = self.ports.get(requester.0.operation) else {
+            return false;
+        };
+        let allowed = (is_load && permissions.load)
+            || (is_observe && permissions.observe)
+            || (is_create && permissions.create)
+            || (is_store && permissions.store);
+        if !allowed {
+            return false;
+        }
+        if let Some(target) = target {
+            let Ok((_, _, cutoff)) = self.owners.get(target.entity()) else {
+                return false;
+            };
+            if cutoff.is_some_and(|cutoff| requester.0.admission <= cutoff.0) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn io_current(&self, io: &KeyIo) -> bool {
+        self.namespaces
+            .get(io.namespace)
+            .is_ok_and(|(_, generation)| generation.0 == io.namespace_generation)
+            && self
+                .owners
+                .get(io.owner)
+                .is_ok_and(|(_, generation, _)| generation.0 == io.generation)
+    }
+
+    fn io_accepted(&self, io: &KeyIo, job: Entity) -> bool {
+        if !self.io_current(io) {
+            return false;
+        }
+        self.requests
+            .iter()
+            .any(|(entity, _, _, waiting, _, _, _, _)| {
+                waiting.is_some_and(|w| w.0 == job) && self.request_valid(entity)
+            })
+    }
+
+    fn io_accepted_write(&self, io: &KeyIo, job: Entity) -> bool {
+        if !self.io_current(io) {
+            return false;
+        }
+        for (entity, requester, _, waiting, _, _, is_create, is_store) in &self.requests {
+            if waiting.is_none_or(|w| w.0 != job) || !self.request_valid(entity) {
+                continue;
+            }
+            let Ok((_, permissions, _)) = self.ports.get(requester.0.operation) else {
+                continue;
+            };
+            if (is_create && permissions.create) || (is_store && permissions.store) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn io_capture(&self, origin: KeyOrigin, owner: Entity) -> Option<KeyIo> {
+        let (access, _) = self.namespaces.get(origin.namespace).ok()?;
+        let (vault_id, generation, _) = self.owners.get(owner).ok()?;
+        let (port, _, _) = self.ports.get(origin.operation).ok()?;
+        Some(KeyIo {
+            namespace: origin.namespace,
+            namespace_generation: origin.generation,
+            owner,
+            generation: generation.0,
+            path: access.0.path(&vault_id.0),
+            vault_id: vault_id.0.clone(),
+            access: access.0.clone(),
+            wake: port.wake.clone(),
+        })
+    }
+
+    fn io_claimed(&self, path: &Path) -> bool {
+        self.ios.iter().any(|io| io.path == path)
     }
 }
 
-fn invalidate(world: &mut World) {
-    let mut namespaces = world.query::<(Entity, Ref<KeyNamespace>)>();
-    let changed: Vec<_> = namespaces
-        .iter(world)
-        .filter(|(_, n)| n.is_changed() && !n.is_added())
-        .map(|(e, _)| e)
-        .collect();
-    for entity in changed {
-        if let Some(mut generation) = world.get_mut::<NamespaceGeneration>(entity) {
+fn lock(
+    mut requests: MessageReader<LockVault>,
+    mut owners: Query<
+        (
+            &EntityTarget<KeyNamespace>,
+            &mut KeyGeneration,
+            Option<&LockCutoff>,
+        ),
+        With<VaultKey>,
+    >,
+    mut namespaces: Query<(&KeyAdmission, Option<&mut super::VaultRegistry>), With<KeyNamespace>>,
+    mut commands: Commands,
+) {
+    for LockVault(owner) in requests.read() {
+        let Ok((target, mut generation, existing_cutoff)) = owners.get_mut(*owner) else {
+            continue;
+        };
+        let namespace = target.entity();
+        let admission = if let Ok((admission, registry)) = namespaces.get_mut(namespace) {
+            if let Some(mut registry) = registry {
+                registry.invalidate();
+            }
+            commands
+                .entity(namespace)
+                .remove::<super::VaultStatusProjection>();
+            admission.0
+        } else {
+            0
+        };
+        let cutoff = existing_cutoff.map_or(admission, |existing| existing.0.max(admission));
+        generation.0 = generation.0.wrapping_add(1);
+        commands
+            .entity(*owner)
+            .remove::<UnlockedKey>()
+            .insert((Locked, LockCutoff(cutoff)));
+    }
+}
+
+fn retire_namespaces(
+    mut namespaces: Query<(Entity, Ref<KeyNamespace>, &mut NamespaceGeneration)>,
+    manifests: Query<(Entity, Ref<KeyManifest>)>,
+    keys: Query<
+        (
+            Entity,
+            &EntityTarget<KeyNamespace>,
+            &VaultId,
+            &AcceptedNamespaceGeneration,
+        ),
+        With<VaultKey>,
+    >,
+    mut commands: Commands,
+) {
+    for (_, access, mut generation) in &mut namespaces {
+        if access.is_changed() && !access.is_added() {
             generation.0 = generation.0.wrapping_add(1);
         }
     }
-    let mut manifests = world.query::<(Entity, Ref<KeyManifest>)>();
-    let replaced: Vec<_> = manifests
-        .iter(world)
-        .filter(|(_, m)| m.is_changed())
-        .map(|(e, m)| (e, m.0.clone()))
-        .collect();
-    for (namespace, vault_id) in replaced {
-        let mut keys = world
-            .query_filtered::<(Entity, &EntityTarget<KeyNamespace>, &VaultId), With<VaultKey>>();
-        let old: Vec<_> = keys
-            .iter(world)
-            .filter(|(_, t, id)| t.entity() == namespace && id.0 != vault_id)
-            .map(|(e, _, _)| e)
-            .collect();
-        for entity in old {
-            world.despawn(entity);
+    for (namespace, manifest) in &manifests {
+        if !manifest.is_changed() {
+            continue;
+        }
+        for (entity, target, vault_id, _) in &keys {
+            if target.entity() == namespace && vault_id.0 != manifest.0 {
+                commands.entity(entity).despawn();
+            }
         }
     }
-    let mut owners = world.query::<(
-        Entity,
-        &EntityTarget<KeyNamespace>,
-        &AcceptedNamespaceGeneration,
-    )>();
-    let retired: Vec<_> = owners
-        .iter(world)
-        .filter(|(_, target, generation)| {
-            world.get::<KeyNamespace>(target.entity()).is_none()
-                || world
-                    .get::<NamespaceGeneration>(target.entity())
-                    .is_none_or(|g| g.0 != generation.0)
-        })
-        .map(|(e, _, _)| e)
-        .collect();
-    for entity in retired {
-        world.despawn(entity);
+    for (entity, target, _, accepted) in &keys {
+        let alive = namespaces
+            .get(target.entity())
+            .is_ok_and(|(_, _, generation)| generation.0 == accepted.0);
+        if !alive {
+            commands.entity(entity).despawn();
+        }
     }
-    let mut ports = world.query::<(&KeyPort, &KeyCanceled)>();
-    for (port, canceled) in ports.iter(world) {
-        if !port.origin.valid(world) {
+}
+
+fn retire_requests(
+    authority: KeyAuthority,
+    ports: Query<(&KeyPort, &KeyCanceled)>,
+    requests: Query<Entity, (With<KeyRequester>, Without<KeyResult>)>,
+    mut commands: Commands,
+) {
+    for (port, canceled) in &ports {
+        if !authority.origin_valid(port.origin) {
             canceled.0.store(true, Ordering::Release);
         }
     }
-    let mut requests = world.query::<(Entity, &KeyRequester)>();
-    let refused: Vec<_> = requests
-        .iter(world)
-        .filter(|(e, r)| !r.valid(world, *e))
-        .map(|(e, _)| e)
-        .collect();
-    for entity in refused {
-        world
-            .entity_mut(entity)
-            .insert(KeyResult(Err("Vault key operation retired".to_string())));
+    for entity in &requests {
+        if !authority.request_valid(entity) {
+            commands
+                .entity(entity)
+                .insert(KeyResult(Err("Vault key operation retired".to_string())));
+        }
     }
 }
 
@@ -406,105 +504,141 @@ fn receive_store(ingress: Query<&KeyIngress>, mut commands: Commands) {
     }
 }
 
-fn materialize(world: &mut World) {
-    let mut query = world
-        .query_filtered::<(Entity, &KeyRequester, &VaultId), Without<EntityTarget<VaultKey>>>();
-    let requests: Vec<_> = query
-        .iter(world)
-        .map(|(e, r, id)| (e, r.0, id.0.clone()))
-        .collect();
-    for (entity, origin, vault_id) in requests {
-        let permissions = world.get::<KeyPermissions>(origin.operation);
-        let allowed = permissions.is_some_and(|p| {
-            (world.get::<LoadKey>(entity).is_some() && p.load)
-                || (world.get::<ObserveKey>(entity).is_some() && p.observe)
-                || (world.get::<CreateKey>(entity).is_some() && p.create)
-                || (world.get::<StoreKey>(entity).is_some() && p.store)
-        });
-        if !allowed || !origin.valid(world) || vault_id.is_empty() {
-            world
-                .entity_mut(entity)
+fn materialize(
+    authority: KeyAuthority,
+    requests: Query<
+        (Entity, &KeyRequester, &VaultId),
+        (Without<EntityTarget<VaultKey>>, Without<KeyResult>),
+    >,
+    existing_owners: Query<
+        (
+            Entity,
+            &VaultId,
+            &EntityTarget<KeyNamespace>,
+            Option<&LockCutoff>,
+        ),
+        With<VaultKey>,
+    >,
+    namespace_dirs: Query<(Option<&Cwd>, Option<&RepositoryDirectory>), With<KeyNamespace>>,
+    mut commands: Commands,
+) {
+    let mut created: BTreeMap<(Entity, String), Entity> = BTreeMap::new();
+    for (entity, requester, vault_id) in &requests {
+        let origin = requester.0;
+        if vault_id.0.is_empty() || !authority.request_valid(entity) {
+            commands
+                .entity(entity)
                 .insert(KeyResult(Err("Vault key request refused".to_string())));
             continue;
         }
-        let mut owners = world
-            .query_filtered::<(Entity, &VaultId, &EntityTarget<KeyNamespace>), With<VaultKey>>();
-        let existing = owners
-            .iter(world)
-            .find(|(_, id, target)| id.0 == vault_id && target.entity() == origin.namespace)
-            .map(|(e, _, _)| e);
-        let owner = match existing {
-            Some(owner) => owner,
+        let existing = existing_owners
+            .iter()
+            .find(|(_, id, target, _)| id.0 == vault_id.0 && target.entity() == origin.namespace);
+        let (owner, cutoff) = match existing {
+            Some((owner, _, _, cutoff)) => (owner, cutoff.map(|c| c.0)),
             None => {
-                let cwd = world
-                    .get::<Cwd>(origin.namespace)
-                    .map(|c| c.0.clone())
-                    .unwrap_or_default();
-                let repository = world
-                    .get::<RepositoryDirectory>(origin.namespace)
-                    .map(|r| r.0.clone())
-                    .unwrap_or_default();
-                world
-                    .spawn((
-                        Name::new("Vault key"),
-                        VaultKey,
-                        VaultId(vault_id),
-                        Cwd(cwd),
-                        RepositoryDirectory(repository),
-                        EntityTarget::<KeyNamespace>::new(origin.namespace),
-                        AcceptedNamespaceGeneration(origin.generation),
-                        KeyGeneration(0),
-                    ))
-                    .id()
+                let key = (origin.namespace, vault_id.0.clone());
+                let owner = match created.get(&key) {
+                    Some(&owner) => owner,
+                    None => {
+                        let (cwd, repository) = namespace_dirs
+                            .get(origin.namespace)
+                            .map(|(cwd, repository)| {
+                                (
+                                    cwd.map(|c| c.0.clone()).unwrap_or_default(),
+                                    repository.map(|r| r.0.clone()).unwrap_or_default(),
+                                )
+                            })
+                            .unwrap_or_default();
+                        let owner = commands
+                            .spawn((
+                                Name::new("Vault key"),
+                                VaultKey,
+                                VaultId(vault_id.0.clone()),
+                                Cwd(cwd),
+                                RepositoryDirectory(repository),
+                                EntityTarget::<KeyNamespace>::new(origin.namespace),
+                                AcceptedNamespaceGeneration(origin.generation),
+                                KeyGeneration(0),
+                            ))
+                            .id();
+                        created.insert(key, owner);
+                        owner
+                    }
+                };
+                (owner, None)
             }
         };
-        if world
-            .get::<LockedSince>(owner)
-            .is_some_and(|l| origin.admission <= l.0)
-        {
-            world
-                .entity_mut(entity)
+        if cutoff.is_some_and(|cutoff| origin.admission <= cutoff) {
+            commands
+                .entity(entity)
                 .insert(KeyResult(Err(LOCKED.to_string())));
             continue;
         }
-        world
-            .entity_mut(entity)
+        commands
+            .entity(entity)
             .insert(EntityTarget::<VaultKey>::new(owner));
     }
 }
 
-fn admit_reads(world: &mut World) {
-    let mut query = world.query_filtered::<(Entity, &KeyRequester, &EntityTarget<VaultKey>), (Without<KeyWaiting>, Without<KeyResult>)>();
-    let requests: Vec<_> = query
-        .iter(world)
-        .filter(|(e, _, _)| {
-            world.get::<LoadKey>(*e).is_some() || world.get::<ObserveKey>(*e).is_some()
-        })
-        .map(|(e, r, t)| (e, r.0, t.entity()))
-        .collect();
-    for (entity, origin, owner) in requests {
-        if let Some(key) = world.get::<UnlockedKey>(owner) {
-            let result = Zeroizing::new(key.0.to_vec());
-            world.entity_mut(entity).insert(KeyResult(Ok(result)));
-            continue;
-        }
-        let observing = world.get::<ObserveKey>(entity).is_some();
-        if observing && world.get::<LockedSince>(owner).is_some() {
-            world.entity_mut(entity).insert(KeyResult::locked());
-            continue;
-        }
-        if let Some(loading) = world.get::<KeyLoading>(owner) {
-            let job = loading.0;
-            world.entity_mut(entity).insert(KeyWaiting(job));
-            continue;
-        }
-        let Some(io) = KeyIo::capture(world, origin, owner) else {
+fn admit_reads(
+    authority: KeyAuthority,
+    requests: Query<
+        (
+            Entity,
+            &KeyRequester,
+            &EntityTarget<VaultKey>,
+            Has<ObserveKey>,
+        ),
+        (
+            Or<(With<LoadKey>, With<ObserveKey>)>,
+            Without<KeyWaiting>,
+            Without<KeyResult>,
+        ),
+    >,
+    owners: Query<(Option<&UnlockedKey>, Has<Locked>, Option<&KeyLoading>), With<VaultKey>>,
+    mut commands: Commands,
+) {
+    let mut spawned_jobs: BTreeMap<Entity, Entity> = BTreeMap::new();
+    let mut claimed_paths: BTreeSet<PathBuf> = BTreeSet::new();
+    for (entity, requester, target, observing) in &requests {
+        let owner = target.entity();
+        let Ok((unlocked, locked, loading)) = owners.get(owner) else {
             continue;
         };
-        if io.claimed(world) {
+        if let Some(key) = unlocked {
+            commands
+                .entity(entity)
+                .insert(KeyResult(Ok(Zeroizing::new(key.0.to_vec()))));
             continue;
         }
-        let job = world
+        if observing && locked {
+            commands.entity(entity).insert(KeyResult::locked());
+            continue;
+        }
+        if let Some(&job) = spawned_jobs.get(&owner) {
+            commands.entity(entity).insert(KeyWaiting(job));
+            continue;
+        }
+        if let Some(loading) = loading {
+            let job = loading.0;
+            if authority
+                .ios
+                .get(job)
+                .is_ok_and(|io| authority.io_current(io))
+            {
+                commands.entity(entity).insert(KeyWaiting(job));
+            }
+            continue;
+        }
+        let Some(io) = authority.io_capture(requester.0, owner) else {
+            continue;
+        };
+        if authority.io_claimed(&io.path) || claimed_paths.contains(&io.path) {
+            continue;
+        }
+        claimed_paths.insert(io.path.clone());
+        let job = commands
             .spawn((
                 Operation::bundle("vault.key.read").unwrap().running(),
                 OperationRetained,
@@ -513,73 +647,58 @@ fn admit_reads(world: &mut World) {
             ))
             .id();
         if observing {
-            world.entity_mut(job).insert(ObserveReady);
+            commands.entity(job).insert(ObserveReady);
         } else {
-            world.entity_mut(job).insert(ReadReady);
+            commands.entity(job).insert(ReadReady);
         }
-        world.entity_mut(owner).insert(KeyLoading(job));
-        world.entity_mut(entity).insert(KeyWaiting(job));
+        spawned_jobs.insert(owner, job);
+        commands.entity(owner).insert(KeyLoading(job));
+        commands.entity(entity).insert(KeyWaiting(job));
     }
 }
 
-impl KeyIo {
-    fn capture(world: &World, origin: KeyOrigin, owner: Entity) -> Option<Self> {
-        let access = world.get::<KeyNamespace>(origin.namespace)?.0.clone();
-        let vault_id = world.get::<VaultId>(owner)?.0.clone();
-        Some(Self {
-            namespace: origin.namespace,
-            namespace_generation: origin.generation,
-            owner,
-            generation: world.get::<KeyGeneration>(owner)?.0,
-            path: access.path(&vault_id),
-            vault_id,
-            access,
-            wake: world.get::<KeyPort>(origin.operation)?.wake.clone(),
-        })
-    }
-
-    fn claimed(&self, world: &mut World) -> bool {
-        let mut query = world.query::<&KeyIo>();
-        query.iter(world).any(|io| io.path == self.path)
-    }
-
-    fn notify(&self) {
-        if let Some(wake) = &self.wake {
-            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+fn admit_creates(
+    authority: KeyAuthority,
+    requests: Query<
+        (Entity, &KeyRequester, &EntityTarget<VaultKey>),
+        (With<CreateKey>, Without<KeyWaiting>, Without<KeyResult>),
+    >,
+    owners: Query<Option<&KeyLoading>, With<VaultKey>>,
+    create_jobs: Query<(), Or<(With<GenerateReady>, With<GenerateTask>, With<StoreBuffer>)>>,
+    mut commands: Commands,
+) {
+    let mut spawned_jobs: BTreeMap<Entity, Entity> = BTreeMap::new();
+    let mut claimed_paths: BTreeSet<PathBuf> = BTreeSet::new();
+    for (entity, requester, target) in &requests {
+        let owner = target.entity();
+        if let Some(&job) = spawned_jobs.get(&owner) {
+            commands.entity(entity).insert(KeyWaiting(job));
+            continue;
         }
-    }
-}
-
-fn admit_creates(world: &mut World) {
-    let mut query = world.query_filtered::<(Entity, &KeyRequester, &EntityTarget<VaultKey>), (With<CreateKey>, Without<KeyWaiting>, Without<KeyResult>)>();
-    let requests: Vec<_> = query
-        .iter(world)
-        .map(|(e, r, t)| (e, r.0, t.entity()))
-        .collect();
-    for (entity, origin, owner) in requests {
-        if let Some(loading) = world.get::<KeyLoading>(owner) {
-            if world.get::<GenerateReady>(loading.0).is_some()
-                || world.get::<GenerateTask>(loading.0).is_some()
-                || world.get::<StoreBuffer>(loading.0).is_some()
+        if let Ok(Some(loading)) = owners.get(owner) {
+            if create_jobs.get(loading.0).is_ok()
+                && authority
+                    .ios
+                    .get(loading.0)
+                    .is_ok_and(|io| authority.io_current(io))
             {
-                let job = loading.0;
-                world.entity_mut(entity).insert(KeyWaiting(job));
+                commands.entity(entity).insert(KeyWaiting(loading.0));
             }
             continue;
         }
-        let Some(mut io) = KeyIo::capture(world, origin, owner) else {
+        let Some(mut io) = authority.io_capture(requester.0, owner) else {
             continue;
         };
-        if io.claimed(world) {
+        if authority.io_claimed(&io.path) || claimed_paths.contains(&io.path) {
             continue;
         }
-        let Some(mut generation) = world.get_mut::<KeyGeneration>(owner) else {
-            continue;
-        };
-        generation.0 = generation.0.wrapping_add(1);
-        io.generation = generation.0;
-        world.entity_mut(owner).remove::<UnlockedKey>();
-        let job = world
+        claimed_paths.insert(io.path.clone());
+        io.generation = io.generation.wrapping_add(1);
+        commands
+            .entity(owner)
+            .remove::<UnlockedKey>()
+            .insert(KeyGeneration(io.generation));
+        let job = commands
             .spawn((
                 Operation::bundle("vault.key.generate").unwrap().running(),
                 OperationRetained,
@@ -588,117 +707,134 @@ fn admit_creates(world: &mut World) {
                 GenerateReady,
             ))
             .id();
-        world.entity_mut(owner).insert(KeyLoading(job));
-        world.entity_mut(entity).insert(KeyWaiting(job));
+        spawned_jobs.insert(owner, job);
+        commands.entity(owner).insert(KeyLoading(job));
+        commands.entity(entity).insert(KeyWaiting(job));
     }
 }
 
-fn admit_stores(world: &mut World) {
-    let mut query = world.query_filtered::<(Entity, &KeyRequester, &EntityTarget<VaultKey>), (With<StoreKey>, Without<KeyWaiting>, Without<KeyResult>)>();
-    let requests: Vec<_> = query
-        .iter(world)
-        .map(|(e, r, t)| (e, r.0, t.entity()))
-        .collect();
-    for (entity, origin, owner) in requests {
-        let Some(mut io) = KeyIo::capture(world, origin, owner) else {
+fn admit_stores(
+    authority: KeyAuthority,
+    requests: Query<
+        (Entity, &KeyRequester, &EntityTarget<VaultKey>, &StoreKey),
+        (Without<KeyWaiting>, Without<KeyResult>),
+    >,
+    mut commands: Commands,
+) {
+    let mut claimed_paths: BTreeSet<PathBuf> = BTreeSet::new();
+    for (entity, requester, target, store_key) in &requests {
+        let owner = target.entity();
+        let Some(mut io) = authority.io_capture(requester.0, owner) else {
             continue;
         };
-        if io.claimed(world) {
+        if authority.io_claimed(&io.path) || claimed_paths.contains(&io.path) {
             continue;
         }
-        let Some(key) = world.entity_mut(entity).take::<StoreKey>() else {
-            continue;
-        };
-        let Some(mut generation) = world.get_mut::<KeyGeneration>(owner) else {
-            continue;
-        };
-        generation.0 = generation.0.wrapping_add(1);
-        io.generation = generation.0;
-        world.entity_mut(owner).remove::<UnlockedKey>();
-        let job = world
+        claimed_paths.insert(io.path.clone());
+        io.generation = io.generation.wrapping_add(1);
+        commands
+            .entity(owner)
+            .remove::<UnlockedKey>()
+            .insert(KeyGeneration(io.generation));
+        let job = commands
             .spawn((
                 Operation::bundle("vault.key.write").unwrap().running(),
                 OperationRetained,
                 OperationTarget::new(owner),
                 io,
-                StoreBuffer(key.0),
+                StoreBuffer(Zeroizing::new(store_key.0.to_vec())),
                 StoreReady,
             ))
             .id();
-        world.entity_mut(owner).insert(KeyLoading(job));
-        world.entity_mut(entity).insert(KeyWaiting(job));
+        commands.entity(owner).insert(KeyLoading(job));
+        commands
+            .entity(entity)
+            .remove::<StoreKey>()
+            .insert(KeyWaiting(job));
     }
 }
 
-fn submit_read(world: &mut World) {
-    let mut query = world.query_filtered::<(Entity, &KeyIo), With<ReadReady>>();
-    let jobs: Vec<_> = query.iter(world).map(|(e, io)| (e, io.clone())).collect();
-    for (entity, io) in jobs {
-        world.entity_mut(entity).remove::<ReadReady>();
-        if !io.accepted(world, entity) {
-            world
-                .entity_mut(entity)
+fn submit_read(
+    authority: KeyAuthority,
+    jobs: Query<(Entity, &KeyIo), With<ReadReady>>,
+    mut commands: Commands,
+) {
+    for (entity, io) in &jobs {
+        commands.entity(entity).remove::<ReadReady>();
+        if !authority.io_accepted(io, entity) {
+            commands
+                .entity(entity)
                 .insert(KeyResult(Err("Vault key operation retired".to_string())));
             continue;
         }
+        let io = io.clone();
         let wake = io.wake.clone();
         let call = NativeCall::spawn(wake, move || io.access.read(&io.vault_id));
-        world.entity_mut(entity).insert(ReadTask(call));
+        commands.entity(entity).insert(ReadTask(call));
     }
 }
 
-fn submit_observe(world: &mut World) {
-    let mut query = world.query_filtered::<(Entity, &KeyIo), With<ObserveReady>>();
-    let jobs: Vec<_> = query.iter(world).map(|(e, io)| (e, io.clone())).collect();
-    for (entity, io) in jobs {
-        world.entity_mut(entity).remove::<ObserveReady>();
-        if !io.accepted(world, entity) {
-            world
-                .entity_mut(entity)
+fn submit_observe(
+    authority: KeyAuthority,
+    jobs: Query<(Entity, &KeyIo), With<ObserveReady>>,
+    mut commands: Commands,
+) {
+    for (entity, io) in &jobs {
+        commands.entity(entity).remove::<ObserveReady>();
+        if !authority.io_accepted(io, entity) {
+            commands
+                .entity(entity)
                 .insert(KeyResult(Err("Vault key operation retired".to_string())));
             continue;
         }
+        let io = io.clone();
         let wake = io.wake.clone();
         let call = NativeCall::spawn(wake, move || io.access.observe(&io.vault_id));
-        world.entity_mut(entity).insert(ObserveTask(call));
+        commands.entity(entity).insert(ObserveTask(call));
     }
 }
 
-fn submit_generate(world: &mut World) {
-    let mut query = world.query_filtered::<(Entity, &KeyIo), With<GenerateReady>>();
-    let jobs: Vec<_> = query.iter(world).map(|(e, io)| (e, io.clone())).collect();
-    for (entity, io) in jobs {
-        world.entity_mut(entity).remove::<GenerateReady>();
-        if !io.accepted(world, entity) {
-            world
-                .entity_mut(entity)
+fn submit_generate(
+    authority: KeyAuthority,
+    jobs: Query<(Entity, &KeyIo), With<GenerateReady>>,
+    mut commands: Commands,
+) {
+    for (entity, io) in &jobs {
+        commands.entity(entity).remove::<GenerateReady>();
+        if !authority.io_accepted_write(io, entity) {
+            commands
+                .entity(entity)
                 .insert(KeyResult(Err("Vault key operation retired".to_string())));
             continue;
         }
+        let io = io.clone();
         let wake = io.wake.clone();
         let call = NativeCall::spawn(wake, move || io.access.generate());
-        world.entity_mut(entity).insert(GenerateTask(call));
+        commands.entity(entity).insert(GenerateTask(call));
     }
 }
 
-fn submit_store(world: &mut World) {
-    let mut query = world.query_filtered::<(Entity, &KeyIo), With<StoreReady>>();
-    let jobs: Vec<_> = query.iter(world).map(|(e, io)| (e, io.clone())).collect();
-    for (entity, io) in jobs {
-        world.entity_mut(entity).remove::<StoreReady>();
-        if !io.accepted(world, entity) {
-            world
-                .entity_mut(entity)
+fn submit_store(
+    authority: KeyAuthority,
+    jobs: Query<(Entity, &KeyIo, Option<&StoreBuffer>), With<StoreReady>>,
+    mut commands: Commands,
+) {
+    for (entity, io, buffer) in &jobs {
+        commands.entity(entity).remove::<StoreReady>();
+        if !authority.io_accepted_write(io, entity) {
+            commands
+                .entity(entity)
                 .insert(KeyResult(Err("Vault key operation retired".to_string())));
             continue;
         }
-        let Some(buffer) = world.get::<StoreBuffer>(entity) else {
+        let Some(buffer) = buffer else {
             continue;
         };
         let key = Zeroizing::new(buffer.0.to_vec());
+        let io = io.clone();
         let wake = io.wake.clone();
         let call = NativeCall::spawn(wake, move || io.access.write(&io.vault_id, &key));
-        world.entity_mut(entity).insert(StoreTask(call));
+        commands.entity(entity).insert(StoreTask(call));
     }
 }
 
@@ -714,36 +850,30 @@ fn drain_read(mut jobs: Query<(Entity, &mut ReadTask)>, mut commands: Commands) 
     }
 }
 
-fn drain_observe(world: &mut World) {
-    let mut query = world.query::<(Entity, &mut ObserveTask)>();
-    let mut results = Vec::new();
-    for (entity, mut task) in query.iter_mut(world) {
-        if let Some(result) = task.0.poll() {
-            results.push((entity, result));
-        }
-    }
-    for (entity, result) in results {
-        world.entity_mut(entity).remove::<ObserveTask>();
+fn drain_observe(
+    mut jobs: Query<(Entity, &KeyIo, &mut ObserveTask)>,
+    waiting_loads: Query<(Entity, &KeyWaiting), With<LoadKey>>,
+    mut commands: Commands,
+) {
+    for (entity, io, mut task) in &mut jobs {
+        let Some(result) = task.0.poll() else {
+            continue;
+        };
+        commands.entity(entity).remove::<ObserveTask>();
         let result = match result {
             Ok(Some(key)) => Ok(key),
             Ok(None) => Err(LOCKED.to_string()),
             Err(e) => Err(e),
         };
         if result.is_err() {
-            let mut waiting = world.query_filtered::<(Entity, &KeyWaiting), With<LoadKey>>();
-            let retry: Vec<_> = waiting
-                .iter(world)
-                .filter(|(_, w)| w.0 == entity)
-                .map(|(e, _)| e)
-                .collect();
-            for request in retry {
-                world.entity_mut(request).remove::<KeyWaiting>();
-                if let Some(io) = world.get::<KeyIo>(entity) {
+            for (request, waiting) in &waiting_loads {
+                if waiting.0 == entity {
+                    commands.entity(request).remove::<KeyWaiting>();
                     io.notify();
                 }
             }
         }
-        world.entity_mut(entity).insert(KeyResult(result));
+        commands.entity(entity).insert(KeyResult(result));
     }
 }
 
@@ -767,117 +897,117 @@ fn drain_generate(mut jobs: Query<(Entity, &KeyIo, &mut GenerateTask)>, mut comm
     }
 }
 
-fn drain_store(world: &mut World) {
-    let mut query = world.query::<(Entity, &mut StoreTask)>();
-    let mut results = Vec::new();
-    for (entity, mut task) in query.iter_mut(world) {
-        if let Some(result) = task.0.poll() {
-            results.push((entity, result));
-        }
-    }
-    for (entity, result) in results {
-        world.entity_mut(entity).remove::<StoreTask>();
+fn drain_store(
+    authority: KeyAuthority,
+    mut jobs: Query<(Entity, &KeyIo, Option<&StoreBuffer>, &mut StoreTask)>,
+    mut commands: Commands,
+) {
+    for (entity, io, buffer, mut task) in &mut jobs {
+        let Some(result) = task.0.poll() else {
+            continue;
+        };
+        commands.entity(entity).remove::<(StoreTask, StoreBuffer)>();
         let result = match result {
             Ok(receipt) => {
-                let io = world.get::<KeyIo>(entity).cloned();
-                if receipt.created && io.is_some_and(|io| !io.current(world)) {
+                if receipt.created && !authority.io_current(io) {
                     warn!("Retired Vault key creation retained its durable file");
                 }
-                match world.entity_mut(entity).take::<StoreBuffer>() {
-                    Some(buffer) => Ok(buffer.0),
+                match buffer {
+                    Some(buffer) => Ok(Zeroizing::new(buffer.0.to_vec())),
                     None => Err("Vault key write lost its accepted input".to_string()),
                 }
             }
             Err(error) => Err(error),
         };
-        world.entity_mut(entity).insert(KeyResult(result));
+        commands.entity(entity).insert(KeyResult(result));
     }
 }
 
-fn respond(world: &mut World) {
-    let mut query = world.query::<(Entity, &KeyIo)>();
-    let completed: Vec<_> = query
-        .iter(world)
-        .filter(|(e, _)| world.get::<KeyResult>(*e).is_some())
-        .map(|(e, io)| (e, io.clone()))
-        .collect();
-    for (job, io) in completed {
-        let Some(result) = world.entity_mut(job).take::<KeyResult>() else {
-            continue;
-        };
-        let active = io.accepted(world, job);
-        let result = if active {
-            result.0
+fn adopt_jobs(
+    authority: KeyAuthority,
+    jobs: Query<(Entity, &KeyIo, &KeyResult)>,
+    owners: Query<Option<&KeyLoading>, With<VaultKey>>,
+    waiting: Query<(Entity, &KeyWaiting)>,
+    pending: Query<(), (With<KeyRequester>, Without<KeyWaiting>, Without<KeyResult>)>,
+    mut commands: Commands,
+) {
+    let has_pending = !pending.is_empty();
+    for (job, io, result) in &jobs {
+        let active = authority.io_accepted(io, job);
+        let outcome = if active {
+            match &result.0 {
+                Ok(key) => Ok(Zeroizing::new(key.to_vec())),
+                Err(error) => Err(error.clone()),
+            }
         } else {
             Err("Vault key operation retired".to_string())
         };
-        if let Ok(key) = &result {
-            world
-                .entity_mut(io.owner)
-                .remove::<LockedSince>()
+        if let Ok(key) = &outcome {
+            commands
+                .entity(io.owner)
+                .remove::<Locked>()
                 .insert(UnlockedKey(Zeroizing::new(key.to_vec())));
         }
-        if world
-            .get::<KeyLoading>(io.owner)
-            .is_some_and(|l| l.0 == job)
+        if owners
+            .get(io.owner)
+            .ok()
+            .flatten()
+            .is_some_and(|loading| loading.0 == job)
         {
-            world.entity_mut(io.owner).remove::<KeyLoading>();
+            commands.entity(io.owner).remove::<KeyLoading>();
         }
-        let mut query = world.query::<(Entity, &KeyWaiting)>();
-        let waiting: Vec<_> = query
-            .iter(world)
-            .filter(|(_, w)| w.0 == job)
-            .map(|(e, _)| e)
-            .collect();
-        for entity in waiting {
-            let reply = match &result {
+        for (entity, link) in &waiting {
+            if link.0 != job {
+                continue;
+            }
+            let reply = match &outcome {
                 Ok(key) => Ok(Zeroizing::new(key.to_vec())),
                 Err(error) => Err(error.clone()),
             };
-            world.entity_mut(entity).insert(KeyResult(reply));
+            commands.entity(entity).insert(KeyResult(reply));
         }
-        world.despawn(job);
-        let mut pending = world
-            .query_filtered::<Entity, (With<KeyRequester>, Without<KeyWaiting>, Without<KeyResult>)>(
-            );
-        if pending.iter(world).next().is_some() {
+        commands.entity(job).despawn();
+        if has_pending {
             io.notify();
         }
     }
-    let mut query = world.query_filtered::<Entity, (With<KeyResult>, Without<KeyIo>)>();
-    let finished: Vec<_> = query.iter(world).collect();
-    for entity in finished {
-        let Some(result) = world.entity_mut(entity).take::<KeyResult>() else {
-            continue;
-        };
-        let valid = world
-            .get::<KeyRequester>(entity)
-            .is_some_and(|r| r.valid(world, entity));
-        let result = if valid {
-            result.0
+}
+
+fn deliver_replies(
+    authority: KeyAuthority,
+    finished: Query<(Entity, &KeyResult, Option<&KeyReply>, Option<&StoreReply>), Without<KeyIo>>,
+    mut commands: Commands,
+) {
+    for (entity, result, key_reply, store_reply) in &finished {
+        let valid = authority.request_valid(entity);
+        let outcome = if valid {
+            match &result.0 {
+                Ok(key) => Ok(Zeroizing::new(key.to_vec())),
+                Err(error) => Err(error.clone()),
+            }
         } else {
             Err("Vault key operation retired".to_string())
         };
-        if let Some(reply) = world.entity_mut(entity).take::<KeyReply>() {
-            let _ = reply.0.send(result);
-        } else if let Some(reply) = world.entity_mut(entity).take::<StoreReply>() {
-            let _ = reply.0.send(result.map(|_| ()));
+        if let Some(reply) = key_reply {
+            let _ = reply.0.send(outcome);
+        } else if let Some(reply) = store_reply {
+            let _ = reply.0.send(outcome.map(|_| ()));
         }
-        world.despawn(entity);
+        commands.entity(entity).despawn();
     }
 }
 
-fn cleanup(world: &mut World) {
-    let mut query = world.query_filtered::<(Entity, &KeyWaiting), With<KeyRequester>>();
-    let abandoned: Vec<_> = query
-        .iter(world)
-        .filter(|(_, w)| world.get::<KeyIo>(w.0).is_none())
-        .map(|(e, _)| e)
-        .collect();
-    for entity in abandoned {
-        world
-            .entity_mut(entity)
-            .insert(KeyResult(Err("Vault key operation retired".to_string())));
+fn cleanup(
+    waiting: Query<(Entity, &KeyWaiting), (With<KeyRequester>, Without<KeyResult>)>,
+    ios: Query<(), With<KeyIo>>,
+    mut commands: Commands,
+) {
+    for (entity, link) in &waiting {
+        if ios.get(link.0).is_err() {
+            commands
+                .entity(entity)
+                .insert(KeyResult(Err("Vault key operation retired".to_string())));
+        }
     }
 }
 
@@ -893,7 +1023,9 @@ mod tests {
         directory: PathBuf,
         reads: Arc<AtomicUsize>,
         writes: Arc<AtomicUsize>,
+        generates: Arc<AtomicUsize>,
         read_gate: Mutex<Option<mpsc::Receiver<()>>>,
+        generate_gate: Mutex<Option<mpsc::Receiver<()>>>,
         write_gate: Mutex<Option<mpsc::Receiver<()>>>,
         fail_write: AtomicBool,
     }
@@ -904,7 +1036,9 @@ mod tests {
                 directory,
                 reads: Arc::new(AtomicUsize::new(0)),
                 writes: Arc::new(AtomicUsize::new(0)),
+                generates: Arc::new(AtomicUsize::new(0)),
                 read_gate: Mutex::new(None),
+                generate_gate: Mutex::new(None),
                 write_gate: Mutex::new(None),
                 fail_write: AtomicBool::new(false),
             }
@@ -942,6 +1076,8 @@ mod tests {
         }
 
         fn generate(&self) -> Result<Zeroizing<Vec<u8>>, String> {
+            self.generates.fetch_add(1, Ordering::SeqCst);
+            Self::wait(&self.generate_gate)?;
             Ok(Zeroizing::new(vec![9; 32]))
         }
 
@@ -1334,5 +1470,95 @@ mod tests {
         let port = scenario.caller();
         let current = scenario.request(port, |p| p.observe("replacement"));
         assert_eq!(*scenario.result(&current).unwrap(), vec![8; 32]);
+    }
+
+    #[test]
+    fn lock_cutoff_refuses_pre_lock_port_even_after_later_unlock() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("vault"), vec![7; 32]).unwrap();
+        let files = Arc::new(KeyFiles::new(temp.path().to_path_buf()));
+        let mut scenario = Scenario::new(files);
+        let first = scenario.caller();
+        let pre_lock_idle = scenario.caller();
+        let reply = scenario.request(first, |p| p.load("vault"));
+        assert_eq!(*scenario.result(&reply).unwrap(), vec![7; 32]);
+        let owner = scenario.owner();
+        scenario.app.world_mut().write_message(LockVault(owner));
+        scenario.app.update();
+        let post_lock = scenario.caller();
+        let unlocked = scenario.request(post_lock, |p| p.load("vault"));
+        assert_eq!(*scenario.result(&unlocked).unwrap(), vec![7; 32]);
+        let stale = scenario.request(pre_lock_idle, |p| p.load("vault"));
+        assert!(scenario.result(&stale).is_err());
+    }
+
+    #[test]
+    fn fresh_load_after_lock_waits_for_stale_read_drain_and_succeeds() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("vault"), vec![7; 32]).unwrap();
+        let files = Arc::new(KeyFiles::new(temp.path().to_path_buf()));
+        let reads = files.reads.clone();
+        let (release, gate) = mpsc::channel();
+        *files.read_gate.lock() = Some(gate);
+        let mut scenario = Scenario::new(files);
+        let old_port = scenario.caller();
+        let old_reply = scenario.request(old_port, |p| p.load("vault"));
+        scenario.entered(&reads);
+        let owner = scenario.owner();
+        scenario.app.world_mut().write_message(LockVault(owner));
+        assert!(scenario.result(&old_reply).is_err());
+        let fresh_port = scenario.caller();
+        let fresh_reply = scenario.request(fresh_port, |p| p.load("vault"));
+        for _ in 0..3 {
+            scenario.app.update();
+        }
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        release.send(()).unwrap();
+        assert_eq!(*scenario.result(&fresh_reply).unwrap(), vec![7; 32]);
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn canceled_creator_with_load_only_waiter_refuses_native_write() {
+        let temp = tempfile::tempdir().unwrap();
+        let files = Arc::new(KeyFiles::new(temp.path().to_path_buf()));
+        let generates = files.generates.clone();
+        let writes = files.writes.clone();
+        let (release, gate) = mpsc::channel();
+        *files.generate_gate.lock() = Some(gate);
+        let mut scenario = Scenario::new(files);
+        let creator = scenario.caller();
+        let creator_op = creator.origin.operation;
+        let create_reply = scenario.request(creator, |p| p.create("vault"));
+        scenario.entered(&generates);
+        let reader = scenario.caller();
+        scenario
+            .app
+            .world_mut()
+            .get_mut::<KeyPermissions>(reader.origin.operation)
+            .unwrap()
+            .create = false;
+        scenario
+            .app
+            .world_mut()
+            .get_mut::<KeyPermissions>(reader.origin.operation)
+            .unwrap()
+            .store = false;
+        let load_reply = scenario.request(reader, |p| p.load("vault"));
+        for _ in 0..3 {
+            scenario.app.update();
+        }
+        scenario
+            .app
+            .world()
+            .get::<KeyCanceled>(creator_op)
+            .unwrap()
+            .0
+            .store(true, Ordering::Release);
+        release.send(()).unwrap();
+        assert!(scenario.result(&create_reply).is_err());
+        assert!(scenario.result(&load_reply).is_err());
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+        assert!(!temp.path().join("vault").exists());
     }
 }

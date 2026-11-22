@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::path::PathBuf;
 use zeroize::Zeroizing;
 
@@ -51,7 +52,6 @@ impl NativeKeyAccess {
         }
         let mut name = String::with_capacity(vault_id.len() * 2);
         for byte in vault_id.as_bytes() {
-            use std::fmt::Write;
             let _ = write!(name, "{byte:02x}");
         }
         self.directory.join("vault").join(format!("{name}.bin"))

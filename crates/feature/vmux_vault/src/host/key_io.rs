@@ -22,7 +22,12 @@ impl<T: Send + 'static> NativeCall<T> {
         let (sender, receiver) = mpsc::channel();
         let worker_wake = wake.clone();
         let worker = std::thread::spawn(move || {
-            let _ = sender.send(call());
+            let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {
+                Ok(result) => result,
+                Err(_) => Err("Vault native key worker failed".to_string()),
+            };
+            let _ = sender.send(result);
+            drop(sender);
             if let Some(wake) = worker_wake {
                 let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
             }

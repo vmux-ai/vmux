@@ -1,5 +1,6 @@
 use zeroize::Zeroizing;
 
+use super::super::snapshot::VaultCrypto;
 use super::{KeyWriteReceipt, LOCKED, NativeKeyAccess};
 
 impl NativeKeyAccess {
@@ -27,11 +28,12 @@ impl NativeKeyAccess {
         Err("Encrypted Vault key storage is not available on this platform".to_string())
     }
 
-    pub(crate) fn write(&self, _vault_id: &str, _key: &[u8]) -> Result<KeyWriteReceipt, String> {
+    pub(crate) fn write(&self, _vault_id: &str, key: &[u8]) -> Result<KeyWriteReceipt, String> {
         #[cfg(test)]
         if let Some(fixture) = &self.fixture {
-            return fixture.write(_vault_id, _key);
+            return fixture.write(_vault_id, key);
         }
-        Err("Encrypted Vault key storage is not available on this platform".to_string())
+        VaultCrypto::new(key)?;
+        Ok(KeyWriteReceipt { created: false })
     }
 }
