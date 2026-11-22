@@ -1168,6 +1168,13 @@ mod tests {
                 .get::<vmux_session::InitialPromptSubmitted>(created)
                 .is_some()
         );
+        let initial_creates = fixture
+            .0
+            .world_mut()
+            .resource_mut::<Messages<CreateRequest>>()
+            .drain()
+            .count();
+        assert_eq!(initial_creates, 1);
         let initial_appends = fixture
             .0
             .world_mut()
