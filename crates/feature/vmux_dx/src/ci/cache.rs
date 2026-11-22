@@ -509,12 +509,7 @@ mod tests {
         }
         fixture.run("cache-stage", &["framework"]).unwrap();
         let staging = fixture.root().join(&output["paths"]);
-        for consumer in [
-            "framework-consumer",
-            "host-consumer",
-            "framework-git-consumer",
-            "host-git-consumer",
-        ] {
+        for consumer in ["framework-consumer", "host-consumer"] {
             assert_eq!(
                 std::fs::read(
                     staging.join(format!("target/{consumer}/debug/deps/libdependency.rlib"))
@@ -525,6 +520,13 @@ mod tests {
             assert!(
                 !staging
                     .join(format!("target/{consumer}/debug/incremental/cache.bin"))
+                    .exists()
+            );
+        }
+        for consumer in ["framework-git-consumer", "host-git-consumer"] {
+            assert!(
+                !staging
+                    .join(format!("target/{consumer}/debug/deps/libdependency.rlib"))
                     .exists()
             );
         }

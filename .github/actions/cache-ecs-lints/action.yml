@@ -48,9 +48,8 @@ runs:
         path: |
           .vmux/compiler-checkout/.vmux/lints
           .vmux/compiler-checkout/.vmux/lints-sources.json
-        key: ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-${{ github.sha }}
+        key: ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}
         restore-keys: |
-          ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-
           ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-
 
     - name: Restore ECS lint compiler artifacts
@@ -60,9 +59,8 @@ runs:
         path: |
           .vmux/compiler-checkout/.vmux/lints
           .vmux/compiler-checkout/.vmux/lints-sources.json
-        key: ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-${{ github.sha }}
+        key: ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}
         restore-keys: |
-          ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.lock', 'crates/feature/vmux_dx/lints/**') }}-
           ecs-lints-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.channel }}-validation${{ env.VMUX_CI_VALIDATION }}-
 
     - uses: ./.github/actions/cache-sources
