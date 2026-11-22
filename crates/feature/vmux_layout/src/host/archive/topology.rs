@@ -1,3 +1,4 @@
+use bevy::ecs::system::{SystemParam, SystemState};
 use bevy::prelude::*;
 use moonshine_save::prelude::Save;
 use vmux_ecs::store::StoreAppExt;
@@ -123,14 +124,16 @@ pub(super) struct Materialized;
 #[type_path = "vmux_layout::archive"]
 pub(super) struct InvalidTopology(pub(super) String);
 
-fn materialize(
-    world: &mut World,
-    pages: &mut QueryState<
+#[derive(SystemParam)]
+struct Materializer<'w, 's> {
+    pages: Query<
+        'w,
+        's,
         (
             Entity,
-            &ArchivedPage,
-            Option<&ArchivedTabPage>,
-            Option<&ArchivedPagePosition>,
+            &'static ArchivedPage,
+            Option<&'static ArchivedTabPage>,
+            Option<&'static ArchivedPagePosition>,
         ),
         (
             With<ArchivedPage>,
@@ -138,9 +141,14 @@ fn materialize(
             Without<InvalidTopology>,
         ),
     >,
-) {
-    let pending = pages
-        .iter(world)
+}
+
+fn materialize(world: &mut World) {
+    let mut state = SystemState::<Materializer>::new(world);
+    let pending = state
+        .get(world)
+        .pages
+        .iter()
         .map(|(page, metadata, tab, position)| {
             (
                 page,
@@ -151,7 +159,7 @@ fn materialize(
         })
         .collect::<Vec<_>>();
     for (page, metadata, tab, position) in pending {
-        Root::materialize_page(world, page, metadata, tab, position);
+        Materializer::materialize_page(world, page, metadata, tab, position);
         world.flush();
     }
 }
@@ -160,6 +168,38 @@ impl Root {
     pub(super) const CAPACITY: usize = 25;
     pub(super) const TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
+    pub(super) fn validate_position(position: &ArchivedPagePosition) -> Result<(), String> {
+        if position.stack_index > u32::MAX as usize {
+            return Err("archive stack order exceeds supported range".into());
+        }
+        if position.pane_path.is_empty() {
+            return Ok(());
+        }
+        if position.leaf_pane_id.is_empty() {
+            return Err("archive leaf identity is missing".into());
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for step in &position.pane_path {
+            if step.split_id.is_empty() || !seen.insert(step.split_id.as_str()) {
+                return Err("archive split path is cyclic or missing identity".into());
+            }
+            if step.child_index >= step.flex_weights.len()
+                || step
+                    .flex_weights
+                    .iter()
+                    .any(|weight| !weight.is_finite() || *weight <= 0.0)
+            {
+                return Err("archive split order or weight is invalid".into());
+            }
+        }
+        if seen.contains(position.leaf_pane_id.as_str()) {
+            return Err("archive leaf is also a split".into());
+        }
+        Ok(())
+    }
+}
+
+impl Materializer<'_, '_> {
     fn materialize_page(
         world: &mut World,
         page: Entity,
@@ -208,8 +248,8 @@ impl Root {
             }
         };
         let validation = Root::validate_position(&position)
-            .and_then(|()| Root::validate_membership(world, root, &metadata, tab.as_ref()))
-            .and_then(|()| Root::validate_existing(world, root, &position));
+            .and_then(|()| Self::validate_membership(world, root, &metadata, tab.as_ref()))
+            .and_then(|()| Self::validate_existing(world, root, &position));
         if let Err(error) = validation {
             world
                 .entity_mut(root)
@@ -219,7 +259,7 @@ impl Root {
                 .insert((ChildOf(root), InvalidTopology(error)));
             return;
         }
-        let leaf = match Root::materialize_position(world, root, &position) {
+        let leaf = match Self::materialize_position(world, root, &position) {
             Ok(leaf) => leaf,
             Err(error) => {
                 world
@@ -243,6 +283,7 @@ impl Root {
             .entity_mut(page)
             .remove::<(ArchivedPagePosition, ArchivedTabPage)>();
     }
+
     fn validate_membership(
         world: &World,
         root: Entity,
@@ -281,7 +322,7 @@ impl Root {
     ) -> Result<(), String> {
         let mut parent = Some(root);
         for (depth, step) in position.pane_path.iter().enumerate() {
-            let existing = Id::find(world, root, &step.split_id);
+            let existing = Self::find_id(world, root, &step.split_id);
             if let Some(split) = existing {
                 if world
                     .get::<Split>(split)
@@ -327,11 +368,11 @@ impl Root {
                 } else {
                     position.pane_path[depth - 1].child_index as u32
                 };
-                Slot::validate_replacement(world, parent, order, existing)?;
+                Self::validate_slot_replacement(world, parent, order, existing)?;
             }
             parent = existing;
         }
-        let existing = Id::find(world, root, &position.leaf_pane_id);
+        let existing = Self::find_id(world, root, &position.leaf_pane_id);
         if let Some(leaf) = existing {
             if world.get::<Leaf>(leaf).is_none()
                 || world.get::<ChildOf>(leaf).map(|relation| relation.parent()) != parent
@@ -361,12 +402,12 @@ impl Root {
                 .pane_path
                 .last()
                 .map_or(0, |step| step.child_index as u32);
-            Slot::validate_replacement(world, parent, order, existing)?;
+            Self::validate_slot_replacement(world, parent, order, existing)?;
         }
         Ok(())
     }
 
-    pub(super) fn ordered_children(world: &World, parent: Entity) -> Vec<Entity> {
+    fn ordered_children(world: &World, parent: Entity) -> Vec<Entity> {
         let mut children = world
             .get::<Children>(parent)
             .map(|children| children.iter().collect::<Vec<_>>())
@@ -379,35 +420,6 @@ impl Root {
         });
         children
     }
-    pub(super) fn validate_position(position: &ArchivedPagePosition) -> Result<(), String> {
-        if position.stack_index > u32::MAX as usize {
-            return Err("archive stack order exceeds supported range".into());
-        }
-        if position.pane_path.is_empty() {
-            return Ok(());
-        }
-        if position.leaf_pane_id.is_empty() {
-            return Err("archive leaf identity is missing".into());
-        }
-        let mut seen = std::collections::BTreeSet::new();
-        for step in &position.pane_path {
-            if step.split_id.is_empty() || !seen.insert(step.split_id.as_str()) {
-                return Err("archive split path is cyclic or missing identity".into());
-            }
-            if step.child_index >= step.flex_weights.len()
-                || step
-                    .flex_weights
-                    .iter()
-                    .any(|weight| !weight.is_finite() || *weight <= 0.0)
-            {
-                return Err("archive split order or weight is invalid".into());
-            }
-        }
-        if seen.contains(position.leaf_pane_id.as_str()) {
-            return Err("archive leaf is also a split".into());
-        }
-        Ok(())
-    }
 
     fn materialize_position(
         world: &mut World,
@@ -416,7 +428,7 @@ impl Root {
     ) -> Result<Entity, String> {
         let mut parent = root;
         for (depth, step) in position.pane_path.iter().enumerate() {
-            let split = Id::find(world, root, &step.split_id);
+            let split = Self::find_id(world, root, &step.split_id);
             let split = match split {
                 Some(split) => {
                     if world
@@ -441,14 +453,14 @@ impl Root {
             };
             if depth > 0 {
                 let previous = &position.pane_path[depth - 1];
-                Slot::replace(world, parent, previous.child_index as u32, split);
+                Self::replace_slot(world, parent, previous.child_index as u32, split);
                 world.entity_mut(split).insert((
                     Order(previous.child_index as u32),
                     Weight(previous.flex_weights[previous.child_index]),
                 ));
             }
             for (index, weight) in step.flex_weights.iter().enumerate() {
-                Slot::ensure(world, split, index as u32, *weight)?;
+                Self::ensure_slot(world, split, index as u32, *weight)?;
             }
             parent = split;
         }
@@ -457,7 +469,7 @@ impl Root {
         } else {
             position.leaf_pane_id.clone()
         };
-        let leaf = match Id::find(world, root, &id) {
+        let leaf = match Self::find_id(world, root, &id) {
             Some(leaf) => {
                 if world.get::<Leaf>(leaf).is_none()
                     || world
@@ -473,7 +485,7 @@ impl Root {
                 .id(),
         };
         if let Some(step) = position.pane_path.last() {
-            Slot::replace(world, parent, step.child_index as u32, leaf);
+            Self::replace_slot(world, parent, step.child_index as u32, leaf);
             world.entity_mut(leaf).insert((
                 Order(step.child_index as u32),
                 Weight(step.flex_weights[step.child_index]),
@@ -481,10 +493,8 @@ impl Root {
         }
         Ok(leaf)
     }
-}
 
-impl Id {
-    fn find(world: &mut World, root: Entity, id: &str) -> Option<Entity> {
+    fn find_id(world: &mut World, root: Entity, id: &str) -> Option<Entity> {
         let mut nodes = world.query::<(Entity, &Id)>();
         let candidates = nodes
             .iter(world)
@@ -504,16 +514,14 @@ impl Id {
         }
         None
     }
-}
 
-impl Slot {
-    fn validate_replacement(
+    fn validate_slot_replacement(
         world: &World,
         parent: Entity,
         order: u32,
         node: Option<Entity>,
     ) -> Result<(), String> {
-        for child in Root::ordered_children(world, parent) {
+        for child in Self::ordered_children(world, parent) {
             if world
                 .get::<Order>(child)
                 .is_some_and(|value| value.0 == order)
@@ -525,7 +533,13 @@ impl Slot {
         }
         Ok(())
     }
-    fn ensure(world: &mut World, parent: Entity, order: u32, weight: f32) -> Result<(), String> {
+
+    fn ensure_slot(
+        world: &mut World,
+        parent: Entity,
+        order: u32,
+        weight: f32,
+    ) -> Result<(), String> {
         let children = world
             .get::<Children>(parent)
             .map(|children| children.iter().collect::<Vec<_>>())
@@ -548,7 +562,7 @@ impl Slot {
         Ok(())
     }
 
-    fn replace(world: &mut World, parent: Entity, order: u32, node: Entity) {
+    fn replace_slot(world: &mut World, parent: Entity, order: u32, node: Entity) {
         let children = world
             .get::<Children>(parent)
             .map(|children| children.iter().collect::<Vec<_>>())

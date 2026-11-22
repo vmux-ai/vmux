@@ -32,7 +32,7 @@ impl ArchiveEditorFixture {
         settings.editor.keymap = vmux_api::editor::KeymapKind::Vim;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(SnapshotDeliveryPlugin)
+            .add_plugins(ArchiveTestHarnessPlugin)
             .add_message::<vmux_setting::ColorSchemeChanged>()
             .insert_resource(settings)
             .insert_non_send(Browsers::default())
@@ -52,6 +52,11 @@ impl ArchiveEditorFixture {
                 vmux_layout::hosted_page::HostedPagePlugin,
                 vmux_editor::EditorPlugin,
             ));
+        app.world_mut().spawn(vmux_api::UiEventPermissions {
+            url: "file://",
+            owns_subtree: true,
+            permissions: &["FileUiState"],
+        });
         let window = app
             .world_mut()
             .spawn((Window::default(), PrimaryWindow))
@@ -328,11 +333,11 @@ impl ArchiveEditorFixture {
     }
 }
 
-struct SnapshotDeliveryPlugin;
+struct ArchiveTestHarnessPlugin;
 
-impl Plugin for SnapshotDeliveryPlugin {
+impl Plugin for ArchiveTestHarnessPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(deliver);
+        app.add_observer(deliver).add_observer(refuse);
     }
 }
 
@@ -390,20 +395,15 @@ fn archive_reopen_preserves_unsaved_text_selection_and_undo() {
 #[derive(Resource)]
 struct RefuseWindow(Option<Entity>);
 
-struct RefuseRestorePlugin;
-
-impl Plugin for RefuseRestorePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_observer(refuse);
-    }
-}
-
 fn refuse(
     added: On<Add, vmux_ecs::Operation>,
     operations: Query<&vmux_ecs::OperationKind>,
-    mut target: ResMut<RefuseWindow>,
+    target: Option<ResMut<RefuseWindow>>,
     mut commands: Commands,
 ) {
+    let Some(mut target) = target else {
+        return;
+    };
     if operations
         .get(added.entity)
         .is_ok_and(|kind| kind.as_str() == "archive.restore")
@@ -422,8 +422,7 @@ fn retired_restore_window_preserves_the_real_archived_editor_content() {
     let archive = fixture.close();
     fixture
         .app
-        .insert_resource(RefuseWindow(Some(fixture.window)))
-        .add_plugins(RefuseRestorePlugin);
+        .insert_resource(RefuseWindow(Some(fixture.window)));
     fixture.reopen();
     assert!(fixture.app.world().get::<ArchivedPage>(archive).is_some());
     fixture.window = fixture

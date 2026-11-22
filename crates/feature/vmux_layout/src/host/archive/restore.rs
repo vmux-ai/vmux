@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_ecs::EntityTarget;
 
@@ -70,6 +71,11 @@ impl Plugin for RestorePlugin {
     }
 }
 
+#[derive(SystemParam)]
+struct Topology<'w, 's> {
+    roots: Query<'w, 's, Option<&'static Claimed>, With<Root>>,
+}
+
 fn allocate(world: &mut World, prepared: &mut QueryState<Entity, With<Prepared>>) {
     let mut nodes = world.query::<(
         Option<&Id>,
@@ -83,17 +89,17 @@ fn allocate(world: &mut World, prepared: &mut QueryState<Entity, With<Prepared>>
         let Some(intent) = world.get::<RestoreIntent>(operation).copied() else {
             continue;
         };
-        if let Err(error) = intent.validate(world, operation, &mut nodes) {
-            intent.refuse(world, operation, error);
+        if let Err(error) = Topology::validate(intent, world, operation, &mut nodes) {
+            Topology::refuse(world, operation, error);
             continue;
         }
         if world.get::<TabGroup>(intent.root).is_some() {
             let directory = world
                 .get::<TabDirectory>(intent.root)
                 .and_then(|directory| directory.0.clone());
-            intent.allocate_group(world, operation, directory);
+            Topology::allocate_group(intent, world, operation, directory);
         } else {
-            intent.allocate_single(world, operation);
+            Topology::allocate_single(intent, world, operation);
         }
         world
             .entity_mut(operation)
@@ -103,7 +109,23 @@ fn allocate(world: &mut World, prepared: &mut QueryState<Entity, With<Prepared>>
     }
 }
 
-impl RestoreBinding {
+impl Topology<'_, '_> {
+    fn ordered_children(world: &World, parent: Entity) -> Vec<Entity> {
+        let mut children = world
+            .get::<Children>(parent)
+            .map(|children| children.iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        children.sort_by_key(|child| {
+            (
+                world
+                    .get::<vmux_ecs::Order>(*child)
+                    .map_or(u32::MAX, |order| order.0),
+                child.to_bits(),
+            )
+        });
+        children
+    }
+
     fn first_leaf(world: &World, root: Entity) -> Option<Entity> {
         let mut pending = vec![root];
         while let Some(node) = pending.pop() {
@@ -136,7 +158,7 @@ impl RestoreBinding {
     }
 
     fn allocate_pages(world: &mut World, operation: Entity, leaf: Entity, live: Entity) {
-        for archive in Root::ordered_children(world, leaf) {
+        for archive in Self::ordered_children(world, leaf) {
             let Some(page) = world.get::<vmux_ecs::ArchivedPage>(archive).cloned() else {
                 continue;
             };
@@ -189,19 +211,22 @@ impl RestoreBinding {
         let position = positions.get(index).copied().unwrap_or(children.len());
         world.entity_mut(parent).insert_children(position, &[node]);
     }
-}
 
-impl RestoreIntent {
-    fn allocate_group(&self, world: &mut World, operation: Entity, directory: Option<String>) {
+    fn allocate_group(
+        intent: RestoreIntent,
+        world: &mut World,
+        operation: Entity,
+        directory: Option<String>,
+    ) {
         let name = world
-            .get::<Name>(self.root)
+            .get::<Name>(intent.root)
             .map(|name| name.as_str().to_owned())
             .unwrap_or_default();
         let tab = world
             .spawn((
                 crate::tab::Tab::bundle(),
                 vmux_ecs::LastActivatedAt::now(),
-                ChildOf(self.space),
+                ChildOf(intent.space),
                 ScaffoldOwner(operation),
             ))
             .id();
@@ -209,21 +234,21 @@ impl RestoreIntent {
             name,
             startup_dir: directory,
         });
-        if self.origin_matches
+        if intent.origin_matches
             && let Some(index) = world
-                .get::<Origin>(self.root)
+                .get::<Origin>(intent.root)
                 .and_then(|origin| origin.tab_index)
         {
             let length = world
-                .get::<Children>(self.space)
+                .get::<Children>(intent.space)
                 .map_or(0, |children| children.len());
             world
-                .entity_mut(self.space)
+                .entity_mut(intent.space)
                 .insert_children(index.min(length), &[tab]);
         }
-        let mut pending = vec![(self.root, tab)];
+        let mut pending = vec![(intent.root, tab)];
         while let Some((archive_parent, live_parent)) = pending.pop() {
-            let children = Root::ordered_children(world, archive_parent);
+            let children = Self::ordered_children(world, archive_parent);
             for archive in children {
                 if world.get::<vmux_ecs::ArchivedPage>(archive).is_some() {
                     continue;
@@ -259,29 +284,29 @@ impl RestoreIntent {
                     crate::pane::PaneSize { flex_grow: weight },
                     vmux_ecs::LastActivatedAt(0),
                 ));
-                if archive_parent == self.root {
+                if archive_parent == intent.root {
                     world
                         .entity_mut(live)
-                        .insert(bevy_cef::prelude::HostWindow(self.window));
+                        .insert(bevy_cef::prelude::HostWindow(intent.window));
                 }
                 world
                     .entity_mut(archive)
                     .insert(RestoreBinding { operation, live });
                 if world.get::<Leaf>(archive).is_some() || world.get::<Slot>(archive).is_some() {
-                    RestoreBinding::allocate_pages(world, operation, archive, live);
+                    Self::allocate_pages(world, operation, archive, live);
                 } else {
                     pending.push((archive, live));
                 }
             }
         }
-        world.entity_mut(self.root).insert(RestoreBinding {
+        world.entity_mut(intent.root).insert(RestoreBinding {
             operation,
             live: tab,
         });
     }
 
-    fn allocate_single(&self, world: &mut World, operation: Entity) {
-        let mut nodes = vec![self.root];
+    fn allocate_single(intent: RestoreIntent, world: &mut World, operation: Entity) {
+        let mut nodes = vec![intent.root];
         while let Some(node) = nodes.pop() {
             if world.get::<Leaf>(node).is_some() {
                 let id = world
@@ -298,34 +323,32 @@ impl RestoreIntent {
                     .collect::<Vec<_>>();
                 let live = candidates
                     .into_iter()
-                    .find(|leaf| RestoreIntent::in_space(world, *leaf, self.space))
-                    .and_then(|leaf| RestoreBinding::first_leaf(world, leaf))
-                    .or_else(|| self.reattach(world, operation, node));
+                    .find(|leaf| Self::in_space(world, *leaf, intent.space))
+                    .and_then(|leaf| Self::first_leaf(world, leaf))
+                    .or_else(|| Self::reattach(intent, world, operation, node));
                 let live = match live {
                     Some(live) => live,
                     None => {
                         let tab = world
                             .spawn((
                                 crate::tab::Tab::bundle(),
-                                ChildOf(self.space),
+                                ChildOf(intent.space),
                                 vmux_ecs::LastActivatedAt::now(),
                                 ScaffoldOwner(operation),
                             ))
                             .id();
-                        if self.origin_matches
+                        if intent.origin_matches
                             && let Some(index) = world
-                                .get::<Origin>(self.root)
+                                .get::<Origin>(intent.root)
                                 .and_then(|origin| origin.tab_index)
                         {
-                            RestoreBinding::insert_at::<crate::tab::Tab>(
-                                world, self.space, tab, index,
-                            );
+                            Self::insert_at::<crate::tab::Tab>(world, intent.space, tab, index);
                         }
                         world
                             .spawn((
                                 crate::pane::Pane::bundle(),
                                 ChildOf(tab),
-                                bevy_cef::prelude::HostWindow(self.window),
+                                bevy_cef::prelude::HostWindow(intent.window),
                                 ScaffoldOwner(operation),
                             ))
                             .id()
@@ -334,10 +357,10 @@ impl RestoreIntent {
                 world
                     .entity_mut(node)
                     .insert(RestoreBinding { operation, live });
-                RestoreBinding::allocate_pages(world, operation, node, live);
+                Self::allocate_pages(world, operation, node, live);
                 break;
             }
-            nodes.extend(Root::ordered_children(world, node));
+            nodes.extend(Self::ordered_children(world, node));
         }
     }
 
@@ -376,15 +399,14 @@ fn transfer(world: &mut World, allocated: &mut QueryState<Entity, With<Allocated
         let Some(intent) = world.get::<RestoreIntent>(operation).copied() else {
             continue;
         };
-        let validation = intent
-            .validate(world, operation, &mut nodes)
-            .and_then(|()| intent.validate_bindings(world, operation));
+        let validation = Topology::validate(intent, world, operation, &mut nodes)
+            .and_then(|()| Topology::validate_bindings(intent, world, operation));
         if let Err(error) = validation {
-            intent.refuse(world, operation, error);
+            Topology::refuse(world, operation, error);
             continue;
         }
-        intent.promote(world, operation, &mut promotions);
-        for archive in intent.pages(world) {
+        Topology::promote(world, operation, &mut promotions);
+        for archive in Topology::pages(intent.root, world) {
             let stack = world.get::<RestoreBinding>(archive).unwrap().live;
             world.trigger(vmux_ecs::page::ArchiveRestoreRequest { archive, stack });
             world.entity_mut(archive).insert(Transferred);
@@ -420,7 +442,7 @@ fn consume(
             .remove::<ScaffoldOwner>()
             .insert(vmux_ecs::store::PageRestore);
         if world.get::<vmux_ecs::Active>(archive).is_some() {
-            RestoreBinding::focus(world, stack);
+            Topology::focus(world, stack);
         }
         if let Some(launch) = page.launch {
             world.entity_mut(stack).insert(launch);
@@ -454,8 +476,8 @@ fn consume(
         let Some(intent) = world.get::<RestoreIntent>(operation).copied() else {
             continue;
         };
-        if !intent.pages(world).is_empty() {
-            intent.refuse(world, operation, "archive transfer target retired".into());
+        if !Topology::pages(intent.root, world).is_empty() {
+            Topology::refuse(world, operation, "archive transfer target retired".into());
             world.entity_mut(operation).remove::<Transferred>();
             continue;
         }
@@ -488,7 +510,7 @@ fn cleanup(
             if world.get_entity(node).is_err() {
                 continue;
             }
-            if intent.empty_scaffold(world, operation, node) {
+            if Topology::empty_scaffold(world, operation, node) {
                 world.despawn(node);
             } else {
                 world.entity_mut(node).remove::<ScaffoldOwner>();
@@ -514,12 +536,9 @@ fn cleanup(
     }
 }
 
-fn admit(
-    request: On<RestoreRequest>,
-    roots: Query<Option<&Claimed>, With<Root>>,
-    mut commands: Commands,
-) {
-    if roots
+fn admit(request: On<RestoreRequest>, topology: Topology, mut commands: Commands) {
+    if topology
+        .roots
         .get(request.root)
         .map_or(true, |claimed| claimed.is_some())
     {
@@ -566,7 +585,7 @@ fn preflight(world: &mut World, pending: &mut QueryState<Entity, With<Pending>>)
                 )
             });
         let error = if active {
-            intent.validate(world, operation, &mut nodes).err()
+            Topology::validate(intent, world, operation, &mut nodes).err()
         } else {
             Some("archive restore was canceled".into())
         };
@@ -590,13 +609,18 @@ fn preflight(world: &mut World, pending: &mut QueryState<Entity, With<Pending>>)
     }
 }
 
-impl RestoreIntent {
-    fn reattach(&self, world: &mut World, operation: Entity, leaf: Entity) -> Option<Entity> {
+impl Topology<'_, '_> {
+    fn reattach(
+        intent: RestoreIntent,
+        world: &mut World,
+        operation: Entity,
+        leaf: Entity,
+    ) -> Option<Entity> {
         let mut path = vec![leaf];
         let mut current = leaf;
         while let Some(parent) = world.get::<ChildOf>(current) {
             current = parent.parent();
-            if current == self.root {
+            if current == intent.root {
                 break;
             }
             path.push(current);
@@ -615,7 +639,7 @@ impl RestoreIntent {
             .collect::<Vec<_>>();
         let mut live = candidates
             .into_iter()
-            .find(|pane| Self::in_space(world, *pane, self.space))?;
+            .find(|pane| Self::in_space(world, *pane, intent.space))?;
         world
             .entity_mut(root)
             .insert(RestoreBinding { operation, live });
@@ -659,14 +683,14 @@ impl RestoreIntent {
                 let index = world
                     .get::<vmux_ecs::Order>(archive)
                     .map_or(usize::MAX, |order| order.0 as usize);
-                RestoreBinding::insert_at::<crate::pane::Pane>(world, live, child, index);
+                Self::insert_at::<crate::pane::Pane>(world, live, child, index);
                 live = child;
             }
             world
                 .entity_mut(archive)
                 .insert(RestoreBinding { operation, live });
         }
-        RestoreBinding::first_leaf(world, live)
+        Self::first_leaf(world, live)
     }
 
     fn direction(axis: vmux_ecs::SplitAxis) -> crate::pane::PaneSplitDirection {
@@ -677,7 +701,6 @@ impl RestoreIntent {
     }
 
     fn promote(
-        &self,
         world: &mut World,
         operation: Entity,
         promotions: &mut QueryState<(Entity, &Promotion, &Split)>,
@@ -712,7 +735,7 @@ impl RestoreIntent {
             for stack in stacks {
                 world.entity_mut(stack).insert(ChildOf(survivor));
             }
-            let target_order = Root::ordered_children(world, archive)
+            let target_order = Self::ordered_children(world, archive)
                 .into_iter()
                 .find_map(|child| {
                     world
@@ -722,7 +745,7 @@ impl RestoreIntent {
                         .map(|order| order.0)
                 })
                 .unwrap_or(1);
-            let slot = Root::ordered_children(world, archive)
+            let slot = Self::ordered_children(world, archive)
                 .into_iter()
                 .find(|child| {
                     world
@@ -735,7 +758,7 @@ impl RestoreIntent {
             world
                 .entity_mut(survivor)
                 .insert(crate::pane::PaneSize { flex_grow: weight });
-            RestoreBinding::insert_at::<crate::pane::Pane>(
+            Self::insert_at::<crate::pane::Pane>(
                 world,
                 live,
                 survivor,
@@ -748,7 +771,7 @@ impl RestoreIntent {
         }
     }
 
-    fn refuse(&self, world: &mut World, operation: Entity, error: String) {
+    fn refuse(world: &mut World, operation: Entity, error: String) {
         world
             .entity_mut(operation)
             .remove::<(Pending, Prepared, Allocated)>()
@@ -758,7 +781,7 @@ impl RestoreIntent {
             ));
     }
 
-    fn empty_scaffold(&self, world: &World, operation: Entity, node: Entity) -> bool {
+    fn empty_scaffold(world: &World, operation: Entity, node: Entity) -> bool {
         let mut nodes = vec![node];
         while let Some(node) = nodes.pop() {
             if world.get::<vmux_ecs::PageNavigation>(node).is_some() {
@@ -777,20 +800,24 @@ impl RestoreIntent {
         true
     }
 
-    fn pages(&self, world: &World) -> Vec<Entity> {
-        let mut nodes = vec![self.root];
+    fn pages(root: Entity, world: &World) -> Vec<Entity> {
+        let mut nodes = vec![root];
         let mut pages = Vec::new();
         while let Some(node) = nodes.pop() {
             if world.get::<vmux_ecs::ArchivedPage>(node).is_some() {
                 pages.push(node);
             }
-            nodes.extend(Root::ordered_children(world, node).into_iter().rev());
+            nodes.extend(Self::ordered_children(world, node).into_iter().rev());
         }
         pages
     }
 
-    fn validate_bindings(&self, world: &World, operation: Entity) -> Result<(), String> {
-        let pages = self.pages(world);
+    fn validate_bindings(
+        intent: RestoreIntent,
+        world: &World,
+        operation: Entity,
+    ) -> Result<(), String> {
+        let pages = Self::pages(intent.root, world);
         if pages.is_empty() {
             return Err("archive has no pages".into());
         }
@@ -802,7 +829,7 @@ impl RestoreIntent {
             if binding.operation != operation
                 || !targets.insert(binding.live)
                 || world.get::<crate::stack::Stack>(binding.live).is_none()
-                || !Self::in_space(world, binding.live, self.space)
+                || !Self::in_space(world, binding.live, intent.space)
                 || world
                     .get::<ScaffoldOwner>(binding.live)
                     .is_none_or(|owner| owner.0 != operation)
@@ -820,7 +847,7 @@ impl RestoreIntent {
     }
 
     fn validate(
-        &self,
+        intent: RestoreIntent,
         world: &mut World,
         operation: Entity,
         nodes: &mut QueryState<(
@@ -842,19 +869,19 @@ impl RestoreIntent {
         {
             return Err("archive restore was canceled".into());
         }
-        if world.get::<Root>(self.root).is_none()
+        if world.get::<Root>(intent.root).is_none()
             || world
-                .get::<Claimed>(self.root)
+                .get::<Claimed>(intent.root)
                 .is_none_or(|claim| claim.0 != operation)
         {
             return Err("archive identity or claim changed".into());
         }
-        if world.get::<crate::space::Space>(self.space).is_none()
-            || world.get::<Window>(self.window).is_none()
+        if world.get::<crate::space::Space>(intent.space).is_none()
+            || world.get::<Window>(intent.window).is_none()
         {
             return Err("archive restore Space or Window retired".into());
         }
-        let mut current = self.space;
+        let mut current = intent.space;
         let mut window = None;
         for _ in 0..128 {
             if let Some(host) = world.get::<bevy_cef::prelude::HostWindow>(current) {
@@ -865,14 +892,14 @@ impl RestoreIntent {
             };
             current = parent.parent();
         }
-        if window.is_some_and(|window| window != self.window) {
+        if window.is_some_and(|window| window != intent.window) {
             return Err("archive restore Space changed windows".into());
         }
-        self.validate_topology(world, nodes)
+        Self::validate_topology(intent.root, world, nodes)
     }
 
     fn validate_topology(
-        &self,
+        root: Entity,
         world: &World,
         topology: &mut QueryState<(
             Option<&Id>,
@@ -882,7 +909,7 @@ impl RestoreIntent {
             Has<Slot>,
         )>,
     ) -> Result<(), String> {
-        let mut nodes = vec![self.root];
+        let mut nodes = vec![root];
         let mut visited = std::collections::BTreeSet::new();
         let mut ids = std::collections::BTreeSet::new();
         let mut pages = 0;
@@ -898,7 +925,7 @@ impl RestoreIntent {
             {
                 return Err("archive node weight is invalid".into());
             }
-            if node != self.root && !slot && world.get::<vmux_ecs::ArchivedPage>(node).is_none() {
+            if node != root && !slot && world.get::<vmux_ecs::ArchivedPage>(node).is_none() {
                 let Some(id) = id else {
                     return Err("archive node identity is missing".into());
                 };
@@ -1046,33 +1073,47 @@ mod tests {
         }
     }
 
-    struct CancelRestorePlugin;
+    #[derive(Resource)]
+    struct CancelOnAllocated;
 
-    impl Plugin for CancelRestorePlugin {
+    #[derive(Resource)]
+    struct DisconnectOnAllocated;
+
+    #[derive(Resource)]
+    struct OccupyOnAllocated;
+
+    struct RestoreInterferencePlugin;
+
+    impl Plugin for RestoreInterferencePlugin {
         fn build(&self, app: &mut App) {
-            app.add_observer(cancel);
+            app.add_observer(cancel)
+                .add_observer(disconnect)
+                .add_observer(occupy);
         }
     }
 
-    fn cancel(added: On<Add, Allocated>, mut commands: Commands) {
+    fn cancel(
+        added: On<Add, Allocated>,
+        enabled: Option<Res<CancelOnAllocated>>,
+        mut commands: Commands,
+    ) {
+        if enabled.is_none() {
+            return;
+        }
         commands
             .entity(added.entity)
             .insert(vmux_ecs::OperationState::Canceled);
     }
 
-    struct PartialRestorePlugin;
-
-    impl Plugin for PartialRestorePlugin {
-        fn build(&self, app: &mut App) {
-            app.add_observer(disconnect);
-        }
-    }
-
     fn disconnect(
         added: On<Add, Allocated>,
+        enabled: Option<Res<DisconnectOnAllocated>>,
         pages: Query<(Entity, &RestoreBinding), With<vmux_ecs::ArchivedPage>>,
         mut commands: Commands,
     ) {
+        if enabled.is_none() {
+            return;
+        }
         for (page, binding) in &pages {
             if binding.operation == added.entity {
                 commands.entity(page).remove::<RestoreBinding>();
@@ -1081,19 +1122,15 @@ mod tests {
         }
     }
 
-    struct OccupyRestorePlugin;
-
-    impl Plugin for OccupyRestorePlugin {
-        fn build(&self, app: &mut App) {
-            app.add_observer(occupy);
-        }
-    }
-
     fn occupy(
         added: On<Add, Allocated>,
+        enabled: Option<Res<OccupyOnAllocated>>,
         pages: Query<&RestoreBinding, With<vmux_ecs::ArchivedPage>>,
         mut commands: Commands,
     ) {
+        if enabled.is_none() {
+            return;
+        }
         for binding in &pages {
             if binding.operation == added.entity {
                 commands.spawn((
@@ -1108,7 +1145,10 @@ mod tests {
     #[test]
     fn a_restore_target_adopted_by_another_owner_is_retained_without_overwriting_it() {
         let mut fixture = RestoreFixture::new();
-        fixture.app.add_plugins(OccupyRestorePlugin);
+        fixture
+            .app
+            .insert_resource(OccupyOnAllocated)
+            .add_plugins(RestoreInterferencePlugin);
         fixture.restore();
         assert!(
             fixture
@@ -1147,7 +1187,10 @@ mod tests {
     #[test]
     fn canceled_allocated_restore_retains_archive_and_removes_only_empty_scaffolding() {
         let mut fixture = RestoreFixture::new();
-        fixture.app.add_plugins(CancelRestorePlugin);
+        fixture
+            .app
+            .insert_resource(CancelOnAllocated)
+            .add_plugins(RestoreInterferencePlugin);
         fixture.restore();
         fixture.assert_retained();
     }
@@ -1155,7 +1198,10 @@ mod tests {
     #[test]
     fn incomplete_page_mapping_refuses_without_consuming_the_archive() {
         let mut fixture = RestoreFixture::new();
-        fixture.app.add_plugins(PartialRestorePlugin);
+        fixture
+            .app
+            .insert_resource(DisconnectOnAllocated)
+            .add_plugins(RestoreInterferencePlugin);
         fixture.restore();
         fixture.assert_retained();
     }

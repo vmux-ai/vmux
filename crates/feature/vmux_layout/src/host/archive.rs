@@ -2,20 +2,20 @@ use std::collections::HashSet;
 #[cfg(test)]
 use std::path::PathBuf;
 
-use bevy::ecs::system::SystemParam;
+use bevy::ecs::system::{Commands, SystemParam};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 #[cfg(test)]
 use bevy_cef::prelude::HostWindow;
 use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 #[cfg(test)]
+use vmux_ecs::PageOpenTarget;
+#[cfg(test)]
 use vmux_ecs::store::PageRestore;
 use vmux_ecs::store::StoreAppExt;
 use vmux_ecs::terminal::TerminalLaunch;
-#[cfg(test)]
-use vmux_ecs::{Active, PageOpenTarget};
 use vmux_ecs::{
-    ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
+    Active, ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
     PageMetadata, PageOpenRequest, PaneStep, SplitAxis, TabCommandSet, UnixMillis, WorkspaceKind,
 };
 #[cfg(test)]
@@ -182,7 +182,7 @@ fn capture_page(
     let Ok((intent, page, position)) = intents.get(request.operation) else {
         return;
     };
-    intent.spawn(page, position, &mut commands);
+    spawn_page_capture(intent, page, position, &mut commands);
     commands.entity(request.operation).despawn();
 }
 
@@ -192,7 +192,7 @@ fn capture(world: &mut World, tabs: &mut QueryState<(Entity, &TabCaptureIntent)>
         .map(|(operation, intent)| (operation, intent.tab))
         .collect::<Vec<_>>();
     for (operation, tab) in pending {
-        TabCaptureIntent::capture(world, tab);
+        capture_tab(world, tab);
         world.despawn(operation);
         world.flush();
     }
@@ -211,98 +211,103 @@ fn finish_tabs(pending: Query<(Entity, &PendingTabClose)>, mut commands: Command
     }
 }
 
-impl PageCaptureIntent {
-    fn spawn(&self, page: &ArchivedPage, position: &ArchivedPagePosition, commands: &mut Commands) {
-        let root = commands
-            .spawn((
-                topology::Root,
-                topology::Id(uuid::Uuid::new_v4().to_string()),
-                Name::new(page.title.clone()),
-                CreatedAt(page.closed_at),
-                topology::Origin {
-                    space_id: page.space_id.clone(),
-                    tab_index: page.tab_index,
-                },
-                topology::Materialized,
-            ))
-            .id();
-        let mut parent = root;
-        let validity = topology::Root::validate_position(position);
-        if validity.is_ok() {
-            for (depth, step) in position.pane_path.iter().enumerate() {
-                let (order, weight) = if depth == 0 {
-                    (0, 1.0)
-                } else {
-                    let previous = &position.pane_path[depth - 1];
-                    (
-                        previous.child_index as u32,
-                        previous.flex_weights[previous.child_index],
-                    )
-                };
-                let split = commands
-                    .spawn((
-                        topology::Id(step.split_id.clone()),
-                        topology::Split::new(step.axis),
-                        vmux_ecs::Order(order),
-                        topology::Weight(weight),
-                        ChildOf(parent),
-                    ))
-                    .id();
-                for (index, weight) in step.flex_weights.iter().enumerate() {
-                    if index != step.child_index {
-                        commands.spawn((
-                            topology::Slot,
-                            vmux_ecs::Order(index as u32),
-                            topology::Weight(*weight),
-                            ChildOf(split),
-                        ));
-                    }
-                }
-                parent = split;
-            }
-            let (order, weight) = position.pane_path.last().map_or((0, 1.0), |step| {
-                (step.child_index as u32, step.flex_weights[step.child_index])
-            });
-            let id = if position.leaf_pane_id.is_empty() {
-                uuid::Uuid::new_v4().to_string()
+fn spawn_page_capture(
+    intent: &PageCaptureIntent,
+    page: &ArchivedPage,
+    position: &ArchivedPagePosition,
+    commands: &mut Commands,
+) {
+    let root = commands
+        .spawn((
+            topology::Root,
+            topology::Id(uuid::Uuid::new_v4().to_string()),
+            Name::new(page.title.clone()),
+            CreatedAt(page.closed_at),
+            topology::Origin {
+                space_id: page.space_id.clone(),
+                tab_index: page.tab_index,
+            },
+            topology::Materialized,
+        ))
+        .id();
+    let mut parent = root;
+    let validity = topology::Root::validate_position(position);
+    if validity.is_ok() {
+        for (depth, step) in position.pane_path.iter().enumerate() {
+            let (order, weight) = if depth == 0 {
+                (0, 1.0)
             } else {
-                position.leaf_pane_id.clone()
+                let previous = &position.pane_path[depth - 1];
+                (
+                    previous.child_index as u32,
+                    previous.flex_weights[previous.child_index],
+                )
             };
-            parent = commands
+            let split = commands
                 .spawn((
-                    topology::Leaf,
-                    topology::Id(id),
+                    topology::Id(step.split_id.clone()),
+                    topology::Split::new(step.axis),
                     vmux_ecs::Order(order),
                     topology::Weight(weight),
                     ChildOf(parent),
                 ))
                 .id();
+            for (index, weight) in step.flex_weights.iter().enumerate() {
+                if index != step.child_index {
+                    commands.spawn((
+                        topology::Slot,
+                        vmux_ecs::Order(index as u32),
+                        topology::Weight(*weight),
+                        ChildOf(split),
+                    ));
+                }
+            }
+            parent = split;
         }
-        let archive = commands
+        let (order, weight) = position.pane_path.last().map_or((0, 1.0), |step| {
+            (step.child_index as u32, step.flex_weights[step.child_index])
+        });
+        let id = if position.leaf_pane_id.is_empty() {
+            uuid::Uuid::new_v4().to_string()
+        } else {
+            position.leaf_pane_id.clone()
+        };
+        parent = commands
             .spawn((
-                page.clone(),
+                topology::Leaf,
+                topology::Id(id),
+                vmux_ecs::Order(order),
+                topology::Weight(weight),
                 ChildOf(parent),
-                vmux_ecs::Order(position.stack_index as u32),
-                vmux_ecs::Active,
-                topology::Materialized,
             ))
             .id();
-        if let Err(error) = validity {
-            commands
-                .entity(root)
-                .insert(topology::InvalidTopology(error.clone()));
-            commands
-                .entity(archive)
-                .insert((topology::InvalidTopology(error), position.clone()));
-        }
-        if let Some(workspace) = self.workspace {
-            commands.entity(archive).insert(workspace);
-        }
-        if let Some(source) = self.source {
-            commands.trigger(vmux_ecs::page::ArchiveCaptureRequest { archive, source });
-        }
     }
+    let archive = commands
+        .spawn((
+            page.clone(),
+            ChildOf(parent),
+            vmux_ecs::Order(position.stack_index as u32),
+            Active,
+            topology::Materialized,
+        ))
+        .id();
+    if let Err(error) = validity {
+        commands
+            .entity(root)
+            .insert(topology::InvalidTopology(error.clone()));
+        commands
+            .entity(archive)
+            .insert((topology::InvalidTopology(error), position.clone()));
+    }
+    if let Some(workspace) = intent.workspace {
+        commands.entity(archive).insert(workspace);
+    }
+    if let Some(source) = intent.source {
+        commands.trigger(vmux_ecs::page::ArchiveCaptureRequest { archive, source });
+    }
+}
 
+impl PageCaptureIntent {
     fn new(
         request: &PageArchiveRequest,
         closed_at: i64,
@@ -333,155 +338,151 @@ impl PageCaptureIntent {
     }
 }
 
-impl TabCaptureIntent {
-    fn capture(world: &mut World, tab: Entity) {
-        let Some(root) = Self::root(world, tab) else {
-            return;
-        };
-        let mut state = bevy::ecs::system::SystemState::<TabArchiveLayout>::new(world);
-        let mut pending = vec![(tab, root)];
-        let mut active = None;
-        while let Some((live_parent, archive_parent)) = pending.pop() {
-            if live_parent != tab && world.get::<PaneSplit>(live_parent).is_none() {
-                Self::capture_pages(
-                    world,
-                    &mut state,
-                    root,
-                    live_parent,
-                    archive_parent,
-                    &mut active,
-                );
-                continue;
-            }
-            let children = world
-                .get::<Children>(live_parent)
-                .map(|children| {
-                    children
-                        .iter()
-                        .filter(|child| world.get::<Pane>(*child).is_some())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            for (index, live) in children.into_iter().enumerate().rev() {
-                let id = world
-                    .get::<PaneId>(live)
-                    .map(|id| id.0.clone())
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                let weight = world
-                    .get::<PaneSize>(live)
-                    .map_or(1.0, |size| size.flex_grow);
-                let axis = world
-                    .get::<PaneSplit>(live)
-                    .map(|split| match split.direction {
-                        PaneSplitDirection::Row => SplitAxis::Row,
-                        PaneSplitDirection::Column => SplitAxis::Column,
-                    });
-                let archive = world
-                    .spawn((
-                        topology::Id(id),
-                        topology::Weight(weight),
-                        vmux_ecs::Order(index as u32),
-                        ChildOf(archive_parent),
-                    ))
-                    .id();
-                if let Some(axis) = axis {
-                    world.entity_mut(archive).insert(topology::Split::new(axis));
-                } else {
-                    world.entity_mut(archive).insert(topology::Leaf);
-                }
-                pending.push((live, archive));
-            }
+fn capture_tab(world: &mut World, tab: Entity) {
+    let Some(root) = spawn_tab_root(world, tab) else {
+        return;
+    };
+    let mut state = bevy::ecs::system::SystemState::<TabArchiveLayout>::new(world);
+    let mut pending = vec![(tab, root)];
+    let mut active = None;
+    while let Some((live_parent, archive_parent)) = pending.pop() {
+        if live_parent != tab && world.get::<PaneSplit>(live_parent).is_none() {
+            capture_tab_pages(
+                world,
+                &mut state,
+                root,
+                live_parent,
+                archive_parent,
+                &mut active,
+            );
+            continue;
         }
-        if let Some((page, _)) = active {
-            world.entity_mut(page).insert(vmux_ecs::Active);
-        } else {
-            world.despawn(root);
-        }
-        world.flush();
-    }
-
-    fn root(world: &mut World, tab: Entity) -> Option<Entity> {
-        let metadata = world.get::<Tab>(tab)?;
-        let name = metadata.name.clone();
-        let directory = metadata.startup_dir.clone();
-        let space = world.get::<ChildOf>(tab)?.parent();
-        let space_id = world.get::<SpaceId>(space)?.0.clone();
-        let index = world
-            .get::<Children>(space)?
-            .iter()
-            .filter(|child| world.get::<Tab>(*child).is_some())
-            .position(|child| child == tab);
-        Some(
-            world
-                .spawn((
-                    topology::Root,
-                    topology::TabGroup,
-                    topology::Materialized,
-                    topology::Id(uuid::Uuid::new_v4().to_string()),
-                    Name::new(name),
-                    topology::TabDirectory(directory),
-                    CreatedAt(UnixMillis::now().0),
-                    topology::Origin {
-                        space_id,
-                        tab_index: index,
-                    },
-                ))
-                .id(),
-        )
-    }
-
-    fn capture_pages(
-        world: &mut World,
-        state: &mut bevy::ecs::system::SystemState<TabArchiveLayout>,
-        root: Entity,
-        live: Entity,
-        archive: Entity,
-        active: &mut Option<(Entity, i64)>,
-    ) {
-        let stacks = world
-            .get::<Children>(live)
+        let children = world
+            .get::<Children>(live_parent)
             .map(|children| {
                 children
                     .iter()
-                    .filter(|stack| {
-                        world.get::<Stack>(*stack).is_some()
-                            && world.get::<Retiring>(*stack).is_none()
-                    })
+                    .filter(|child| world.get::<Pane>(*child).is_some())
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        for (index, stack) in stacks.into_iter().enumerate() {
-            let request = state.get(world).unwrap().request_page(stack, true);
-            let Some(request) = request else {
-                continue;
-            };
-            let closed_at = world.get::<CreatedAt>(root).unwrap().0;
-            let Some((intent, metadata, _)) = PageCaptureIntent::new(&request, closed_at, true)
-            else {
-                continue;
-            };
-            let activated = world.get::<LastActivatedAt>(stack).map_or(0, |time| time.0);
-            let page = world
+        for (index, live) in children.into_iter().enumerate().rev() {
+            let id = world
+                .get::<PaneId>(live)
+                .map(|id| id.0.clone())
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let weight = world
+                .get::<PaneSize>(live)
+                .map_or(1.0, |size| size.flex_grow);
+            let axis = world
+                .get::<PaneSplit>(live)
+                .map(|split| match split.direction {
+                    PaneSplitDirection::Row => SplitAxis::Row,
+                    PaneSplitDirection::Column => SplitAxis::Column,
+                });
+            let archive = world
                 .spawn((
-                    metadata,
-                    topology::Materialized,
+                    topology::Id(id),
+                    topology::Weight(weight),
                     vmux_ecs::Order(index as u32),
-                    ChildOf(archive),
+                    ChildOf(archive_parent),
                 ))
                 .id();
-            if active.is_none_or(|(_, time)| activated >= time) {
-                *active = Some((page, activated));
+            if let Some(axis) = axis {
+                world.entity_mut(archive).insert(topology::Split::new(axis));
+            } else {
+                world.entity_mut(archive).insert(topology::Leaf);
             }
-            if let Some(workspace) = intent.workspace {
-                world.entity_mut(page).insert(workspace);
-            }
-            if let Some(source) = request.source {
-                world.trigger(vmux_ecs::page::ArchiveCaptureRequest {
-                    archive: page,
-                    source,
-                });
-                world.flush();
-            }
+            pending.push((live, archive));
+        }
+    }
+    if let Some((page, _)) = active {
+        world.entity_mut(page).insert(Active);
+    } else {
+        world.despawn(root);
+    }
+    world.flush();
+}
+
+fn spawn_tab_root(world: &mut World, tab: Entity) -> Option<Entity> {
+    let metadata = world.get::<Tab>(tab)?;
+    let name = metadata.name.clone();
+    let directory = metadata.startup_dir.clone();
+    let space = world.get::<ChildOf>(tab)?.parent();
+    let space_id = world.get::<SpaceId>(space)?.0.clone();
+    let index = world
+        .get::<Children>(space)?
+        .iter()
+        .filter(|child| world.get::<Tab>(*child).is_some())
+        .position(|child| child == tab);
+    Some(
+        world
+            .spawn((
+                topology::Root,
+                topology::TabGroup,
+                topology::Materialized,
+                topology::Id(uuid::Uuid::new_v4().to_string()),
+                Name::new(name),
+                topology::TabDirectory(directory),
+                CreatedAt(UnixMillis::now().0),
+                topology::Origin {
+                    space_id,
+                    tab_index: index,
+                },
+            ))
+            .id(),
+    )
+}
+
+fn capture_tab_pages(
+    world: &mut World,
+    state: &mut bevy::ecs::system::SystemState<TabArchiveLayout>,
+    root: Entity,
+    live: Entity,
+    archive: Entity,
+    active: &mut Option<(Entity, i64)>,
+) {
+    let stacks = world
+        .get::<Children>(live)
+        .map(|children| {
+            children
+                .iter()
+                .filter(|stack| {
+                    world.get::<Stack>(*stack).is_some() && world.get::<Retiring>(*stack).is_none()
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for (index, stack) in stacks.into_iter().enumerate() {
+        let request = state.get(world).unwrap().request_page(stack, true);
+        let Some(request) = request else {
+            continue;
+        };
+        let closed_at = world.get::<CreatedAt>(root).unwrap().0;
+        let Some((intent, metadata, _)) = PageCaptureIntent::new(&request, closed_at, true) else {
+            continue;
+        };
+        let activated = world.get::<LastActivatedAt>(stack).map_or(0, |time| time.0);
+        let page = world
+            .spawn((
+                metadata,
+                topology::Materialized,
+                vmux_ecs::Order(index as u32),
+                ChildOf(archive),
+            ))
+            .id();
+        if active.is_none_or(|(_, time)| activated >= time) {
+            *active = Some((page, activated));
+        }
+        if let Some(workspace) = intent.workspace {
+            world.entity_mut(page).insert(workspace);
+        }
+        if let Some(source) = request.source {
+            world.trigger(vmux_ecs::page::ArchiveCaptureRequest {
+                archive: page,
+                source,
+            });
+            world.flush();
         }
     }
 }
