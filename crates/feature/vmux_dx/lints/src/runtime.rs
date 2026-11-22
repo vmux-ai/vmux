@@ -46,10 +46,10 @@ impl crate::VmuxExportedSystem<'_> {
         if !function.is_local() {
             return;
         }
-        let mut caller = expression.hir_id.owner.def_id.to_def_id();
-        while cx.tcx.def_kind(caller) == DefKind::Closure {
-            caller = cx.tcx.parent(caller);
-        }
+        let caller = cx
+            .tcx
+            .hir_enclosing_body_owner(expression.hir_id)
+            .to_def_id();
         if caller != *function {
             self.helper_callers
                 .entry(*function)
@@ -210,10 +210,18 @@ impl crate::VmuxExportedSystem<'_> {
         let Some(callers) = self.helper_callers.get(&function) else {
             return false;
         };
-        if callers.len() != 1 {
+        let mut owners = HashSet::new();
+        for caller in callers {
+            let mut caller = *caller;
+            while cx.tcx.def_kind(caller) == DefKind::Closure && !self.systems.contains(&caller) {
+                caller = cx.tcx.parent(caller);
+            }
+            owners.insert(caller);
+        }
+        if owners.len() != 1 {
             return false;
         }
-        let caller = *callers.iter().next().unwrap();
+        let caller = *owners.iter().next().unwrap();
         if cx.tcx.parent_module_from_def_id(caller.expect_local())
             != cx.tcx.parent_module_from_def_id(function.expect_local())
         {

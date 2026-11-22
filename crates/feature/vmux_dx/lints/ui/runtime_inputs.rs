@@ -36,6 +36,13 @@ fn unregistered(input: Inputs) {
 
 fn generic<T: SystemParam>(_: T) {}
 
+fn captured(_: Inputs) {}
+
+fn disconnected(input: Inputs) {
+    let invoke = || captured(input);
+    invoke();
+}
+
 fn first(input: Inputs) {
     shared(input);
 }

@@ -365,6 +365,9 @@ impl<'tcx> VmuxExportedSystem<'tcx> {
 
     fn system_type(&mut self, cx: &LateContext<'tcx>, ty: Ty<'tcx>) {
         match ty.kind() {
+            TyKind::Closure(function, _) => {
+                self.systems.insert(*function);
+            }
             TyKind::FnDef(function, arguments) => {
                 self.ownership
                     .system(cx, *function, arguments.skip_binder());

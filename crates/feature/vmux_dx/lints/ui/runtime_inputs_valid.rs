@@ -5,6 +5,17 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
 #[derive(Component)]
+#[component(on_insert = renew)]
+#[relationship(relationship_target = Views)]
+struct Binding(Entity);
+
+#[derive(Component)]
+#[relationship_target(relationship = Binding)]
+struct Views(Vec<Entity>);
+
+fn renew(_: bevy_ecs::world::DeferredWorld, _: bevy_ecs::lifecycle::HookContext) {}
+
+#[derive(Component)]
 struct State;
 
 type Inputs<'w, 's> = Query<'w, 's, &'static State>;
