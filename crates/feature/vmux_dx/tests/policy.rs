@@ -4352,10 +4352,448 @@ fn outlined_binary_children_use_their_resolved_logical_parent() {
 }
 
 #[test]
+fn generated_query_data_ownership_respects_fields_namespaces_and_real_registration() {
+    let cases = [
+        (
+            "mutable",
+            "#[derive(QueryData)] #[query_data(mutable)] struct View { position:&'static mut Position }",
+            "View",
+            "ViewItem",
+            true,
+        ),
+        (
+            "readonly_only",
+            "#[derive(QueryData)] #[query_data(mutable)] struct View { position:&'static mut Position }",
+            "ViewReadOnly",
+            "ViewReadOnlyItem",
+            true,
+        ),
+        (
+            "nested",
+            "#[derive(QueryData)] #[query_data(mutable)] struct Inner { position:&'static mut Position } #[derive(QueryData)] #[query_data(mutable)] struct View { inner:Inner, optional:Option<&'static mut Position> }",
+            "ViewReadOnly",
+            "ViewReadOnlyItem",
+            true,
+        ),
+        (
+            "tuple",
+            "#[derive(QueryData)] struct View(&'static Position, Option<&'static Position>);",
+            "View",
+            "ViewItem",
+            true,
+        ),
+        (
+            "repeated_readonly_alias_tuple",
+            "type Alias = &'static Position; #[derive(QueryData)] struct View { pair:(Alias,Alias) }",
+            "View",
+            "ViewItem",
+            true,
+        ),
+        (
+            "foreign_hierarchy_and_name",
+            "#[derive(QueryData)] struct View { parent:&'static ChildOf, name:&'static Name, children:Option<&'static Children> }",
+            "View",
+            "ViewItem",
+            true,
+        ),
+        (
+            "shadow_foreign_component",
+            "struct ChildOf { value:u32 } #[derive(QueryData)] struct View { parent:&'static ChildOf }",
+            "View",
+            "ViewItem",
+            false,
+        ),
+        (
+            "wrong_foreign_component_namespace",
+            "use bevy_ecs::entity::ChildOf as Parent; #[derive(QueryData)] struct View { parent:&'static Parent }",
+            "View",
+            "ViewItem",
+            false,
+        ),
+        (
+            "empty",
+            "#[derive(QueryData)] struct View;",
+            "View",
+            "ViewItem",
+            true,
+        ),
+        (
+            "derive_alias",
+            "use bevy_ecs::query::QueryData as Data; #[derive(Data)] struct View { position:&'static Position }",
+            "View",
+            "ViewItem",
+            true,
+        ),
+        (
+            "query_alias",
+            "#[derive(QueryData)] #[query_data(mutable)] struct View { position:&'static mut Position } type Read = ViewReadOnly;",
+            "Read",
+            "ViewReadOnlyItem",
+            true,
+        ),
+        (
+            "item_alias",
+            "#[derive(QueryData)] struct View { position:&'static Position } type Row<'w,'s> = ViewItem<'w,'s>;",
+            "View",
+            "Row",
+            true,
+        ),
+        (
+            "owned",
+            "#[derive(QueryData)] struct View { position:Position }",
+            "View",
+            "ViewItem",
+            false,
+        ),
+        (
+            "owned_engine",
+            "struct Engine { rows:Vec<Position> } #[derive(QueryData)] struct View { engine:Engine }",
+            "View",
+            "ViewItem",
+            false,
+        ),
+        (
+            "borrowed_wrapped_engine",
+            "struct Row { id:u32 } #[derive(Component)] struct WrappedEngine { rows:Vec<Row> } #[derive(QueryData)] struct View { engine:&'static WrappedEngine }",
+            "View",
+            "ViewItem",
+            false,
+        ),
+        (
+            "opaque",
+            "#[derive(QueryData)] struct View { engine:Box<dyn Send> }",
+            "View",
+            "ViewItem",
+            false,
+        ),
+        (
+            "borrowed_plain",
+            "struct Plain { value:u32 } #[derive(QueryData)] struct View { value:&'static Plain }",
+            "View",
+            "ViewItem",
+            false,
+        ),
+        (
+            "immutable_mut",
+            "#[derive(QueryData)] struct View { position:&'static mut Position }",
+            "View",
+            "ViewItem",
+            false,
+        ),
+        (
+            "fake_derive",
+            "mod fake {pub struct QueryData;} use fake::QueryData as Data; #[derive(Data)] struct View { position:&'static Position }",
+            "View",
+            "ViewItem",
+            false,
+        ),
+        (
+            "shadow_derive",
+            "struct QueryData; #[derive(QueryData)] struct View { position:&'static Position }",
+            "View",
+            "ViewItem",
+            false,
+        ),
+        (
+            "collision",
+            "#[derive(QueryData)] struct View { position:&'static Position } struct ViewItem<'w,'s> { data:&'w Position, marker:std::marker::PhantomData<&'s()> }",
+            "View",
+            "ViewItem",
+            false,
+        ),
+        (
+            "item_as_descriptor",
+            "#[derive(QueryData)] struct View { position:&'static Position }",
+            "ViewItem<'static,'static>",
+            "ViewItem",
+            false,
+        ),
+        (
+            "item_as_resource",
+            "#[derive(QueryData)] struct View { position:&'static Position }",
+            "&Position",
+            "ViewItem",
+            false,
+        ),
+        (
+            "invalid_option",
+            "#[derive(QueryData)] #[query_data(unknown)] struct View { position:&'static Position }",
+            "View",
+            "ViewItem",
+            false,
+        ),
+    ];
+    for (name, declarations, query, owner, expected) in cases {
+        let source = format!(
+            "use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use bevy_ecs::query::QueryData; #[derive(Component)] struct Position {{value:u32}} {declarations} impl {owner}<'_, '_> {{ fn count(&self)->u32 {{ 1 }} }} fn read(rows:Query<{query}>) {{}} struct RootPlugin; impl Plugin for RootPlugin {{ fn build(&self,app:&mut App) {{ app.add_systems(Update,read); }} }}"
+        );
+        let inventory = Inventory::fixture(&source);
+        let entry = inventory.entries.values().find(|entry| matches!(&entry.implemented_type, Some(Type::Path(value)) if value.path.segments.last().is_some_and(|segment| segment.ident == owner))).unwrap();
+        assert_eq!(
+            inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()),
+            expected,
+            "{name}"
+        );
+    }
+    for (app, plugin) in [("struct App;", ""), ("", "struct Plugin;")] {
+        let source = format!(
+            "use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use bevy_ecs::query::QueryData; {app} {plugin} #[derive(Component)] struct Position {{value:u32}} #[derive(QueryData)] struct View {{position:&'static Position}} impl ViewItem<'_, '_>{{ fn count(&self)->u32{{1}} }} fn read(rows:Query<View>){{}} struct RootPlugin; impl Plugin for RootPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,read);}}}}"
+        );
+        let inventory = Inventory::fixture(&source);
+        let entry = inventory.entries.values().find(|entry| matches!(&entry.implemented_type, Some(Type::Path(value)) if value.path.segments.last().is_some_and(|segment| segment.ident == "ViewItem"))).unwrap();
+        assert!(!inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()));
+    }
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::*; use bevy_ecs::query::QueryData; #[derive(Component)] struct Position{value:u32} #[derive(QueryData)] struct View{position:&'static Position} fn legitimate(rows:Query<View>){} fn misuse(rows:Query<ViewItem<'static,'static>>){} struct RootPlugin; impl Plugin for RootPlugin{fn build(&self,app:&mut App){app.add_systems(Update,(legitimate,misuse));}}",
+    );
+    for (function, expected) in [("legitimate", true), ("misuse", false)] {
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key(&format!("fn:{function}"))],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            expected
+        );
+    }
+}
+
+#[cfg(test)]
+mod query_data_behavior_oracle {
+    use bevy_app::{App, Plugin, Update};
+    use bevy_ecs::prelude::{
+        ChildOf, Component, IntoScheduleConfigs, Name, Query, ResMut, Resource,
+    };
+    use bevy_ecs::query::QueryData;
+
+    #[derive(Component)]
+    struct Counter(i32);
+
+    #[derive(Component)]
+    struct Offset(i32);
+
+    #[derive(QueryData)]
+    #[query_data(mutable)]
+    struct Inner {
+        counter: &'static mut Counter,
+    }
+
+    #[derive(QueryData)]
+    #[query_data(mutable)]
+    struct View {
+        inner: Inner,
+        offset: Option<&'static Offset>,
+        parent: Option<&'static ChildOf>,
+        name: Option<&'static Name>,
+    }
+
+    impl ViewItem<'_, '_> {
+        fn advance(&mut self) {
+            self.inner.counter.0 += self.offset.map_or(1, |offset| offset.0);
+        }
+    }
+
+    impl ViewReadOnlyItem<'_, '_> {
+        fn observed(&self) -> i32 {
+            self.inner.counter.0
+        }
+    }
+
+    fn advance(mut views: Query<View>) {
+        for mut view in &mut views {
+            view.advance();
+        }
+    }
+
+    #[derive(Resource, Default)]
+    struct Observed(Vec<i32>);
+
+    fn observe(views: Query<ViewReadOnly>, mut observed: ResMut<Observed>) {
+        observed.0.clear();
+        for view in &views {
+            observed.0.push(view.observed());
+        }
+        observed.0.sort_unstable();
+    }
+
+    struct OwnerPlugin;
+
+    impl Plugin for OwnerPlugin {
+        fn build(&self, app: &mut App) {
+            app.init_resource::<Observed>()
+                .add_systems(Update, (advance, observe).chain());
+        }
+    }
+
+    #[test]
+    fn real_bevy_query_data_item_mutation_and_readonly_projection_agree() {
+        let mut app = App::new();
+        app.add_plugins(OwnerPlugin);
+        let parent = app.world_mut().spawn_empty().id();
+        let first = app
+            .world_mut()
+            .spawn((Counter(10), Offset(3), ChildOf(parent), Name::new("first")))
+            .id();
+        let second = app.world_mut().spawn(Counter(20)).id();
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<Observed>().0, vec![16, 22]);
+        let mut query = app.world_mut().query::<ViewReadOnly>();
+        let view = query.get(app.world(), first).unwrap();
+        assert_eq!(view.parent.unwrap().parent(), parent);
+        assert_eq!(view.name.unwrap().as_str(), "first");
+        assert_eq!(app.world().get::<Counter>(first).unwrap().0, 16);
+        assert_eq!(app.world().get::<Counter>(second).unwrap().0, 22);
+        assert_eq!(app.world().get::<Offset>(first).unwrap().0, 3);
+    }
+}
+
+#[test]
+fn generated_query_data_binds_type_and_const_arguments_without_owned_engines() {
+    for (argument, expected) in [
+        ("Position", true),
+        ("Plain", false),
+        ("WrappedEngine", false),
+    ] {
+        let source = format!(
+            "use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use bevy_ecs::query::QueryData; #[derive(Component)] struct Position{{value:u32}} struct Plain{{value:u32}} struct Row{{id:u32}} #[derive(Component)] struct WrappedEngine{{rows:Vec<Row>}} #[derive(Component)] struct Slot<const N:usize>([u8;N]); #[derive(QueryData)] struct View<T:Component,const N:usize> {{position:&'static T,slot:&'static Slot<N>}} impl ViewItem<'_, '_, {argument}, 3>{{fn count(&self)->u32{{1}}}} fn read(rows:Query<View<Position,3>>){{}} struct RootPlugin; impl Plugin for RootPlugin{{fn build(&self,app:&mut App){{app.add_systems(Update,read);}}}}"
+        );
+        let inventory = Inventory::fixture(&source);
+        let entry = inventory.entries.values().find(|entry| matches!(&entry.implemented_type, Some(Type::Path(value)) if value.path.segments.last().is_some_and(|segment| segment.ident == "ViewItem"))).unwrap();
+        assert_eq!(
+            inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()),
+            expected,
+            "{argument}"
+        );
+    }
+}
+
+#[test]
+fn generated_query_data_name_collisions_and_wrong_namespaces_fail_closed() {
+    let source = "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::*; mod first {use bevy_ecs::prelude::*; use bevy_ecs::query::QueryData; #[derive(Component)] pub struct Position{value:u32} #[derive(QueryData)] pub struct View{position:&'static Position}} mod second {use bevy_ecs::prelude::*; use bevy_ecs::query::QueryData; #[derive(Component)] pub struct Position{value:u32} #[derive(QueryData)] pub struct View{position:&'static Position}} impl second::ViewItem<'_, '_>{fn count(&self)->u32{1}} fn read(rows:Query<first::View>){} struct RootPlugin; impl Plugin for RootPlugin{fn build(&self,app:&mut App){app.add_systems(Update,read);}}";
+    let inventory = Inventory::fixture(source);
+    let entry = inventory.entries.values().find(|entry| matches!(&entry.implemented_type, Some(Type::Path(value)) if value.path.segments.last().is_some_and(|segment| segment.ident == "ViewItem"))).unwrap();
+    assert!(!inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()));
+    let collision = Inventory::fixture(
+        "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::*; use bevy_ecs::query::QueryData; #[derive(Component)] struct Position{value:u32} #[derive(QueryData)] struct View{position:&'static Position} #[derive(Component)] struct ViewItem{owned:Vec<Position>} fn read(rows:Query<View>){} struct RootPlugin; impl Plugin for RootPlugin{fn build(&self,app:&mut App){app.add_systems(Update,read);}}",
+    );
+    assert!(
+        Policy::default()
+            .audit(&collision)
+            .iter()
+            .any(|error| error.contains("generated QueryData identity collides"))
+    );
+}
+
+#[test]
+fn generated_query_data_associations_invalidate_missing_owner_cache() {
+    let mut inventory = Inventory::default();
+    inventory.source("crates/util/fixture/src/lib.rs", "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::*; use bevy_ecs::system::Query; use crate::data::*; mod data; fn read(rows:Query<View>){} struct RootPlugin; impl Plugin for RootPlugin{fn build(&self,app:&mut App){app.add_systems(Update,read);}}");
+    inventory.resolve_usage();
+    assert!(
+        inventory
+            .resolve("fixture::data", "ViewItem", &mut BTreeSet::new())
+            .is_none()
+    );
+    inventory.source("crates/util/fixture/src/data.rs", "use bevy_ecs::prelude::*; use bevy_ecs::query::QueryData; #[derive(Component)] pub struct Position{value:u32} #[derive(QueryData)] pub struct View{position:&'static Position} impl ViewItem<'_, '_>{fn count(&self)->u32{1}}");
+    inventory.resolve_usage();
+    let item = inventory
+        .resolve("fixture::data", "ViewItem", &mut BTreeSet::new())
+        .unwrap();
+    assert!(inventory.canonical(item, &Policy::default(), &mut BTreeSet::new()));
+}
+
+#[test]
+fn generated_query_data_projects_aliases_from_the_resolved_namespace() {
+    for reverse in [false, true] {
+        let mut source = vec![
+            (
+                "crates/util/fixture/src/lib.rs",
+                "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::*; use bevy_ecs::query::QueryData; mod data; use data::Inner as Alias; #[derive(Component)] pub struct Position { pub value:u32 } #[derive(QueryData)] #[query_data(mutable)] struct View { inner:Alias } impl ViewReadOnlyItem<'_, '_> { fn count(&self)->u32 { self.inner.position.value } } fn read(rows:Query<ViewReadOnly>){} struct RootPlugin; impl Plugin for RootPlugin{fn build(&self,app:&mut App){app.add_systems(Update,read);}}",
+            ),
+            (
+                "crates/util/fixture/src/data.rs",
+                "use bevy_ecs::query::QueryData; use crate::Position; #[derive(QueryData)] #[query_data(mutable)] pub struct Inner { pub position:&'static mut Position }",
+            ),
+        ];
+        if reverse {
+            source.reverse();
+        }
+        let mut inventory = Inventory::default();
+        for (path, source) in source {
+            inventory.source(path, source);
+        }
+        inventory.resolve_usage();
+        let entry = inventory.entries.values().find(|entry| matches!(&entry.implemented_type, Some(Type::Path(value)) if value.path.segments.last().is_some_and(|segment| segment.ident == "ViewReadOnlyItem"))).unwrap();
+        assert!(
+            inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()),
+            "reverse={reverse}"
+        );
+        let generated = inventory
+            .resolve("fixture", "ViewReadOnlyItem", &mut BTreeSet::new())
+            .unwrap();
+        let nested = &generated.field_types[0];
+        assert!(inventory.borrowed_type(
+            &generated.namespace,
+            nested,
+            &inventory.entries[&inventory.key("struct:Position")],
+            true,
+            false,
+            &mut BTreeSet::new()
+        ));
+    }
+}
+
+#[test]
+fn query_data_generated_item_methods_require_the_actual_used_descriptor() {
+    for (derive, options, query, owner, expected) in [
+        (
+            "QueryData",
+            "#[query_data(mutable)]",
+            "View",
+            "ViewItem",
+            true,
+        ),
+        (
+            "QueryData",
+            "#[query_data(mutable)]",
+            "ViewReadOnly",
+            "ViewReadOnlyItem",
+            true,
+        ),
+        ("QueryData", "", "View", "ViewItem", true),
+        ("QueryData", "", "View", "ViewReadOnlyItem", false),
+        ("", "", "View", "ViewItem", false),
+        (
+            "QueryData",
+            "#[query_data(mutable)]",
+            "&Position",
+            "ViewItem",
+            false,
+        ),
+    ] {
+        let derive = if derive.is_empty() {
+            String::new()
+        } else {
+            format!("#[derive({derive})]")
+        };
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_app::{{App,Plugin,Update}}; use bevy_ecs::prelude::*; use bevy_ecs::query::QueryData; #[derive(Component)] struct Position {{ value:u32 }} {derive} {options} struct View {{ position:&'static Position }} impl {owner}<'_, '_> {{ fn value(&self)->u32 {{ self.position.value }} }} fn read(rows:Query<{query}>) {{}} struct RootPlugin; impl Plugin for RootPlugin {{ fn build(&self,app:&mut App) {{ app.add_systems(Update,read); }} }}"
+        ));
+        let entry = inventory.entries.values().find(|entry| matches!(&entry.implemented_type, Some(Type::Path(value)) if value.path.segments.last().is_some_and(|segment| segment.ident == owner))).expect("declared generated Item implementation");
+        assert_eq!(
+            inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()),
+            expected,
+            "{derive} {options} {query} {owner}"
+        );
+    }
+}
+
+#[test]
 fn query_data_is_owned_only_through_registered_queries() {
     for (registered, suffix) in [(true, "struct:View"), (false, "struct:Unused")] {
         let source = if registered {
-            "use bevy_ecs::query::QueryData; #[derive(Component)] struct Position { x:f32 } #[derive(QueryData)] struct View { position:&'static Position } fn read(rows:Query<View>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } }"
+            "use bevy_app::{App,Plugin,Update}; use bevy_ecs::prelude::*; use bevy_ecs::query::QueryData; #[derive(Component)] struct Position { x:f32 } #[derive(QueryData)] struct View { position:&'static Position } fn read(rows:Query<View>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } }"
         } else {
             "use bevy_ecs::query::QueryData; #[derive(QueryData)] struct Unused { value:&'static String }"
         };
@@ -6378,6 +6816,9 @@ impl Policy {
             }
         }
         for entry in inventory.entries.values() {
+            if entry.generated_query.is_some() {
+                continue;
+            }
             if legacy_by_key
                 .get(entry.key.as_str())
                 .is_some_and(|fingerprint| *fingerprint == entry.fingerprint)
@@ -6392,6 +6833,11 @@ impl Policy {
             }
         }
         errors.extend(self.shape.audit(inventory, self));
+        for symbol in &inventory.generated_collisions {
+            errors.push(format!(
+                "generated QueryData identity collides with a source declaration: {symbol}"
+            ));
+        }
         errors
     }
 
@@ -7355,6 +7801,7 @@ struct BodyException {
     reason: String,
 }
 
+#[derive(Clone)]
 struct EnumShape {
     variants: usize,
     payloads: usize,
@@ -7428,6 +7875,7 @@ impl EnumShape {
     }
 }
 
+#[derive(Clone)]
 struct BodyShape {
     key: String,
     name: String,
@@ -8279,6 +8727,7 @@ enum Kind {
     Script,
 }
 
+#[derive(Clone)]
 struct Declaration {
     key: String,
     path: String,
@@ -8337,9 +8786,36 @@ struct Declaration {
     local: bool,
     dynamic: bool,
     opaque: bool,
+    query_options: Option<bool>,
+    query_derive: Option<String>,
+    generated_query: Option<(String, bool, bool)>,
 }
 
 impl Declaration {
+    fn query_attributes(attributes: &[Attribute]) -> Option<bool> {
+        let mut mutable = false;
+        for attribute in Declarations::metadata(attributes, false) {
+            if !attribute.path().is_ident("query_data") {
+                continue;
+            }
+            let syn::Meta::List(list) = attribute else {
+                return None;
+            };
+            let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+            for option in parser.parse2(list.tokens).ok()? {
+                match option {
+                    syn::Meta::Path(path) if path.is_ident("mutable") => mutable = true,
+                    syn::Meta::List(list) if list.path.is_ident("derive") => {
+                        let parser = syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated;
+                        parser.parse2(list.tokens).ok()?;
+                    }
+                    _ => return None,
+                }
+            }
+        }
+        Some(mutable)
+    }
+
     fn shape_source(&self) -> bool {
         self.production && !self.test && !self.path.contains("/tests/")
     }
@@ -8458,6 +8934,10 @@ struct Inventory {
     root_declarations: RefCell<BTreeMap<(String, String), DeclarationLookup>>,
     owner_reference_cache: RefCell<BTreeMap<(String, String), bool>>,
     implementation_index: RefCell<Option<BTreeMap<String, Vec<String>>>>,
+    generated_ready: bool,
+    generated_collisions: BTreeSet<String>,
+    query_used_keys: BTreeSet<String>,
+    fixture_query_used_keys: BTreeSet<String>,
 }
 
 struct DeclarationLookup {
@@ -8466,6 +8946,666 @@ struct DeclarationLookup {
 }
 
 impl Inventory {
+    fn clear_generated_queries(&mut self) {
+        if !self.generated_ready {
+            return;
+        }
+        self.entries
+            .retain(|_, entry| entry.generated_query.is_none());
+        for entries in self.names.values_mut() {
+            entries.retain(|key| self.entries.contains_key(key));
+        }
+        for entries in self.symbols.values_mut() {
+            entries.retain(|key| self.entries.contains_key(key));
+        }
+        self.names.retain(|_, entries| !entries.is_empty());
+        self.symbols.retain(|_, entries| !entries.is_empty());
+        self.generated_collisions.clear();
+        self.query_used_keys.clear();
+        self.fixture_query_used_keys.clear();
+        self.generated_ready = false;
+    }
+
+    fn generate_queries(&mut self) {
+        self.clear_generated_queries();
+        let mut parents = Vec::new();
+        for entry in self.entries.values() {
+            if !matches!(entry.kind, Kind::Struct) {
+                continue;
+            }
+            let derived = entry.derive_paths.iter().find(|path| {
+                self.framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("QueryData")
+            });
+            if let Some(path) = derived {
+                parents.push((entry.key.clone(), path.clone()));
+            }
+        }
+        for (key, path) in &parents {
+            let parent = self.entries.get_mut(key).unwrap();
+            parent.query_derive = Some(path.clone());
+            parent.parameter = true;
+            parent.parameter_path = Some(path.clone());
+            parent.ecs = true;
+        }
+        for (key, _) in &parents {
+            let parent = self.entries[key].clone();
+            let Some(mutable) = parent.query_options else {
+                continue;
+            };
+            let mut variants = vec![(format!("{}Item", parent.name), false, true)];
+            if mutable {
+                variants.push((format!("{}ReadOnly", parent.name), true, false));
+                variants.push((format!("{}ReadOnlyItem", parent.name), true, true));
+            }
+            for (name, readonly, item) in variants {
+                let symbol = format!("{}::{name}", parent.namespace);
+                if self
+                    .symbols
+                    .get(&symbol)
+                    .is_some_and(|entries| !entries.is_empty())
+                {
+                    self.generated_collisions.insert(symbol);
+                    continue;
+                }
+                let mut generated = parent.clone();
+                generated.key = format!("{}|generated-query:{name}", parent.key);
+                generated.name = name.clone();
+                generated.generated_query = Some((key.clone(), readonly, item));
+                generated.owner = None;
+                generated.ecs = false;
+                generated.syntax_ecs = false;
+                generated.component_path = None;
+                generated.derive_paths.clear();
+                generated.component_hooks.clear();
+                generated.required_components.clear();
+                generated.bodies.clear();
+                generated.parameter = !item;
+                generated.parameter_path = (!item).then(|| "bevy_ecs::query::QueryData".into());
+                generated.query_derive = None;
+                generated.fingerprint =
+                    Declaration::fingerprint(&format!("{}:{readonly}:{item}", parent.fingerprint));
+                self.symbols.insert(symbol, vec![generated.key.clone()]);
+                self.names
+                    .entry(name)
+                    .or_default()
+                    .push(generated.key.clone());
+                self.entries.insert(generated.key.clone(), generated);
+            }
+        }
+        self.root_declarations.get_mut().clear();
+        self.root_bindings.get_mut().clear();
+        self.owner_reference_cache.get_mut().clear();
+        *self.implementation_index.get_mut() = None;
+        let keys: Vec<_> = self
+            .entries
+            .values()
+            .filter(|entry| entry.generated_query.is_some())
+            .map(|entry| entry.key.clone())
+            .collect();
+        for key in keys {
+            let generated = &self.entries[&key];
+            let (parent, readonly, item) = generated.generated_query.as_ref().unwrap();
+            let parent = &self.entries[parent];
+            let fields = self.query_fields(parent, *readonly, *item, &mut BTreeSet::new());
+            let mut references = References::default();
+            if let Some(fields) = &fields {
+                for field in fields {
+                    references.visit_type(field);
+                }
+            }
+            let generated = self.entries.get_mut(&key).unwrap();
+            generated.query_options = fields.as_ref().map(|_| false);
+            generated.field_types = fields.unwrap_or_default();
+            generated.field_paths = references.paths;
+            generated.fields = references.names;
+        }
+        self.generated_ready = true;
+    }
+
+    fn query_fields(
+        &self,
+        parent: &Declaration,
+        readonly: bool,
+        item: bool,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<Vec<Type>> {
+        if parent.query_derive.is_none()
+            || parent.query_options.is_none()
+            || !visiting.insert(parent.key.clone())
+        {
+            return None;
+        }
+        let mut fields = Vec::new();
+        for field in &parent.field_types {
+            if parent.query_options == Some(false)
+                && !self.query_readonly(parent, field, &mut BTreeSet::new())
+            {
+                return None;
+            }
+            fields.push(self.query_projection(parent, field, readonly, item, visiting)?);
+        }
+        visiting.remove(&parent.key);
+        Some(fields)
+    }
+
+    fn query_component(&self, parent: &Declaration, value: &Type) -> bool {
+        let Type::Path(value) = value else {
+            return false;
+        };
+        if value.qself.is_some() {
+            return false;
+        }
+        let name = References::path(&value.path);
+        if self
+            .framework_handle(&parent.namespace, &name, &mut BTreeSet::new())
+            .is_some_and(|kind| matches!(kind.as_str(), "ChildOf" | "Children" | "Name"))
+        {
+            return value
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| matches!(segment.arguments, syn::PathArguments::None));
+        }
+        if let Some(bound) = parent.component_bindings.get(&name) {
+            return self
+                .framework_handle(&parent.namespace, bound, &mut BTreeSet::new())
+                .as_deref()
+                == Some("Component");
+        }
+        let Some(component) = self
+            .resolve(&parent.namespace, &name, &mut BTreeSet::new())
+            .and_then(|entry| self.nominal(entry))
+        else {
+            return false;
+        };
+        component.ecs
+            && component.component_path.as_deref().is_some_and(|path| {
+                self.framework_handle(&component.namespace, path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("Component")
+            })
+    }
+
+    fn query_readonly(
+        &self,
+        parent: &Declaration,
+        value: &Type,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        match value {
+            Type::Reference(value) => value.mutability.is_none(),
+            Type::Paren(value) => self.query_readonly(parent, &value.elem, visiting),
+            Type::Group(value) => self.query_readonly(parent, &value.elem, visiting),
+            Type::Tuple(value) => value
+                .elems
+                .iter()
+                .all(|value| self.query_readonly(parent, value, visiting)),
+            Type::Path(value) if value.qself.is_none() => {
+                let name = References::path(&value.path);
+                let kind = self.framework_handle(&parent.namespace, &name, &mut BTreeSet::new());
+                if matches!(kind.as_deref(), Some("Entity" | "Has" | "Ref")) {
+                    return true;
+                }
+                if kind.as_deref() == Some("Option") {
+                    let arguments = References::arguments(&value.path);
+                    return arguments.len() == 1
+                        && syn::parse_str::<Type>(&arguments[0])
+                            .is_ok_and(|value| self.query_readonly(parent, &value, visiting));
+                }
+                let Some(owner) = self.resolve(&parent.namespace, &name, &mut BTreeSet::new())
+                else {
+                    return false;
+                };
+                if let Some((_, readonly, item)) = &owner.generated_query {
+                    return *readonly && !item;
+                }
+                if owner.query_derive.is_some() {
+                    return owner.query_options == Some(false);
+                }
+                if matches!(owner.kind, Kind::Alias) && visiting.insert(owner.key.clone()) {
+                    let result = self
+                        .query_alias(parent, value, owner)
+                        .is_some_and(|value| self.query_readonly(owner, &value, visiting));
+                    visiting.remove(&owner.key);
+                    return result;
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn query_alias(
+        &self,
+        caller: &Declaration,
+        value: &syn::TypePath,
+        alias: &Declaration,
+    ) -> Option<Type> {
+        let bindings = self.type_bindings(
+            &caller.namespace,
+            &alias.generic_parameters,
+            &alias.generic_bindings,
+            &References::arguments(&value.path),
+            &BTreeMap::new(),
+        )?;
+        Some(Bindings::apply(
+            self,
+            &alias.namespace,
+            &bindings,
+            alias.field_types.first()?,
+        ))
+    }
+
+    fn query_projection(
+        &self,
+        parent: &Declaration,
+        value: &Type,
+        readonly: bool,
+        item: bool,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<Type> {
+        match value {
+            Type::Reference(reference) => {
+                if !self.query_component(parent, &reference.elem) {
+                    return None;
+                }
+                let element =
+                    Bindings::apply(self, &parent.namespace, &BTreeMap::new(), &reference.elem);
+                if item && reference.mutability.is_some() && !readonly {
+                    return Some(
+                        syn::parse_quote!(bevy_ecs::change_detection::Mut<'__w, #element>),
+                    );
+                }
+                let mut reference = reference.clone();
+                reference.elem = Box::new(element);
+                if readonly {
+                    reference.mutability = None;
+                }
+                if item {
+                    reference.lifetime = Some(syn::parse_quote!('__w));
+                }
+                Some(Type::Reference(reference))
+            }
+            Type::Paren(value) => {
+                self.query_projection(parent, &value.elem, readonly, item, visiting)
+            }
+            Type::Group(value) => {
+                self.query_projection(parent, &value.elem, readonly, item, visiting)
+            }
+            Type::Tuple(value) => {
+                let mut tuple = value.clone();
+                tuple.elems.clear();
+                for value in &value.elems {
+                    tuple
+                        .elems
+                        .push(self.query_projection(parent, value, readonly, item, visiting)?);
+                }
+                Some(Type::Tuple(tuple))
+            }
+            Type::Path(value) if value.qself.is_none() => {
+                self.query_path_projection(parent, value, readonly, item, visiting)
+            }
+            _ => None,
+        }
+    }
+
+    fn query_path_projection(
+        &self,
+        parent: &Declaration,
+        value: &syn::TypePath,
+        readonly: bool,
+        item: bool,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<Type> {
+        let name = References::path(&value.path);
+        let handle = self.framework_handle(&parent.namespace, &name, &mut BTreeSet::new());
+        if handle.as_deref() == Some("Option") {
+            let arguments = References::arguments(&value.path);
+            if arguments.len() != 1 {
+                return None;
+            }
+            let field = self.query_projection(
+                parent,
+                &syn::parse_str::<Type>(&arguments[0]).ok()?,
+                readonly,
+                item,
+                visiting,
+            )?;
+            return Some(syn::parse_quote!(::core::option::Option<#field>));
+        }
+        if handle.as_deref() == Some("Entity") {
+            return Some(Type::Path(value.clone()));
+        }
+        if matches!(handle.as_deref(), Some("Has" | "Ref" | "Mut")) {
+            let arguments = References::arguments(&value.path);
+            if arguments.len() != 1 {
+                return None;
+            }
+            let field = syn::parse_str::<Type>(&arguments[0]).ok()?;
+            if !self.query_component(parent, &field) {
+                return None;
+            }
+            return match handle.as_deref() {
+                Some("Has") if item => Some(syn::parse_quote!(bool)),
+                Some("Mut") if readonly => Some(syn::parse_quote!(&'__w #field)),
+                _ => Some(Type::Path(value.clone())),
+            };
+        }
+        let owner = self.resolve(&parent.namespace, &name, &mut BTreeSet::new())?;
+        if matches!(owner.kind, Kind::Alias) {
+            if !visiting.insert(owner.key.clone()) {
+                return None;
+            }
+            let value = self.query_alias(parent, value, owner)?;
+            let result = self.query_projection(owner, &value, readonly, item, visiting);
+            visiting.remove(&owner.key);
+            return result;
+        }
+        let (owner, readonly) = match &owner.generated_query {
+            Some((source, true, false)) => (&self.entries[source], true),
+            Some(_) => return None,
+            None => (owner, readonly),
+        };
+        self.query_fields(owner, readonly, false, visiting)?;
+        let original = value.path.segments.last()?.arguments.clone();
+        let suffix = match (readonly && owner.query_options == Some(true), item) {
+            (true, true) => "ReadOnlyItem",
+            (true, false) => "ReadOnly",
+            (false, true) => "Item",
+            (false, false) => "",
+        };
+        let mut path: syn::Path =
+            syn::parse_str(&format!("{}::{}{suffix}", owner.namespace, owner.name)).ok()?;
+        let segment = path.segments.last_mut()?;
+        segment.arguments = original;
+        if item {
+            let mut arguments: syn::AngleBracketedGenericArguments = match &segment.arguments {
+                syn::PathArguments::None => syn::parse_quote!(<>),
+                syn::PathArguments::AngleBracketed(arguments) => arguments.clone(),
+                _ => return None,
+            };
+            arguments.args.insert(0, syn::parse_quote!('__s));
+            arguments.args.insert(0, syn::parse_quote!('__w));
+            segment.arguments = syn::PathArguments::AngleBracketed(arguments);
+        }
+        Some(Type::Path(syn::TypePath { qself: None, path }))
+    }
+
+    fn canonical_query_item(
+        &self,
+        entry: &Declaration,
+        policy: &Policy,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        let Some((parent, _, _)) = &entry.generated_query else {
+            return false;
+        };
+        let Some(parent) = self.entries.get(parent) else {
+            return false;
+        };
+        if entry.query_options.is_none()
+            || parent.query_derive.is_none()
+            || !self.query_used_keys.contains(&parent.key)
+                && (entry.production || !self.fixture_query_used_keys.contains(&parent.key))
+        {
+            return false;
+        }
+        if self.generated_collisions.iter().any(|symbol| {
+            [
+                format!("{}::{}Item", parent.namespace, parent.name),
+                format!("{}::{}ReadOnly", parent.namespace, parent.name),
+                format!("{}::{}ReadOnlyItem", parent.namespace, parent.name),
+            ]
+            .contains(symbol)
+        }) {
+            return false;
+        }
+        self.canonical(parent, policy, visiting)
+    }
+
+    fn canonical_query_data(
+        &self,
+        entry: &Declaration,
+        policy: &Policy,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        if entry.query_derive.as_deref().is_none_or(|path| {
+            self.framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                .as_deref()
+                != Some("QueryData")
+        }) || !self.query_used_keys.contains(&entry.key)
+            && (entry.production || !self.fixture_query_used_keys.contains(&entry.key))
+        {
+            return false;
+        }
+        let Some(fields) = self.query_fields(entry, false, true, &mut BTreeSet::new()) else {
+            return false;
+        };
+        fields
+            .iter()
+            .all(|field| self.query_item_field(entry, field, policy, visiting))
+    }
+
+    fn query_alias_owner(
+        &self,
+        entry: &Declaration,
+        policy: &Policy,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        for parent in self.entries.values() {
+            if parent.query_derive.is_none()
+                || !self.query_used_keys.contains(&parent.key)
+                    && (parent.production || !self.fixture_query_used_keys.contains(&parent.key))
+            {
+                continue;
+            }
+            let mut pending: Vec<_> = parent
+                .field_paths
+                .iter()
+                .map(|path| (parent.namespace.clone(), path.clone()))
+                .collect();
+            let mut seen = BTreeSet::new();
+            while let Some((namespace, path)) = pending.pop() {
+                let Some(alias) = self.resolve(&namespace, &path, &mut BTreeSet::new()) else {
+                    continue;
+                };
+                if !matches!(alias.kind, Kind::Alias) || !seen.insert(alias.key.clone()) {
+                    continue;
+                }
+                if alias.key == entry.key
+                    && self.canonical_query_data(parent, policy, &mut visiting.clone())
+                {
+                    return true;
+                }
+                for path in &alias.field_paths {
+                    pending.push((alias.namespace.clone(), path.clone()));
+                }
+            }
+        }
+        false
+    }
+
+    fn generated_field_types(
+        &self,
+        namespace: &str,
+        value: &syn::TypePath,
+        owner: &Declaration,
+    ) -> Option<Vec<Type>> {
+        owner.query_options?;
+        let bindings = self.type_bindings(
+            namespace,
+            &owner.generic_parameters,
+            &owner.generic_bindings,
+            &References::arguments(&value.path),
+            &BTreeMap::new(),
+        )?;
+        Some(
+            owner
+                .field_types
+                .iter()
+                .map(|field| Bindings::apply(self, &owner.namespace, &bindings, field))
+                .collect(),
+        )
+    }
+
+    fn query_item_field(
+        &self,
+        caller: &Declaration,
+        field: &Type,
+        policy: &Policy,
+        visited: &mut BTreeSet<String>,
+    ) -> bool {
+        match field {
+            Type::Reference(field) => {
+                self.query_item_component(caller, &field.elem, policy, visited)
+            }
+            Type::Tuple(fields) => fields
+                .elems
+                .iter()
+                .all(|field| self.query_item_field(caller, field, policy, visited)),
+            Type::Paren(field) => self.query_item_field(caller, &field.elem, policy, visited),
+            Type::Group(field) => self.query_item_field(caller, &field.elem, policy, visited),
+            Type::Path(field) if field.qself.is_none() => {
+                if field.path.is_ident("bool") {
+                    return true;
+                }
+                let name = References::path(&field.path);
+                let handle = self.framework_handle(&caller.namespace, &name, &mut BTreeSet::new());
+                if handle.as_deref() == Some("Entity") {
+                    return true;
+                }
+                if matches!(handle.as_deref(), Some("Mut" | "Ref" | "Option")) {
+                    let arguments = References::arguments(&field.path);
+                    if arguments.len() != 1 {
+                        return false;
+                    }
+                    let Ok(value) = syn::parse_str::<Type>(&arguments[0]) else {
+                        return false;
+                    };
+                    return if handle.as_deref() == Some("Option") {
+                        self.query_item_field(caller, &value, policy, visited)
+                    } else {
+                        self.query_item_component(caller, &value, policy, visited)
+                    };
+                }
+                let Some(owner) = self.resolve(&caller.namespace, &name, &mut BTreeSet::new())
+                else {
+                    return false;
+                };
+                if owner
+                    .generated_query
+                    .as_ref()
+                    .is_none_or(|(_, _, item)| !item)
+                    || !visited.insert(owner.key.clone())
+                {
+                    return false;
+                }
+                let Some(fields) = self.generated_field_types(&caller.namespace, field, owner)
+                else {
+                    return false;
+                };
+                let result = fields
+                    .iter()
+                    .all(|field| self.query_item_field(caller, field, policy, visited));
+                visited.remove(&owner.key);
+                result
+            }
+            _ => false,
+        }
+    }
+
+    fn query_item_component(
+        &self,
+        caller: &Declaration,
+        value: &Type,
+        policy: &Policy,
+        visited: &mut BTreeSet<String>,
+    ) -> bool {
+        if !self.query_component(caller, value) {
+            return false;
+        }
+        let Type::Path(value) = value else {
+            return false;
+        };
+        let name = References::path(&value.path);
+        match self
+            .resolve(&caller.namespace, &name, &mut BTreeSet::new())
+            .and_then(|owner| self.nominal(owner))
+        {
+            Some(owner) => self.canonical(owner, policy, &mut visited.clone()),
+            None => true,
+        }
+    }
+
+    fn resolve_query_usage(&mut self) {
+        let mut production = BTreeSet::new();
+        let mut fixtures = BTreeSet::new();
+        let registered = self.real_query_registrations();
+        for entry in self.entries.values() {
+            if !matches!(entry.kind, Kind::Function) || !registered.contains(&entry.key) {
+                continue;
+            }
+            let mut references = References {
+                parameter_inventory: Some(self),
+                parameter_namespace: &entry.namespace,
+                valid: true,
+                ..Default::default()
+            };
+            for field in &entry.field_types {
+                references.visit_type(field);
+            }
+            if references.valid {
+                if entry.production {
+                    production.extend(references.query_owners);
+                } else {
+                    fixtures.extend(references.query_owners);
+                }
+            }
+        }
+        self.query_used_keys = production;
+        self.fixture_query_used_keys = fixtures;
+    }
+
+    fn real_query_registrations(&self) -> BTreeSet<String> {
+        let mut registered = BTreeSet::new();
+        for implementation in self.entries.values() {
+            if !implementation.plugin
+                || implementation
+                    .plugin_path
+                    .as_deref()
+                    .and_then(|path| {
+                        self.framework_handle(&implementation.namespace, path, &mut BTreeSet::new())
+                    })
+                    .as_deref()
+                    != Some("Plugin")
+            {
+                continue;
+            }
+            for (app, callback) in &implementation.registered_systems {
+                if self
+                    .framework_handle(&implementation.namespace, app, &mut BTreeSet::new())
+                    .as_deref()
+                    != Some("App")
+                {
+                    continue;
+                }
+                let Some(function) = self.function_reference(
+                    &implementation.namespace,
+                    callback,
+                    &mut BTreeSet::new(),
+                ) else {
+                    continue;
+                };
+                if function.production == implementation.production && self.registered(function) {
+                    registered.insert(function.key.clone());
+                }
+            }
+        }
+        registered
+    }
+
     fn enum_job(&self, entry: &Declaration) -> bool {
         for implementation in self.implementations(entry) {
             if !matches!(implementation.kind, Kind::Impl) {
@@ -8690,6 +9830,7 @@ impl Inventory {
     fn source(&mut self, path: &str, source: &str) {
         self.lookup_ready = false;
         self.local_bindings.get_mut().clear();
+        self.clear_generated_queries();
         self.sources.insert(path.into(), source.into());
         if path.ends_with(".rs") {
             let namespace = self.namespace(path, &[]).0;
@@ -8820,6 +9961,9 @@ impl Inventory {
                 local: false,
                 dynamic: false,
                 opaque: true,
+                query_options: None,
+                query_derive: None,
+                generated_query: None,
             },
         );
     }
@@ -8846,6 +9990,9 @@ impl Inventory {
     ) -> bool {
         if !visiting.insert(entry.key.clone()) {
             return false;
+        }
+        if entry.generated_query.is_some() {
+            return self.canonical_query_item(entry, policy, visiting);
         }
         if self.automatic_boundary(entry) || self.fixture_bootstrap(entry) {
             return true;
@@ -8888,15 +10035,35 @@ impl Inventory {
         if entry.local || entry.dynamic || entry.opaque {
             return false;
         }
+        if entry.query_derive.is_some() {
+            return self.canonical_query_data(entry, policy, visiting);
+        }
         if let Some(owner) = &entry.owner {
             let Some(declaration) = self.resolve(&entry.namespace, owner, &mut BTreeSet::new())
             else {
                 return false;
             };
+            let declaration = self.nominal(declaration).unwrap_or(declaration);
+            if declaration.generated_query.is_some() {
+                let Some(Type::Path(value)) = &entry.implemented_type else {
+                    return false;
+                };
+                let Some(fields) = self.generated_field_types(&entry.namespace, value, declaration)
+                else {
+                    return false;
+                };
+                if fields
+                    .iter()
+                    .any(|field| !self.query_item_field(entry, field, policy, &mut BTreeSet::new()))
+                {
+                    return false;
+                }
+            }
             if declaration.projection {
                 return false;
             }
             if !declaration.ecs
+                && declaration.generated_query.is_none()
                 && !policy
                     .values
                     .iter()
@@ -8914,6 +10081,7 @@ impl Inventory {
             Kind::Alias => {
                 self.used(entry)
                     && (self.component_alias(entry, policy, &mut visiting.clone())
+                        || self.query_alias_owner(entry, policy, &mut visiting.clone())
                         || entry.fields.iter().any(|field| {
                             matches!(
                                 field.as_str(),
@@ -8949,6 +10117,9 @@ impl Inventory {
             for field in &entry.field_types {
                 parameters.visit_type(field);
             }
+        }
+        if parameters.invalid_query {
+            return false;
         }
         for key in &parameters.outputs {
             let field = &self.entries[key];
@@ -9084,7 +10255,7 @@ impl Inventory {
             return false;
         };
         owner.key != entry.key
-            && owner.ecs
+            && (owner.ecs || owner.generated_query.is_some())
             && self.used(owner)
             && self.canonical(owner, policy, visiting)
     }
@@ -10558,6 +11729,30 @@ impl Inventory {
                         | "bevy::ecs::prelude"
                         | "bevy::prelude"
                 ),
+                "Entity" => matches!(
+                    prefix,
+                    "bevy_ecs::entity"
+                        | "bevy_ecs::prelude"
+                        | "bevy::ecs::entity"
+                        | "bevy::ecs::prelude"
+                        | "bevy::prelude"
+                ),
+                "ChildOf" | "Children" => matches!(
+                    prefix,
+                    "bevy_ecs::hierarchy"
+                        | "bevy_ecs::prelude"
+                        | "bevy::ecs::hierarchy"
+                        | "bevy::ecs::prelude"
+                        | "bevy::prelude"
+                ),
+                "Name" => matches!(
+                    prefix,
+                    "bevy_ecs::name"
+                        | "bevy_ecs::prelude"
+                        | "bevy::ecs::name"
+                        | "bevy::ecs::prelude"
+                        | "bevy::prelude"
+                ),
                 "Ref" | "Mut" => matches!(
                     prefix,
                     "bevy_ecs::change_detection"
@@ -10664,6 +11859,25 @@ impl Inventory {
                     .collect::<Vec<_>>()
                     .join("::");
                 if let Some(entry) = self.resolve(namespace, &reference, &mut BTreeSet::new()) {
+                    if let Some((parent, _, item)) = &entry.generated_query
+                        && (self.query_used_keys.contains(parent)
+                            || !entry.production && self.fixture_query_used_keys.contains(parent))
+                    {
+                        let Some(fields) = self.generated_field_types(namespace, value, entry)
+                        else {
+                            return false;
+                        };
+                        return fields.iter().any(|field| {
+                            self.borrowed_type(
+                                &entry.namespace,
+                                field,
+                                endpoint,
+                                inside || *item,
+                                direct,
+                                &mut visiting.clone(),
+                            )
+                        });
+                    }
                     if inside && direct && entry.key == endpoint.key {
                         return true;
                     }
@@ -11330,6 +12544,7 @@ impl Inventory {
         self.owner_reference_cache.get_mut().clear();
         *self.implementation_index.get_mut() = None;
         self.resolve_components();
+        self.generate_queries();
         let mut keys = BTreeSet::new();
         let mut registered = BTreeSet::new();
         for usage in self.usage.values() {
@@ -11377,6 +12592,11 @@ impl Inventory {
         let mut pending: Vec<_> = keys.iter().cloned().collect();
         while let Some(key) = pending.pop() {
             let entry = &self.entries[&key];
+            if let Some((parent, _, _)) = &entry.generated_query
+                && keys.insert(parent.clone())
+            {
+                pending.push(parent.clone());
+            }
             if !entry.parameter && !matches!(entry.kind, Kind::Alias) {
                 continue;
             }
@@ -11487,6 +12707,7 @@ impl Inventory {
         self.used_keys = keys;
         self.registered_keys = registered;
         self.resolve_fixture_usage();
+        self.resolve_query_usage();
         self.root_namespaces.get_mut().clear();
         self.root_modules.get_mut().clear();
         self.root_declarations.get_mut().clear();
@@ -13225,6 +14446,12 @@ impl Declarations<'_> {
             local: references.local,
             dynamic: references.dynamic,
             opaque: references.opaque,
+            query_options: match &parsed_item {
+                Some(Item::Struct(value)) => Declaration::query_attributes(&value.attrs),
+                _ => None,
+            },
+            query_derive: None,
+            generated_query: None,
         };
         if matches!(
             kind,
@@ -13514,6 +14741,8 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
 
 #[derive(Default)]
 struct References<'a> {
+    query_owners: BTreeSet<String>,
+    invalid_query: bool,
     parameter_inventory: Option<&'a Inventory>,
     parameter_namespace: &'a str,
     parameter_inside: bool,
@@ -13948,6 +15177,18 @@ impl References<'_> {
             (self.parameter_inside, self.parameter_read) = previous;
             return;
         };
+        if self.parameter_inside && !self.parameter_read {
+            if let Some((parent, _, item)) = &owner.generated_query {
+                if *item {
+                    self.valid = false;
+                    self.invalid_query = true;
+                    return;
+                }
+                self.query_owners.insert(parent.clone());
+            } else if owner.query_derive.is_some() {
+                self.query_owners.insert(owner.key.clone());
+            }
+        }
         if self.inside {
             self.indexed.insert(owner.key.clone());
             visit::visit_type_path(self, value);
@@ -13984,6 +15225,7 @@ impl References<'_> {
             payload.visit_type(&output);
             payload.valid &= !payload.dynamic && !payload.local;
             self.valid &= payload.valid;
+            self.invalid_query |= payload.invalid_query;
             if payload.valid {
                 self.inside = true;
                 self.visit_type(input);
@@ -14036,11 +15278,13 @@ impl References<'_> {
                     nested.visit_type(field);
                 }
                 self.valid &= nested.valid;
+                self.invalid_query |= nested.invalid_query;
                 self.dynamic |= nested.dynamic;
                 self.local |= nested.local;
                 self.indexed.extend(nested.indexed);
                 self.retained.extend(nested.retained);
                 self.outputs.extend(nested.outputs);
+                self.query_owners.extend(nested.query_owners);
                 self.visiting.remove(&owner.key);
                 return;
             }
