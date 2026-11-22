@@ -544,6 +544,7 @@ fn McpRegistryCard(config_path: String) -> Element {
     let mut target = use_signal(String::new);
     let mut args = use_signal(String::new);
     let mut bearer_env = use_signal(String::new);
+    let mut oauth = use_signal(|| false);
     let open_path = config_path.clone();
     let is_stdio = transport() == "stdio";
     let can_submit = !id().trim().is_empty() && !target().trim().is_empty();
@@ -590,11 +591,22 @@ fn McpRegistryCard(config_path: String) -> Element {
                         oninput: move |event| args.set(event.value()),
                     }
                 } else {
-                    input {
-                        class: "sm:col-span-2 rounded-lg bg-background px-2.5 py-1.5 text-xs text-foreground ring-1 ring-inset ring-foreground/12 focus:outline-none focus:ring-primary/50",
-                        placeholder: "TOKEN_ENV",
-                        value: "{bearer_env}",
-                        oninput: move |event| bearer_env.set(event.value()),
+                    div { class: "sm:col-span-2 flex items-center gap-1.5",
+                        input {
+                            class: "min-w-0 flex-1 rounded-lg bg-background px-2 py-1.5 text-xs text-foreground ring-1 ring-inset ring-foreground/12 focus:outline-none focus:ring-primary/50 disabled:opacity-40",
+                            placeholder: "TOKEN_ENV",
+                            disabled: oauth(),
+                            value: "{bearer_env}",
+                            oninput: move |event| bearer_env.set(event.value()),
+                        }
+                        label { class: "flex shrink-0 cursor-pointer items-center gap-1 text-[10px] text-muted-foreground",
+                            input {
+                                r#type: "checkbox",
+                                checked: oauth(),
+                                onchange: move |event| oauth.set(event.checked()),
+                            }
+                            "OAuth"
+                        }
                     }
                 }
                 div { class: "sm:col-span-1 flex justify-end",
@@ -608,11 +620,13 @@ fn McpRegistryCard(config_path: String) -> Element {
                                 target: target(),
                                 args: args(),
                                 bearer_token_env_var: bearer_env(),
+                                oauth: !is_stdio && oauth(),
                             });
                             id.set(String::new());
                             target.set(String::new());
                             args.set(String::new());
                             bearer_env.set(String::new());
+                            oauth.set(false);
                         },
                         {translate("common-add")}
                     }

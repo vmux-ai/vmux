@@ -301,6 +301,22 @@ impl McpServerSpec {
         }
     }
 
+    pub fn oauth_config(&self) -> Option<(&str, &[String])> {
+        match self {
+            Self::Http {
+                url,
+                auth: McpAuthSpec::OAuth { scopes },
+                ..
+            }
+            | Self::Sse {
+                url,
+                auth: McpAuthSpec::OAuth { scopes },
+                ..
+            } => Some((url.as_str(), scopes.as_slice())),
+            _ => None,
+        }
+    }
+
     pub fn to_managed(
         &self,
         name: &str,
@@ -325,12 +341,14 @@ impl McpServerSpec {
                 cwd: cwd.clone(),
                 url: None,
                 headers: Vec::new(),
+                oauth: false,
             },
             Self::Http {
                 url,
                 headers,
                 header_env,
                 bearer_token_env_var,
+                auth,
                 ..
             } => ManagedMcpServer {
                 name: name.to_string(),
@@ -346,12 +364,14 @@ impl McpServerSpec {
                     bearer_token_env_var.as_deref(),
                     env_lookup,
                 ),
+                oauth: matches!(auth, McpAuthSpec::OAuth { .. }),
             },
             Self::Sse {
                 url,
                 headers,
                 header_env,
                 bearer_token_env_var,
+                auth,
                 ..
             } => ManagedMcpServer {
                 name: name.to_string(),
@@ -367,6 +387,7 @@ impl McpServerSpec {
                     bearer_token_env_var.as_deref(),
                     env_lookup,
                 ),
+                oauth: matches!(auth, McpAuthSpec::OAuth { .. }),
             },
         }
     }

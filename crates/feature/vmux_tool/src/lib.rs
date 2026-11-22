@@ -21,10 +21,16 @@ pub use mcp_config::{
     McpServerOverride, McpServerPatch, McpServerSpec, McpTrustStore, McpWorkspaceRoot,
 };
 #[cfg(host)]
+pub use mcp_oauth::{McpOauthFlow, McpOauthStatus};
+#[cfg(host)]
+pub use mcp_proxy::McpProxy;
+#[cfg(host)]
 pub use mcp_registry::{
     McpApproveTrust, McpDeleteEntry, McpMutationResult, McpRegistryPlugin, McpResolveRequest,
     McpResolveResult, McpSaveEntry,
 };
+#[cfg(host)]
+pub use mcp_sync::{McpDoctor, McpSync, McpSyncAgent};
 pub use npm::*;
 #[cfg(host)]
 pub use package::ToolPackageDrain;
@@ -90,7 +96,13 @@ pub mod mcp_config;
 #[cfg(host)]
 mod mcp_inventory;
 #[cfg(host)]
+pub mod mcp_oauth;
+#[cfg(host)]
+pub mod mcp_proxy;
+#[cfg(host)]
 pub mod mcp_registry;
+#[cfg(host)]
+pub mod mcp_sync;
 mod npm;
 #[cfg(host)]
 mod npm_inventory;

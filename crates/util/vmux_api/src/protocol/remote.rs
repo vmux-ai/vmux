@@ -22,6 +22,7 @@ pub struct ManagedMcpServer {
     pub cwd: Option<String>,
     pub url: Option<String>,
     pub headers: Vec<(String, String)>,
+    pub oauth: bool,
 }
 
 #[vmux_api::contract(Eq)]

@@ -246,13 +246,14 @@ pub struct ToolImportRequest {
     pub value: String,
 }
 
-#[vmux_api::ui_event(Eq)]
+#[vmux_api::ui_event(Eq, version = 2)]
 pub struct McpRegisterRequest {
     pub id: String,
     pub transport: String,
     pub target: String,
     pub args: String,
     pub bearer_token_env_var: String,
+    pub oauth: bool,
 }
 
 impl From<ToolInstallRequest> for ToolOperationKey {

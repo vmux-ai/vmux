@@ -111,7 +111,8 @@ impl AcpSessions {
         managed_mcp_servers: Vec<vmux_api::protocol::ManagedMcpServer>,
         resume: Option<String>,
     ) -> Result<(), String> {
-        let mcp_servers = AcpMcpServers::from_sources(mcp_command, mcp_args, managed_mcp_servers);
+        let mcp_servers =
+            AcpMcpServers::from_sources(mcp_command, mcp_args, managed_mcp_servers, cwd.clone());
         let (response, receiver) = oneshot::channel();
         self.spawns
             .send(SpawnAcpSession {

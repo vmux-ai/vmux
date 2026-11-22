@@ -179,13 +179,18 @@ fn register_mcp(
         .collect::<Vec<_>>();
     let bearer = (!payload.bearer_token_env_var.trim().is_empty())
         .then(|| payload.bearer_token_env_var.trim().to_string());
+    let auth = if payload.oauth {
+        crate::McpAuthSpec::OAuth { scopes: Vec::new() }
+    } else {
+        crate::McpAuthSpec::None
+    };
     let spec = match payload.transport.trim().to_ascii_lowercase().as_str() {
         "http" => crate::McpServerSpec::Http {
             url: target_value,
             headers: Default::default(),
             header_env: Default::default(),
             bearer_token_env_var: bearer,
-            auth: crate::McpAuthSpec::None,
+            auth,
             enabled: true,
             agents: Vec::new(),
         },
@@ -194,7 +199,7 @@ fn register_mcp(
             headers: Default::default(),
             header_env: Default::default(),
             bearer_token_env_var: bearer,
-            auth: crate::McpAuthSpec::None,
+            auth,
             enabled: true,
             agents: Vec::new(),
         },
