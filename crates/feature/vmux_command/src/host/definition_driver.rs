@@ -1,4 +1,3 @@
-use bevy::prelude::Commands;
 use bevy::prelude::*;
 use vmux_api::JsonSchema;
 use vmux_api::json::JsonValue;
@@ -408,18 +407,13 @@ impl CommandMessage {
     where
         T: Message + for<'a> TryFrom<&'a CommandInvocation>,
     {
-        Self(Self::write::<T>)
-    }
-
-    fn write<T>(invocation: &CommandInvocation, commands: &mut Commands)
-    where
-        T: Message + for<'a> TryFrom<&'a CommandInvocation>,
-    {
-        let Ok(message) = T::try_from(invocation) else {
-            warn!(command = %invocation.id, "command message rejected its registered definition");
-            return;
-        };
-        commands.write_message(message);
+        Self(|invocation, commands| {
+            let Ok(message) = T::try_from(invocation) else {
+                warn!(command = %invocation.id, "command message rejected its registered definition");
+                return;
+            };
+            commands.write_message(message);
+        })
     }
 }
 
