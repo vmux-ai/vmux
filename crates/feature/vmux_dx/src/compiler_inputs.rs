@@ -166,7 +166,7 @@ impl CompilerInputs {
         std::fs::read_to_string(path).map_err(|error| error.to_string())
     }
 
-    fn harness(file: &syn::File, name: &str, source: &Path) -> Result<Self, String> {
+    pub(super) fn harness(file: &syn::File, name: &str, source: &Path) -> Result<Self, String> {
         let mut proof = Self {
             harness: name.into(),
             source_directory: Self::cargo_directory(source)?,
@@ -234,6 +234,9 @@ impl CompilerInputs {
                     proof.visit_item_fn(function);
                 }
             }
+        }
+        if proof.included.is_empty() {
+            return Err("Compiler harness must compile included source fixtures".into());
         }
         Ok(proof)
     }

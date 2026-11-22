@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
+#[cfg(feature = "development")]
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+#[cfg(feature = "development")]
 use crate::Result;
 #[cfg(feature = "development")]
 use crate::product::ProductMetadata;
@@ -50,6 +52,7 @@ impl Environment {
         environment
     }
 
+    #[cfg(feature = "development")]
     pub fn load(&mut self, root: &Path) -> Result<()> {
         let text = match fs::read_to_string(root.join(".env")) {
             Ok(text) => text,
@@ -102,6 +105,7 @@ impl Environment {
         self.get(name).is_some_and(|value| !value.is_empty())
     }
 
+    #[cfg(any(feature = "development", test))]
     pub fn incremental(&self, command: Option<&OsStr>) -> &OsStr {
         if let Some(value) = self.get("CARGO_INCREMENTAL")
             && !value.is_empty()
@@ -122,6 +126,7 @@ impl Environment {
         OsStr::new("0")
     }
 
+    #[cfg(feature = "development")]
     pub fn required(&self, name: &str) -> Result<&OsStr> {
         match self.get(name) {
             Some(value) if !value.is_empty() => Ok(value),

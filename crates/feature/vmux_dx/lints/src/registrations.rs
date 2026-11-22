@@ -41,7 +41,7 @@ impl Fixture {
         }
     }
 
-    fn check(&self, name: &str, source: &str, expected: &[&str], ownership: bool) {
+    fn check(&self, name: &str, source: &str, expected: &[&str], code: &str) {
         std::fs::write(
             self.directory
                 .path()
@@ -66,15 +66,15 @@ impl Fixture {
             .expect("run the prepared Dylint compiler");
         let stdout = String::from_utf8(output.stdout).unwrap();
         let stderr = String::from_utf8(output.stderr).unwrap();
-        let (mut diagnostics, unexpected) = self.diagnostics(name, &stdout, ownership);
+        let (mut diagnostics, unexpected) = self.diagnostics(name, &stdout, code);
         assert!(unexpected.is_empty(), "{name}: {unexpected:?}\n{stderr}");
         let mut expected: Vec<String> = expected
             .iter()
             .map(|name| {
-                if ownership {
-                    name.to_string()
-                } else {
+                if code == "vmux_exported_system" {
                     format!("registered system `{name}` must be private to its defining module")
+                } else {
+                    name.to_string()
                 }
             })
             .collect();
@@ -88,7 +88,7 @@ impl Fixture {
         );
     }
 
-    fn diagnostics(&self, name: &str, stdout: &str, ownership: bool) -> (Vec<String>, Vec<String>) {
+    fn diagnostics(&self, name: &str, stdout: &str, code: &str) -> (Vec<String>, Vec<String>) {
         let mut diagnostics = Vec::new();
         let mut unexpected = Vec::new();
         for line in stdout.lines() {
@@ -105,11 +105,6 @@ impl Fixture {
             {
                 continue;
             }
-            let code = if ownership {
-                "vmux_ecs_ownership"
-            } else {
-                "vmux_exported_system"
-            };
             if message["code"]["code"] != code {
                 unexpected.push(message.to_string());
                 continue;
@@ -129,7 +124,7 @@ impl Fixture {
                 "{name}: {message}"
             );
             let mut diagnostic = message["message"].as_str().unwrap().to_owned();
-            if ownership {
+            if code == "vmux_ecs_ownership" {
                 let primary = spans
                     .iter()
                     .find(|span| span["is_primary"] == true)
@@ -145,6 +140,34 @@ impl Fixture {
             diagnostics.push(diagnostic);
         }
         (diagnostics, unexpected)
+    }
+}
+
+#[test]
+fn registered_system_names_follow_resolved_functions_and_ignore_other_methods() {
+    let fixture = Fixture::new();
+    for (name, source, expected) in [
+        (
+            "system_names",
+            include_str!("../ui/system_names.rs"),
+            &[
+                "registered system `bookmark_pin` must use its module's operation name: remove repeated `bookmark` context",
+                "registered system `pin_system` must use its module's operation name: remove `system`",
+                "registered system `bookmark_condition` must use its module's operation name: remove repeated `bookmark` context",
+                "registered system `bookmark_observe` must use its module's operation name: remove repeated `bookmark` context",
+                "registered system `bookmark_once` must use its module's operation name: remove repeated `bookmark` context",
+                "registered system `bookmark_bind` must use its module's operation name: remove repeated `bookmark` context",
+                "registered system `bookmark_remove` must use its module's operation name: remove repeated `bookmark` context",
+                "registered system `lints_sync` must use its module's operation name: remove repeated `lints` context",
+            ][..],
+        ),
+        (
+            "system_names_valid",
+            include_str!("../ui/system_names_valid.rs"),
+            &[][..],
+        ),
+    ] {
+        fixture.check(name, source, expected, "vmux_system_name");
     }
 }
 
@@ -171,8 +194,25 @@ fn compiler_resolves_observers_and_ignores_lookalike_registration_apis() {
             include_str!("../ui/unrelated_observers.rs"),
             &[][..],
         ),
+        (
+            "runtime_callbacks",
+            include_str!("../ui/runtime_callbacks.rs"),
+            &[
+                "added",
+                "removed",
+                "once",
+                "explicit",
+                "tail",
+                "labeled",
+                "fallible_added",
+                "fallible_inserted",
+                "fallible_discarded",
+                "fallible_removed",
+                "fallible_despawned",
+            ][..],
+        ),
     ] {
-        fixture.check(name, source, expected, false);
+        fixture.check(name, source, expected, "vmux_exported_system");
     }
 }
 
@@ -230,7 +270,7 @@ fn compiler_resolves_registered_systems_and_ignores_other_contracts() {
             &["carried", "continued", "from_loop"][..],
         ),
     ] {
-        fixture.check(name, source, expected, false);
+        fixture.check(name, source, expected, "vmux_exported_system");
     }
 }
 
@@ -241,7 +281,7 @@ fn ownership_diagnostics_require_an_explicit_audit_request() {
         "ownership_default",
         "struct Detached(u32); fn main() {}\n",
         &[],
-        false,
+        "vmux_ecs_ownership",
     );
 }
 
@@ -305,6 +345,6 @@ fn compiler_proves_registered_ownership_and_rejects_hidden_or_unused_models() {
             ][..],
         ),
     ] {
-        fixture.check(name, source, expected, true);
+        fixture.check(name, source, expected, "vmux_ecs_ownership");
     }
 }

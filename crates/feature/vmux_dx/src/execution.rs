@@ -1,6 +1,8 @@
 use std::fmt;
 use std::io::{Read, Write};
-use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::os::unix::process::CommandExt;
+#[cfg(any(feature = "development", test))]
+use std::os::unix::process::ExitStatusExt;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::thread;
 use std::time::Duration;
@@ -17,6 +19,7 @@ impl Execution {
         Self { command }
     }
 
+    #[cfg(any(feature = "development", test))]
     pub fn run(&mut self) -> Result<()> {
         Signals::check()?;
         self.command.process_group(0);
@@ -31,6 +34,7 @@ impl Execution {
         Ok(())
     }
 
+    #[cfg(any(feature = "development", test))]
     pub fn output(&mut self, input: Option<&[u8]>) -> Result<Output> {
         let output = self.output_any(input)?;
         if !output.status.success() {
@@ -121,16 +125,19 @@ impl Execution {
 
 #[derive(Debug, Clone)]
 pub struct Failure {
+    #[cfg(any(feature = "development", test))]
     code: i32,
     message: String,
 }
 
 impl Failure {
+    #[cfg(feature = "development")]
     pub fn context(mut self, context: &str) -> Self {
         self.message = format!("{context}: {}", self.message);
         self
     }
 
+    #[cfg(feature = "development")]
     pub fn from_error(error: Box<dyn std::error::Error + Send + Sync>) -> Self {
         match error.downcast::<Self>() {
             Ok(error) => *error,
@@ -138,6 +145,7 @@ impl Failure {
         }
     }
 
+    #[cfg(feature = "development")]
     pub fn message(message: impl Into<String>) -> Self {
         Self {
             code: 1,
@@ -145,6 +153,7 @@ impl Failure {
         }
     }
 
+    #[cfg(any(feature = "development", test))]
     pub(crate) fn status(status: ExitStatus) -> Self {
         let code = match status.code() {
             Some(code) => code,
@@ -158,11 +167,13 @@ impl Failure {
 
     pub fn interrupted(signal: i32) -> Self {
         Self {
+            #[cfg(any(feature = "development", test))]
             code: 128 + signal,
             message: format!("Build cancelled by signal {signal}"),
         }
     }
 
+    #[cfg(any(feature = "development", test))]
     pub fn code(&self) -> i32 {
         self.code
     }

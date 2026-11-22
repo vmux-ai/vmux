@@ -27,10 +27,6 @@ impl Workspace {
     }
 }
 
-const GENERIC_MODULES: &[&str] = &[
-    "bin", "host", "lib", "main", "plugin", "runtime", "src", "test", "tests", "ui",
-];
-
 #[test]
 fn ui_events_are_declared_in_the_owning_feature_page_manifest() {
     let feature_dir = Workspace::current().0.join("crates").join("feature");
@@ -125,85 +121,6 @@ fn sent_type(expression: &Expr) -> Option<String> {
             .last()
             .map(|part| part.ident.to_string()),
         _ => None,
-    }
-}
-
-#[test]
-fn registered_systems_and_observers_use_short_names_from_their_module_context() {
-    let crates_dir = Workspace::current().0.join("crates");
-    let mut violations = Vec::new();
-
-    walk(&crates_dir, &mut |path, source| {
-        let Ok(file) = syn::parse_file(source) else {
-            return;
-        };
-        let mut functions = FunctionNames::default();
-        functions.visit_file(&file);
-        let mut systems = RegisteredSystems::default();
-        systems.visit_file(&file);
-
-        for name in functions.0.intersection(&systems.0) {
-            if let Some(reason) = violation(path, name) {
-                violations.push(format!("{}: {name}: {reason}", path.display()));
-            }
-        }
-    });
-
-    assert!(
-        violations.is_empty(),
-        "registered systems and observers must use short operation names within their owning module:\n{}",
-        violations.join("\n")
-    );
-}
-
-#[test]
-fn registered_systems_and_observers_are_private_to_their_plugin_module() {
-    let crates_dir = Workspace::current().0.join("crates");
-    let mut violations = Vec::new();
-
-    walk(&crates_dir, &mut |path, source| {
-        let Ok(file) = syn::parse_file(source) else {
-            return;
-        };
-        audit_private_systems(path, &file.items, "crate", &mut violations);
-    });
-
-    assert!(
-        violations.is_empty(),
-        "registered systems and observers must be private to the module whose plugin schedules them:\n{}",
-        violations.join("\n")
-    );
-}
-
-fn audit_private_systems(path: &Path, items: &[Item], scope: &str, violations: &mut Vec<String>) {
-    let public = items
-        .iter()
-        .filter_map(|item| {
-            let Item::Fn(function) = item else {
-                return None;
-            };
-            (!matches!(function.vis, Visibility::Inherited)).then(|| function.sig.ident.to_string())
-        })
-        .collect::<BTreeSet<_>>();
-    let mut systems = RegisteredSystems::default();
-    for item in items {
-        if !matches!(item, Item::Mod(_)) {
-            systems.visit_item(item);
-        }
-    }
-    for name in public.intersection(&systems.0) {
-        violations.push(format!("{} ({scope}): {name}", path.display()));
-    }
-
-    for item in items {
-        let Item::Mod(module) = item else {
-            continue;
-        };
-        let Some((_, items)) = &module.content else {
-            continue;
-        };
-        let nested = format!("{scope}::{}", module.ident);
-        audit_private_systems(path, items, &nested, violations);
     }
 }
 
@@ -371,16 +288,6 @@ fn audit_module_layout(dir: &Path, violations: &mut Vec<String>) {
         {
             violations.push(path.display().to_string());
         }
-    }
-}
-
-#[derive(Default)]
-struct FunctionNames(BTreeSet<String>);
-
-impl<'ast> Visit<'ast> for FunctionNames {
-    fn visit_item_fn(&mut self, item: &'ast ItemFn) {
-        self.0.insert(item.sig.ident.to_string());
-        visit::visit_item_fn(self, item);
     }
 }
 
@@ -554,58 +461,6 @@ fn collect_paths(expression: &Expr, names: &mut BTreeSet<String>) {
     }
 }
 
-fn violation(path: &Path, name: &str) -> Option<String> {
-    if name.starts_with("on_") {
-        return Some("remove `on_`".to_string());
-    }
-    let operation = name;
-    let segments = operation.split('_').collect::<Vec<_>>();
-    for redundant in ["feature", "plugin", "system"] {
-        if segments.contains(&redundant) {
-            return Some(format!("remove `{redundant}`"));
-        }
-    }
-
-    for context in module_context(path) {
-        let context = context.split('_').collect::<Vec<_>>();
-        if operation != context.join("_")
-            && context.len() <= segments.len()
-            && segments
-                .windows(context.len())
-                .any(|window| window == context)
-        {
-            let context = context.join("_");
-            return Some(format!("remove repeated `{context}` context"));
-        }
-    }
-    None
-}
-
-fn module_context(path: &Path) -> BTreeSet<String> {
-    let mut context = BTreeSet::new();
-    let components = path
-        .components()
-        .filter_map(|component| component.as_os_str().to_str())
-        .collect::<Vec<_>>();
-
-    if let Some(crate_name) = components
-        .iter()
-        .rev()
-        .find(|name| name.starts_with("vmux_"))
-    {
-        context.insert(crate_name.trim_start_matches("vmux_").to_string());
-    }
-    if let Some(src) = components.iter().position(|component| *component == "src") {
-        for component in components.iter().skip(src + 1) {
-            let module = component.trim_end_matches(".rs");
-            if !GENERIC_MODULES.contains(&module) {
-                context.insert(module.to_string());
-            }
-        }
-    }
-    context
-}
-
 fn walk(dir: &Path, visit: &mut dyn FnMut(&Path, &str)) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -624,44 +479,6 @@ fn walk(dir: &Path, visit: &mut dyn FnMut(&Path, &str)) {
             visit(&path, &source);
         }
     }
-}
-
-#[test]
-fn system_name_policy_detects_framework_and_module_repetition() {
-    let path = Path::new("crates/feature/vmux_bookmark/src/tool.rs");
-
-    assert_eq!(
-        violation(path, "bookmark_pin").as_deref(),
-        Some("remove repeated `bookmark` context")
-    );
-    assert_eq!(
-        violation(path, "on_bookmark_pin").as_deref(),
-        Some("remove `on_`")
-    );
-    assert_eq!(
-        violation(path, "tool_pin").as_deref(),
-        Some("remove repeated `tool` context")
-    );
-    assert_eq!(
-        violation(
-            Path::new("crates/feature/vmux_editor/src/host/explorer/search.rs"),
-            "queue_global_search_requests",
-        )
-        .as_deref(),
-        Some("remove repeated `search` context")
-    );
-    assert_eq!(
-        violation(path, "pin_system").as_deref(),
-        Some("remove `system`")
-    );
-    assert!(violation(path, "pin").is_none());
-    assert!(
-        violation(
-            Path::new("crates/feature/vmux_history/src/prune.rs"),
-            "prune"
-        )
-        .is_none()
-    );
 }
 
 #[test]
