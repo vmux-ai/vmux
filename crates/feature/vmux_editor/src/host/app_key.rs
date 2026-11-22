@@ -1,5 +1,9 @@
 use crate::host::editor::EditReadOnly;
 use bevy::prelude::*;
+use bevy::prelude::{
+    App, Children, Commands, Entity, Message, MessageReader, MessageWriter, On, Plugin, Query, Res,
+    With,
+};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{CommandBarPick, CommandBarPicker, PickRequest};
 use vmux_command::{
@@ -371,122 +375,121 @@ fn apply_status_picks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
     use vmux_command::CommandInvocation;
-    #[derive(Resource, Default)]
-    struct FindRequests(Vec<Entity>);
 
-    #[derive(Resource, Default)]
-    struct PanelRequests(Vec<Entity>);
-
-    impl FindRequests {
-        fn record(trigger: On<FileFindOpenRequest>, mut seen: ResMut<Self>) {
-            seen.0.push(trigger.event_target());
-        }
+    struct Echo {
+        app: App,
+        find: Arc<Mutex<Vec<Entity>>>,
+        panel: Arc<Mutex<Vec<Entity>>>,
     }
-
-    impl PanelRequests {
-        fn record(trigger: On<FilePanelChooseRequest>, mut seen: ResMut<Self>) {
-            seen.0.push(trigger.event_target());
-        }
-    }
-
-    struct Echo;
 
     impl Echo {
-        fn app() -> App {
+        fn new() -> Self {
+            let find = Arc::new(Mutex::new(Vec::new()));
+            let panel = Arc::new(Mutex::new(Vec::new()));
+            let find_sink = find.clone();
+            let panel_sink = panel.clone();
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(KeyPlugin)
                 .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
                 .add_message::<FileStatusPicked>()
-                .init_resource::<FindRequests>()
-                .init_resource::<PanelRequests>()
-                .add_observer(FindRequests::record)
-                .add_observer(PanelRequests::record);
-            app
+                .add_observer(move |trigger: On<FileFindOpenRequest>| {
+                    find_sink.lock().unwrap().push(trigger.event_target());
+                })
+                .add_observer(move |trigger: On<FilePanelChooseRequest>| {
+                    panel_sink.lock().unwrap().push(trigger.event_target());
+                });
+            Self { app, find, panel }
         }
 
-        fn issue(app: &mut App, caller: Entity, id: &str) {
-            app.world_mut()
+        fn issue(&mut self, caller: Entity, id: &str) {
+            self.app
+                .world_mut()
                 .resource_mut::<bevy::ecs::message::Messages<CommandInvocation>>()
                 .write(CommandInvocation::new(caller, id));
-            app.update();
+            self.app.update();
         }
     }
 
     #[test]
     fn a_panel_key_reaches_host_ecs_for_only_the_page_that_sent_it() {
-        let mut app = Echo::app();
-        let pressed = app.world_mut().spawn_empty().id();
-        let other = app.world_mut().spawn_empty().id();
+        let mut echo = Echo::new();
+        let pressed = echo.app.world_mut().spawn_empty().id();
+        let other = echo.app.world_mut().spawn_empty().id();
 
-        Echo::issue(&mut app, pressed, "file_panel_choose");
+        echo.issue(pressed, "file_panel_choose");
 
-        assert_eq!(app.world().resource::<PanelRequests>().0, vec![pressed]);
-        assert!(app.world().resource::<FindRequests>().0.is_empty());
-        assert!(!app.world().resource::<PanelRequests>().0.contains(&other));
+        assert_eq!(*echo.panel.lock().unwrap(), vec![pressed]);
+        assert!(echo.find.lock().unwrap().is_empty());
+        assert!(!echo.panel.lock().unwrap().contains(&other));
     }
 
     #[test]
     fn a_find_key_dispatches_a_targeted_ecs_request() {
-        let mut app = Echo::app();
-        let pressed = app.world_mut().spawn_empty().id();
+        let mut echo = Echo::new();
+        let pressed = echo.app.world_mut().spawn_empty().id();
 
-        Echo::issue(&mut app, pressed, "file_find");
+        echo.issue(pressed, "file_find");
 
-        assert_eq!(app.world().resource::<FindRequests>().0, vec![pressed]);
+        assert_eq!(*echo.find.lock().unwrap(), vec![pressed]);
     }
 
-    #[derive(Resource, Default)]
-    struct Reopened(Vec<(Entity, FileEncoding)>);
-
-    impl Reopened {
-        fn record(trigger: On<UiInput<FileEncodingReopenRequest>>, mut seen: ResMut<Self>) {
-            seen.0
-                .push((trigger.event().webview, trigger.event().payload.encoding));
-        }
+    struct Picks {
+        app: App,
+        reopened: Arc<Mutex<Vec<(Entity, FileEncoding)>>>,
     }
-
-    struct Picks;
 
     impl Picks {
-        fn app() -> App {
+        fn new() -> Self {
+            let reopened = Arc::new(Mutex::new(Vec::new()));
+            let sink = reopened.clone();
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(KeyPlugin)
                 .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
                 .add_message::<FileStatusPicked>()
-                .init_resource::<Reopened>()
-                .add_observer(Reopened::record);
-            app
+                .add_observer(move |trigger: On<UiInput<FileEncodingReopenRequest>>| {
+                    sink.lock()
+                        .unwrap()
+                        .push((trigger.event().webview, trigger.event().payload.encoding));
+                });
+            Self { app, reopened }
         }
 
-        fn stack_with_editor(app: &mut App) -> (Entity, Entity) {
-            let editor = app
+        fn stack_with_editor(&mut self) -> (Entity, Entity) {
+            let editor = self
+                .app
                 .world_mut()
                 .spawn(FileView {
                     path: std::path::PathBuf::from("/tmp/a.txt"),
                 })
                 .id();
-            let stack = app.world_mut().spawn(children![]).add_child(editor).id();
+            let stack = self
+                .app
+                .world_mut()
+                .spawn(children![])
+                .add_child(editor)
+                .id();
             (stack, editor)
         }
 
-        fn submit(app: &mut App, stack: Option<Entity>, pick: CommandBarPick) {
-            app.world_mut()
+        fn submit(&mut self, stack: Option<Entity>, pick: CommandBarPick) {
+            self.app
+                .world_mut()
                 .resource_mut::<bevy::ecs::message::Messages<FileStatusPicked>>()
                 .write(FileStatusPicked { stack, pick });
-            app.update();
+            self.app.update();
         }
     }
 
     #[test]
     fn an_encoding_pick_reaches_the_editor_under_the_focused_stack() {
-        let mut app = Picks::app();
-        let (stack, editor) = Picks::stack_with_editor(&mut app);
+        let mut picks = Picks::new();
+        let (stack, editor) = picks.stack_with_editor();
 
-        Picks::submit(
-            &mut app,
+        picks.submit(
             Some(stack),
             CommandBarPick::Typed {
                 picker: EditorPicker::encoding_reopen(),
@@ -495,7 +498,7 @@ mod tests {
         );
 
         assert_eq!(
-            app.world().resource::<Reopened>().0,
+            *picks.reopened.lock().unwrap(),
             vec![(editor, FileEncoding::ShiftJis)],
             "the stack itself must not be asked to reopen"
         );
@@ -503,12 +506,11 @@ mod tests {
 
     #[test]
     fn a_pick_with_no_focused_editor_asks_nothing_to_reopen() {
-        let mut app = Picks::app();
-        let empty = app.world_mut().spawn(children![]).id();
+        let mut picks = Picks::new();
+        let empty = picks.app.world_mut().spawn(children![]).id();
 
         for stack in [None, Some(empty)] {
-            Picks::submit(
-                &mut app,
+            picks.submit(
                 stack,
                 CommandBarPick::Typed {
                     picker: EditorPicker::encoding_reopen(),
@@ -517,16 +519,15 @@ mod tests {
             );
         }
 
-        assert!(app.world().resource::<Reopened>().0.is_empty());
+        assert!(picks.reopened.lock().unwrap().is_empty());
     }
 
     #[test]
     fn an_unknown_encoding_label_is_refused_rather_than_guessed() {
-        let mut app = Picks::app();
-        let (stack, _) = Picks::stack_with_editor(&mut app);
+        let mut picks = Picks::new();
+        let (stack, _) = picks.stack_with_editor();
 
-        Picks::submit(
-            &mut app,
+        picks.submit(
             Some(stack),
             CommandBarPick::Typed {
                 picker: EditorPicker::encoding_reopen(),
@@ -534,6 +535,6 @@ mod tests {
             },
         );
 
-        assert!(app.world().resource::<Reopened>().0.is_empty());
+        assert!(picks.reopened.lock().unwrap().is_empty());
     }
 }

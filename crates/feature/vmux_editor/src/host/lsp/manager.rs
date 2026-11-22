@@ -4,6 +4,10 @@ use std::path::{Path, PathBuf};
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::prelude::{
+    App, Commands, Component, Entity, Message, MessageReader, MessageWriter, On, ParamSet, Plugin,
+    Query, Res, With, Without,
+};
 use bevy_cef::prelude::{Browsers, UiInput};
 #[cfg(test)]
 use vmux_ecs::Operation;
@@ -171,8 +175,6 @@ impl LspDiagnostics {
         }
     }
 }
-
-type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
 
 enum ReqKind {
     Hover { line: u32, col: u32 },
@@ -408,11 +410,33 @@ impl Job for StartJob {
     }
 }
 
-fn uri_for(path: &Path) -> Option<String> {
-    url::Url::from_file_path(path).ok().map(|u| u.to_string())
-}
-
 impl LspManager<'_, '_> {
+    fn uri_for(path: &Path) -> Option<String> {
+        url::Url::from_file_path(path).ok().map(|u| u.to_string())
+    }
+
+    fn server_overrides(settings: &AppSettings) -> std::collections::BTreeMap<String, ServerSpec> {
+        settings
+            .editor
+            .lsp
+            .servers
+            .iter()
+            .map(|(ext, o)| {
+                (
+                    ext.clone(),
+                    ServerSpec {
+                        extensions: vec![ext.clone()],
+                        command: o.command.clone(),
+                        args: o.args.clone(),
+                        language_id: o.language_id.clone(),
+                        root_markers: o.root_markers.clone(),
+                        package: None,
+                    },
+                )
+            })
+            .collect()
+    }
+
     fn read_text(path: &Path) -> Option<String> {
         let meta = std::fs::metadata(path).ok()?;
         if !meta.is_file() || meta.len() > Highlighter::MAX_HIGHLIGHT_BYTES {
@@ -658,7 +682,7 @@ impl LspManager<'_, '_> {
         kind: ReqKind,
     ) -> Option<LspPendingRequest> {
         let key = self.document_key_for(entity, path)?;
-        let uri = uri_for(path)?;
+        let uri = LspManager::uri_for(path)?;
         let client = self.client(key)?;
         if !client.provides(method) {
             return None;
@@ -830,7 +854,7 @@ impl LspManager<'_, '_> {
         kind: ReqKind,
     ) -> Option<LspPendingRequest> {
         let key = self.document_key_for(entity, path)?;
-        let uri = uri_for(path)?;
+        let uri = LspManager::uri_for(path)?;
         let client = self.client(key)?;
         if !client.provides(method) {
             return None;
@@ -893,7 +917,7 @@ impl LspManager<'_, '_> {
         extra: serde_json::Value,
     ) -> Option<LspPendingRequest> {
         let key = self.document_key_for(entity, path)?;
-        let uri = uri_for(path)?;
+        let uri = LspManager::uri_for(path)?;
         let client = self.client(key)?;
         let root = key.root().to_path_buf();
         if !client.provides(method) {
@@ -980,7 +1004,7 @@ impl LspManager<'_, '_> {
 
     pub(crate) fn folding_range(&self, entity: Entity, path: &Path) -> Option<LspPendingRequest> {
         let key = self.document_key_for(entity, path)?;
-        let uri = uri_for(path)?;
+        let uri = LspManager::uri_for(path)?;
         let client = self.client(key)?;
         if !client.provides("textDocument/foldingRange") {
             return None;
@@ -1005,7 +1029,7 @@ impl LspManager<'_, '_> {
 
     pub(crate) fn document_symbol(&self, entity: Entity, path: &Path) -> Option<LspPendingRequest> {
         let key = self.document_key_for(entity, path)?;
-        let uri = uri_for(path)?;
+        let uri = LspManager::uri_for(path)?;
         let client = self.client(key)?;
         if !client.provides("textDocument/documentSymbol") {
             return None;
@@ -1028,7 +1052,7 @@ impl LspManager<'_, '_> {
 
     pub(crate) fn semantic_tokens(&self, entity: Entity, path: &Path) -> Option<LspPendingRequest> {
         let key = self.document_key_for(entity, path)?;
-        let uri = uri_for(path)?;
+        let uri = LspManager::uri_for(path)?;
         let key = key.clone();
         let client = self.client(&key)?;
         if !client.provides("textDocument/semanticTokens/full") {
@@ -1058,11 +1082,6 @@ impl LspManager<'_, '_> {
     }
 }
 
-fn loc_tuple(uri: &lsp_types::Uri, pos: lsp_types::Position) -> Option<(PathBuf, u32, u32)> {
-    let path = ServerClient::path_from_uri(uri.as_str())?;
-    Some((path, pos.line, pos.character))
-}
-
 #[derive(Component)]
 pub struct LspOpened;
 
@@ -1071,28 +1090,6 @@ struct LspInitialized(i32);
 
 #[derive(Component)]
 struct LspSynced(uuid::Uuid, i32);
-
-fn server_overrides(settings: &AppSettings) -> ServerOverrides {
-    settings
-        .editor
-        .lsp
-        .servers
-        .iter()
-        .map(|(ext, o)| {
-            (
-                ext.clone(),
-                ServerSpec {
-                    extensions: vec![ext.clone()],
-                    command: o.command.clone(),
-                    args: o.args.clone(),
-                    language_id: o.language_id.clone(),
-                    root_markers: o.root_markers.clone(),
-                    package: None,
-                },
-            )
-        })
-        .collect()
-}
 
 struct ServersPlugin;
 
@@ -1233,7 +1230,7 @@ fn prepare_servers(
     wake: Option<Res<JobWake>>,
     mut commands: Commands,
 ) {
-    let overrides = server_overrides(&settings);
+    let overrides = LspManager::server_overrides(&settings);
     let mut pending_roots = Vec::<(PathBuf, Entity)>::new();
     let mut pending_servers = Vec::<(ServerKey, Entity)>::new();
     for (entity, view, _) in &q {
@@ -1642,7 +1639,10 @@ impl LspResponseWriters<'_> {
                 self.semantic.write(LspSemantic {
                     entity: request.target,
                     path: path.clone(),
-                    tokens: parse_semantic_tokens(&value, manager.semantic_legend(key).as_ref()),
+                    tokens: LspRequestOperation::parse_semantic_tokens(
+                        &value,
+                        manager.semantic_legend(key).as_ref(),
+                    ),
                     origin: Some(origin),
                 });
             }
@@ -1769,12 +1769,34 @@ impl LspResponseWriters<'_> {
 }
 
 impl LspRequestOperation {
+    fn loc_tuple(uri: &lsp_types::Uri, pos: lsp_types::Position) -> Option<(PathBuf, u32, u32)> {
+        let path = ServerClient::path_from_uri(uri.as_str())?;
+        Some((path, pos.line, pos.character))
+    }
+
+    fn parse_semantic_tokens(
+        value: &serde_json::Value,
+        legend: Option<&crate::lsp::semantic::SemanticLegend>,
+    ) -> Vec<crate::lsp::semantic::SemanticToken> {
+        let Some(legend) = legend else {
+            return Vec::new();
+        };
+        let Some(data) = value.pointer("/result/data").and_then(|d| d.as_array()) else {
+            return Vec::new();
+        };
+        let data: Vec<u32> = data
+            .iter()
+            .filter_map(|n| n.as_u64().map(|n| n as u32))
+            .collect();
+        legend.decode(&data)
+    }
+
     #[allow(clippy::mutable_key_type)]
     fn one_document_edit(
         path: &Path,
         edits: Vec<lsp_types::TextEdit>,
     ) -> Option<lsp_types::WorkspaceEdit> {
-        let uri: lsp_types::Uri = uri_for(path)?.parse().ok()?;
+        let uri: lsp_types::Uri = LspManager::uri_for(path)?.parse().ok()?;
         let mut changes = HashMap::new();
         changes.insert(uri, edits);
         Some(lsp_types::WorkspaceEdit {
@@ -1868,13 +1890,13 @@ impl LspRequestOperation {
             return None;
         }
         match serde_json::from_value::<lsp_types::GotoDefinitionResponse>(result.clone()).ok()? {
-            Scalar(l) => loc_tuple(&l.uri, l.range.start),
+            Scalar(l) => LspRequestOperation::loc_tuple(&l.uri, l.range.start),
             Array(ls) => ls
                 .into_iter()
-                .find_map(|l| loc_tuple(&l.uri, l.range.start)),
+                .find_map(|l| LspRequestOperation::loc_tuple(&l.uri, l.range.start)),
             Link(lls) => lls
                 .into_iter()
-                .find_map(|l| loc_tuple(&l.target_uri, l.target_range.start)),
+                .find_map(|l| LspRequestOperation::loc_tuple(&l.target_uri, l.target_range.start)),
         }
     }
 
@@ -1885,7 +1907,7 @@ impl LspRequestOperation {
         serde_json::from_value::<Vec<lsp_types::Location>>(result.clone())
             .map(|ls| {
                 ls.into_iter()
-                    .filter_map(|l| loc_tuple(&l.uri, l.range.start))
+                    .filter_map(|l| LspRequestOperation::loc_tuple(&l.uri, l.range.start))
                     .collect()
             })
             .unwrap_or_default()
@@ -1962,28 +1984,13 @@ fn drain_requests(
         let origin = LspOrigin {
             owner: request.target,
             stamp: request.stamp,
-            operation: matches!(request.kind, ReqKind::Rename { .. } | ReqKind::CodeAction)
-                .then_some(request_entity),
+            operation: match request.kind {
+                ReqKind::Rename { .. } | ReqKind::CodeAction => Some(request_entity),
+                _ => None,
+            },
         };
         writers.dispatch_response(request, value, origin, ready, dark, &manager, &mut commands);
     }
-}
-
-fn parse_semantic_tokens(
-    value: &serde_json::Value,
-    legend: Option<&crate::lsp::semantic::SemanticLegend>,
-) -> Vec<crate::lsp::semantic::SemanticToken> {
-    let Some(legend) = legend else {
-        return Vec::new();
-    };
-    let Some(data) = value.pointer("/result/data").and_then(|d| d.as_array()) else {
-        return Vec::new();
-    };
-    let data: Vec<u32> = data
-        .iter()
-        .filter_map(|n| n.as_u64().map(|n| n as u32))
-        .collect();
-    legend.decode(&data)
 }
 
 #[derive(Message)]
@@ -2488,7 +2495,7 @@ fn publish_status(
     mut installs: MessageWriter<crate::lsp::manager_page::PackageInstallRequest>,
     mut commands: Commands,
 ) {
-    let overrides = server_overrides(&settings);
+    let overrides = LspManager::server_overrides(&settings);
     let store = store::PackageStore::lsp();
     for (entity, fv, sent) in &q {
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
@@ -2966,7 +2973,7 @@ mod tests {
             );
             assert_eq!(
                 fixture.message(0, "textDocument/foldingRange", 2)["params"]["textDocument"]["uri"],
-                uri_for(&path).unwrap()
+                LspManager::uri_for(&path).unwrap()
             );
             fixture.message(0, "textDocument/documentSymbol", 2);
             fixture.message(0, "textDocument/semanticTokens/full", 2);
@@ -3201,6 +3208,45 @@ mod tests {
     }
 
     impl DiagnosticFixture {
+        fn fline(no: u32, text: &str) -> FileLine {
+            FileLine {
+                line_no: no,
+                fold: vmux_ecs::event::FoldGutter::None,
+                spans: vec![StyledSpan {
+                    text: text.into(),
+                    fg: [0, 0, 0],
+                    bold: false,
+                    italic: false,
+                }],
+                indent_levels: 0,
+            }
+        }
+
+        fn diag(l0: u32, c0: u32, l1: u32, c1: u32, sev: i32, msg: &str) -> lsp_types::Diagnostic {
+            let severity = match sev {
+                1 => lsp_types::DiagnosticSeverity::ERROR,
+                2 => lsp_types::DiagnosticSeverity::WARNING,
+                3 => lsp_types::DiagnosticSeverity::INFORMATION,
+                _ => lsp_types::DiagnosticSeverity::HINT,
+            };
+            lsp_types::Diagnostic {
+                range: lsp_types::Range {
+                    start: lsp_types::Position {
+                        line: l0,
+                        character: c0,
+                    },
+                    end: lsp_types::Position {
+                        line: l1,
+                        character: c1,
+                    },
+                },
+                severity: Some(severity),
+                message: msg.into(),
+                source: Some("rustc".into()),
+                ..Default::default()
+            }
+        }
+
         fn new() -> Self {
             let mut app = App::new();
             app.add_plugins((vmux_lsp::LspPlugin, DiagnosticsPlugin))
@@ -3341,7 +3387,7 @@ mod tests {
             .world()
             .get::<Transport>(document.server)
             .unwrap()
-            .did_open(&uri_for(&path).unwrap(), "rust", 1, &text);
+            .did_open(&LspManager::uri_for(&path).unwrap(), "rust", 1, &text);
         let reopened = fixture
             .app
             .world_mut()
@@ -4225,49 +4271,11 @@ mod tests {
         );
     }
 
-    fn fline(no: u32, text: &str) -> FileLine {
-        FileLine {
-            line_no: no,
-            fold: vmux_ecs::event::FoldGutter::None,
-            spans: vec![StyledSpan {
-                text: text.into(),
-                fg: [0, 0, 0],
-                bold: false,
-                italic: false,
-            }],
-            indent_levels: 0,
-        }
-    }
-
-    fn diag(l0: u32, c0: u32, l1: u32, c1: u32, sev: i32, msg: &str) -> lsp_types::Diagnostic {
-        let severity = match sev {
-            1 => lsp_types::DiagnosticSeverity::ERROR,
-            2 => lsp_types::DiagnosticSeverity::WARNING,
-            3 => lsp_types::DiagnosticSeverity::INFORMATION,
-            _ => lsp_types::DiagnosticSeverity::HINT,
-        };
-        lsp_types::Diagnostic {
-            range: lsp_types::Range {
-                start: lsp_types::Position {
-                    line: l0,
-                    character: c0,
-                },
-                end: lsp_types::Position {
-                    line: l1,
-                    character: c1,
-                },
-            },
-            severity: Some(severity),
-            message: msg.into(),
-            source: Some("rustc".into()),
-            ..Default::default()
-        }
-    }
-
     #[test]
     fn ascii_columns_pass_through() {
-        let lines = vec![fline(0, "let x = 1;")];
-        let out = LspDiagnostics::from_lines(&lines, &[diag(0, 4, 0, 5, 1, "unused")]);
+        let lines = vec![DiagnosticFixture::fline(0, "let x = 1;")];
+        let out =
+            LspDiagnostics::from_lines(&lines, &[DiagnosticFixture::diag(0, 4, 0, 5, 1, "unused")]);
         assert_eq!(out[0].start_col, 4);
         assert_eq!(out[0].end_col, 5);
         assert_eq!(out[0].severity, DiagSeverity::Error);
@@ -4285,11 +4293,12 @@ mod tests {
 
     #[test]
     fn utf16_emoji_maps_to_char_index() {
-        let lines = vec![fline(0, "😀ab")];
+        let lines = vec![DiagnosticFixture::fline(0, "😀ab")];
         let line = LspLine::new("😀ab".to_string());
         assert_eq!(line.char_col(2), 1);
         assert_eq!(line.char_col(3), 2);
-        let out = LspDiagnostics::from_lines(&lines, &[diag(0, 2, 0, 3, 2, "warn")]);
+        let out =
+            LspDiagnostics::from_lines(&lines, &[DiagnosticFixture::diag(0, 2, 0, 3, 2, "warn")]);
         assert_eq!(out[0].start_col, 1);
         assert_eq!(out[0].end_col, 2);
         assert_eq!(out[0].severity, DiagSeverity::Warning);
@@ -4297,16 +4306,21 @@ mod tests {
 
     #[test]
     fn out_of_range_columns_clamp() {
-        let lines = vec![fline(0, "ab")];
-        let out = LspDiagnostics::from_lines(&lines, &[diag(0, 99, 0, 99, 1, "x")]);
+        let lines = vec![DiagnosticFixture::fline(0, "ab")];
+        let out =
+            LspDiagnostics::from_lines(&lines, &[DiagnosticFixture::diag(0, 99, 0, 99, 1, "x")]);
         assert_eq!(out[0].start_col, 2);
         assert_eq!(out[0].end_col, 2);
     }
 
     #[test]
     fn multiline_range_underlines_first_line_to_eol() {
-        let lines = vec![fline(0, "abcdef"), fline(1, "ghi")];
-        let out = LspDiagnostics::from_lines(&lines, &[diag(0, 2, 1, 1, 1, "multi")]);
+        let lines = vec![
+            DiagnosticFixture::fline(0, "abcdef"),
+            DiagnosticFixture::fline(1, "ghi"),
+        ];
+        let out =
+            LspDiagnostics::from_lines(&lines, &[DiagnosticFixture::diag(0, 2, 1, 1, 1, "multi")]);
         assert_eq!(out[0].line, 0);
         assert_eq!(out[0].start_col, 2);
         assert_eq!(out[0].end_col, 6);

@@ -2,6 +2,7 @@ use crate::host::editor::EditReadOnly;
 #[cfg(test)]
 use crate::host::editor::Editor;
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Entity, MessageReader, On, Plugin, Query, With};
 #[cfg(test)]
 use bevy_cef::prelude::Browsers;
 
@@ -98,7 +99,7 @@ fn apply(request: On<ApplyWorkspaceEdit>, mut edits: WorkspaceEdits) {
     {
         Some("language server instance is no longer current".to_string())
     } else {
-        documents(&request, &mut edits)
+        edits.apply_documents(&request)
     };
     if let Some(request) = request.request {
         edits
@@ -119,30 +120,6 @@ fn apply(request: On<ApplyWorkspaceEdit>, mut edits: WorkspaceEdits) {
     }
 }
 
-fn documents(request: &ApplyWorkspaceEdit, edits: &mut WorkspaceEdits) -> Option<String> {
-    let edit = match &request.result {
-        Ok(edit) => edit,
-        Err(reason) => return Some(reason.clone()),
-    };
-    let plan = match WorkspaceEditPlan::within(&request.root, edit) {
-        Ok(plan) => plan,
-        Err(error) => return Some(error.to_string()),
-    };
-    let mut prepared = Vec::with_capacity(plan.documents.len());
-    for document in plan.documents {
-        match edits.prepare_document(document, request.server, request.origin.as_ref()) {
-            Ok(document) => prepared.push(document),
-            Err(reason) => return Some(reason),
-        }
-    }
-    for document in prepared {
-        if let Err(reason) = edits.apply_document(document) {
-            return Some(reason);
-        }
-    }
-    None
-}
-
 #[derive(bevy::ecs::system::SystemParam)]
 struct WorkspaceEdits<'w, 's> {
     views: Query<'w, 's, (Entity, &'static FileView, EditReadOnly)>,
@@ -154,6 +131,29 @@ struct WorkspaceEdits<'w, 's> {
 }
 
 impl WorkspaceEdits<'_, '_> {
+    fn apply_documents(&mut self, request: &ApplyWorkspaceEdit) -> Option<String> {
+        let edit = match &request.result {
+            Ok(edit) => edit,
+            Err(reason) => return Some(reason.clone()),
+        };
+        let plan = match WorkspaceEditPlan::within(&request.root, edit) {
+            Ok(plan) => plan,
+            Err(error) => return Some(error.to_string()),
+        };
+        let mut prepared = Vec::with_capacity(plan.documents.len());
+        for document in plan.documents {
+            match self.prepare_document(document, request.server, request.origin.as_ref()) {
+                Ok(document) => prepared.push(document),
+                Err(reason) => return Some(reason),
+            }
+        }
+        for document in prepared {
+            if let Err(reason) = self.apply_document(document) {
+                return Some(reason);
+            }
+        }
+        None
+    }
     fn prepare_document(
         &self,
         document: crate::lsp::workspace_edit::PlannedDocument,

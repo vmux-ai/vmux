@@ -96,39 +96,41 @@ impl std::fmt::Display for PlanRefusal {
 mod tests {
     use super::*;
 
-    fn edit(new_text: &str) -> lsp_types::TextEdit {
-        lsp_types::TextEdit {
-            range: lsp_types::Range::default(),
-            new_text: new_text.to_string(),
+    impl WorkspaceEditPlan {
+        fn edit(new_text: &str) -> lsp_types::TextEdit {
+            lsp_types::TextEdit {
+                range: lsp_types::Range::default(),
+                new_text: new_text.to_string(),
+            }
         }
-    }
 
-    fn uri(path: &Path) -> lsp_types::Uri {
-        url::Url::from_file_path(path)
-            .unwrap()
-            .as_str()
-            .parse()
-            .unwrap()
-    }
-
-    #[allow(clippy::mutable_key_type)]
-    fn changes(
-        entries: Vec<(&Path, &str)>,
-    ) -> std::collections::HashMap<lsp_types::Uri, Vec<lsp_types::TextEdit>> {
-        let mut changes = std::collections::HashMap::new();
-        for (path, text) in entries {
-            changes.insert(uri(path), vec![edit(text)]);
+        fn uri(path: &Path) -> lsp_types::Uri {
+            url::Url::from_file_path(path)
+                .unwrap()
+                .as_str()
+                .parse()
+                .unwrap()
         }
-        changes
-    }
 
-    fn document(path: &Path, version: Option<i32>) -> lsp_types::TextDocumentEdit {
-        lsp_types::TextDocumentEdit {
-            text_document: lsp_types::OptionalVersionedTextDocumentIdentifier {
-                uri: uri(path),
-                version,
-            },
-            edits: vec![lsp_types::OneOf::Left(edit("x"))],
+        #[allow(clippy::mutable_key_type)]
+        fn changes(
+            entries: Vec<(&Path, &str)>,
+        ) -> std::collections::HashMap<lsp_types::Uri, Vec<lsp_types::TextEdit>> {
+            let mut changes = std::collections::HashMap::new();
+            for (path, text) in entries {
+                changes.insert(Self::uri(path), vec![Self::edit(text)]);
+            }
+            changes
+        }
+
+        fn document(path: &Path, version: Option<i32>) -> lsp_types::TextDocumentEdit {
+            lsp_types::TextDocumentEdit {
+                text_document: lsp_types::OptionalVersionedTextDocumentIdentifier {
+                    uri: Self::uri(path),
+                    version,
+                },
+                edits: vec![lsp_types::OneOf::Left(Self::edit("x"))],
+            }
         }
     }
 
@@ -141,7 +143,10 @@ mod tests {
         let plan = WorkspaceEditPlan::within(
             root.path(),
             &lsp_types::WorkspaceEdit {
-                changes: Some(changes(vec![(b.as_path(), "b"), (a.as_path(), "a")])),
+                changes: Some(WorkspaceEditPlan::changes(vec![
+                    (b.as_path(), "b"),
+                    (a.as_path(), "a"),
+                ])),
                 ..Default::default()
             },
         )
@@ -164,10 +169,9 @@ mod tests {
         let plan = WorkspaceEditPlan::within(
             root.path(),
             &lsp_types::WorkspaceEdit {
-                document_changes: Some(lsp_types::DocumentChanges::Edits(vec![document(
-                    &root.path().join("a.rs"),
-                    Some(4),
-                )])),
+                document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                    WorkspaceEditPlan::document(&root.path().join("a.rs"), Some(4)),
+                ])),
                 ..Default::default()
             },
         )
@@ -184,10 +188,13 @@ mod tests {
         let plan = WorkspaceEditPlan::within(
             root.path(),
             &lsp_types::WorkspaceEdit {
-                changes: Some(changes(vec![(legacy.as_path(), "legacy")])),
-                document_changes: Some(lsp_types::DocumentChanges::Edits(vec![document(
-                    &modern, None,
+                changes: Some(WorkspaceEditPlan::changes(vec![(
+                    legacy.as_path(),
+                    "legacy",
                 )])),
+                document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                    WorkspaceEditPlan::document(&modern, None),
+                ])),
                 ..Default::default()
             },
         )
@@ -205,14 +212,17 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let rename = lsp_types::DocumentChangeOperation::Op(lsp_types::ResourceOp::Rename(
             lsp_types::RenameFile {
-                old_uri: uri(&root.path().join("a.rs")),
-                new_uri: uri(&root.path().join("b.rs")),
+                old_uri: WorkspaceEditPlan::uri(&root.path().join("a.rs")),
+                new_uri: WorkspaceEditPlan::uri(&root.path().join("b.rs")),
                 options: None,
                 annotation_id: None,
             },
         ));
         let ops = vec![
-            lsp_types::DocumentChangeOperation::Edit(document(&root.path().join("a.rs"), None)),
+            lsp_types::DocumentChangeOperation::Edit(WorkspaceEditPlan::document(
+                &root.path().join("a.rs"),
+                None,
+            )),
             rename,
         ];
         let refusal = WorkspaceEditPlan::within(
@@ -230,10 +240,10 @@ mod tests {
     fn annotated_edits_are_unwrapped() {
         let root = tempfile::tempdir().unwrap();
         let annotated = lsp_types::OneOf::Right(lsp_types::AnnotatedTextEdit {
-            text_edit: edit("annotated"),
+            text_edit: WorkspaceEditPlan::edit("annotated"),
             annotation_id: "a1".to_string(),
         });
-        let mut doc = document(&root.path().join("a.rs"), None);
+        let mut doc = WorkspaceEditPlan::document(&root.path().join("a.rs"), None);
         doc.edits = vec![annotated];
         let plan = WorkspaceEditPlan::within(
             root.path(),
@@ -253,10 +263,9 @@ mod tests {
         let refusal = WorkspaceEditPlan::within(
             root.path(),
             &lsp_types::WorkspaceEdit {
-                document_changes: Some(lsp_types::DocumentChanges::Edits(vec![document(
-                    &outside.path().join("escape.rs"),
-                    None,
-                )])),
+                document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                    WorkspaceEditPlan::document(&outside.path().join("escape.rs"), None),
+                ])),
                 ..Default::default()
             },
         )

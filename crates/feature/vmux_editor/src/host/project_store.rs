@@ -4,6 +4,7 @@ use std::task::Wake;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Entity, Name, Plugin, Query, Res};
 use bevy::winit::EventLoopProxyWrapper;
 use vmux_ecs::Cwd;
 use vmux_ecs::profile::ProjectsRoot;
@@ -58,11 +59,14 @@ impl Wake for EventLoopWake {
     }
 }
 
-pub(super) struct ErrorMessage(pub(super) vmux_project::Error);
+#[derive(SystemParam)]
+pub(super) struct Registrations<'w, 's> {
+    inner: vmux_project::Registrations<'w, 's>,
+}
 
-impl ErrorMessage {
-    pub(super) fn localized(self) -> String {
-        let key = match self.0 {
+impl Registrations<'_, '_> {
+    pub(super) fn localize_error(error: vmux_project::Error) -> String {
+        let key = match error {
             vmux_project::Error::Conflict => "project-edit-conflict",
             vmux_project::Error::Duplicate => "project-already-exists",
             vmux_project::Error::InvalidName => "project-name-invalid",
@@ -71,18 +75,11 @@ impl ErrorMessage {
         };
         vmux_ui::i18n::translate(key)
     }
-}
 
-#[derive(SystemParam)]
-pub(super) struct Registrations<'w, 's> {
-    inner: vmux_project::Registrations<'w, 's>,
-}
-
-impl Registrations<'_, '_> {
     pub(super) fn ready(&self, root: &Path) -> Result<bool, String> {
         self.inner
             .ready(vmux_path::PathIdentity::resolve(root).as_path())
-            .map_err(|error| ErrorMessage(error).localized())
+            .map_err(Self::localize_error)
     }
 
     pub(super) fn snapshot(&self, root: &Path) -> Snapshot {
@@ -110,7 +107,7 @@ impl Registrations<'_, '_> {
         }
         let directory = match self.inner.directory(root, url) {
             Ok(directory) => directory,
-            Err(error) => return Some(Err(ErrorMessage(error).localized())),
+            Err(error) => return Some(Err(Self::localize_error(error))),
         };
         if let Some(directory) = directory {
             return Some(Ok(directory));

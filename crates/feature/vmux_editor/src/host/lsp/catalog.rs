@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use bevy::prelude::*;
+use bevy::prelude::{App, Component, Plugin};
 use serde_json::Value;
 
 use crate::lsp::package_path::{PackageName, PackagePath, Sha256Digest};
@@ -160,7 +160,8 @@ impl Package {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = r#"[
+    impl Package {
+        const SAMPLE: &str = r#"[
       {
         "name": "rust-analyzer",
         "description": "  Rust LSP  ",
@@ -191,10 +192,11 @@ mod tests {
         "source": {"id": "pkg:pypi/ruff@0.5.0"}
       }
     ]"#;
+    }
 
     #[test]
     fn parses_three_packages() {
-        let packages = Package::parse_catalog(SAMPLE).unwrap();
+        let packages = Package::parse_catalog(Package::SAMPLE).unwrap();
         assert_eq!(packages.len(), 3);
         let ra = packages
             .iter()
@@ -217,7 +219,7 @@ mod tests {
 
     #[test]
     fn npm_and_pypi_have_no_github_assets() {
-        let packages = Package::parse_catalog(SAMPLE).unwrap();
+        let packages = Package::parse_catalog(Package::SAMPLE).unwrap();
         let ts = packages
             .iter()
             .find(|package| package.name.as_str() == "typescript-language-server")

@@ -7,8 +7,6 @@ use vmux_path::Executable;
 
 use crate::lsp::package_path::{PackageName, PackagePath};
 
-const RECEIPT_MAX_BYTES: u64 = 1024 * 1024;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackageStore {
     root: PathBuf,
@@ -30,6 +28,8 @@ pub enum Resolution {
 }
 
 impl PackageStore {
+    const RECEIPT_MAX_BYTES: u64 = 1024 * 1024;
+
     pub fn lsp() -> Self {
         Self::at(vmux_ecs::profile::ProfilePaths::current().lsp())
     }
@@ -75,10 +75,10 @@ impl PackageStore {
     pub fn read_receipt(&self, name: &PackageName) -> Option<Receipt> {
         let file = std::fs::File::open(self.receipt_path(name)).ok()?;
         let mut bytes = Vec::new();
-        file.take(RECEIPT_MAX_BYTES + 1)
+        file.take(Self::RECEIPT_MAX_BYTES + 1)
             .read_to_end(&mut bytes)
             .ok()?;
-        if bytes.len() as u64 > RECEIPT_MAX_BYTES {
+        if bytes.len() as u64 > Self::RECEIPT_MAX_BYTES {
             return None;
         }
         let receipt: Receipt = serde_json::from_slice(&bytes).ok()?;
@@ -172,17 +172,19 @@ impl Receipt {
 mod tests {
     use super::*;
 
-    fn receipt(name: &str) -> Receipt {
-        let mut bin = BTreeMap::new();
-        bin.insert(
-            PackageName::parse(name).unwrap(),
-            PackagePath::parse(&format!("{name}-bin")).unwrap(),
-        );
-        Receipt {
-            name: PackageName::parse(name).unwrap(),
-            version: Some("1.0".into()),
-            source_id: "pkg:github/x/y@1.0".into(),
-            bin,
+    impl Receipt {
+        fn sample(name: &str) -> Self {
+            let mut bin = BTreeMap::new();
+            bin.insert(
+                PackageName::parse(name).unwrap(),
+                PackagePath::parse(&format!("{name}-bin")).unwrap(),
+            );
+            Self {
+                name: PackageName::parse(name).unwrap(),
+                version: Some("1.0".into()),
+                source_id: "pkg:github/x/y@1.0".into(),
+                bin,
+            }
         }
     }
 
@@ -194,7 +196,7 @@ mod tests {
         let pkgdir = store.package_dir(&name);
         std::fs::create_dir_all(&pkgdir).unwrap();
         std::fs::write(pkgdir.join("foo-bin"), b"#!/bin/sh\n").unwrap();
-        store.write_receipt(&name, &receipt("foo")).unwrap();
+        store.write_receipt(&name, &Receipt::sample("foo")).unwrap();
 
         assert!(store.is_installed(&name));
         assert_eq!(
@@ -213,7 +215,7 @@ mod tests {
         let pkgdir = store.package_dir(&name);
         std::fs::create_dir_all(&pkgdir).unwrap();
         std::fs::write(pkgdir.join("foo-bin"), b"x").unwrap();
-        store.write_receipt(&name, &receipt("foo")).unwrap();
+        store.write_receipt(&name, &Receipt::sample("foo")).unwrap();
         store.link_bin(&name, &package_binary, &bin_name).unwrap();
 
         assert!(store.bin_path(&name).is_some());
@@ -232,7 +234,7 @@ mod tests {
         let pkgdir = store.package_dir(&name);
         std::fs::create_dir_all(&pkgdir).unwrap();
         std::fs::write(pkgdir.join("foo-bin"), b"x").unwrap();
-        store.write_receipt(&name, &receipt("foo")).unwrap();
+        store.write_receipt(&name, &Receipt::sample("foo")).unwrap();
         store.link_bin(&name, &package_binary, &bin_name).unwrap();
         assert!(matches!(
             store.resolve_command("foo"),

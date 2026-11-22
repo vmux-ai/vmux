@@ -19,25 +19,24 @@ enum PendingMark {
 }
 
 #[derive(Clone)]
-enum Recorded {
-    Key(KeyInput),
-    Text(String),
+struct Recorded {
+    key: Option<KeyInput>,
+    text: Option<String>,
 }
 
-fn is_change(cmd: &EditCommand) -> bool {
-    match cmd {
-        EditCommand::Op { operator, .. } => *operator != Operator::Yank,
-        EditCommand::Put { .. }
-        | EditCommand::ReplaceChar { .. }
-        | EditCommand::JoinLines { .. }
-        | EditCommand::OpenLine { .. }
-        | EditCommand::InsertText(_)
-        | EditCommand::InsertNewline
-        | EditCommand::InsertTab
-        | EditCommand::DeleteBack
-        | EditCommand::DeleteForward
-        | EditCommand::DeleteWordBack => true,
-        _ => false,
+impl Recorded {
+    fn key(input: KeyInput) -> Self {
+        Self {
+            key: Some(input),
+            text: None,
+        }
+    }
+
+    fn text(text: String) -> Self {
+        Self {
+            key: None,
+            text: Some(text),
+        }
     }
 }
 
@@ -70,91 +69,6 @@ pub struct VimKeymap {
     block_text: String,
     mappings: crate::keymap::mapping::Mappings,
     map_pending: Vec<KeyInput>,
-}
-
-fn motion_for(key: &str) -> Option<Motion> {
-    Some(match key {
-        "h" | "ArrowLeft" | "Backspace" => Motion::LeftBounded,
-        "l" | "ArrowRight" | " " => Motion::RightBounded,
-        "j" | "ArrowDown" => Motion::Down,
-        "k" | "ArrowUp" => Motion::Up,
-        "w" => Motion::WordNext,
-        "b" => Motion::WordPrev,
-        "e" => Motion::WordEnd,
-        "W" => Motion::BigWordNext,
-        "B" => Motion::BigWordPrev,
-        "E" => Motion::BigWordEnd,
-        "0" => Motion::LineStart,
-        "^" => Motion::FirstNonBlank,
-        "$" => Motion::LineEnd,
-        "{" => Motion::ParagraphPrev,
-        "}" => Motion::ParagraphNext,
-        "%" => Motion::MatchPair,
-        "n" => Motion::SearchNext { reverse: false },
-        "N" => Motion::SearchNext { reverse: true },
-        "H" => Motion::ScreenTop,
-        "M" => Motion::ScreenMiddle,
-        "L" => Motion::ScreenBottom,
-        "+" | "Enter" => Motion::NextLineStart,
-        "-" => Motion::PrevLineStart,
-        "_" => Motion::FirstNonBlank,
-        _ => return None,
-    })
-}
-
-fn find_prefix(key: &str) -> Option<(bool, bool)> {
-    Some(match key {
-        "f" => (true, false),
-        "F" => (false, false),
-        "t" => (true, true),
-        "T" => (false, true),
-        _ => return None,
-    })
-}
-
-fn g_operator(key: &str) -> Option<(Operator, char)> {
-    Some(match key {
-        "u" => (Operator::Lower, 'u'),
-        "U" => (Operator::Upper, 'U'),
-        "~" => (Operator::ToggleCase, '~'),
-        _ => return None,
-    })
-}
-
-fn operator_for(key: &str) -> Option<(Operator, char)> {
-    Some(match key {
-        "d" => (Operator::Delete, 'd'),
-        "c" => (Operator::Change, 'c'),
-        "y" => (Operator::Yank, 'y'),
-        ">" => (Operator::Indent, '>'),
-        "<" => (Operator::Outdent, '<'),
-        "=" => (Operator::Indent, '='),
-        _ => return None,
-    })
-}
-
-fn text_object_kind(key: &str) -> Option<TextObjectKind> {
-    Some(match key {
-        "w" => TextObjectKind::Word,
-        "W" => TextObjectKind::BigWord,
-        "s" => TextObjectKind::Sentence,
-        "p" => TextObjectKind::Paragraph,
-        "(" | ")" | "b" => TextObjectKind::Paren,
-        "[" | "]" => TextObjectKind::Bracket,
-        "{" | "}" | "B" => TextObjectKind::Brace,
-        "<" | ">" => TextObjectKind::Angle,
-        "\"" => TextObjectKind::DoubleQuote,
-        "'" => TextObjectKind::SingleQuote,
-        "`" => TextObjectKind::BackQuote,
-        "t" => TextObjectKind::Tag,
-        _ => return None,
-    })
-}
-
-fn single_char(key: &str) -> Option<char> {
-    let mut chars = key.chars();
-    let c = chars.next()?;
-    chars.next().is_none().then_some(c)
 }
 
 pub(super) struct VimInput<'a> {
@@ -200,6 +114,108 @@ impl VimKeymap {
 }
 
 impl VimInput<'_> {
+    fn is_change(cmd: &EditCommand) -> bool {
+        match cmd {
+            EditCommand::Op { operator, .. } => *operator != Operator::Yank,
+            EditCommand::Put { .. }
+            | EditCommand::ReplaceChar { .. }
+            | EditCommand::JoinLines { .. }
+            | EditCommand::OpenLine { .. }
+            | EditCommand::InsertText(_)
+            | EditCommand::InsertNewline
+            | EditCommand::InsertTab
+            | EditCommand::DeleteBack
+            | EditCommand::DeleteForward
+            | EditCommand::DeleteWordBack => true,
+            _ => false,
+        }
+    }
+
+    fn motion_for(key: &str) -> Option<Motion> {
+        Some(match key {
+            "h" | "ArrowLeft" | "Backspace" => Motion::LeftBounded,
+            "l" | "ArrowRight" | " " => Motion::RightBounded,
+            "j" | "ArrowDown" => Motion::Down,
+            "k" | "ArrowUp" => Motion::Up,
+            "w" => Motion::WordNext,
+            "b" => Motion::WordPrev,
+            "e" => Motion::WordEnd,
+            "W" => Motion::BigWordNext,
+            "B" => Motion::BigWordPrev,
+            "E" => Motion::BigWordEnd,
+            "0" => Motion::LineStart,
+            "^" => Motion::FirstNonBlank,
+            "$" => Motion::LineEnd,
+            "{" => Motion::ParagraphPrev,
+            "}" => Motion::ParagraphNext,
+            "%" => Motion::MatchPair,
+            "n" => Motion::SearchNext { reverse: false },
+            "N" => Motion::SearchNext { reverse: true },
+            "H" => Motion::ScreenTop,
+            "M" => Motion::ScreenMiddle,
+            "L" => Motion::ScreenBottom,
+            "+" | "Enter" => Motion::NextLineStart,
+            "-" => Motion::PrevLineStart,
+            "_" => Motion::FirstNonBlank,
+            _ => return None,
+        })
+    }
+
+    fn find_prefix(key: &str) -> Option<(bool, bool)> {
+        Some(match key {
+            "f" => (true, false),
+            "F" => (false, false),
+            "t" => (true, true),
+            "T" => (false, true),
+            _ => return None,
+        })
+    }
+
+    fn g_operator(key: &str) -> Option<(Operator, char)> {
+        Some(match key {
+            "u" => (Operator::Lower, 'u'),
+            "U" => (Operator::Upper, 'U'),
+            "~" => (Operator::ToggleCase, '~'),
+            _ => return None,
+        })
+    }
+
+    fn operator_for(key: &str) -> Option<(Operator, char)> {
+        Some(match key {
+            "d" => (Operator::Delete, 'd'),
+            "c" => (Operator::Change, 'c'),
+            "y" => (Operator::Yank, 'y'),
+            ">" => (Operator::Indent, '>'),
+            "<" => (Operator::Outdent, '<'),
+            "=" => (Operator::Indent, '='),
+            _ => return None,
+        })
+    }
+
+    fn text_object_kind(key: &str) -> Option<TextObjectKind> {
+        Some(match key {
+            "w" => TextObjectKind::Word,
+            "W" => TextObjectKind::BigWord,
+            "s" => TextObjectKind::Sentence,
+            "p" => TextObjectKind::Paragraph,
+            "(" | ")" | "b" => TextObjectKind::Paren,
+            "[" | "]" => TextObjectKind::Bracket,
+            "{" | "}" | "B" => TextObjectKind::Brace,
+            "<" | ">" => TextObjectKind::Angle,
+            "\"" => TextObjectKind::DoubleQuote,
+            "'" => TextObjectKind::SingleQuote,
+            "`" => TextObjectKind::BackQuote,
+            "t" => TextObjectKind::Tag,
+            _ => return None,
+        })
+    }
+
+    fn single_char(key: &str) -> Option<char> {
+        let mut chars = key.chars();
+        let c = chars.next()?;
+        chars.next().is_none().then_some(c)
+    }
+
     fn take_count(&mut self) -> usize {
         self.parser.count.take().unwrap_or(1)
     }
@@ -291,11 +307,11 @@ impl VimInput<'_> {
                 "Enter" => {
                     let line = std::mem::take(body);
                     ex = None;
-                    out.extend(crate::edit::ex::ExLine::edits(&line));
+                    out.extend(crate::edit::ex::ExCommand::edits_from_line(&line));
                 }
                 "Escape" => ex = None,
                 typed => {
-                    if let Some(c) = single_char(typed) {
+                    if let Some(c) = Self::single_char(typed) {
                         body.push(c);
                     }
                 }
@@ -320,9 +336,10 @@ impl VimInput<'_> {
         let mut out = Vec::new();
         for _ in 0..times.max(1) {
             for input in inputs {
-                match input {
-                    Recorded::Key(k) => out.extend(self.dispatch(k)),
-                    Recorded::Text(t) => out.push(EditCommand::InsertText(t.clone())),
+                if let Some(k) = &input.key {
+                    out.extend(self.dispatch(k));
+                } else if let Some(t) = &input.text {
+                    out.push(EditCommand::InsertText(t.clone()));
                 }
             }
         }
@@ -366,7 +383,7 @@ impl VimInput<'_> {
     }
 
     fn resolve_find(&mut self, forward: bool, till: bool, key: &str) -> Vec<EditCommand> {
-        let Some(ch) = single_char(key) else {
+        let Some(ch) = Self::single_char(key) else {
             self.reset();
             return vec![];
         };
@@ -386,7 +403,7 @@ impl VimInput<'_> {
         if let Some(scope) = self.parser.pending_object.take() {
             let count = self.take_operator_count();
             self.parser.pending_op_key = None;
-            let Some(kind) = text_object_kind(key) else {
+            let Some(kind) = Self::text_object_kind(key) else {
                 return vec![];
             };
             let target = Target::TextObject(TextObject {
@@ -410,7 +427,7 @@ impl VimInput<'_> {
             return vec![];
         }
 
-        let doubled = single_char(key)
+        let doubled = Self::single_char(key)
             .zip(self.parser.pending_op_key)
             .is_some_and(|(a, b)| a == b);
         let count = self.take_operator_count();
@@ -418,7 +435,7 @@ impl VimInput<'_> {
 
         let target = if doubled {
             Target::Line(count)
-        } else if let Some(m) = motion_for(key) {
+        } else if let Some(m) = Self::motion_for(key) {
             Target::Motion(m, count)
         } else if key == "G" {
             Target::Motion(Motion::DocEnd, 1)
@@ -466,12 +483,12 @@ impl VimInput<'_> {
             return std::iter::repeat_n(Redo, n).collect();
         }
 
-        if let Some(m) = motion_for(key) {
+        if let Some(m) = Self::motion_for(key) {
             let n = self.take_count();
             return std::iter::repeat_n(Move(m), n).collect();
         }
 
-        if let Some((operator, op_key)) = operator_for(key) {
+        if let Some((operator, op_key)) = Self::operator_for(key) {
             self.start_operator(operator, op_key);
             return vec![];
         }
@@ -485,7 +502,7 @@ impl VimInput<'_> {
         }
 
         if let Some(pending) = self.parser.mark_pending.take() {
-            let Some(name) = single_char(key) else {
+            let Some(name) = Self::single_char(key) else {
                 return Some(vec![]);
             };
             return Some(match pending {
@@ -502,7 +519,7 @@ impl VimInput<'_> {
         }
 
         if let Some(record) = self.parser.macro_pending.take() {
-            let Some(reg) = single_char(key) else {
+            let Some(reg) = Self::single_char(key) else {
                 return Some(vec![]);
             };
             if record {
@@ -531,7 +548,7 @@ impl VimInput<'_> {
     fn normal_prefix(&mut self, key: &str) -> Option<Vec<EditCommand>> {
         if self.parser.register_pending {
             self.parser.register_pending = false;
-            if let Some(c) = single_char(key) {
+            if let Some(c) = Self::single_char(key) {
                 self.parser.register = Some(c);
             }
             return Some(vec![]);
@@ -540,13 +557,13 @@ impl VimInput<'_> {
         if self.parser.replace_pending {
             self.parser.replace_pending = false;
             let count = self.take_count();
-            if let Some(ch) = single_char(key) {
+            if let Some(ch) = Self::single_char(key) {
                 return Some(vec![ReplaceChar { ch, count }]);
             }
             return Some(vec![]);
         }
 
-        if let Some(c) = single_char(key)
+        if let Some(c) = Self::single_char(key)
             && c.is_ascii_digit()
             && !(c == '0' && self.parser.count.is_none())
         {
@@ -556,7 +573,7 @@ impl VimInput<'_> {
         }
 
         if !self.awaits_literal_key() {
-            if let Some((forward, till)) = find_prefix(key) {
+            if let Some((forward, till)) = Self::find_prefix(key) {
                 self.parser.pending_find = Some((forward, till));
                 return Some(vec![]);
             }
@@ -573,7 +590,7 @@ impl VimInput<'_> {
     }
 
     fn normal_g(&mut self, key: &str) -> Vec<EditCommand> {
-        if let Some((operator, op_key)) = g_operator(key) {
+        if let Some((operator, op_key)) = Self::g_operator(key) {
             self.start_operator(operator, op_key);
             return vec![];
         }
@@ -806,7 +823,7 @@ impl VimInput<'_> {
 
         if let Some(scope) = self.parser.pending_object.take() {
             let count = self.take_count();
-            let Some(kind) = text_object_kind(key) else {
+            let Some(kind) = Self::text_object_kind(key) else {
                 return Some(vec![]);
             };
             return Some(vec![SelectTextObject(TextObject {
@@ -818,7 +835,7 @@ impl VimInput<'_> {
 
         if self.parser.register_pending {
             self.parser.register_pending = false;
-            if let Some(c) = single_char(key) {
+            if let Some(c) = Self::single_char(key) {
                 self.parser.register = Some(c);
             }
             return Some(vec![]);
@@ -826,13 +843,13 @@ impl VimInput<'_> {
 
         if self.parser.replace_pending {
             self.parser.replace_pending = false;
-            if let Some(ch) = single_char(key) {
+            if let Some(ch) = Self::single_char(key) {
                 self.mode = EditMode::Normal;
                 return Some(vec![
                     Op {
                         operator: Operator::Delete,
                         target: Target::Selection,
-                        register: Some(crate::edit::register::BLACKHOLE),
+                        register: Some(crate::edit::register::Registers::BLACKHOLE),
                     },
                     InsertText(ch.to_string()),
                     SetMode(EditMode::Normal),
@@ -841,7 +858,7 @@ impl VimInput<'_> {
             return Some(vec![]);
         }
 
-        if let Some(c) = single_char(key)
+        if let Some(c) = Self::single_char(key)
             && c.is_ascii_digit()
             && !(c == '0' && self.parser.count.is_none())
         {
@@ -850,7 +867,7 @@ impl VimInput<'_> {
             return Some(vec![]);
         }
 
-        if let Some((forward, till)) = find_prefix(key) {
+        if let Some((forward, till)) = Self::find_prefix(key) {
             self.parser.pending_find = Some((forward, till));
             return Some(vec![]);
         }
@@ -873,7 +890,7 @@ impl VimInput<'_> {
             });
         }
 
-        if let Some(m) = motion_for(key) {
+        if let Some(m) = Self::motion_for(key) {
             let n = self.take_count();
             return Some(std::iter::repeat_n(Select(m), n).collect());
         }
@@ -1009,7 +1026,7 @@ impl VimInput<'_> {
     fn insert(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         if self.parser.register_pending {
             self.parser.register_pending = false;
-            let Some(reg) = single_char(&k.key) else {
+            let Some(reg) = Self::single_char(&k.key) else {
                 return vec![];
             };
             return vec![Put {
@@ -1075,14 +1092,14 @@ impl Keymap for VimInput<'_> {
             return;
         }
         if let Some((_, body)) = self.parser.macro_record.as_mut() {
-            body.push(Recorded::Text(text.to_string()));
+            body.push(Recorded::text(text.to_string()));
         }
         if self.parser.block_insert.is_some() {
             self.parser.block_text.push_str(text);
         }
         self.parser
             .pending_change
-            .push(Recorded::Text(text.to_string()));
+            .push(Recorded::text(text.to_string()));
         self.parser.in_change = true;
     }
 
@@ -1120,12 +1137,12 @@ impl VimInput<'_> {
         if let Some((_, body)) = self.parser.macro_record.as_mut()
             && !stops_recording
         {
-            body.push(Recorded::Key(k.clone()));
+            body.push(Recorded::key(k.clone()));
         }
 
         let repeating = k.key == "." && self.mode == EditMode::Normal && self.is_command_start();
         if !repeating {
-            self.parser.pending_change.push(Recorded::Key(k.clone()));
+            self.parser.pending_change.push(Recorded::key(k.clone()));
         }
 
         let cmds = self.dispatch(k);
@@ -1134,7 +1151,7 @@ impl VimInput<'_> {
             self.parser.pending_change.clear();
             return cmds;
         }
-        if cmds.iter().any(is_change) {
+        if cmds.iter().any(Self::is_change) {
             self.parser.in_change = true;
         }
         if self.parser.in_change {
@@ -1402,26 +1419,40 @@ mod tests {
     use super::*;
     use crate::keymap::Mods;
 
-    fn chord(key: &str, mods: Mods) -> KeyInput {
-        KeyInput {
-            key: key.into(),
-            mods,
-            repeat: false,
+    impl Fixture {
+        fn chord(key: &str, mods: Mods) -> KeyInput {
+            KeyInput {
+                key: key.into(),
+                mods,
+                repeat: false,
+            }
         }
-    }
 
-    fn ctrl() -> Mods {
-        Mods {
-            ctrl: true,
-            ..Default::default()
+        fn ctrl() -> Mods {
+            Mods {
+                ctrl: true,
+                ..Default::default()
+            }
         }
-    }
 
-    fn op(operator: Operator, target: Target) -> EditCommand {
-        EditCommand::Op {
-            operator,
-            target,
-            register: None,
+        fn op(operator: Operator, target: Target) -> EditCommand {
+            EditCommand::Op {
+                operator,
+                target,
+                register: None,
+            }
+        }
+
+        fn object(kind: TextObjectKind, around: bool, count: usize) -> Target {
+            Target::TextObject(TextObject {
+                kind,
+                around,
+                count,
+            })
+        }
+
+        fn find(ch: char, forward: bool, till: bool) -> Motion {
+            Motion::FindChar { ch, forward, till }
         }
     }
 
@@ -1430,19 +1461,22 @@ mod tests {
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&["d", "w"]),
-            vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 1))]
+            vec![Fixture::op(
+                Operator::Delete,
+                Target::Motion(Motion::WordNext, 1)
+            )]
         );
         assert_eq!(
             km.run(&["d", "d"]),
-            vec![op(Operator::Delete, Target::Line(1))]
+            vec![Fixture::op(Operator::Delete, Target::Line(1))]
         );
         assert_eq!(
             km.run(&["y", "y"]),
-            vec![op(Operator::Yank, Target::Line(1))]
+            vec![Fixture::op(Operator::Yank, Target::Line(1))]
         );
         assert_eq!(
             km.run(&["c", "c"]),
-            vec![op(Operator::Change, Target::Line(1))]
+            vec![Fixture::op(Operator::Change, Target::Line(1))]
         );
         assert_eq!(km.mode(), EditMode::Insert);
     }
@@ -1452,24 +1486,22 @@ mod tests {
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&["d", "3", "w"]),
-            vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 3))]
+            vec![Fixture::op(
+                Operator::Delete,
+                Target::Motion(Motion::WordNext, 3)
+            )]
         );
         assert_eq!(
             km.run(&["2", "d", "3", "w"]),
-            vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 6))]
+            vec![Fixture::op(
+                Operator::Delete,
+                Target::Motion(Motion::WordNext, 6)
+            )]
         );
         assert_eq!(
             km.run(&["2", "d", "d"]),
-            vec![op(Operator::Delete, Target::Line(2))]
+            vec![Fixture::op(Operator::Delete, Target::Line(2))]
         );
-    }
-
-    fn object(kind: TextObjectKind, around: bool, count: usize) -> Target {
-        Target::TextObject(TextObject {
-            kind,
-            around,
-            count,
-        })
     }
 
     #[test]
@@ -1477,13 +1509,16 @@ mod tests {
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&["d", "i", "w"]),
-            vec![op(Operator::Delete, object(TextObjectKind::Word, false, 1))]
+            vec![Fixture::op(
+                Operator::Delete,
+                Fixture::object(TextObjectKind::Word, false, 1)
+            )]
         );
         assert_eq!(
             km.run(&["c", "a", "\""]),
-            vec![op(
+            vec![Fixture::op(
                 Operator::Change,
-                object(TextObjectKind::DoubleQuote, true, 1)
+                Fixture::object(TextObjectKind::DoubleQuote, true, 1)
             )]
         );
         assert_eq!(km.mode(), EditMode::Insert);
@@ -1494,9 +1529,9 @@ mod tests {
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&["2", "d", "i", "("]),
-            vec![op(
+            vec![Fixture::op(
                 Operator::Delete,
-                object(TextObjectKind::Paren, false, 2)
+                Fixture::object(TextObjectKind::Paren, false, 2)
             )]
         );
     }
@@ -1521,12 +1556,11 @@ mod tests {
         assert_eq!(km.run(&["d", "i", "z"]), vec![]);
         assert_eq!(
             km.run(&["d", "w"]),
-            vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 1))]
+            vec![Fixture::op(
+                Operator::Delete,
+                Target::Motion(Motion::WordNext, 1)
+            )]
         );
-    }
-
-    fn find(ch: char, forward: bool, till: bool) -> Motion {
-        Motion::FindChar { ch, forward, till }
     }
 
     #[test]
@@ -1534,11 +1568,11 @@ mod tests {
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&["f", ","]),
-            vec![EditCommand::Move(find(',', true, false))]
+            vec![EditCommand::Move(Fixture::find(',', true, false))]
         );
         assert_eq!(
             km.run(&["T", "x"]),
-            vec![EditCommand::Move(find('x', false, true))]
+            vec![EditCommand::Move(Fixture::find('x', false, true))]
         );
     }
 
@@ -1548,11 +1582,11 @@ mod tests {
         km.run(&["f", "x"]);
         assert_eq!(
             km.run(&[";"]),
-            vec![EditCommand::Move(find('x', true, false))]
+            vec![EditCommand::Move(Fixture::find('x', true, false))]
         );
         assert_eq!(
             km.run(&[","]),
-            vec![EditCommand::Move(find('x', false, false))]
+            vec![EditCommand::Move(Fixture::find('x', false, false))]
         );
     }
 
@@ -1567,16 +1601,16 @@ mod tests {
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&["d", "t", ","]),
-            vec![op(
+            vec![Fixture::op(
                 Operator::Delete,
-                Target::Motion(find(',', true, true), 1)
+                Target::Motion(Fixture::find(',', true, true), 1)
             )]
         );
         assert_eq!(
             km.run(&["2", "d", "f", "x"]),
-            vec![op(
+            vec![Fixture::op(
                 Operator::Delete,
-                Target::Motion(find('x', true, false), 2)
+                Target::Motion(Fixture::find('x', true, false), 2)
             )]
         );
     }
@@ -1586,7 +1620,10 @@ mod tests {
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&["d", "i", "t"]),
-            vec![op(Operator::Delete, object(TextObjectKind::Tag, false, 1))]
+            vec![Fixture::op(
+                Operator::Delete,
+                Fixture::object(TextObjectKind::Tag, false, 1)
+            )]
         );
     }
 
@@ -1631,11 +1668,11 @@ mod tests {
     fn half_and_full_page_scroll_chords() {
         let mut km = Fixture::default();
         assert_eq!(
-            km.handle(&chord("d", ctrl())),
+            km.handle(&Fixture::chord("d", Fixture::ctrl())),
             vec![EditCommand::Move(Motion::HalfPageDown)]
         );
         assert_eq!(
-            km.handle(&chord("b", ctrl())),
+            km.handle(&Fixture::chord("b", Fixture::ctrl())),
             vec![EditCommand::Move(Motion::PageUp)]
         );
     }
@@ -1661,7 +1698,10 @@ mod tests {
         km.run(&["j", "l"]);
         assert_eq!(
             km.run(&["."]),
-            vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 1))]
+            vec![Fixture::op(
+                Operator::Delete,
+                Target::Motion(Motion::WordNext, 1)
+            )]
         );
     }
 
@@ -1669,7 +1709,7 @@ mod tests {
     fn dot_takes_a_count_and_survives_reuse() {
         let mut km = Fixture::default();
         km.run(&["x"]);
-        let expected = op(Operator::Delete, Target::Motion(Motion::Right, 1));
+        let expected = Fixture::op(Operator::Delete, Target::Motion(Motion::Right, 1));
         assert_eq!(
             km.run(&["2", "."]),
             vec![expected.clone(), expected.clone()]
@@ -1701,7 +1741,10 @@ mod tests {
         km.run(&["y", "y"]);
         assert_eq!(
             km.run(&["."]),
-            vec![op(Operator::Delete, Target::Motion(Motion::Right, 1))]
+            vec![Fixture::op(
+                Operator::Delete,
+                Target::Motion(Motion::Right, 1)
+            )]
         );
     }
 
@@ -1712,14 +1755,14 @@ mod tests {
         assert_eq!(
             km.run(&["@", "a"]),
             vec![
-                op(Operator::Delete, Target::Motion(Motion::Right, 1)),
+                Fixture::op(Operator::Delete, Target::Motion(Motion::Right, 1)),
                 EditCommand::Move(Motion::Down),
             ]
         );
         assert_eq!(
             km.run(&["@", "@"]),
             vec![
-                op(Operator::Delete, Target::Motion(Motion::Right, 1)),
+                Fixture::op(Operator::Delete, Target::Motion(Motion::Right, 1)),
                 EditCommand::Move(Motion::Down),
             ]
         );
@@ -1729,7 +1772,7 @@ mod tests {
     fn a_counted_macro_replays_repeatedly() {
         let mut km = Fixture::default();
         km.run(&["q", "b", "x", "q"]);
-        let once = op(Operator::Delete, Target::Motion(Motion::Right, 1));
+        let once = Fixture::op(Operator::Delete, Target::Motion(Motion::Right, 1));
         assert_eq!(
             km.run(&["3", "@", "b"]),
             vec![once.clone(), once.clone(), once]
@@ -1747,16 +1790,19 @@ mod tests {
         let mut km = Fixture::default();
         km.run(&["i"]);
         assert_eq!(
-            km.handle(&chord("w", ctrl())),
+            km.handle(&Fixture::chord("w", Fixture::ctrl())),
             vec![EditCommand::DeleteWordBack]
         );
         assert_eq!(
-            km.handle(&chord("u", ctrl())),
-            vec![op(Operator::Delete, Target::Motion(Motion::LineStart, 1))]
+            km.handle(&Fixture::chord("u", Fixture::ctrl())),
+            vec![Fixture::op(
+                Operator::Delete,
+                Target::Motion(Motion::LineStart, 1)
+            )]
         );
         assert_eq!(
-            km.handle(&chord("t", ctrl())),
-            vec![op(Operator::Indent, Target::Line(1))]
+            km.handle(&Fixture::chord("t", Fixture::ctrl())),
+            vec![Fixture::op(Operator::Indent, Target::Line(1))]
         );
         assert_eq!(km.mode(), EditMode::Insert);
     }
@@ -1765,7 +1811,7 @@ mod tests {
     fn ctrl_r_pastes_a_register_while_inserting() {
         let mut km = Fixture::default();
         km.run(&["i"]);
-        assert_eq!(km.handle(&chord("r", ctrl())), vec![]);
+        assert_eq!(km.handle(&Fixture::chord("r", Fixture::ctrl())), vec![]);
         assert_eq!(
             km.run(&["a"]),
             vec![EditCommand::Put {
@@ -1814,7 +1860,10 @@ mod tests {
         let mut km = Fixture::mapped(&[("i", "jk", "<Esc>")]);
         assert_eq!(
             km.run(&["x"]),
-            vec![op(Operator::Delete, Target::Motion(Motion::Right, 1))]
+            vec![Fixture::op(
+                Operator::Delete,
+                Target::Motion(Motion::Right, 1)
+            )]
         );
     }
 
@@ -1822,12 +1871,12 @@ mod tests {
     fn ctrl_v_toggles_visual_block() {
         let mut km = Fixture::default();
         assert_eq!(
-            km.handle(&chord("v", ctrl())),
+            km.handle(&Fixture::chord("v", Fixture::ctrl())),
             vec![EditCommand::SetMode(EditMode::VisualBlock)]
         );
         assert_eq!(km.mode(), EditMode::VisualBlock);
         assert_eq!(
-            km.handle(&chord("v", ctrl())),
+            km.handle(&Fixture::chord("v", Fixture::ctrl())),
             vec![EditCommand::SetMode(EditMode::Normal)]
         );
     }
@@ -1835,7 +1884,7 @@ mod tests {
     #[test]
     fn block_insert_starts_then_replicates_on_escape() {
         let mut km = Fixture::default();
-        km.handle(&chord("v", ctrl()));
+        km.handle(&Fixture::chord("v", Fixture::ctrl()));
         assert_eq!(
             km.run(&["I"]),
             vec![EditCommand::BeginBlockInsert { after: false }]
@@ -1855,11 +1904,11 @@ mod tests {
     #[test]
     fn block_operators_route_through_the_selection() {
         let mut km = Fixture::default();
-        km.handle(&chord("v", ctrl()));
+        km.handle(&Fixture::chord("v", Fixture::ctrl()));
         assert_eq!(
             km.run(&["d"]),
             vec![
-                op(Operator::Delete, Target::Selection),
+                Fixture::op(Operator::Delete, Target::Selection),
                 EditCommand::SetMode(EditMode::Normal)
             ]
         );
@@ -1870,7 +1919,7 @@ mod tests {
         let mut km = Fixture::default();
         km.run(&["i"]);
         assert_eq!(
-            km.handle(&chord("o", ctrl())),
+            km.handle(&Fixture::chord("o", Fixture::ctrl())),
             vec![EditCommand::SetMode(EditMode::Normal)]
         );
         assert_eq!(km.mode(), EditMode::Normal);
@@ -1889,7 +1938,7 @@ mod tests {
         for (key, forward) in [("/", true), ("?", false)] {
             let mut km = Fixture::default();
             km.run(&["i"]);
-            km.handle(&chord("o", ctrl()));
+            km.handle(&Fixture::chord("o", Fixture::ctrl()));
             assert_eq!(
                 km.run(&[key]),
                 vec![EditCommand::OpenFind { forward }],
@@ -1903,7 +1952,7 @@ mod tests {
     fn scroll_chords_do_not_fire_while_inserting() {
         let mut km = Fixture::default();
         km.run(&["i"]);
-        assert_eq!(km.handle(&chord("e", ctrl())), vec![]);
+        assert_eq!(km.handle(&Fixture::chord("e", Fixture::ctrl())), vec![]);
     }
 
     #[test]
@@ -1932,7 +1981,7 @@ mod tests {
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&["d", "n"]),
-            vec![op(
+            vec![Fixture::op(
                 Operator::Delete,
                 Target::Motion(Motion::SearchNext { reverse: false }, 1)
             )]
@@ -1963,14 +2012,14 @@ mod tests {
     fn jump_and_change_list_bindings() {
         let mut km = Fixture::default();
         assert_eq!(
-            km.handle(&chord("o", ctrl())),
+            km.handle(&Fixture::chord("o", Fixture::ctrl())),
             vec![EditCommand::JumpList {
                 back: true,
                 count: 1
             }]
         );
         assert_eq!(
-            km.handle(&chord("i", ctrl())),
+            km.handle(&Fixture::chord("i", Fixture::ctrl())),
             vec![EditCommand::JumpList {
                 back: false,
                 count: 1
@@ -1990,9 +2039,9 @@ mod tests {
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&["d", "i", "'"]),
-            vec![op(
+            vec![Fixture::op(
                 Operator::Delete,
-                object(TextObjectKind::SingleQuote, false, 1)
+                Fixture::object(TextObjectKind::SingleQuote, false, 1)
             )]
         );
     }
@@ -2036,11 +2085,11 @@ mod tests {
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&[">", ">"]),
-            vec![op(Operator::Indent, Target::Line(1))]
+            vec![Fixture::op(Operator::Indent, Target::Line(1))]
         );
         assert_eq!(
             km.run(&["3", "<", "<"]),
-            vec![op(Operator::Outdent, Target::Line(3))]
+            vec![Fixture::op(Operator::Outdent, Target::Line(3))]
         );
     }
 
@@ -2049,11 +2098,14 @@ mod tests {
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&["g", "u", "w"]),
-            vec![op(Operator::Lower, Target::Motion(Motion::WordNext, 1))]
+            vec![Fixture::op(
+                Operator::Lower,
+                Target::Motion(Motion::WordNext, 1)
+            )]
         );
         assert_eq!(
             km.run(&["g", "U", "U"]),
-            vec![op(Operator::Upper, Target::Line(1))]
+            vec![Fixture::op(Operator::Upper, Target::Line(1))]
         );
     }
 
@@ -2081,7 +2133,7 @@ mod tests {
         assert_eq!(
             km.run(&["~"]),
             vec![
-                op(Operator::ToggleCase, Target::Motion(Motion::Right, 1)),
+                Fixture::op(Operator::ToggleCase, Target::Motion(Motion::Right, 1)),
                 EditCommand::Move(Motion::RightBounded)
             ]
         );
@@ -2092,22 +2144,34 @@ mod tests {
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&["D"]),
-            vec![op(Operator::Delete, Target::Motion(Motion::LineEnd, 1))]
+            vec![Fixture::op(
+                Operator::Delete,
+                Target::Motion(Motion::LineEnd, 1)
+            )]
         );
         assert_eq!(
             km.run(&["C"]),
-            vec![op(Operator::Change, Target::Motion(Motion::LineEnd, 1))]
+            vec![Fixture::op(
+                Operator::Change,
+                Target::Motion(Motion::LineEnd, 1)
+            )]
         );
         let mut km = Fixture::default();
-        assert_eq!(km.run(&["S"]), vec![op(Operator::Change, Target::Line(1))]);
+        assert_eq!(
+            km.run(&["S"]),
+            vec![Fixture::op(Operator::Change, Target::Line(1))]
+        );
         let mut km = Fixture::default();
         assert_eq!(
             km.run(&["2", "Y"]),
-            vec![op(Operator::Yank, Target::Line(2))]
+            vec![Fixture::op(Operator::Yank, Target::Line(2))]
         );
         assert_eq!(
             km.run(&["3", "x"]),
-            vec![op(Operator::Delete, Target::Motion(Motion::Right, 3))]
+            vec![Fixture::op(
+                Operator::Delete,
+                Target::Motion(Motion::Right, 3)
+            )]
         );
     }
 
@@ -2152,7 +2216,7 @@ mod tests {
         assert_eq!(
             km.run(&["y"]),
             vec![
-                op(Operator::Yank, Target::Selection),
+                Fixture::op(Operator::Yank, Target::Selection),
                 EditCommand::SetMode(EditMode::Normal)
             ]
         );
@@ -2181,7 +2245,7 @@ mod tests {
         assert_eq!(
             km.run(&[">"]),
             vec![
-                op(Operator::Indent, Target::Selection),
+                Fixture::op(Operator::Indent, Target::Selection),
                 EditCommand::SetMode(EditMode::Normal)
             ]
         );
@@ -2282,11 +2346,11 @@ mod tests {
     fn ctrl_navigation_never_falls_through_to_vim_commands() {
         let mut km = Fixture::default();
         assert_eq!(
-            km.handle(&chord("n", ctrl())),
+            km.handle(&Fixture::chord("n", Fixture::ctrl())),
             vec![EditCommand::Move(Motion::Down)]
         );
         assert_eq!(
-            km.handle(&chord("p", ctrl())),
+            km.handle(&Fixture::chord("p", Fixture::ctrl())),
             vec![EditCommand::Move(Motion::Up)]
         );
         assert_eq!(km.mode(), EditMode::Normal);
@@ -2297,11 +2361,11 @@ mod tests {
         let mut km = Fixture::default();
         km.run(&["3"]);
         assert_eq!(
-            km.handle(&chord("e", ctrl())),
+            km.handle(&Fixture::chord("e", Fixture::ctrl())),
             vec![EditCommand::ScrollViewport(3)]
         );
         assert_eq!(
-            km.handle(&chord("y", ctrl())),
+            km.handle(&Fixture::chord("y", Fixture::ctrl())),
             vec![EditCommand::ScrollViewport(-1)]
         );
     }
@@ -2309,7 +2373,10 @@ mod tests {
     #[test]
     fn ctrl_r_redoes() {
         let mut km = Fixture::default();
-        assert_eq!(km.handle(&chord("r", ctrl())), vec![EditCommand::Redo]);
+        assert_eq!(
+            km.handle(&Fixture::chord("r", Fixture::ctrl())),
+            vec![EditCommand::Redo]
+        );
     }
 
     #[test]
@@ -2317,7 +2384,7 @@ mod tests {
         let mut km = Fixture::default();
         km.run(&["i"]);
         assert_eq!(
-            km.handle(&chord("c", ctrl())),
+            km.handle(&Fixture::chord("c", Fixture::ctrl())),
             vec![
                 EditCommand::Move(Motion::LeftBounded),
                 EditCommand::SetMode(EditMode::Normal)
@@ -2325,7 +2392,7 @@ mod tests {
         );
         km.run(&["v"]);
         assert_eq!(
-            km.handle(&chord("c", ctrl())),
+            km.handle(&Fixture::chord("c", Fixture::ctrl())),
             vec![EditCommand::SetMode(EditMode::Normal)]
         );
         assert_eq!(km.mode(), EditMode::Normal);

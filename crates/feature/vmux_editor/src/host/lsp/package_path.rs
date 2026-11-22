@@ -1,9 +1,10 @@
 use std::path::{Component, Path, PathBuf};
 
-struct PortableComponent;
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PackageName(String);
 
-impl PortableComponent {
-    fn accepts(value: &str) -> bool {
+impl PackageName {
+    fn accepts_component(value: &str) -> bool {
         if value.is_empty()
             || value == "."
             || value == ".."
@@ -49,14 +50,9 @@ impl PortableComponent {
                 | "LPT9"
         )
     }
-}
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PackageName(String);
-
-impl PackageName {
     pub fn parse(value: &str) -> Result<Self, String> {
-        if !PortableComponent::accepts(value) {
+        if !Self::accepts_component(value) {
             return Err(format!("invalid package name: {value}"));
         }
         Ok(Self(value.to_string()))
@@ -109,7 +105,7 @@ impl PackagePath {
             let Some(component) = component.to_str() else {
                 return Err(format!("invalid package path: {value}"));
             };
-            if !PortableComponent::accepts(component) {
+            if !PackageName::accepts_component(component) {
                 return Err(format!("invalid package path: {value}"));
             }
             count += 1;

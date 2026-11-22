@@ -64,14 +64,14 @@ impl TextObject {
     pub(crate) fn resolve(self, buffer: &TextBuffer, head: usize) -> Option<Range<usize>> {
         let count = self.count.max(1);
         match self.kind {
-            TextObjectKind::Word => word(buffer, head, false, self.around),
-            TextObjectKind::BigWord => word(buffer, head, true, self.around),
-            TextObjectKind::Sentence => sentence(buffer, head, self.around),
-            TextObjectKind::Paragraph => paragraph(buffer, head, self.around),
-            TextObjectKind::Tag => tag(buffer, head, self.around),
+            TextObjectKind::Word => Self::word(buffer, head, false, self.around),
+            TextObjectKind::BigWord => Self::word(buffer, head, true, self.around),
+            TextObjectKind::Sentence => Self::sentence(buffer, head, self.around),
+            TextObjectKind::Paragraph => Self::paragraph(buffer, head, self.around),
+            TextObjectKind::Tag => Self::tag(buffer, head, self.around),
             kind => {
                 if let Some((open, close)) = kind.delimiters() {
-                    let (open, close) = enclosing_pair(buffer, head, open, close, count)?;
+                    let (open, close) = Self::enclosing_pair(buffer, head, open, close, count)?;
                     return Some(if self.around {
                         open..close + 1
                     } else {
@@ -79,7 +79,7 @@ impl TextObject {
                     });
                 }
                 let quote = kind.quote()?;
-                let (open, close) = quoted(buffer, head, quote)?;
+                let (open, close) = Self::quoted(buffer, head, quote)?;
                 Some(if self.around {
                     open..close + 1
                 } else {
@@ -88,256 +88,253 @@ impl TextObject {
             }
         }
     }
-}
 
-fn word(buf: &TextBuffer, head: usize, big: bool, around: bool) -> Option<Range<usize>> {
-    let len = buf.len_chars();
-    if len == 0 {
-        return None;
-    }
-    let head = head.min(len - 1);
-    let class_at = |i: usize| -> u8 {
-        let c = buf.rope.char(i);
-        if c == '\n' {
-            return 0;
+    fn word(buf: &TextBuffer, head: usize, big: bool, around: bool) -> Option<Range<usize>> {
+        let len = buf.len_chars();
+        if len == 0 {
+            return None;
         }
-        if big {
-            if c.is_whitespace() { 0 } else { 1 }
-        } else {
-            TextObjectKind::char_class(c)
+        let head = head.min(len - 1);
+        let class_at = |i: usize| -> u8 {
+            let c = buf.rope.char(i);
+            if c == '\n' {
+                return 0;
+            }
+            if big {
+                if c.is_whitespace() { 0 } else { 1 }
+            } else {
+                TextObjectKind::char_class(c)
+            }
+        };
+        let base = class_at(head);
+        let mut start = head;
+        while start > 0 && class_at(start - 1) == base && buf.rope.char(start - 1) != '\n' {
+            start -= 1;
         }
-    };
-    let base = class_at(head);
-    let mut start = head;
-    while start > 0 && class_at(start - 1) == base && buf.rope.char(start - 1) != '\n' {
-        start -= 1;
-    }
-    let mut end = head + 1;
-    while end < len && class_at(end) == base && buf.rope.char(end) != '\n' {
-        end += 1;
-    }
-    if !around {
-        return Some(start..end);
-    }
-    let mut trailing = end;
-    while trailing < len && buf.rope.char(trailing) != '\n' && class_at(trailing) == 0 {
-        trailing += 1;
-    }
-    if trailing > end {
-        return Some(start..trailing);
-    }
-    let mut leading = start;
-    while leading > 0 && buf.rope.char(leading - 1) != '\n' && class_at(leading - 1) == 0 {
-        leading -= 1;
-    }
-    Some(leading..end)
-}
-
-fn sentence(buf: &TextBuffer, head: usize, around: bool) -> Option<Range<usize>> {
-    let len = buf.len_chars();
-    if len == 0 {
-        return None;
-    }
-    let head = head.min(len - 1);
-    let terminator = |i: usize| {
-        let c = buf.rope.char(i);
-        c == '.' || c == '!' || c == '?'
-    };
-    let mut start = head;
-    while start > 0 {
-        let prev = start - 1;
-        if buf.rope.char(prev).is_whitespace()
-            && prev > 0
-            && terminator(prev - 1)
-            && prev.saturating_sub(1) < head
-        {
-            break;
-        }
-        if buf.rope.char(prev) == '\n' && prev > 0 && buf.rope.char(prev - 1) == '\n' {
-            break;
-        }
-        start = prev;
-    }
-    let mut end = head;
-    while end < len && !terminator(end) {
-        end += 1;
-    }
-    if end < len {
-        end += 1;
-    }
-    if around {
-        while end < len && buf.rope.char(end) == ' ' {
+        let mut end = head + 1;
+        while end < len && class_at(end) == base && buf.rope.char(end) != '\n' {
             end += 1;
         }
+        if !around {
+            return Some(start..end);
+        }
+        let mut trailing = end;
+        while trailing < len && buf.rope.char(trailing) != '\n' && class_at(trailing) == 0 {
+            trailing += 1;
+        }
+        if trailing > end {
+            return Some(start..trailing);
+        }
+        let mut leading = start;
+        while leading > 0 && buf.rope.char(leading - 1) != '\n' && class_at(leading - 1) == 0 {
+            leading -= 1;
+        }
+        Some(leading..end)
     }
-    (start < end).then_some(start..end)
-}
 
-fn paragraph(buf: &TextBuffer, head: usize, around: bool) -> Option<Range<usize>> {
-    let total = buf.len_lines();
-    if total == 0 {
-        return None;
+    fn sentence(buf: &TextBuffer, head: usize, around: bool) -> Option<Range<usize>> {
+        let len = buf.len_chars();
+        if len == 0 {
+            return None;
+        }
+        let head = head.min(len - 1);
+        let terminator = |i: usize| {
+            let c = buf.rope.char(i);
+            c == '.' || c == '!' || c == '?'
+        };
+        let mut start = head;
+        while start > 0 {
+            let prev = start - 1;
+            if buf.rope.char(prev).is_whitespace()
+                && prev > 0
+                && terminator(prev - 1)
+                && prev.saturating_sub(1) < head
+            {
+                break;
+            }
+            if buf.rope.char(prev) == '\n' && prev > 0 && buf.rope.char(prev - 1) == '\n' {
+                break;
+            }
+            start = prev;
+        }
+        let mut end = head;
+        while end < len && !terminator(end) {
+            end += 1;
+        }
+        if end < len {
+            end += 1;
+        }
+        if around {
+            while end < len && buf.rope.char(end) == ' ' {
+                end += 1;
+            }
+        }
+        (start < end).then_some(start..end)
     }
-    let (line, _) = buf.char_to_coords(head);
-    let blank = |l: usize| buf.line_len_chars(l) == 0;
-    let base = blank(line);
-    let mut first = line;
-    while first > 0 && blank(first - 1) == base {
-        first -= 1;
-    }
-    let mut last = line;
-    while last + 1 < total && blank(last + 1) == base {
-        last += 1;
-    }
-    if around {
-        while last + 1 < total && blank(last + 1) != base {
+
+    fn paragraph(buf: &TextBuffer, head: usize, around: bool) -> Option<Range<usize>> {
+        let total = buf.len_lines();
+        if total == 0 {
+            return None;
+        }
+        let (line, _) = buf.char_to_coords(head);
+        let blank = |l: usize| buf.line_len_chars(l) == 0;
+        let base = blank(line);
+        let mut first = line;
+        while first > 0 && blank(first - 1) == base {
+            first -= 1;
+        }
+        let mut last = line;
+        while last + 1 < total && blank(last + 1) == base {
             last += 1;
         }
-    }
-    let start = buf.line_to_char(first);
-    let end = if last + 1 < total {
-        buf.line_to_char(last + 1)
-    } else {
-        buf.len_chars()
-    };
-    (start < end).then_some(start..end)
-}
-
-fn enclosing_pair(
-    buf: &TextBuffer,
-    head: usize,
-    open: char,
-    close: char,
-    count: usize,
-) -> Option<(usize, usize)> {
-    let mut found = matching_pair(buf, head, open, close)?;
-    for _ in 1..count {
-        if found.0 == 0 {
-            break;
+        if around {
+            while last + 1 < total && blank(last + 1) != base {
+                last += 1;
+            }
         }
-        found = matching_pair(buf, found.0 - 1, open, close)?;
+        let start = buf.line_to_char(first);
+        let end = if last + 1 < total {
+            buf.line_to_char(last + 1)
+        } else {
+            buf.len_chars()
+        };
+        (start < end).then_some(start..end)
     }
-    Some(found)
-}
 
-fn matching_pair(buf: &TextBuffer, head: usize, open: char, close: char) -> Option<(usize, usize)> {
-    let len = buf.len_chars();
-    if len == 0 {
-        return None;
+    fn enclosing_pair(
+        buf: &TextBuffer,
+        head: usize,
+        open: char,
+        close: char,
+        count: usize,
+    ) -> Option<(usize, usize)> {
+        let mut found = Self::matching_pair(buf, head, open, close)?;
+        for _ in 1..count {
+            if found.0 == 0 {
+                break;
+            }
+            found = Self::matching_pair(buf, found.0 - 1, open, close)?;
+        }
+        Some(found)
     }
-    let head = head.min(len - 1);
-    let open_at = if buf.rope.char(head) == open {
-        Some(head)
-    } else {
+
+    fn matching_pair(
+        buf: &TextBuffer,
+        head: usize,
+        open: char,
+        close: char,
+    ) -> Option<(usize, usize)> {
+        let len = buf.len_chars();
+        if len == 0 {
+            return None;
+        }
+        let head = head.min(len - 1);
+        let open_at = if buf.rope.char(head) == open {
+            Some(head)
+        } else {
+            let mut depth = 0i32;
+            let mut found = None;
+            let mut i = head as i64;
+            while i >= 0 {
+                let c = buf.rope.char(i as usize);
+                if c == close && i as usize != head {
+                    depth += 1;
+                } else if c == open {
+                    if depth == 0 {
+                        found = Some(i as usize);
+                        break;
+                    }
+                    depth -= 1;
+                }
+                i -= 1;
+            }
+            found
+        }?;
         let mut depth = 0i32;
-        let mut found = None;
-        let mut i = head as i64;
-        while i >= 0 {
-            let c = buf.rope.char(i as usize);
-            if c == close && i as usize != head {
+        let mut j = open_at + 1;
+        while j < len {
+            let c = buf.rope.char(j);
+            if c == open {
                 depth += 1;
-            } else if c == open {
+            } else if c == close {
                 if depth == 0 {
-                    found = Some(i as usize);
-                    break;
+                    return Some((open_at, j));
                 }
                 depth -= 1;
             }
-            i -= 1;
-        }
-        found
-    }?;
-    let mut depth = 0i32;
-    let mut j = open_at + 1;
-    while j < len {
-        let c = buf.rope.char(j);
-        if c == open {
-            depth += 1;
-        } else if c == close {
-            if depth == 0 {
-                return Some((open_at, j));
-            }
-            depth -= 1;
-        }
-        j += 1;
-    }
-    None
-}
-
-fn quoted(buf: &TextBuffer, head: usize, q: char) -> Option<(usize, usize)> {
-    let (line, _) = buf.char_to_coords(head);
-    let base = buf.line_to_char(line);
-    let len = buf.line_len_chars(line);
-    let mut marks = Vec::new();
-    let mut i = 0;
-    while i < len {
-        let c = buf.rope.char(base + i);
-        if c == '\\' {
-            i += 2;
-            continue;
-        }
-        if c == q {
-            marks.push(base + i);
-        }
-        i += 1;
-    }
-    marks
-        .chunks(2)
-        .find(|pair| pair.len() == 2 && head <= pair[1])
-        .map(|pair| (pair[0], pair[1]))
-}
-
-struct TagSpan {
-    outer: Range<usize>,
-    inner: Range<usize>,
-}
-
-fn tag(buf: &TextBuffer, head: usize, around: bool) -> Option<Range<usize>> {
-    let len = buf.len_chars();
-    let mut stack: Vec<(String, usize, usize)> = Vec::new();
-    let mut spans: Vec<TagSpan> = Vec::new();
-    let mut i = 0;
-    while i < len {
-        if buf.rope.char(i) != '<' {
-            i += 1;
-            continue;
-        }
-        let mut j = i + 1;
-        while j < len && buf.rope.char(j) != '>' {
             j += 1;
         }
-        if j >= len {
-            break;
-        }
-        let raw: String = buf.rope.slice(i + 1..j).chars().collect();
-        let self_closing = raw.ends_with('/');
-        let closing = raw.starts_with('/');
-        let name: String = raw
-            .trim_start_matches('/')
-            .chars()
-            .take_while(|c| !c.is_whitespace() && *c != '/')
-            .collect();
-        if !name.is_empty() {
-            if closing {
-                if let Some(pos) = stack.iter().rposition(|(n, _, _)| *n == name) {
-                    let (_, open_start, inner_start) = stack.remove(pos);
-                    stack.truncate(pos);
-                    spans.push(TagSpan {
-                        outer: open_start..j + 1,
-                        inner: inner_start..i,
-                    });
-                }
-            } else if !self_closing {
-                stack.push((name, i, j + 1));
-            }
-        }
-        i = j + 1;
+        None
     }
-    spans
-        .into_iter()
-        .filter(|s| s.outer.contains(&head))
-        .min_by_key(|s| s.outer.end - s.outer.start)
-        .map(|s| if around { s.outer } else { s.inner })
+
+    fn quoted(buf: &TextBuffer, head: usize, q: char) -> Option<(usize, usize)> {
+        let (line, _) = buf.char_to_coords(head);
+        let base = buf.line_to_char(line);
+        let len = buf.line_len_chars(line);
+        let mut marks = Vec::new();
+        let mut i = 0;
+        while i < len {
+            let c = buf.rope.char(base + i);
+            if c == '\\' {
+                i += 2;
+                continue;
+            }
+            if c == q {
+                marks.push(base + i);
+            }
+            i += 1;
+        }
+        marks
+            .chunks(2)
+            .find(|pair| pair.len() == 2 && head <= pair[1])
+            .map(|pair| (pair[0], pair[1]))
+    }
+
+    fn tag(buf: &TextBuffer, head: usize, around: bool) -> Option<Range<usize>> {
+        let len = buf.len_chars();
+        let mut stack: Vec<(String, usize, usize)> = Vec::new();
+        let mut spans: Vec<(Range<usize>, Range<usize>)> = Vec::new();
+        let mut i = 0;
+        while i < len {
+            if buf.rope.char(i) != '<' {
+                i += 1;
+                continue;
+            }
+            let mut j = i + 1;
+            while j < len && buf.rope.char(j) != '>' {
+                j += 1;
+            }
+            if j >= len {
+                break;
+            }
+            let raw: String = buf.rope.slice(i + 1..j).chars().collect();
+            let self_closing = raw.ends_with('/');
+            let closing = raw.starts_with('/');
+            let name: String = raw
+                .trim_start_matches('/')
+                .chars()
+                .take_while(|c| !c.is_whitespace() && *c != '/')
+                .collect();
+            if !name.is_empty() {
+                if closing {
+                    if let Some(pos) = stack.iter().rposition(|(n, _, _)| *n == name) {
+                        let (_, open_start, inner_start) = stack.remove(pos);
+                        stack.truncate(pos);
+                        spans.push((open_start..j + 1, inner_start..i));
+                    }
+                } else if !self_closing {
+                    stack.push((name, i, j + 1));
+                }
+            }
+            i = j + 1;
+        }
+        spans
+            .into_iter()
+            .filter(|(outer, _)| outer.contains(&head))
+            .min_by_key(|(outer, _)| outer.end - outer.start)
+            .map(|(outer, inner)| if around { outer } else { inner })
+    }
 }
 
 #[cfg(test)]
@@ -345,33 +342,35 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn buf(text: &str) -> TextBuffer {
-        TextBuffer::from_text(PathBuf::from("a.txt"), "Plain Text".into(), text)
-    }
-
-    fn slice(text: &str, head: usize, kind: TextObjectKind, around: bool) -> Option<String> {
-        let b = buf(text);
-        let r = TextObject {
-            kind,
-            around,
-            count: 1,
+    impl TextObject {
+        fn buf(text: &str) -> TextBuffer {
+            TextBuffer::from_text(PathBuf::from("a.txt"), "Plain Text".into(), text)
         }
-        .resolve(&b, head)?;
-        Some(b.rope.slice(r).chars().collect())
+
+        fn slice(text: &str, head: usize, kind: TextObjectKind, around: bool) -> Option<String> {
+            let b = Self::buf(text);
+            let r = Self {
+                kind,
+                around,
+                count: 1,
+            }
+            .resolve(&b, head)?;
+            Some(b.rope.slice(r).chars().collect())
+        }
     }
 
     #[test]
     fn inner_word_stops_at_class_boundaries() {
         assert_eq!(
-            slice("foo bar", 1, TextObjectKind::Word, false).as_deref(),
+            TextObject::slice("foo bar", 1, TextObjectKind::Word, false).as_deref(),
             Some("foo")
         );
         assert_eq!(
-            slice("foo.bar", 1, TextObjectKind::Word, false).as_deref(),
+            TextObject::slice("foo.bar", 1, TextObjectKind::Word, false).as_deref(),
             Some("foo")
         );
         assert_eq!(
-            slice("foo.bar", 3, TextObjectKind::Word, false).as_deref(),
+            TextObject::slice("foo.bar", 3, TextObjectKind::Word, false).as_deref(),
             Some(".")
         );
     }
@@ -379,11 +378,11 @@ mod tests {
     #[test]
     fn around_word_takes_trailing_then_leading_space() {
         assert_eq!(
-            slice("foo bar", 1, TextObjectKind::Word, true).as_deref(),
+            TextObject::slice("foo bar", 1, TextObjectKind::Word, true).as_deref(),
             Some("foo ")
         );
         assert_eq!(
-            slice("foo bar", 5, TextObjectKind::Word, true).as_deref(),
+            TextObject::slice("foo bar", 5, TextObjectKind::Word, true).as_deref(),
             Some(" bar")
         );
     }
@@ -391,7 +390,7 @@ mod tests {
     #[test]
     fn big_word_spans_punctuation() {
         assert_eq!(
-            slice("foo.bar baz", 1, TextObjectKind::BigWord, false).as_deref(),
+            TextObject::slice("foo.bar baz", 1, TextObjectKind::BigWord, false).as_deref(),
             Some("foo.bar")
         );
     }
@@ -399,22 +398,22 @@ mod tests {
     #[test]
     fn bracket_objects_respect_nesting() {
         assert_eq!(
-            slice("a(b(c)d)e", 4, TextObjectKind::Paren, false).as_deref(),
+            TextObject::slice("a(b(c)d)e", 4, TextObjectKind::Paren, false).as_deref(),
             Some("c")
         );
         assert_eq!(
-            slice("a(b(c)d)e", 2, TextObjectKind::Paren, false).as_deref(),
+            TextObject::slice("a(b(c)d)e", 2, TextObjectKind::Paren, false).as_deref(),
             Some("b(c)d")
         );
         assert_eq!(
-            slice("a(b(c)d)e", 2, TextObjectKind::Paren, true).as_deref(),
+            TextObject::slice("a(b(c)d)e", 2, TextObjectKind::Paren, true).as_deref(),
             Some("(b(c)d)")
         );
     }
 
     #[test]
     fn counted_bracket_object_walks_outward() {
-        let b = buf("a(b(c)d)e");
+        let b = TextObject::buf("a(b(c)d)e");
         let r = TextObject {
             kind: TextObjectKind::Paren,
             around: false,
@@ -429,11 +428,11 @@ mod tests {
     #[test]
     fn cursor_on_a_delimiter_selects_that_pair() {
         assert_eq!(
-            slice("a(bc)d", 1, TextObjectKind::Paren, false).as_deref(),
+            TextObject::slice("a(bc)d", 1, TextObjectKind::Paren, false).as_deref(),
             Some("bc")
         );
         assert_eq!(
-            slice("a(bc)d", 4, TextObjectKind::Paren, false).as_deref(),
+            TextObject::slice("a(bc)d", 4, TextObjectKind::Paren, false).as_deref(),
             Some("bc")
         );
     }
@@ -441,11 +440,11 @@ mod tests {
     #[test]
     fn quote_objects_pair_left_to_right() {
         assert_eq!(
-            slice("say \"hi\" now", 6, TextObjectKind::DoubleQuote, false).as_deref(),
+            TextObject::slice("say \"hi\" now", 6, TextObjectKind::DoubleQuote, false).as_deref(),
             Some("hi")
         );
         assert_eq!(
-            slice("say \"hi\" now", 0, TextObjectKind::DoubleQuote, true).as_deref(),
+            TextObject::slice("say \"hi\" now", 0, TextObjectKind::DoubleQuote, true).as_deref(),
             Some("\"hi\"")
         );
     }
@@ -453,7 +452,7 @@ mod tests {
     #[test]
     fn escaped_quotes_do_not_split_the_span() {
         assert_eq!(
-            slice("x \"a\\\"b\" y", 3, TextObjectKind::DoubleQuote, false).as_deref(),
+            TextObject::slice("x \"a\\\"b\" y", 3, TextObjectKind::DoubleQuote, false).as_deref(),
             Some("a\\\"b")
         );
     }
@@ -462,11 +461,11 @@ mod tests {
     fn paragraph_objects_use_blank_line_boundaries() {
         let text = "one\ntwo\n\nthree\n";
         assert_eq!(
-            slice(text, 0, TextObjectKind::Paragraph, false).as_deref(),
+            TextObject::slice(text, 0, TextObjectKind::Paragraph, false).as_deref(),
             Some("one\ntwo\n")
         );
         assert_eq!(
-            slice(text, 0, TextObjectKind::Paragraph, true).as_deref(),
+            TextObject::slice(text, 0, TextObjectKind::Paragraph, true).as_deref(),
             Some("one\ntwo\n\n")
         );
     }
@@ -475,11 +474,11 @@ mod tests {
     fn tag_objects_pick_the_innermost_match() {
         let text = "<a><b>hi</b></a>";
         assert_eq!(
-            slice(text, 7, TextObjectKind::Tag, false).as_deref(),
+            TextObject::slice(text, 7, TextObjectKind::Tag, false).as_deref(),
             Some("hi")
         );
         assert_eq!(
-            slice(text, 7, TextObjectKind::Tag, true).as_deref(),
+            TextObject::slice(text, 7, TextObjectKind::Tag, true).as_deref(),
             Some("<b>hi</b>")
         );
     }
@@ -488,7 +487,7 @@ mod tests {
     fn self_closing_tags_are_not_opened() {
         let text = "<a>x<br/>y</a>";
         assert_eq!(
-            slice(text, 5, TextObjectKind::Tag, false).as_deref(),
+            TextObject::slice(text, 5, TextObjectKind::Tag, false).as_deref(),
             Some("x<br/>y")
         );
     }
@@ -497,18 +496,24 @@ mod tests {
     fn sentence_object_covers_one_sentence() {
         let text = "One two. Three four. Five.";
         assert_eq!(
-            slice(text, 10, TextObjectKind::Sentence, false).as_deref(),
+            TextObject::slice(text, 10, TextObjectKind::Sentence, false).as_deref(),
             Some("Three four.")
         );
         assert_eq!(
-            slice(text, 10, TextObjectKind::Sentence, true).as_deref(),
+            TextObject::slice(text, 10, TextObjectKind::Sentence, true).as_deref(),
             Some("Three four. ")
         );
     }
 
     #[test]
     fn unmatched_delimiters_resolve_to_nothing() {
-        assert_eq!(slice("a(bc", 2, TextObjectKind::Paren, false), None);
-        assert_eq!(slice("abc", 1, TextObjectKind::Paren, false), None);
+        assert_eq!(
+            TextObject::slice("a(bc", 2, TextObjectKind::Paren, false),
+            None
+        );
+        assert_eq!(
+            TextObject::slice("abc", 1, TextObjectKind::Paren, false),
+            None
+        );
     }
 }

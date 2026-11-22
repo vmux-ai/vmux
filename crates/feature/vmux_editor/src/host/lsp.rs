@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
+use bevy::prelude::{App, Commands, Component, Plugin};
 use vmux_feature::manifest::FeaturePlugin;
 use vmux_tool::ToolProviderBinding;
 
@@ -69,10 +70,10 @@ fn spawn_tool_provider(mut commands: Commands) {
     ));
 }
 
-pub type PathLintDiagnostics = (PathBuf, Vec<vmux_ecs::event::FileDiagnostic>);
-
 #[derive(Component, Clone)]
-pub struct LintDiagnosticsSender(crossbeam_channel::Sender<PathLintDiagnostics>);
+pub struct LintDiagnosticsSender(
+    crossbeam_channel::Sender<(PathBuf, Vec<vmux_ecs::event::FileDiagnostic>)>,
+);
 
 impl LintDiagnosticsSender {
     fn channel() -> (Self, LintDiagnosticsInbox) {
@@ -80,16 +81,18 @@ impl LintDiagnosticsSender {
         (Self(sender), LintDiagnosticsInbox(receiver))
     }
 
-    fn send(&self, diagnostics: PathLintDiagnostics) {
+    fn send(&self, diagnostics: (PathBuf, Vec<vmux_ecs::event::FileDiagnostic>)) {
         let _ = self.0.send(diagnostics);
     }
 }
 
 #[derive(Component, Clone)]
-struct LintDiagnosticsInbox(crossbeam_channel::Receiver<PathLintDiagnostics>);
+struct LintDiagnosticsInbox(
+    crossbeam_channel::Receiver<(PathBuf, Vec<vmux_ecs::event::FileDiagnostic>)>,
+);
 
 impl LintDiagnosticsInbox {
-    fn drain(&self) -> Vec<PathLintDiagnostics> {
+    fn drain(&self) -> Vec<(PathBuf, Vec<vmux_ecs::event::FileDiagnostic>)> {
         self.0.try_iter().collect()
     }
 }

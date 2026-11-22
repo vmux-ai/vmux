@@ -43,12 +43,14 @@ impl PlatformTarget {
 mod tests {
     use super::*;
 
-    fn asset(target: &str) -> Asset {
-        Asset {
-            target: target.into(),
-            file: PackagePath::parse(&format!("file-{target}.gz")).unwrap(),
-            bin: Some(PackagePath::parse("bin").unwrap()),
-            sha256: None,
+    impl Asset {
+        fn sample(target: &str) -> Self {
+            Self {
+                target: target.into(),
+                file: PackagePath::parse(&format!("file-{target}.gz")).unwrap(),
+                bin: Some(PackagePath::parse("bin").unwrap()),
+                sha256: None,
+            }
         }
     }
 
@@ -59,7 +61,10 @@ mod tests {
 
     #[test]
     fn picks_exact_target() {
-        let assets = vec![asset("darwin_arm64"), asset("linux_x64_gnu")];
+        let assets = vec![
+            Asset::sample("darwin_arm64"),
+            Asset::sample("linux_x64_gnu"),
+        ];
         assert_eq!(
             PlatformTarget("darwin_arm64")
                 .select(&assets)
@@ -71,7 +76,10 @@ mod tests {
 
     #[test]
     fn linux_x64_falls_back_to_musl() {
-        let assets = vec![asset("linux_x64_musl"), asset("darwin_arm64")];
+        let assets = vec![
+            Asset::sample("linux_x64_musl"),
+            Asset::sample("darwin_arm64"),
+        ];
         assert_eq!(
             PlatformTarget("linux_x64_gnu")
                 .select(&assets)
@@ -83,7 +91,7 @@ mod tests {
 
     #[test]
     fn no_match_is_none() {
-        let assets = vec![asset("win_x64")];
+        let assets = vec![Asset::sample("win_x64")];
         assert!(PlatformTarget("darwin_arm64").select(&assets).is_none());
     }
 }

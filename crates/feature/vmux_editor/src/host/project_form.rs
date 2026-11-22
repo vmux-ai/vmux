@@ -2,6 +2,9 @@ use std::path::PathBuf;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::prelude::{
+    App, Commands, Component, Entity, MessageReader, MessageWriter, On, Plugin, Query, Res,
+};
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -17,7 +20,7 @@ use crate::project::{
 
 use super::project::{GitHubRepository, ProjectImport, ProjectName};
 use super::project_store::{
-    ErrorMessage, Mutation, ProjectSaved, Registrations, StoreSet, WriteCompleted, WriteRequest,
+    Mutation, ProjectSaved, Registrations, StoreSet, WriteCompleted, WriteRequest,
 };
 
 pub(super) struct ProjectFormPlugin;
@@ -183,33 +186,49 @@ impl SavePlan {
     }
 }
 
+#[derive(Component, Default)]
+struct ProjectFormSession {
+    request_id: String,
+    folder: Option<String>,
+    pending: bool,
+}
+
 #[derive(SystemParam)]
 struct Feedback<'w, 's> {
-    states: Query<'w, 's, &'static vmux_ecs::UiState<ProjectFormUiState>>,
+    sessions: Query<'w, 's, &'static mut ProjectFormSession>,
     commands: Commands<'w, 's>,
 }
 
 impl Feedback<'_, '_> {
     fn matches(&self, webview: Entity, request_id: &str) -> bool {
-        self.states
+        self.sessions
             .get(webview)
-            .ok()
-            .and_then(vmux_ecs::UiState::current)
-            .is_some_and(|state| state.request_id == request_id)
+            .is_ok_and(|session| session.request_id == request_id)
     }
 
     fn start(&mut self, webview: Entity, request_id: &str) -> bool {
-        let current = self
-            .states
-            .get(webview)
-            .ok()
-            .and_then(vmux_ecs::UiState::current);
-        if current.is_some_and(|state| state.request_id == request_id && state.pending) {
-            return false;
-        }
-        let folder = current
-            .filter(|state| state.request_id == request_id)
-            .and_then(|state| state.folder.clone());
+        let folder = match self.sessions.get_mut(webview) {
+            Ok(mut session) => {
+                if session.request_id == request_id && session.pending {
+                    return false;
+                }
+                let folder = (session.request_id == request_id)
+                    .then(|| session.folder.clone())
+                    .flatten();
+                session.request_id = request_id.to_string();
+                session.folder.clone_from(&folder);
+                session.pending = true;
+                folder
+            }
+            Err(_) => {
+                self.commands.entity(webview).insert(ProjectFormSession {
+                    request_id: request_id.to_string(),
+                    folder: None,
+                    pending: true,
+                });
+                None
+            }
+        };
         self.commands
             .trigger(vmux_ecs::UiStateWrite::<ProjectFormUiState>::from_event(
                 webview,
@@ -231,29 +250,30 @@ impl Feedback<'_, '_> {
         result: Result<Option<PathBuf>, String>,
         saved: Option<ProjectId>,
     ) {
-        let mut state = self
-            .states
-            .get(webview)
-            .ok()
-            .and_then(vmux_ecs::UiState::current)
-            .cloned()
-            .unwrap_or_else(|| ProjectFormUiState {
-                request_id: request_id.to_string(),
-                ..Default::default()
-            });
-        if state.request_id != request_id {
-            return;
+        let mut folder = None;
+        if let Ok(mut session) = self.sessions.get_mut(webview) {
+            if session.request_id != request_id {
+                return;
+            }
+            session.pending = false;
+            if let Ok(Some(path)) = &result {
+                session.folder = Some(path.to_string_lossy().into_owned());
+            }
+            folder.clone_from(&session.folder);
+        } else if let Ok(Some(path)) = &result {
+            folder = Some(path.to_string_lossy().into_owned());
         }
-        state.pending = false;
-        match result {
-            Ok(Some(path)) => state.folder = Some(path.to_string_lossy().into_owned()),
-            Ok(None) => {}
-            Err(error) => state.error = Some(error),
-        }
-        state.saved = saved;
+        let error = result.err();
         self.commands
             .trigger(vmux_ecs::UiStateWrite::<ProjectFormUiState>::from_event(
-                webview, &state,
+                webview,
+                &ProjectFormUiState {
+                    request_id: request_id.to_string(),
+                    folder,
+                    pending: false,
+                    error,
+                    saved,
+                },
             ));
     }
 }
@@ -619,7 +639,7 @@ fn finish_commits(
                 .result
                 .clone()
                 .map(|_| None)
-                .map_err(|error| ErrorMessage(error).localized()),
+                .map_err(Registrations::localize_error),
             saved,
         );
         commands
@@ -631,7 +651,7 @@ fn finish_commits(
                 .result
                 .clone()
                 .map(|_| ())
-                .map_err(|error| ErrorMessage(error).localized()),
+                .map_err(Registrations::localize_error),
         });
     }
 }

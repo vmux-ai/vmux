@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::prelude::{App, Plugin};
 
 use crate::{FileViewModeRequest, GlobalSearchRequest};
 

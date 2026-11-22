@@ -11,9 +11,6 @@ use crate::lsp::{install_runtime, store};
 use vmux_ecs::profile::CurrentProfile;
 use vmux_ecs::{Operation, OperationRetained, OperationState};
 
-const DONE_NOTICE: Duration = Duration::from_millis(2_500);
-const FAILED_NOTICE: Duration = Duration::from_millis(6_000);
-
 pub struct ManagerPlugin;
 
 impl Plugin for ManagerPlugin {
@@ -70,6 +67,11 @@ struct PackageNotice {
 
 #[derive(Component)]
 struct PackageNoticeTimer(Timer);
+
+impl PackageNoticeTimer {
+    const DONE: Duration = Duration::from_millis(2_500);
+    const FAILED: Duration = Duration::from_millis(6_000);
+}
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct PackageTargets<'w, 's> {
@@ -310,8 +312,8 @@ fn deliver_progress_outputs(
         for target in targets.matching(output.target, &output.progress.name) {
             if targets.contains(target) {
                 let duration = match output.progress.phase {
-                    InstallPhase::Done => Some(DONE_NOTICE),
-                    InstallPhase::Failed => Some(FAILED_NOTICE),
+                    InstallPhase::Done => Some(PackageNoticeTimer::DONE),
+                    InstallPhase::Failed => Some(PackageNoticeTimer::FAILED),
                     _ => None,
                 };
                 notices.publish(
@@ -356,7 +358,7 @@ fn deliver_status_outputs(
                         message: String::new(),
                     },
                     true,
-                    Some(DONE_NOTICE),
+                    Some(PackageNoticeTimer::DONE),
                     &mut commands,
                 );
             }

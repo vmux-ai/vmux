@@ -5,34 +5,34 @@ use syntect::highlighting::Highlighter;
 use syntect::parsing::ScopeStack;
 use vmux_ecs::event::StyledSpan;
 
-pub const SEMANTIC_TOKEN_TYPES: &[&str] = &[
-    "namespace",
-    "type",
-    "class",
-    "enum",
-    "interface",
-    "struct",
-    "typeParameter",
-    "parameter",
-    "variable",
-    "property",
-    "enumMember",
-    "function",
-    "method",
-    "macro",
-    "keyword",
-    "comment",
-    "string",
-    "number",
-    "operator",
-    "lifetime",
-];
-
 pub struct SemanticLegend {
     kinds: Vec<Option<SemanticKind>>,
 }
 
 impl SemanticLegend {
+    pub const TOKEN_TYPES: &[&str] = &[
+        "namespace",
+        "type",
+        "class",
+        "enum",
+        "interface",
+        "struct",
+        "typeParameter",
+        "parameter",
+        "variable",
+        "property",
+        "enumMember",
+        "function",
+        "method",
+        "macro",
+        "keyword",
+        "comment",
+        "string",
+        "number",
+        "operator",
+        "lifetime",
+    ];
+
     pub fn from_capabilities(capabilities: &lsp_types::ServerCapabilities) -> Option<Self> {
         let provider = capabilities.semantic_tokens_provider.as_ref()?;
         let legend = match provider {
@@ -254,24 +254,28 @@ impl SemanticHighlight {
 mod tests {
     use super::*;
 
-    fn legend(types: &[&str]) -> SemanticLegend {
-        SemanticLegend {
-            kinds: types.iter().map(|t| SemanticKind::parse(t)).collect(),
+    impl SemanticLegend {
+        fn sample(types: &[&str]) -> Self {
+            Self {
+                kinds: types.iter().map(|t| SemanticKind::parse(t)).collect(),
+            }
         }
     }
 
-    fn span(text: &str) -> StyledSpan {
-        StyledSpan {
-            text: text.to_string(),
-            fg: [0xc0, 0xc5, 0xce],
-            bold: false,
-            italic: false,
+    impl SemanticHighlight {
+        fn sample_span(text: &str) -> StyledSpan {
+            StyledSpan {
+                text: text.to_string(),
+                fg: [0xc0, 0xc5, 0xce],
+                bold: false,
+                italic: false,
+            }
         }
     }
 
     #[test]
     fn deltas_expand_to_absolute_positions() {
-        let legend = legend(&["struct", "function"]);
+        let legend = SemanticLegend::sample(&["struct", "function"]);
         let tokens = legend.decode(&[0, 4, 3, 0, 0, 0, 6, 2, 1, 0, 2, 1, 5, 0, 0]);
         let at: Vec<_> = tokens
             .iter()
@@ -289,13 +293,13 @@ mod tests {
 
     #[test]
     fn a_type_the_legend_does_not_name_is_dropped() {
-        let legend = legend(&["comment"]);
+        let legend = SemanticLegend::sample(&["comment"]);
         assert!(legend.decode(&[0, 0, 4, 0, 0]).is_empty());
     }
 
     #[test]
     fn a_token_type_beyond_the_legend_is_dropped_rather_than_panicking() {
-        let legend = legend(&["struct"]);
+        let legend = SemanticLegend::sample(&["struct"]);
         assert!(legend.decode(&[0, 0, 4, 9, 0]).is_empty());
     }
 
@@ -307,7 +311,11 @@ mod tests {
             utf16_len: 3,
             kind: SemanticKind::Type,
         }]);
-        let out = hl.apply(0, vec![span("let Foo = 1;")], true);
+        let out = hl.apply(
+            0,
+            vec![SemanticHighlight::sample_span("let Foo = 1;")],
+            true,
+        );
         let texts: Vec<_> = out.iter().map(|s| s.text.as_str()).collect();
         assert_eq!(texts, vec!["let ", "Foo", " = 1;"]);
         assert_eq!(out[1].fg, SemanticKind::Type.colour(true));
@@ -326,7 +334,14 @@ mod tests {
             utf16_len: 6,
             kind: SemanticKind::Function,
         }]);
-        let out = hl.apply(0, vec![span("foo"), span("bar!")], true);
+        let out = hl.apply(
+            0,
+            vec![
+                SemanticHighlight::sample_span("foo"),
+                SemanticHighlight::sample_span("bar!"),
+            ],
+            true,
+        );
         let coloured: String = out
             .iter()
             .filter(|s| s.fg == SemanticKind::Function.colour(true))
@@ -343,7 +358,11 @@ mod tests {
             utf16_len: 3,
             kind: SemanticKind::Type,
         }]);
-        let out = hl.apply(0, vec![span("let 😀 = Foo;")], true);
+        let out = hl.apply(
+            0,
+            vec![SemanticHighlight::sample_span("let 😀 = Foo;")],
+            true,
+        );
         let coloured: String = out
             .iter()
             .filter(|s| s.fg == SemanticKind::Type.colour(true))
@@ -360,7 +379,7 @@ mod tests {
             utf16_len: 3,
             kind: SemanticKind::Type,
         }]);
-        let out = hl.apply(0, vec![span("untouched")], true);
+        let out = hl.apply(0, vec![SemanticHighlight::sample_span("untouched")], true);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].fg, [0xc0, 0xc5, 0xce]);
     }

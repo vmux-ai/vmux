@@ -3,6 +3,10 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
+use bevy::prelude::{
+    App, Commands, Component, Entity, Message, MessageReader, Name, Plugin, Query, Single,
+    SystemSet,
+};
 use serde_json::Value;
 
 use crate::lsp::wire::{ErrorCode, RequestId};

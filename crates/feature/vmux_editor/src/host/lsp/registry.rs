@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use bevy::prelude::{Added, App, Commands, Component, Entity, Plugin, Query, With};
 use serde::Deserialize;
 use vmux_feature::manifest::{FeatureManifest, FeatureManifestOwner};
 #[cfg(test)]
@@ -163,12 +164,14 @@ mod tests {
         const SOURCE: &'static str = "(policies: Some((unrelated: true)))";
     }
 
-    fn registry() -> LspRegistry {
-        FeatureManifest::of::<crate::Feature>()
-            .policies::<EditorPolicies>()
-            .unwrap()
-            .unwrap()
-            .lsp
+    impl LspRegistry {
+        fn sample() -> Self {
+            FeatureManifest::of::<crate::Feature>()
+                .policies::<EditorPolicies>()
+                .unwrap()
+                .unwrap()
+                .lsp
+        }
     }
 
     #[test]
@@ -192,7 +195,7 @@ mod tests {
 
     #[test]
     fn known_extensions_map_to_servers() {
-        let registry = registry();
+        let registry = LspRegistry::sample();
         let overrides = Default::default();
         assert_eq!(
             registry.server("rs", &overrides).unwrap().command,
@@ -215,7 +218,7 @@ mod tests {
 
     #[test]
     fn known_extensions_map_to_preferred_packages() {
-        let registry = registry();
+        let registry = LspRegistry::sample();
         for (extension, package) in [
             ("rs", "rust-analyzer"),
             ("py", "pyright"),
@@ -283,7 +286,7 @@ mod tests {
 
     #[test]
     fn linters_map_by_extension() {
-        let registry = registry();
+        let registry = LspRegistry::sample();
         assert_eq!(registry.linter("py").unwrap().command, "ruff");
         assert_eq!(registry.linter("ts").unwrap().format, LintFormat::Eslint);
         assert_eq!(registry.linter("sh").unwrap().command, "shellcheck");
@@ -292,7 +295,7 @@ mod tests {
 
     #[test]
     fn override_takes_precedence_over_builtin() {
-        let registry = registry();
+        let registry = LspRegistry::sample();
         let mut ov = std::collections::BTreeMap::new();
         ov.insert(
             "rs".to_string(),

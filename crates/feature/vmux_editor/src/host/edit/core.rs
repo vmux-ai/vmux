@@ -24,51 +24,6 @@ pub(super) enum Group {
     Other,
 }
 
-fn translated_caret_after_replace(old: &str, new: &str, caret: usize) -> usize {
-    let old = old.chars().collect::<Vec<_>>();
-    let new = new.chars().collect::<Vec<_>>();
-    let prefix = old
-        .iter()
-        .zip(&new)
-        .take_while(|(left, right)| left == right)
-        .count();
-    if caret <= prefix {
-        return caret.min(new.len());
-    }
-    let suffix = old[prefix..]
-        .iter()
-        .rev()
-        .zip(new[prefix..].iter().rev())
-        .take_while(|(left, right)| left == right)
-        .count();
-    let old_suffix = old.len().saturating_sub(suffix);
-    let new_suffix = new.len().saturating_sub(suffix);
-    if caret >= old_suffix {
-        return (new_suffix + caret.saturating_sub(old_suffix)).min(new.len());
-    }
-    (prefix
-        + caret
-            .saturating_sub(prefix)
-            .min(new_suffix.saturating_sub(prefix)))
-    .min(new.len())
-}
-
-struct OperatorSpan {
-    ranges: Vec<std::ops::Range<usize>>,
-    kind: RegisterKind,
-}
-
-fn transform_case(src: &str, operator: Operator) -> String {
-    src.chars()
-        .map(|c| match operator {
-            Operator::Upper => c.to_uppercase().next().unwrap_or(c),
-            Operator::Lower => c.to_lowercase().next().unwrap_or(c),
-            _ if c.is_uppercase() => c.to_lowercase().next().unwrap_or(c),
-            _ => c.to_uppercase().next().unwrap_or(c),
-        })
-        .collect()
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EditOutcome {
     pub text_changed: bool,
@@ -588,22 +543,16 @@ impl<'w, 's> EditCoreReadOnlyItem<'w, 's> {
             .collect()
     }
 
-    fn operator_span(&self, target: Target) -> Option<OperatorSpan> {
+    fn operator_span(&self, target: Target) -> Option<(Vec<std::ops::Range<usize>>, RegisterKind)> {
         if target == Target::Selection && self.mode.value == EditMode::VisualBlock {
             let rows = self.block_rows();
             if rows.iter().all(|r| r.is_empty()) {
                 return None;
             }
-            return Some(OperatorSpan {
-                ranges: rows,
-                kind: RegisterKind::Blockwise,
-            });
+            return Some((rows, RegisterKind::Blockwise));
         }
         let (range, kind) = self.operator_range(target)?;
-        Some(OperatorSpan {
-            ranges: vec![range],
-            kind,
-        })
+        Some((vec![range], kind))
     }
 
     fn operator_range(&self, target: Target) -> Option<(std::ops::Range<usize>, RegisterKind)> {
@@ -732,6 +681,46 @@ impl<'w, 's> EditCoreReadOnlyItem<'w, 's> {
 }
 
 impl EditCoreItem<'_, '_> {
+    fn translated_caret_after_replace(old: &str, new: &str, caret: usize) -> usize {
+        let old = old.chars().collect::<Vec<_>>();
+        let new = new.chars().collect::<Vec<_>>();
+        let prefix = old
+            .iter()
+            .zip(&new)
+            .take_while(|(left, right)| left == right)
+            .count();
+        if caret <= prefix {
+            return caret.min(new.len());
+        }
+        let suffix = old[prefix..]
+            .iter()
+            .rev()
+            .zip(new[prefix..].iter().rev())
+            .take_while(|(left, right)| left == right)
+            .count();
+        let old_suffix = old.len().saturating_sub(suffix);
+        let new_suffix = new.len().saturating_sub(suffix);
+        if caret >= old_suffix {
+            return (new_suffix + caret.saturating_sub(old_suffix)).min(new.len());
+        }
+        (prefix
+            + caret
+                .saturating_sub(prefix)
+                .min(new_suffix.saturating_sub(prefix)))
+        .min(new.len())
+    }
+
+    fn transform_case(src: &str, operator: Operator) -> String {
+        src.chars()
+            .map(|c| match operator {
+                Operator::Upper => c.to_uppercase().next().unwrap_or(c),
+                Operator::Lower => c.to_lowercase().next().unwrap_or(c),
+                _ if c.is_uppercase() => c.to_lowercase().next().unwrap_or(c),
+                _ => c.to_uppercase().next().unwrap_or(c),
+            })
+            .collect()
+    }
+
     pub(crate) fn forget_vertical(&mut self) {
         self.memory().preferred_vertical_col = None;
     }
@@ -792,7 +781,7 @@ impl EditCoreItem<'_, '_> {
 
     pub(crate) fn replace(&mut self, t: String) -> (bool, Option<RegisterValue>) {
         let caret = self.primary().head;
-        let next_caret = translated_caret_after_replace(&self.buffer.text(), &t, caret);
+        let next_caret = Self::translated_caret_after_replace(&self.buffer.text(), &t, caret);
         self.checkpoint(Group::Other);
         let len = self.buffer.len_chars();
         self.buffer.remove(0..len);
@@ -1381,7 +1370,7 @@ impl EditCoreItem<'_, '_> {
         self.view().block_rows()
     }
 
-    fn operator_span(&self, target: Target) -> Option<OperatorSpan> {
+    fn operator_span(&self, target: Target) -> Option<(Vec<std::ops::Range<usize>>, RegisterKind)> {
         self.view().operator_span(target)
     }
 
@@ -1817,7 +1806,7 @@ impl EditCoreItem<'_, '_> {
                         continue;
                     }
                     let src: String = self.buffer.rope.slice(row.clone()).chars().collect();
-                    let out = transform_case(&src, operator);
+                    let out = Self::transform_case(&src, operator);
                     self.buf_remove(row.clone());
                     self.buf_insert(row.start, &out);
                 }
@@ -1840,15 +1829,14 @@ impl EditCoreItem<'_, '_> {
         target: Target,
         register: Option<char>,
     ) -> (bool, Option<RegisterValue>) {
-        let Some(span) = self.operator_span(target) else {
+        let Some((ranges, kind)) = self.operator_span(target) else {
             return (false, None);
         };
-        if span.kind == RegisterKind::Blockwise {
-            let rows = span.ranges.clone();
+        if kind == RegisterKind::Blockwise {
+            let rows = ranges.clone();
             return self.apply_block_operator(operator, &rows, register);
         }
-        let kind = span.kind;
-        let range = span.ranges[0].clone();
+        let range = ranges[0].clone();
         let was_visual = self.mode.value.is_visual();
         match operator {
             Operator::Yank => {
@@ -1900,7 +1888,7 @@ impl EditCoreItem<'_, '_> {
             }
             Operator::Upper | Operator::Lower | Operator::ToggleCase => {
                 let src: String = self.buffer.rope.slice(range.clone()).chars().collect();
-                let out = transform_case(&src, operator);
+                let out = Self::transform_case(&src, operator);
                 if was_visual {
                     self.mode.value = EditMode::Normal;
                 }
@@ -2134,7 +2122,8 @@ impl EditCoreItem<'_, '_> {
             }
             EditCommand::ReplaceText(t) => {
                 let caret = self.primary().head;
-                let next_caret = translated_caret_after_replace(&self.buffer.text(), &t, caret);
+                let next_caret =
+                    Self::translated_caret_after_replace(&self.buffer.text(), &t, caret);
                 self.checkpoint(Group::Other);
                 let len = self.buffer.len_chars();
                 self.buffer.remove(0..len);
@@ -2529,6 +2518,22 @@ mod tests {
     }
 
     impl Fixture {
+        fn op(operator: Operator, target: Target) -> EditCommand {
+            EditCommand::Op {
+                operator,
+                target,
+                register: None,
+            }
+        }
+
+        fn put(before: bool) -> EditCommand {
+            EditCommand::Put {
+                before,
+                count: 1,
+                register: None,
+            }
+        }
+
         fn new(text: &str) -> Self {
             let mut world = World::new();
             let entity = world
@@ -2748,7 +2753,7 @@ mod tests {
         c.mode.value = EditMode::Normal;
         c.registers.set_unnamed(RegisterValue::charwise("XY"));
         c.set_caret(0);
-        c.apply(put(false));
+        c.apply(Fixture::put(false));
 
         assert_eq!(Fixture::text_of(&c), "aXYb\n");
         assert_eq!(c.primary().head, 2);
@@ -2961,22 +2966,6 @@ mod tests {
         assert_eq!(spans.len(), 2, "both selections render: {spans:?}");
     }
 
-    fn op(operator: Operator, target: Target) -> EditCommand {
-        EditCommand::Op {
-            operator,
-            target,
-            register: None,
-        }
-    }
-
-    fn put(before: bool) -> EditCommand {
-        EditCommand::Put {
-            before,
-            count: 1,
-            register: None,
-        }
-    }
-
     #[test]
     fn insert_text_moves_caret() {
         let mut c_fixture = Fixture::new("");
@@ -3066,7 +3055,7 @@ mod tests {
         c.mode.value = EditMode::Visual;
         c.apply(EditCommand::Select(Motion::Right));
         c.apply(EditCommand::Select(Motion::Right));
-        c.apply(op(Operator::Delete, Target::Selection));
+        c.apply(Fixture::op(Operator::Delete, Target::Selection));
         assert_eq!(Fixture::text_of(&c), "aef");
     }
 
@@ -3075,7 +3064,10 @@ mod tests {
         let mut c_fixture = Fixture::new("foo bar");
         let mut c = c_fixture.core();
         c.set_caret(0);
-        c.apply(op(Operator::Delete, Target::Motion(Motion::WordNext, 1)));
+        c.apply(Fixture::op(
+            Operator::Delete,
+            Target::Motion(Motion::WordNext, 1),
+        ));
         assert_eq!(Fixture::text_of(&c), "bar");
     }
 
@@ -3120,7 +3112,7 @@ mod tests {
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
-        c.apply(op(
+        c.apply(Fixture::op(
             Operator::Delete,
             Target::Motion(
                 Motion::FindChar {
@@ -3140,7 +3132,7 @@ mod tests {
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
-        c.apply(op(
+        c.apply(Fixture::op(
             Operator::Delete,
             Target::Motion(
                 Motion::FindChar {
@@ -3298,7 +3290,7 @@ mod tests {
     fn block_delete_removes_a_rectangle() {
         let mut c_fixture = Fixture::block("abcd\nefgh\nijkl\n", (0, 1), (2, 2));
         let mut c = c_fixture.core();
-        c.apply(op(Operator::Delete, Target::Selection));
+        c.apply(Fixture::op(Operator::Delete, Target::Selection));
         assert_eq!(Fixture::text_of(&c), "ad\neh\nil\n");
         assert_eq!(c.mode.value, EditMode::Normal);
     }
@@ -3307,7 +3299,7 @@ mod tests {
     fn block_yank_joins_rows_with_newlines() {
         let mut c_fixture = Fixture::block("abcd\nefgh\n", (0, 1), (1, 2));
         let mut c = c_fixture.core();
-        let out = c.apply(op(Operator::Yank, Target::Selection));
+        let out = c.apply(Fixture::op(Operator::Yank, Target::Selection));
         assert_eq!(
             out.yank,
             Some(RegisterValue {
@@ -3336,7 +3328,7 @@ mod tests {
             kind: RegisterKind::Blockwise,
         });
         c.set_caret(0);
-        c.apply(put(true));
+        c.apply(Fixture::put(true));
         assert_eq!(Fixture::text_of(&c), "Xab\nYcd\n");
     }
 
@@ -3350,7 +3342,7 @@ mod tests {
             kind: RegisterKind::Blockwise,
         });
         c.set_caret(c.buffer.coords_to_char(0, 3));
-        c.apply(put(true));
+        c.apply(Fixture::put(true));
         assert_eq!(Fixture::text_of(&c), "abc1d\nx  2\n");
     }
 
@@ -3358,7 +3350,7 @@ mod tests {
     fn block_case_operator_covers_every_row() {
         let mut c_fixture = Fixture::block("abcd\nefgh\n", (0, 0), (1, 1));
         let mut c = c_fixture.core();
-        c.apply(op(Operator::Upper, Target::Selection));
+        c.apply(Fixture::op(Operator::Upper, Target::Selection));
         assert_eq!(Fixture::text_of(&c), "ABcd\nEFgh\n");
     }
 
@@ -3576,7 +3568,7 @@ mod tests {
             forward: true,
         });
         c.set_caret(0);
-        c.apply(op(
+        c.apply(Fixture::op(
             Operator::Delete,
             Target::Motion(Motion::SearchNext { reverse: false }, 1),
         ));
@@ -3728,7 +3720,10 @@ mod tests {
         let mut c_fixture = Fixture::new("one two three four");
         let mut c = c_fixture.core();
         c.set_caret(0);
-        c.apply(op(Operator::Delete, Target::Motion(Motion::WordNext, 3)));
+        c.apply(Fixture::op(
+            Operator::Delete,
+            Target::Motion(Motion::WordNext, 3),
+        ));
         assert_eq!(Fixture::text_of(&c), "four");
     }
 
@@ -3737,7 +3732,10 @@ mod tests {
         let mut c_fixture = Fixture::new("foo bar");
         let mut c = c_fixture.core();
         c.set_caret(0);
-        c.apply(op(Operator::Delete, Target::Motion(Motion::WordEnd, 1)));
+        c.apply(Fixture::op(
+            Operator::Delete,
+            Target::Motion(Motion::WordEnd, 1),
+        ));
         assert_eq!(Fixture::text_of(&c), " bar");
     }
 
@@ -3746,7 +3744,10 @@ mod tests {
         let mut c_fixture = Fixture::new("one\ntwo\nthree\n");
         let mut c = c_fixture.core();
         c.set_caret(c.buffer.coords_to_char(0, 1));
-        c.apply(op(Operator::Delete, Target::Motion(Motion::Down, 1)));
+        c.apply(Fixture::op(
+            Operator::Delete,
+            Target::Motion(Motion::Down, 1),
+        ));
         assert_eq!(Fixture::text_of(&c), "three\n");
     }
 
@@ -3755,7 +3756,10 @@ mod tests {
         let mut c_fixture = Fixture::new("foo\nbar\n");
         let mut c = c_fixture.core();
         c.set_caret(1);
-        c.apply(op(Operator::Delete, Target::Motion(Motion::WordNext, 1)));
+        c.apply(Fixture::op(
+            Operator::Delete,
+            Target::Motion(Motion::WordNext, 1),
+        ));
         assert_eq!(Fixture::text_of(&c), "f\nbar\n");
     }
 
@@ -3765,13 +3769,13 @@ mod tests {
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(c.buffer.coords_to_char(1, 0));
-        c.apply(op(Operator::Delete, Target::Line(1)));
+        c.apply(Fixture::op(Operator::Delete, Target::Line(1)));
         assert_eq!(Fixture::text_of(&c), "one\nthree\n");
         assert_eq!(
             c.registers.read(None),
             Some(&RegisterValue::linewise("two\n"))
         );
-        c.apply(put(false));
+        c.apply(Fixture::put(false));
         assert_eq!(Fixture::text_of(&c), "one\nthree\ntwo\n");
     }
 
@@ -3781,7 +3785,7 @@ mod tests {
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
-        c.apply(op(Operator::Delete, Target::Line(3)));
+        c.apply(Fixture::op(Operator::Delete, Target::Line(3)));
         assert_eq!(Fixture::text_of(&c), "d\n");
     }
 
@@ -3791,7 +3795,7 @@ mod tests {
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(c.buffer.coords_to_char(0, 4));
-        c.apply(op(Operator::Change, Target::Line(1)));
+        c.apply(Fixture::op(Operator::Change, Target::Line(1)));
         assert_eq!(Fixture::text_of(&c), "    \nbar\n");
         assert_eq!(c.primary().head, 4);
         assert_eq!(c.mode.value, EditMode::Insert);
@@ -3803,9 +3807,9 @@ mod tests {
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
-        c.apply(op(Operator::Indent, Target::Line(2)));
+        c.apply(Fixture::op(Operator::Indent, Target::Line(2)));
         assert_eq!(Fixture::text_of(&c), "\ta\n\tb\n");
-        c.apply(op(Operator::Outdent, Target::Line(2)));
+        c.apply(Fixture::op(Operator::Outdent, Target::Line(2)));
         assert_eq!(Fixture::text_of(&c), "a\nb\n");
     }
 
@@ -3815,9 +3819,15 @@ mod tests {
         let mut c = c_fixture.core();
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
-        c.apply(op(Operator::Upper, Target::Motion(Motion::LineEnd, 1)));
+        c.apply(Fixture::op(
+            Operator::Upper,
+            Target::Motion(Motion::LineEnd, 1),
+        ));
         assert_eq!(Fixture::text_of(&c), "HELLO");
-        c.apply(op(Operator::ToggleCase, Target::Motion(Motion::LineEnd, 1)));
+        c.apply(Fixture::op(
+            Operator::ToggleCase,
+            Target::Motion(Motion::LineEnd, 1),
+        ));
         assert_eq!(Fixture::text_of(&c), "hello");
     }
 
@@ -3828,7 +3838,10 @@ mod tests {
         c.mode.value = EditMode::Normal;
         c.set_caret(2);
 
-        c.apply(op(Operator::Delete, Target::Motion(Motion::LineEnd, 1)));
+        c.apply(Fixture::op(
+            Operator::Delete,
+            Target::Motion(Motion::LineEnd, 1),
+        ));
 
         assert_eq!(Fixture::text_of(&c), "ab\ndef\n");
     }
@@ -3905,7 +3918,7 @@ mod tests {
         c.mode.value = EditMode::Normal;
         c.registers.set_unnamed(RegisterValue::linewise("new\n"));
         c.set_caret(c.buffer.coords_to_char(1, 0));
-        c.apply(put(true));
+        c.apply(Fixture::put(true));
         assert_eq!(Fixture::text_of(&c), "one\nnew\ntwo\n");
     }
 
@@ -4036,11 +4049,11 @@ mod tests {
         c.mode.value = EditMode::Visual;
         c.apply(EditCommand::Select(Motion::Right));
         c.apply(EditCommand::Select(Motion::Right));
-        let out = c.apply(op(Operator::Yank, Target::Selection));
+        let out = c.apply(Fixture::op(Operator::Yank, Target::Selection));
         assert_eq!(out.yank, Some(RegisterValue::charwise("abc")));
         c.mode.value = EditMode::Insert;
         c.set_caret(6);
-        c.apply(put(true));
+        c.apply(Fixture::put(true));
         assert_eq!(Fixture::text_of(&c), "abcdefabc");
     }
 
@@ -4083,14 +4096,14 @@ mod tests {
         c.registers.set_unnamed(RegisterValue::charwise("X"));
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
-        c.apply(put(false));
+        c.apply(Fixture::put(false));
         assert_eq!(Fixture::text_of(&c), "aXc");
         let mut c2_fixture = Fixture::new("ac");
         let mut c2 = c2_fixture.core();
         c2.registers.set_unnamed(RegisterValue::charwise("X"));
         c2.mode.value = EditMode::Normal;
         c2.set_caret(0);
-        c2.apply(put(true));
+        c2.apply(Fixture::put(true));
         assert_eq!(Fixture::text_of(&c2), "Xac");
     }
 
@@ -4101,8 +4114,8 @@ mod tests {
         c.registers.set_unnamed(RegisterValue::charwise("X"));
         c.mode.value = EditMode::Normal;
         c.set_caret(0);
-        c.apply(put(false));
-        c.apply(put(false));
+        c.apply(Fixture::put(false));
+        c.apply(Fixture::put(false));
         assert_eq!(Fixture::text_of(&c), "aXX");
         c.apply(EditCommand::Undo);
         assert_eq!(Fixture::text_of(&c), "aX");

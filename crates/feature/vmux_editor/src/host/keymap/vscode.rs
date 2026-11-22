@@ -6,20 +6,125 @@ use EditCommand::*;
 #[derive(Default)]
 pub struct VscodeKeymap;
 
-fn selection_op(operator: Operator) -> EditCommand {
-    EditCommand::Op {
-        operator,
-        target: Target::Selection,
-        register: None,
+impl VscodeKeymap {
+    fn selection_op(operator: Operator) -> EditCommand {
+        EditCommand::Op {
+            operator,
+            target: Target::Selection,
+            register: None,
+        }
     }
-}
 
-#[cfg(target_os = "macos")]
-fn delete_to_line_end() -> EditCommand {
-    EditCommand::Op {
-        operator: Operator::Delete,
-        target: Target::Motion(Motion::LineEnd, 1),
-        register: None,
+    #[cfg(target_os = "macos")]
+    fn delete_to_line_end() -> EditCommand {
+        EditCommand::Op {
+            operator: Operator::Delete,
+            target: Target::Motion(Motion::LineEnd, 1),
+            register: None,
+        }
+    }
+
+    fn move_or_select(motion: Motion, select: bool) -> Vec<EditCommand> {
+        if select {
+            vec![Select(motion)]
+        } else {
+            vec![Move(motion)]
+        }
+    }
+
+    fn handle_gui_chord(k: &KeyInput) -> Option<Vec<EditCommand>> {
+        let m = &k.mods;
+        #[cfg(target_os = "macos")]
+        let gui = m.meta;
+        #[cfg(not(target_os = "macos"))]
+        let gui = m.meta || m.ctrl;
+        if !gui {
+            return None;
+        }
+        if m.alt && !m.shift {
+            return match k.key.as_str() {
+                "ArrowUp" => Some(vec![AddCaretVertically(VerticalDirection::Up)]),
+                "ArrowDown" => Some(vec![AddCaretVertically(VerticalDirection::Down)]),
+                _ => None,
+            };
+        }
+        if m.shift && !m.alt {
+            match k.key.as_str() {
+                "[" | "{" => return Some(vec![FoldClose]),
+                "]" | "}" => return Some(vec![FoldOpen]),
+                "0" | ")" => return Some(vec![FoldAll]),
+                "j" | "J" => return Some(vec![UnfoldAll]),
+                _ => {}
+            }
+        }
+        if !m.alt {
+            return match k.key.to_ascii_lowercase().as_str() {
+                "c" => Some(vec![Self::selection_op(Operator::Yank)]),
+                "x" => Some(vec![Self::selection_op(Operator::Delete)]),
+                "v" => Some(vec![EditCommand::Paste]),
+                "a" => Some(vec![Move(Motion::DocStart), Select(Motion::DocEnd)]),
+                "s" => Some(vec![Save]),
+                "z" if m.shift => Some(vec![Redo]),
+                "z" => Some(vec![Undo]),
+                "y" => Some(vec![Redo]),
+                _ => None,
+            };
+        }
+        None
+    }
+
+    #[cfg(target_os = "macos")]
+    fn handle_macos_chord(k: &KeyInput) -> Option<Vec<EditCommand>> {
+        let m = &k.mods;
+        let sel = m.shift;
+        if m.meta && !m.ctrl && !m.alt {
+            return match k.key.as_str() {
+                "ArrowLeft" => Some(Self::move_or_select(Motion::LineStart, sel)),
+                "ArrowRight" => Some(Self::move_or_select(Motion::LineEnd, sel)),
+                "ArrowUp" => Some(Self::move_or_select(Motion::DocStart, sel)),
+                "ArrowDown" => Some(Self::move_or_select(Motion::DocEnd, sel)),
+                _ => None,
+            };
+        }
+        if m.ctrl && !m.meta && !m.alt {
+            return match k.key.as_str() {
+                "a" | "A" => Some(Self::move_or_select(Motion::LineStart, sel)),
+                "e" | "E" => Some(Self::move_or_select(Motion::LineEnd, sel)),
+                "f" | "F" => Some(Self::move_or_select(Motion::Right, sel)),
+                "b" | "B" => Some(Self::move_or_select(Motion::Left, sel)),
+                "n" | "N" => Some(Self::move_or_select(Motion::Down, sel)),
+                "p" | "P" => Some(Self::move_or_select(Motion::Up, sel)),
+                "d" | "D" => Some(vec![DeleteForward]),
+                "h" | "H" => Some(vec![DeleteBack]),
+                "k" | "K" => Some(vec![Self::delete_to_line_end()]),
+                "w" | "W" => Some(vec![DeleteWordBack]),
+                _ => None,
+            };
+        }
+        None
+    }
+
+    fn handle_navigation_key(k: &KeyInput) -> Vec<EditCommand> {
+        let m = &k.mods;
+        let sel = m.shift;
+        match k.key.as_str() {
+            "ArrowLeft" if m.word() => Self::move_or_select(Motion::WordPrev, sel),
+            "ArrowRight" if m.word() => Self::move_or_select(Motion::WordNext, sel),
+            "ArrowLeft" => Self::move_or_select(Motion::Left, sel),
+            "ArrowRight" => Self::move_or_select(Motion::Right, sel),
+            "ArrowUp" => Self::move_or_select(Motion::Up, sel),
+            "ArrowDown" => Self::move_or_select(Motion::Down, sel),
+            "Home" => Self::move_or_select(Motion::LineStart, sel),
+            "End" => Self::move_or_select(Motion::LineEnd, sel),
+            "PageUp" => Self::move_or_select(Motion::PageUp, sel),
+            "PageDown" => Self::move_or_select(Motion::PageDown, sel),
+            "Backspace" if m.word() => vec![DeleteWordBack],
+            "Backspace" => vec![DeleteBack],
+            "Delete" => vec![DeleteForward],
+            "Enter" => vec![InsertNewline],
+            "Tab" => vec![InsertTab],
+            _ => vec![],
+        }
     }
 }
 
@@ -33,126 +138,23 @@ impl Keymap for VscodeKeymap {
     }
 
     fn handle(&mut self, k: &KeyInput) -> Vec<EditCommand> {
-        let m = &k.mods;
-        let sel = m.shift;
-        let mv = |motion: Motion| {
-            if sel {
-                vec![Select(motion)]
-            } else {
-                vec![Move(motion)]
-            }
-        };
-
         if let Some(command) = k.lsp_action() {
             return vec![command];
         }
-
-        if m.ctrl && !m.meta && !m.alt && k.key == " " {
+        if k.mods.ctrl && !k.mods.meta && !k.mods.alt && k.key == " " {
             return vec![TriggerCompletion];
         }
-
         if k.key == "Escape" {
             return vec![CollapseCarets];
         }
-
+        if let Some(commands) = Self::handle_gui_chord(k) {
+            return commands;
+        }
         #[cfg(target_os = "macos")]
-        let gui = m.meta;
-        #[cfg(not(target_os = "macos"))]
-        let gui = m.meta || m.ctrl;
-        if gui && m.alt && !m.shift {
-            match k.key.as_str() {
-                "ArrowUp" => return vec![AddCaretVertically(VerticalDirection::Up)],
-                "ArrowDown" => return vec![AddCaretVertically(VerticalDirection::Down)],
-                _ => {}
-            }
+        if let Some(commands) = Self::handle_macos_chord(k) {
+            return commands;
         }
-        if gui && m.shift && !m.alt {
-            match k.key.as_str() {
-                "[" | "{" => return vec![FoldClose],
-                "]" | "}" => return vec![FoldOpen],
-                "0" | ")" => return vec![FoldAll],
-                "j" | "J" => return vec![UnfoldAll],
-                _ => {}
-            }
-        }
-        if gui && !m.alt {
-            let cmd = match k.key.to_ascii_lowercase().as_str() {
-                "c" => Some(vec![selection_op(Operator::Yank)]),
-                "x" => Some(vec![selection_op(Operator::Delete)]),
-                "v" => Some(vec![EditCommand::Paste]),
-                "a" => Some(vec![Move(Motion::DocStart), Select(Motion::DocEnd)]),
-                "s" => Some(vec![Save]),
-                "z" if m.shift => Some(vec![Redo]),
-                "z" => Some(vec![Undo]),
-                "y" => Some(vec![Redo]),
-                _ => None,
-            };
-            if let Some(cmd) = cmd {
-                return cmd;
-            }
-        }
-
-        #[cfg(target_os = "macos")]
-        if m.meta && !m.ctrl && !m.alt {
-            match k.key.as_str() {
-                "ArrowLeft" => return mv(Motion::LineStart),
-                "ArrowRight" => return mv(Motion::LineEnd),
-                "ArrowUp" => return mv(Motion::DocStart),
-                "ArrowDown" => return mv(Motion::DocEnd),
-                _ => {}
-            }
-        }
-
-        #[cfg(target_os = "macos")]
-        if m.ctrl && !m.meta && !m.alt {
-            let cmd = match k.key.as_str() {
-                "a" | "A" => Some(mv(Motion::LineStart)),
-                "e" | "E" => Some(mv(Motion::LineEnd)),
-                "f" | "F" => Some(mv(Motion::Right)),
-                "b" | "B" => Some(mv(Motion::Left)),
-                "n" | "N" => Some(mv(Motion::Down)),
-                "p" | "P" => Some(mv(Motion::Up)),
-                "d" | "D" => Some(vec![DeleteForward]),
-                "h" | "H" => Some(vec![DeleteBack]),
-                "k" | "K" => Some(vec![delete_to_line_end()]),
-                "w" | "W" => Some(vec![DeleteWordBack]),
-                _ => None,
-            };
-            if let Some(cmd) = cmd {
-                return cmd;
-            }
-        }
-
-        match k.key.as_str() {
-            "ArrowLeft" if m.word() => {
-                if sel {
-                    vec![Select(Motion::WordPrev)]
-                } else {
-                    vec![Move(Motion::WordPrev)]
-                }
-            }
-            "ArrowRight" if m.word() => {
-                if sel {
-                    vec![Select(Motion::WordNext)]
-                } else {
-                    vec![Move(Motion::WordNext)]
-                }
-            }
-            "ArrowLeft" => mv(Motion::Left),
-            "ArrowRight" => mv(Motion::Right),
-            "ArrowUp" => mv(Motion::Up),
-            "ArrowDown" => mv(Motion::Down),
-            "Home" => mv(Motion::LineStart),
-            "End" => mv(Motion::LineEnd),
-            "PageUp" => mv(Motion::PageUp),
-            "PageDown" => mv(Motion::PageDown),
-            "Backspace" if m.word() => vec![DeleteWordBack],
-            "Backspace" => vec![DeleteBack],
-            "Delete" => vec![DeleteForward],
-            "Enter" => vec![InsertNewline],
-            "Tab" => vec![InsertTab],
-            _ => vec![],
-        }
+        Self::handle_navigation_key(k)
     }
 }
 
@@ -161,11 +163,13 @@ mod tests {
     use super::*;
     use crate::keymap::Mods;
 
-    fn key(k: &str, mods: Mods) -> KeyInput {
-        KeyInput {
-            key: k.into(),
-            mods,
-            repeat: false,
+    impl VscodeKeymap {
+        fn key(k: &str, mods: Mods) -> KeyInput {
+            KeyInput {
+                key: k.into(),
+                mods,
+                repeat: false,
+            }
         }
     }
 
@@ -173,7 +177,7 @@ mod tests {
     fn arrow_moves_shift_selects() {
         let mut km = VscodeKeymap;
         assert_eq!(
-            km.handle(&key("ArrowRight", Mods::default())),
+            km.handle(&VscodeKeymap::key("ArrowRight", Mods::default())),
             vec![EditCommand::Move(Motion::Right)]
         );
         let shift = Mods {
@@ -181,7 +185,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            km.handle(&key("ArrowRight", shift)),
+            km.handle(&VscodeKeymap::key("ArrowRight", shift)),
             vec![EditCommand::Select(Motion::Right)]
         );
     }
@@ -195,15 +199,15 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            km.handle(&key("ArrowDown", gui_alt)),
+            km.handle(&VscodeKeymap::key("ArrowDown", gui_alt)),
             vec![EditCommand::AddCaretVertically(VerticalDirection::Down)]
         );
         assert_eq!(
-            km.handle(&key("ArrowUp", gui_alt)),
+            km.handle(&VscodeKeymap::key("ArrowUp", gui_alt)),
             vec![EditCommand::AddCaretVertically(VerticalDirection::Up)]
         );
         assert_eq!(
-            km.handle(&key("ArrowDown", Mods::default())),
+            km.handle(&VscodeKeymap::key("ArrowDown", Mods::default())),
             vec![EditCommand::Move(Motion::Down)]
         );
     }
@@ -216,16 +220,22 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            km.handle(&key("c", cmd)),
-            vec![selection_op(Operator::Yank)]
+            km.handle(&VscodeKeymap::key("c", cmd)),
+            vec![VscodeKeymap::selection_op(Operator::Yank)]
         );
-        assert_eq!(km.handle(&key("s", cmd)), vec![EditCommand::Save]);
+        assert_eq!(
+            km.handle(&VscodeKeymap::key("s", cmd)),
+            vec![EditCommand::Save]
+        );
         let cmd_shift = Mods {
             meta: true,
             shift: true,
             ..Default::default()
         };
-        assert_eq!(km.handle(&key("z", cmd_shift)), vec![EditCommand::Redo]);
+        assert_eq!(
+            km.handle(&VscodeKeymap::key("z", cmd_shift)),
+            vec![EditCommand::Redo]
+        );
     }
 
     #[test]
@@ -236,9 +246,18 @@ mod tests {
             shift: true,
             ..Default::default()
         };
-        assert_eq!(km.handle(&key("[", cs)), vec![EditCommand::FoldClose]);
-        assert_eq!(km.handle(&key("]", cs)), vec![EditCommand::FoldOpen]);
-        assert_eq!(km.handle(&key("J", cs)), vec![EditCommand::UnfoldAll]);
+        assert_eq!(
+            km.handle(&VscodeKeymap::key("[", cs)),
+            vec![EditCommand::FoldClose]
+        );
+        assert_eq!(
+            km.handle(&VscodeKeymap::key("]", cs)),
+            vec![EditCommand::FoldOpen]
+        );
+        assert_eq!(
+            km.handle(&VscodeKeymap::key("J", cs)),
+            vec![EditCommand::UnfoldAll]
+        );
     }
 
     #[test]
@@ -249,7 +268,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            km.handle(&key("a", cmd)),
+            km.handle(&VscodeKeymap::key("a", cmd)),
             vec![
                 EditCommand::Move(Motion::DocStart),
                 EditCommand::Select(Motion::DocEnd)
@@ -265,7 +284,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            km.handle(&key("Backspace", alt)),
+            km.handle(&VscodeKeymap::key("Backspace", alt)),
             vec![EditCommand::DeleteWordBack]
         );
     }
@@ -279,27 +298,33 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            km.handle(&key("a", ctrl)),
+            km.handle(&VscodeKeymap::key("a", ctrl)),
             vec![EditCommand::Move(Motion::LineStart)]
         );
         assert_eq!(
-            km.handle(&key("e", ctrl)),
+            km.handle(&VscodeKeymap::key("e", ctrl)),
             vec![EditCommand::Move(Motion::LineEnd)]
         );
         assert_eq!(
-            km.handle(&key("f", ctrl)),
+            km.handle(&VscodeKeymap::key("f", ctrl)),
             vec![EditCommand::Move(Motion::Right)]
         );
         assert_eq!(
-            km.handle(&key("n", ctrl)),
+            km.handle(&VscodeKeymap::key("n", ctrl)),
             vec![EditCommand::Move(Motion::Down)]
         );
         assert_eq!(
-            km.handle(&key("p", ctrl)),
+            km.handle(&VscodeKeymap::key("p", ctrl)),
             vec![EditCommand::Move(Motion::Up)]
         );
-        assert_eq!(km.handle(&key("k", ctrl)), vec![delete_to_line_end()]);
-        assert_eq!(km.handle(&key("h", ctrl)), vec![EditCommand::DeleteBack]);
+        assert_eq!(
+            km.handle(&VscodeKeymap::key("k", ctrl)),
+            vec![VscodeKeymap::delete_to_line_end()]
+        );
+        assert_eq!(
+            km.handle(&VscodeKeymap::key("h", ctrl)),
+            vec![EditCommand::DeleteBack]
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -312,11 +337,11 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            km.handle(&key("A", cs)),
+            km.handle(&VscodeKeymap::key("A", cs)),
             vec![EditCommand::Select(Motion::LineStart)]
         );
         assert_eq!(
-            km.handle(&key("E", cs)),
+            km.handle(&VscodeKeymap::key("E", cs)),
             vec![EditCommand::Select(Motion::LineEnd)]
         );
     }
@@ -329,14 +354,17 @@ mod tests {
             ctrl: true,
             ..Default::default()
         };
-        assert_eq!(km.handle(&key("c", ctrl)), Vec::<EditCommand>::new());
+        assert_eq!(
+            km.handle(&VscodeKeymap::key("c", ctrl)),
+            Vec::<EditCommand>::new()
+        );
         let meta = Mods {
             meta: true,
             ..Default::default()
         };
         assert_eq!(
-            km.handle(&key("c", meta)),
-            vec![selection_op(Operator::Yank)]
+            km.handle(&VscodeKeymap::key("c", meta)),
+            vec![VscodeKeymap::selection_op(Operator::Yank)]
         );
     }
 
@@ -344,7 +372,7 @@ mod tests {
     fn lsp_actions() {
         let mut km = VscodeKeymap;
         assert_eq!(
-            km.handle(&key("F12", Mods::default())),
+            km.handle(&VscodeKeymap::key("F12", Mods::default())),
             vec![EditCommand::GotoDefinition]
         );
         let shift = Mods {
@@ -352,7 +380,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            km.handle(&key("F12", shift)),
+            km.handle(&VscodeKeymap::key("F12", shift)),
             vec![EditCommand::FindReferences]
         );
         let ctrl = Mods {
@@ -360,7 +388,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            km.handle(&key(" ", ctrl)),
+            km.handle(&VscodeKeymap::key(" ", ctrl)),
             vec![EditCommand::TriggerCompletion]
         );
     }
@@ -374,19 +402,19 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            km.handle(&key("ArrowLeft", cmd)),
+            km.handle(&VscodeKeymap::key("ArrowLeft", cmd)),
             vec![EditCommand::Move(Motion::LineStart)]
         );
         assert_eq!(
-            km.handle(&key("ArrowRight", cmd)),
+            km.handle(&VscodeKeymap::key("ArrowRight", cmd)),
             vec![EditCommand::Move(Motion::LineEnd)]
         );
         assert_eq!(
-            km.handle(&key("ArrowUp", cmd)),
+            km.handle(&VscodeKeymap::key("ArrowUp", cmd)),
             vec![EditCommand::Move(Motion::DocStart)]
         );
         assert_eq!(
-            km.handle(&key("ArrowDown", cmd)),
+            km.handle(&VscodeKeymap::key("ArrowDown", cmd)),
             vec![EditCommand::Move(Motion::DocEnd)]
         );
     }
@@ -401,11 +429,11 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            km.handle(&key("ArrowLeft", cs)),
+            km.handle(&VscodeKeymap::key("ArrowLeft", cs)),
             vec![EditCommand::Select(Motion::LineStart)]
         );
         assert_eq!(
-            km.handle(&key("ArrowDown", cs)),
+            km.handle(&VscodeKeymap::key("ArrowDown", cs)),
             vec![EditCommand::Select(Motion::DocEnd)]
         );
     }

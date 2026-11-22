@@ -341,10 +341,8 @@ mod tests {
         app: App,
         entity: Entity,
         dir: tempfile::TempDir,
+        rendered: std::sync::Arc<std::sync::Mutex<Vec<vmux_ecs::event::FileUiState>>>,
     }
-
-    #[derive(Resource, Default)]
-    struct RenderedDocuments(Vec<vmux_ecs::event::FileUiState>);
 
     impl Session {
         fn open(first: &str) -> Self {
@@ -375,7 +373,12 @@ mod tests {
                     PageMetadata::default(),
                 ))
                 .id();
-            Self { app, entity, dir }
+            Self {
+                app,
+                entity,
+                dir,
+                rendered: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            }
         }
 
         fn write(&self, name: &str, text: &str) {
@@ -435,23 +438,19 @@ mod tests {
         }
 
         fn present(&mut self) {
+            let rendered = self.rendered.clone();
             self.app
                 .init_resource::<vmux_setting::AppSettings>()
-                .init_resource::<RenderedDocuments>()
                 .add_plugins(crate::host::status::StatusPlugin)
-                .add_observer(
-                    |request: On<vmux_ecs::FileUiStateWrite>,
-                     mut rendered: ResMut<RenderedDocuments>| {
-                        let state =
-                            <vmux_ecs::event::FileUiState as vmux_api::UiState>::from_updates(
-                                None,
-                                vec![request.update().clone()],
-                            );
-                        if state.document.meta.is_some() {
-                            rendered.0.push(state);
-                        }
-                    },
-                );
+                .add_observer(move |request: On<vmux_ecs::FileUiStateWrite>| {
+                    let state = <vmux_ecs::event::FileUiState as vmux_api::UiState>::from_updates(
+                        None,
+                        vec![request.update().clone()],
+                    );
+                    if state.document.meta.is_some() {
+                        rendered.lock().unwrap().push(state);
+                    }
+                });
             self.app
                 .world_mut()
                 .entity_mut(self.entity)
@@ -493,17 +492,17 @@ mod tests {
                 .emit_world(self.app.world_mut());
             self.app.world_mut().flush();
         }
-    }
 
-    const SHIFT_JIS_SAMPLE: [u8; 17] = [
-        0x93, 0xFA, 0x96, 0x7B, 0x8C, 0xEA, 0x82, 0xCC, 0x83, 0x65, 0x83, 0x4C, 0x83, 0x58, 0x83,
-        0x67, 0x0A,
-    ];
+        const SHIFT_JIS_SAMPLE: [u8; 17] = [
+            0x93, 0xFA, 0x96, 0x7B, 0x8C, 0xEA, 0x82, 0xCC, 0x83, 0x65, 0x83, 0x4C, 0x83, 0x58,
+            0x83, 0x67, 0x0A,
+        ];
+    }
 
     #[test]
     fn a_shift_jis_file_opens_and_saves_back_as_shift_jis() {
         let mut session = Session::open("main.txt");
-        session.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
+        session.write_bytes("main.txt", &Session::SHIFT_JIS_SAMPLE);
         session.settle();
 
         assert_eq!(session.text(), "日本語のテキスト\n", "decoded on load");
@@ -513,7 +512,7 @@ mod tests {
         session.save_with_encoding(FileEncoding::ShiftJis);
 
         let mut expected = b"EDIT".to_vec();
-        expected.extend_from_slice(&SHIFT_JIS_SAMPLE);
+        expected.extend_from_slice(&Session::SHIFT_JIS_SAMPLE);
         assert_eq!(
             session.bytes("main.txt"),
             expected,
@@ -524,7 +523,7 @@ mod tests {
     #[test]
     fn saving_a_character_the_encoding_cannot_hold_leaves_the_file_untouched() {
         let mut session = Session::open("main.txt");
-        session.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
+        session.write_bytes("main.txt", &Session::SHIFT_JIS_SAMPLE);
         session.settle();
 
         session.type_into_buffer("€");
@@ -532,7 +531,7 @@ mod tests {
 
         assert_eq!(
             session.bytes("main.txt"),
-            SHIFT_JIS_SAMPLE,
+            Session::SHIFT_JIS_SAMPLE,
             "a lossy save is refused rather than written with substitutions"
         );
     }
@@ -540,7 +539,7 @@ mod tests {
     #[test]
     fn reopening_with_an_encoding_redecodes_the_same_bytes() {
         let mut session = Session::open("main.txt");
-        session.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
+        session.write_bytes("main.txt", &Session::SHIFT_JIS_SAMPLE);
         session.settle();
         assert_eq!(session.encoding(), FileEncoding::ShiftJis);
 
@@ -588,7 +587,7 @@ mod tests {
     #[test]
     fn an_encoding_chosen_for_one_file_does_not_follow_the_pane_to_the_next() {
         let mut session = Session::open("main.txt");
-        session.write_bytes("main.txt", &SHIFT_JIS_SAMPLE);
+        session.write_bytes("main.txt", &Session::SHIFT_JIS_SAMPLE);
         session.write("plain.txt", "ascii\n");
         session.settle();
 
@@ -788,12 +787,7 @@ mod tests {
         session.settle();
         session.type_into_buffer("EDIT");
         session.navigate_to("lib.rs");
-        session
-            .app
-            .world_mut()
-            .resource_mut::<RenderedDocuments>()
-            .0
-            .clear();
+        session.rendered.lock().unwrap().clear();
 
         session.select("main.rs");
 
@@ -819,7 +813,7 @@ mod tests {
                 .get::<crate::host::status::FileInitialMetaSent>(session.entity)
                 .is_some()
         );
-        let documents = &session.app.world().resource::<RenderedDocuments>().0;
+        let documents = session.rendered.lock().unwrap().clone();
         assert_eq!(documents.len(), 1);
         let document = &documents[0];
         let meta = document.document.meta.as_ref().unwrap();
