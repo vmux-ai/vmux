@@ -325,7 +325,14 @@ mod profile_tests {
             if tools {
                 assert_eq!(
                     catalog,
-                    ["container", "mcp", "remote.pair", "service", "tool"]
+                    [
+                        "container",
+                        "mcp",
+                        "mcp.proxy",
+                        "remote.pair",
+                        "service",
+                        "tool"
+                    ]
                 );
             } else {
                 assert!(catalog.is_empty());

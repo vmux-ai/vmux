@@ -61,6 +61,7 @@ type Reads<'w, 's> = Query<
     (
         Entity,
         &'static ChildOf,
+        &'static Read,
         &'static JobOwner<Read>,
         &'static mut JobResult<Read>,
         Has<Retried>,
@@ -69,16 +70,16 @@ type Reads<'w, 's> = Query<
 
 fn read(
     mut results: Reads,
-    scopes: Query<&Location, With<InstallationScope>>,
+    scopes: Query<(&Location, Option<&Context>), With<InstallationScope>>,
     mut commands: Commands,
 ) {
-    for (entity, owner, accepted, mut result, retried) in &mut results {
+    for (entity, owner, request, accepted, mut result, retried) in &mut results {
         let scope = owner.parent();
-        let Ok(location) = scopes.get(scope) else {
+        let Ok((location, existing)) = scopes.get(scope) else {
             commands.entity(entity).despawn();
             continue;
         };
-        if !accepted.accepts(Some(owner)) {
+        if !accepted.accepts(Some(owner)) || request.path != location.0 {
             commands.entity(entity).despawn();
             continue;
         }
@@ -102,7 +103,15 @@ fn read(
                     }
                 };
                 let mut context = Context::installation(&identity.to_string());
-                context.generation = 1;
+                context.generation =
+                    existing.map_or(1, |current| current.generation.saturating_add(1));
+                if let Some(existing) = existing {
+                    for attribute in [Attribute::Account, Attribute::Workspace] {
+                        if let Some(value) = existing.attributes.get(&attribute) {
+                            context.attributes.insert(attribute, value.clone());
+                        }
+                    }
+                }
                 context.attributes.insert(
                     Attribute::Platform,
                     Value::String(std::env::consts::OS.into()),
@@ -148,6 +157,7 @@ type Creates<'w, 's> = Query<
         Entity,
         &'static ChildOf,
         &'static Candidate,
+        &'static Create,
         &'static JobOwner<Create>,
         &'static mut JobResult<Create>,
     ),
@@ -155,16 +165,16 @@ type Creates<'w, 's> = Query<
 
 fn created(
     mut results: Creates,
-    scopes: Query<&Location, With<InstallationScope>>,
+    scopes: Query<(&Location, Option<&Context>), With<InstallationScope>>,
     mut commands: Commands,
 ) {
-    for (entity, owner, candidate, accepted, mut result) in &mut results {
+    for (entity, owner, candidate, request, accepted, mut result) in &mut results {
         let scope = owner.parent();
-        let Ok(location) = scopes.get(scope) else {
+        let Ok((location, existing)) = scopes.get(scope) else {
             commands.entity(entity).despawn();
             continue;
         };
-        if !accepted.accepts(Some(owner)) {
+        if !accepted.accepts(Some(owner)) || request.path != location.0 {
             commands.entity(entity).despawn();
             continue;
         }
@@ -177,7 +187,15 @@ fn created(
         match result {
             Ok(true) => {
                 let mut context = Context::installation(&candidate.0);
-                context.generation = 1;
+                context.generation =
+                    existing.map_or(1, |current| current.generation.saturating_add(1));
+                if let Some(existing) = existing {
+                    for attribute in [Attribute::Account, Attribute::Workspace] {
+                        if let Some(value) = existing.attributes.get(&attribute) {
+                            context.attributes.insert(attribute, value.clone());
+                        }
+                    }
+                }
                 context.attributes.insert(
                     Attribute::Platform,
                     Value::String(std::env::consts::OS.into()),
