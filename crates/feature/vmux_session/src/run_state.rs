@@ -24,6 +24,21 @@ impl RunState {
             Self::Errored(_) => "errored",
         }
     }
+
+    pub fn failure(&self) -> Option<Failure<'_>> {
+        match self {
+            Self::Errored(message) => Some(Failure(message)),
+            _ => None,
+        }
+    }
+
+    pub fn failure_kind(&self) -> Option<FailureKind> {
+        self.failure().map(|failure| failure.kind())
+    }
+
+    pub fn in_use(&self) -> bool {
+        self.failure().is_some_and(|failure| failure.in_use())
+    }
 }
 
 pub struct Failure<'a>(pub &'a str);

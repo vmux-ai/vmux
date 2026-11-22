@@ -57,6 +57,7 @@ impl Plugin for EntityPlugin {
             .register_stored::<ProviderSessionId>()
             .register_stored::<AgentConversationTitle>()
             .register_stored::<TitlePending>()
+            .register_stored::<InitialPromptSubmitted>()
             .register_stored::<LocalTask>()
             .init_resource::<ArchiveSequence>()
             .init_resource::<ProviderSessionTombstones>()
@@ -245,6 +246,12 @@ pub struct LocalTask;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
+pub struct InitialPromptSubmitted;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
 #[require(Save, SourceUpdatedAt)]
 #[type_path = "vmux_session"]
 pub struct ProviderStage;
@@ -324,6 +331,7 @@ pub struct StageDefinition;
 pub struct CreateRequest {
     id: SessionId,
     operation: Option<Entity>,
+    operation_id: Option<String>,
     pub name: String,
     pub description: String,
     pub cwd: PathBuf,
@@ -340,9 +348,26 @@ impl CreateRequest {
         cwd: PathBuf,
         agent: Option<AgentId>,
     ) -> Self {
+        Self::with_id(
+            SessionId(uuid::Uuid::new_v4().to_string()),
+            name,
+            description,
+            cwd,
+            agent,
+        )
+    }
+
+    pub fn with_id(
+        id: SessionId,
+        name: impl Into<String>,
+        description: impl Into<String>,
+        cwd: PathBuf,
+        agent: Option<AgentId>,
+    ) -> Self {
         Self {
-            id: SessionId(uuid::Uuid::new_v4().to_string()),
+            id,
             operation: None,
+            operation_id: None,
             name: name.into(),
             description: description.into(),
             cwd,
@@ -351,6 +376,11 @@ impl CreateRequest {
             activated_at: None,
             local: true,
         }
+    }
+
+    pub fn with_operation_id(mut self, operation_id: impl Into<String>) -> Self {
+        self.operation_id = Some(operation_id.into());
+        self
     }
 
     pub fn imported(
@@ -364,6 +394,7 @@ impl CreateRequest {
         Self {
             id: SessionId(uuid::Uuid::new_v4().to_string()),
             operation: None,
+            operation_id: None,
             name: name.into(),
             description: description.into(),
             cwd,
@@ -785,6 +816,8 @@ fn create(
         );
         if let Some((operation, uuid)) = lease {
             mutation = mutation.leased(operation, uuid);
+        } else if let Some(operation_id) = &request.operation_id {
+            mutation.operation = operation_id.clone();
         }
         mutations.write(mutation);
     }
@@ -1920,6 +1953,33 @@ mod tests {
     }
 
     #[test]
+    fn reserved_id_creation_is_idempotent_with_matching_operation_id() {
+        let mut app = App::new();
+        app.add_plugins(crate::SessionDomainPlugin);
+        let reserved = SessionId::new("reserved-id-1");
+        let request = CreateRequest::with_id(
+            reserved.clone(),
+            "Reserved",
+            "desc",
+            PathBuf::from("/tmp"),
+            Some(AgentId("codex".into())),
+        )
+        .with_operation_id("op-reserved-1");
+        app.world_mut().write_message(request.clone());
+        app.update();
+        app.world_mut().write_message(request);
+        app.update();
+
+        let ids: Vec<_> = app
+            .world_mut()
+            .query_filtered::<&SessionId, With<Session>>()
+            .iter(app.world())
+            .cloned()
+            .collect();
+        assert_eq!(ids, vec![reserved]);
+    }
+
+    #[test]
     fn domain_plugin_registers_its_durable_components() {
         let mut app = App::new();
         app.add_plugins(crate::DomainPlugin);
@@ -1937,6 +1997,7 @@ mod tests {
         assert!(filter.is_allowed::<ProviderSessionId>());
         assert!(filter.is_allowed::<AgentConversationTitle>());
         assert!(filter.is_allowed::<TitlePending>());
+        assert!(filter.is_allowed::<InitialPromptSubmitted>());
         assert!(filter.is_allowed::<LocalTask>());
         assert!(filter.is_allowed::<Stage>());
         assert!(filter.is_allowed::<StageChangedAt>());
