@@ -12566,9 +12566,6 @@ impl Inventory {
     fn valid_test_fixture_target(&self, entry: &Declaration) -> bool {
         if entry.production
             || entry.local
-            || entry.ecs
-            || entry.bundle_derive.is_some()
-            || entry.query_derive.is_some()
             || entry.plugin
             || entry.plugin_path.is_some()
             || entry.path.starts_with("crates/feature/vmux_dx/lints/")
@@ -12583,29 +12580,6 @@ impl Inventory {
                 .any(|implementation| implementation.plugin || implementation.plugin_path.is_some())
         {
             return false;
-        }
-        if matches!(entry.kind, Kind::Function) {
-            if self.has_bevy_runtime_access(entry) {
-                return false;
-            }
-            if entry.fields.iter().any(|field| {
-                matches!(
-                    field.as_str(),
-                    "Query"
-                        | "Res"
-                        | "ResMut"
-                        | "Commands"
-                        | "On"
-                        | "MessageReader"
-                        | "MessageWriter"
-                        | "Single"
-                        | "NonSend"
-                        | "NonSendMut"
-                        | "ParamSet"
-                )
-            }) {
-                return false;
-            }
         }
         matches!(
             entry.kind,
@@ -13854,7 +13828,11 @@ impl Inventory {
             if self
                 .resolve(&implementation.namespace, path, &mut BTreeSet::new())
                 .is_some_and(|target| {
-                    target.key == "crates/util/vmux_ecs/src/ui_state.rs||struct:UiStatePlugin"
+                    matches!(
+                        target.key.as_str(),
+                        "crates/util/vmux_ecs/src/ui_state.rs||struct:UiStatePlugin"
+                            | "crates/feature/vmux_feature/src/manifest.rs||struct:FeaturePlugin"
+                    )
                 })
             {
                 continue;
@@ -21074,10 +21052,16 @@ fn automatic_owned_values_prove_unit_enums_and_reject_unowned_structs() {
 #[test]
 fn automatic_test_fixtures_prove_test_reachable_harnesses_and_preserve_isolation() {
     let inventory = Inventory::fixture(
-        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; struct ProdOrphan { v: u32 } #[cfg(test)] mod tests { use bevy_ecs::prelude::*; struct Harness { count: u32 } impl Harness { fn new() -> Self { Self { count: 1 } } } fn helper() -> Harness { Harness::new() } struct DeadFixture { x: u32 } #[derive(Resource)] struct UnregisteredRes(u32); fn unregistered_system(r: Res<UnregisteredRes>) { let _ = r; } #[test] fn exercises_harness() { let _ = helper(); } }",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; struct ProdOrphan { v: u32 } #[cfg(test)] mod tests { use bevy_ecs::prelude::*; #[derive(Resource, Default)] struct Recorded(u32); fn capture(mut r: ResMut<Recorded>) { r.0 += 1; } struct Harness { count: u32 } impl Harness { fn new() -> Self { let _ = (Recorded::default(), capture); Self { count: 1 } } } fn helper() -> Harness { Harness::new() } struct DeadFixture { x: u32 } #[derive(Resource)] struct UnregisteredRes(u32); fn unregistered_system(r: Res<UnregisteredRes>) { let _ = r; } #[test] fn exercises_harness() { let _ = helper(); } }",
     );
     let policy = Policy::default();
-    for name in ["struct:Harness", "impl:Harness", "fn:helper"] {
+    for name in [
+        "struct:Harness",
+        "impl:Harness",
+        "fn:helper",
+        "struct:Recorded",
+        "fn:capture",
+    ] {
         assert!(
             inventory.canonical(
                 &inventory.entries[&inventory.key(name)],
