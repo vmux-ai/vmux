@@ -9800,6 +9800,8 @@ struct Inventory {
     renderer_graph: RefCell<Option<(BTreeSet<String>, BTreeSet<String>)>>,
     job_adapters: RefCell<Option<BTreeSet<String>>>,
     enum_owner_candidates: RefCell<Option<BTreeMap<String, Vec<String>>>>,
+    owned_values: RefCell<Option<BTreeSet<String>>>,
+    test_fixtures: RefCell<Option<BTreeSet<String>>>,
     implementation_index: RefCell<Option<BTreeMap<String, Vec<String>>>>,
     generated_ready: bool,
     generated_collisions: BTreeSet<String>,
@@ -10970,6 +10972,8 @@ impl Inventory {
         *self.renderer_graph.get_mut() = None;
         *self.job_adapters.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
+        *self.owned_values.get_mut() = None;
+        *self.test_fixtures.get_mut() = None;
         *self.implementation_index.get_mut() = None;
         let keys: Vec<_> = self
             .entries
@@ -11708,6 +11712,8 @@ impl Inventory {
         *self.renderer_graph.get_mut() = None;
         *self.job_adapters.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
+        *self.owned_values.get_mut() = None;
+        *self.test_fixtures.get_mut() = None;
         *self.implementation_index.get_mut() = None;
         if !path.ends_with(".rs") {
             self.script(path, source);
@@ -11774,6 +11780,8 @@ impl Inventory {
         *self.renderer_graph.get_mut() = None;
         *self.job_adapters.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
+        *self.owned_values.get_mut() = None;
+        *self.test_fixtures.get_mut() = None;
         *self.implementation_index.get_mut() = None;
         let key = format!("{path}||script");
         self.entries.insert(
@@ -11875,7 +11883,10 @@ impl Inventory {
         if entry.generated_query.is_some() {
             return self.canonical_query_item(entry, policy, visiting);
         }
-        if self.automatic_boundary(entry) || self.fixture_bootstrap(entry) {
+        if self.automatic_boundary(entry)
+            || self.fixture_bootstrap(entry)
+            || self.automatic_test_fixture(entry)
+        {
             return true;
         }
         if matches!(entry.kind, Kind::Script) && entry.path.ends_with(".rs") {
@@ -11892,6 +11903,9 @@ impl Inventory {
                 && boundary.fingerprint == entry.fingerprint
                 && boundary.valid()
         }) {
+            return true;
+        }
+        if self.automatic_owned_value(entry) {
             return true;
         }
         if let Some(value) = policy.values.iter().find(|value| value.key == entry.key)
@@ -11973,6 +11987,7 @@ impl Inventory {
             if !declaration.ecs
                 && declaration.bundle_derive.is_none()
                 && declaration.generated_query.is_none()
+                && !self.automatic_owned_value(declaration)
                 && !policy
                     .values
                     .iter()
@@ -12236,6 +12251,285 @@ impl Inventory {
             .borrow()
             .as_ref()
             .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn automatic_owned_value(&self, entry: &Declaration) -> bool {
+        if !entry.production {
+            return false;
+        }
+        self.ensure_owned_values();
+        self.owned_values
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn ensure_owned_values(&self) {
+        if self.owned_values.borrow().is_some() {
+            return;
+        }
+        let mut owned = BTreeSet::new();
+        for entry in self.entries.values() {
+            if !entry.production
+                || !matches!(entry.kind, Kind::Struct)
+                || !entry.ecs
+                || !self.used(entry)
+                || entry.local
+                || entry.dynamic
+                || entry.opaque
+                || entry.projection
+            {
+                continue;
+            }
+            let mut paths = BTreeSet::new();
+            for ty in &entry.field_types {
+                Self::collect_non_collection_types(ty, &mut paths);
+            }
+            for path in paths {
+                let Some(target) = self.resolve(&entry.namespace, &path, &mut BTreeSet::new())
+                else {
+                    continue;
+                };
+                if target.key != entry.key && self.plain_value_candidate(target) {
+                    owned.insert(target.key.clone());
+                }
+            }
+        }
+        *self.owned_values.borrow_mut() = Some(owned);
+    }
+
+    fn collect_non_collection_types(ty: &Type, paths: &mut BTreeSet<String>) {
+        match ty {
+            Type::Path(path) if path.qself.is_none() => {
+                let Some(segment) = path.path.segments.last() else {
+                    return;
+                };
+                let name = segment.ident.unraw().to_string();
+                if matches!(
+                    name.as_str(),
+                    "Vec" | "VecDeque" | "HashMap" | "BTreeMap" | "HashSet" | "BTreeSet"
+                ) {
+                    return;
+                }
+                paths.insert(References::path(&path.path));
+                if let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments {
+                    for argument in &arguments.args {
+                        if let syn::GenericArgument::Type(inner) = argument {
+                            Self::collect_non_collection_types(inner, paths);
+                        }
+                    }
+                }
+            }
+            Type::Reference(value) => Self::collect_non_collection_types(&value.elem, paths),
+            Type::Paren(value) => Self::collect_non_collection_types(&value.elem, paths),
+            Type::Group(value) => Self::collect_non_collection_types(&value.elem, paths),
+            Type::Tuple(value) => {
+                for element in &value.elems {
+                    Self::collect_non_collection_types(element, paths);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn plain_value_candidate(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || entry.ecs
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.projection
+            || entry.bundle_derive.is_some()
+            || entry.query_derive.is_some()
+            || self.has_bevy_runtime_access(entry)
+        {
+            return false;
+        }
+        match entry.kind {
+            Kind::Enum => {
+                entry
+                    .enum_shape
+                    .as_ref()
+                    .is_some_and(|shape| shape.payloads == 0 && !shape.component && !shape.signal)
+                    && !self.enum_job(entry)
+                    && self.value_impls_clean(entry)
+            }
+            _ => false,
+        }
+    }
+
+    fn value_impls_clean(&self, entry: &Declaration) -> bool {
+        for implementation in self.implementations(entry) {
+            if !implementation.production {
+                continue;
+            }
+            if implementation.local
+                || implementation.dynamic
+                || implementation.opaque
+                || self.has_bevy_runtime_access(implementation)
+            {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn automatic_test_fixture(&self, entry: &Declaration) -> bool {
+        if entry.production {
+            return false;
+        }
+        self.ensure_test_fixtures();
+        self.test_fixtures
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn ensure_test_fixtures(&self) {
+        if self.test_fixtures.borrow().is_some() {
+            return;
+        }
+        let mut fixtures = BTreeSet::new();
+        let mut queue = Vec::new();
+        for entry in self.entries.values() {
+            if !entry.production && entry.test {
+                queue.push(entry.key.clone());
+            }
+        }
+        while let Some(source_key) = queue.pop() {
+            let source = &self.entries[&source_key];
+            let source_crate = source.namespace.split("::").next();
+            let mut origins = vec![source];
+            if matches!(source.kind, Kind::Struct | Kind::Enum) {
+                for implementation in self.implementations(source) {
+                    if !implementation.production
+                        && !implementation.plugin
+                        && implementation.plugin_path.is_none()
+                    {
+                        origins.push(implementation);
+                    }
+                }
+            }
+            for origin in origins {
+                for path in origin
+                    .field_paths
+                    .iter()
+                    .chain(origin.reference_paths.iter())
+                {
+                    let target = self
+                        .resolve_path_or_prefix(&origin.namespace, path)
+                        .or_else(|| {
+                            self.function_reference(&origin.namespace, path, &mut BTreeSet::new())
+                        });
+                    let Some(target) = target else {
+                        continue;
+                    };
+                    if target.namespace.split("::").next() != source_crate
+                        || !self.valid_test_fixture_target(target)
+                    {
+                        continue;
+                    }
+                    if fixtures.insert(target.key.clone()) {
+                        queue.push(target.key.clone());
+                    }
+                }
+            }
+        }
+        let mut finalized = fixtures.clone();
+        for key in &fixtures {
+            let entry = &self.entries[key];
+            if matches!(entry.kind, Kind::Struct | Kind::Enum) {
+                for implementation in self.implementations(entry) {
+                    if !implementation.production
+                        && !implementation.plugin
+                        && implementation.plugin_path.is_none()
+                        && !implementation.local
+                    {
+                        finalized.insert(implementation.key.clone());
+                    }
+                }
+            }
+        }
+        *self.test_fixtures.borrow_mut() = Some(finalized);
+    }
+
+    fn has_process_command(&self, entry: &Declaration) -> bool {
+        let mut sources = vec![entry];
+        if matches!(entry.kind, Kind::Struct | Kind::Enum) {
+            for implementation in self.implementations(entry) {
+                if !implementation.production {
+                    sources.push(implementation);
+                }
+            }
+        }
+        for source in sources {
+            for path in source
+                .field_paths
+                .iter()
+                .chain(source.reference_paths.iter())
+            {
+                if self
+                    .external_path(&source.namespace, path, &mut BTreeSet::new())
+                    .is_some_and(|target| {
+                        target == "std::process::Command"
+                            || target.starts_with("std::process::Command::")
+                    })
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn valid_test_fixture_target(&self, entry: &Declaration) -> bool {
+        if entry.production
+            || entry.local
+            || entry.ecs
+            || entry.bundle_derive.is_some()
+            || entry.query_derive.is_some()
+            || entry.plugin
+            || entry.plugin_path.is_some()
+            || entry.path.starts_with("crates/feature/vmux_dx/lints/")
+            || self.has_process_command(entry)
+        {
+            return false;
+        }
+        if matches!(entry.kind, Kind::Struct)
+            && self
+                .implementations(entry)
+                .into_iter()
+                .any(|implementation| implementation.plugin || implementation.plugin_path.is_some())
+        {
+            return false;
+        }
+        if matches!(entry.kind, Kind::Function) {
+            if self.has_bevy_runtime_access(entry) {
+                return false;
+            }
+            if entry.fields.iter().any(|field| {
+                matches!(
+                    field.as_str(),
+                    "Query"
+                        | "Res"
+                        | "ResMut"
+                        | "Commands"
+                        | "On"
+                        | "MessageReader"
+                        | "MessageWriter"
+                        | "Single"
+                        | "NonSend"
+                        | "NonSendMut"
+                        | "ParamSet"
+                )
+            }) {
+                return false;
+            }
+        }
+        matches!(
+            entry.kind,
+            Kind::Struct | Kind::Enum | Kind::Function | Kind::Const | Kind::Static | Kind::Alias
+        )
     }
 
     fn ensure_job_adapters(&self) {
@@ -15782,6 +16076,8 @@ impl Inventory {
         *self.renderer_graph.get_mut() = None;
         *self.job_adapters.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
+        *self.owned_values.get_mut() = None;
+        *self.test_fixtures.get_mut() = None;
         *self.implementation_index.get_mut() = None;
         self.resolve_components();
         self.generate_queries();
@@ -20488,6 +20784,72 @@ fn automatic_enum_purposes_prove_unit_canonical_and_system_set_enums() {
         assert!(
             !inventory.automatic_enum_purpose(&inventory.entries[&inventory.key(name)], &policy),
             "expected rejected enum purpose: {name}"
+        );
+    }
+}
+
+#[test]
+fn automatic_owned_values_prove_unit_enums_and_reject_unowned_structs() {
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; enum Mode { Ready, Idle } impl Mode { fn ready(self) -> bool { matches!(self, Self::Ready) } } enum PayloadEnum { A(u32), B } enum VecMode { X, Y } enum UnusedMode { Z } struct UnownedModel { value: String } #[derive(Component)] struct Owner { mode: Option<Mode>, payload: PayloadEnum, modes: Vec<VecMode>, model: UnownedModel } #[derive(Component)] struct UnusedOwner { mode: UnusedMode } fn read(a: Query<&Owner>) { let _ = a; } struct RootPlugin; impl Plugin for RootPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+    );
+    let policy = Policy::default();
+    for name in ["enum:Mode", "impl:Mode"] {
+        assert!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key(name)],
+                &policy,
+                &mut BTreeSet::new()
+            ),
+            "expected proved unit enum value: {name}"
+        );
+    }
+    for name in [
+        "enum:PayloadEnum",
+        "enum:VecMode",
+        "enum:UnusedMode",
+        "struct:UnownedModel",
+    ] {
+        assert!(
+            !inventory.canonical(
+                &inventory.entries[&inventory.key(name)],
+                &policy,
+                &mut BTreeSet::new()
+            ),
+            "expected rejected value: {name}"
+        );
+    }
+}
+
+#[test]
+fn automatic_test_fixtures_prove_test_reachable_harnesses_and_preserve_isolation() {
+    let inventory = Inventory::fixture(
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; struct ProdOrphan { v: u32 } #[cfg(test)] mod tests { use bevy_ecs::prelude::*; struct Harness { count: u32 } impl Harness { fn new() -> Self { Self { count: 1 } } } fn helper() -> Harness { Harness::new() } struct DeadFixture { x: u32 } #[derive(Resource)] struct UnregisteredRes(u32); fn unregistered_system(r: Res<UnregisteredRes>) { let _ = r; } #[test] fn exercises_harness() { let _ = helper(); } }",
+    );
+    let policy = Policy::default();
+    for name in ["struct:Harness", "impl:Harness", "fn:helper"] {
+        assert!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key(name)],
+                &policy,
+                &mut BTreeSet::new()
+            ),
+            "expected proved test fixture: {name}"
+        );
+    }
+    for name in [
+        "struct:ProdOrphan",
+        "struct:DeadFixture",
+        "struct:UnregisteredRes",
+        "fn:unregistered_system",
+    ] {
+        assert!(
+            !inventory.canonical(
+                &inventory.entries[&inventory.key(name)],
+                &policy,
+                &mut BTreeSet::new()
+            ),
+            "expected rejected declaration: {name}"
         );
     }
 }
