@@ -99,32 +99,6 @@ impl ChatListSelection {
         self.index = index;
     }
 
-    fn finish_composer_menu(
-        &mut self,
-        caller: Entity,
-        composer: &mut ComposerState,
-        commands: &mut Commands,
-    ) {
-        self.close_composer_menu();
-        commands
-            .entity(caller)
-            .insert(ActiveComposerMenu::default());
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                caller,
-                &ChatComposerMenuState {
-                    menu: None,
-                    index: 0,
-                },
-            ),
-        );
-        let draft = composer.draft().to_string();
-        let effect = composer.effect(draft, true);
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(caller, &effect),
-        );
-    }
-
     fn close_composer_menu(&mut self) {
         if self.kind == Some(ChatListKind::Composer) {
             self.kind = None;
@@ -661,6 +635,33 @@ impl ChatLists<'_, '_> {
         }
     }
 
+    fn finish_composer_menu(
+        &self,
+        caller: Entity,
+        selection: &mut ChatListSelection,
+        composer: &mut ComposerState,
+        commands: &mut Commands,
+    ) {
+        selection.close_composer_menu();
+        commands
+            .entity(caller)
+            .insert(ActiveComposerMenu::default());
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
+                caller,
+                &ChatComposerMenuState {
+                    menu: None,
+                    index: 0,
+                },
+            ),
+        );
+        let draft = composer.draft().to_string();
+        let effect = composer.effect(draft, true);
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(caller, &effect),
+        );
+    }
+
     fn mcp_entries(&self, webview: Entity, query: &str) -> Vec<McpServerEntry> {
         let Ok(state) = self.mcp.get(webview) else {
             return Vec::new();
@@ -879,7 +880,7 @@ fn choose(
         }
     }
     if close_menu {
-        selection.finish_composer_menu(caller, &mut composer, &mut commands);
+        lists.finish_composer_menu(caller, &mut selection, &mut composer, &mut commands);
     }
     if let Some(draft) = change_composer {
         let effect = composer.effect(draft, true);
