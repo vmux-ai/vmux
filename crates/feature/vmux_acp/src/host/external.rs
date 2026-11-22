@@ -1720,47 +1720,55 @@ impl SourceChanges {
             SCAN_MAX_LATENCY
         }
     }
-    fn update_activation(
-        &mut self,
-        paths: &SourcePaths,
-        sources: HashSet<SourceKind>,
-        watch_codex_activity: bool,
-        manager: bool,
-        conversation_paths: HashSet<ConversationTarget>,
-        native_sources: &mut NativeSources,
-    ) {
-        if let Some(watch) = &mut self.conversation_watch {
-            watch.set_paths(conversation_paths);
-        }
-        if self.sources != sources
-            || self.watch_codex_activity != watch_codex_activity
-            || self.manager != manager
-        {
-            let requested = sources
-                .difference(&self.sources)
-                .copied()
-                .collect::<HashSet<_>>();
-            self.sources = sources;
-            self.watch_codex_activity = watch_codex_activity;
-            self.manager = manager;
-            self.ensure_watches(paths);
-            for source in requested {
-                native_sources.queue(source);
-            }
-        }
-    }
+}
 
-    #[allow(clippy::too_many_arguments)]
-    fn start_active(
-        paths: SourcePaths,
+#[derive(SystemParam)]
+struct RuntimeActivation<'w, 's> {
+    runtime: Query<'w, 's, (Entity, &'static mut Runtime, &'static SourcePaths)>,
+    native_sources: NativeSources<'w, 's>,
+    commands: Commands<'w, 's>,
+}
+
+impl RuntimeActivation<'_, '_> {
+    fn apply(
+        &mut self,
         sources: HashSet<SourceKind>,
         watch_codex_activity: bool,
         manager: bool,
         conversation_paths: HashSet<ConversationTarget>,
         wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
-        native_sources: &mut NativeSources,
-        commands: &mut Commands,
     ) {
+        if sources.is_empty() && !watch_codex_activity && conversation_paths.is_empty() {
+            for (entity, _, _) in &mut self.runtime {
+                self.commands.entity(entity).despawn();
+            }
+            return;
+        }
+        if let Ok((_, mut runtime, paths)) = self.runtime.single_mut() {
+            if let Some(watch) = &mut runtime.conversation_watch {
+                watch.set_paths(conversation_paths);
+            }
+            if runtime.sources != sources
+                || runtime.watch_codex_activity != watch_codex_activity
+                || runtime.manager != manager
+            {
+                let requested = sources
+                    .difference(&runtime.sources)
+                    .copied()
+                    .collect::<HashSet<_>>();
+                runtime.sources = sources;
+                runtime.watch_codex_activity = watch_codex_activity;
+                runtime.manager = manager;
+                runtime.ensure_watches(paths);
+                for source in requested {
+                    self.native_sources.queue(source);
+                }
+            }
+            return;
+        }
+        let Some(paths) = SourcePaths::current() else {
+            return;
+        };
         let events = SourceWatchEvents::start(wake);
         let mut conversation_watch = ConversationWatch::start(events.sender.clone());
         conversation_watch.set_paths(conversation_paths);
@@ -1788,9 +1796,10 @@ impl SourceChanges {
             conversation_watch: Some(conversation_watch),
         };
         runtime.ensure_watches(&paths);
-        commands.spawn((Name::new("ACP provider session catalog"), runtime, paths));
+        self.commands
+            .spawn((Name::new("ACP provider session catalog"), runtime, paths));
         for source in sources {
-            native_sources.queue(source);
+            self.native_sources.queue(source);
         }
     }
 }
@@ -1813,10 +1822,8 @@ fn activate(
         With<Session>,
     >,
     mut dirty: ResMut<ActivationDirty>,
-    mut runtime: Query<(Entity, &mut Runtime, &SourcePaths)>,
-    mut native_sources: NativeSources,
+    mut activation: RuntimeActivation,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut commands: Commands,
 ) {
     if !dirty.0 {
         return;
@@ -1871,36 +1878,13 @@ fn activate(
             }
         }
     }
-    if sources.is_empty() && !watch_codex_activity && conversation_paths.is_empty() {
-        for (entity, _, _) in &mut runtime {
-            commands.entity(entity).despawn();
-        }
-        return;
-    }
-    if let Ok((_, mut runtime, paths)) = runtime.single_mut() {
-        runtime.update_activation(
-            paths,
-            sources,
-            watch_codex_activity,
-            manager,
-            conversation_paths,
-            &mut native_sources,
-        );
-        return;
-    }
-    let Some(paths) = SourcePaths::current() else {
-        return;
-    };
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    Runtime::start_active(
-        paths,
+    activation.apply(
         sources,
         watch_codex_activity,
         manager,
         conversation_paths,
         wake,
-        &mut native_sources,
-        &mut commands,
     );
 }
 
