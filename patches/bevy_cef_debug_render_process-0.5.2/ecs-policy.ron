@@ -1,3 +1,0 @@
-(legacy: [
-    (key: "patches/bevy_cef_debug_render_process-0.5.2/src/main.rs||fn:main", fingerprint: "4aeaab7036112f86", issue: "VMX-253"),
-])
