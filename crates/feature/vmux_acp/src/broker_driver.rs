@@ -14,8 +14,6 @@ pub type AgentCommandResponses = PendingResponses<AgentRequestId, AgentCommandRe
 pub type AgentQueryResponses = PendingResponses<AgentRequestId, ServiceMessage>;
 pub type AgentToolResponses = PendingResponses<AgentRequestId, (String, bool)>;
 
-const NO_AGENT_SUBSCRIBER: &str = "no desktop subscribed to agent commands";
-
 pub struct PendingResponses<K, V> {
     entries: Arc<Mutex<HashMap<K, oneshot::Sender<V>>>>,
 }
@@ -80,6 +78,8 @@ pub struct AgentBroker {
 }
 
 impl AgentBroker {
+    const NO_AGENT_SUBSCRIBER: &'static str = "no desktop subscribed to agent commands";
+
     pub fn new(
         outbound: broadcast::Sender<ServiceMessage>,
         commands: AgentCommandResponses,
@@ -101,7 +101,7 @@ impl AgentBroker {
         request: AgentRequest,
     ) -> Result<AgentCommandResult, String> {
         if self.outbound.receiver_count() == 0 {
-            return Err(NO_AGENT_SUBSCRIBER.to_string());
+            return Err(Self::NO_AGENT_SUBSCRIBER.to_string());
         }
         self.commands
             .request(
@@ -116,7 +116,7 @@ impl AgentBroker {
                         })
                         .is_ok()
                 },
-                NO_AGENT_SUBSCRIBER,
+                Self::NO_AGENT_SUBSCRIBER,
                 "agent command timed out",
             )
             .await
@@ -128,7 +128,7 @@ impl AgentBroker {
         query: AgentRequest,
     ) -> Result<ServiceMessage, String> {
         if self.outbound.receiver_count() == 0 {
-            return Err(NO_AGENT_SUBSCRIBER.to_string());
+            return Err(Self::NO_AGENT_SUBSCRIBER.to_string());
         }
         self.queries
             .request(
@@ -139,7 +139,7 @@ impl AgentBroker {
                         .send(ServiceMessage::AgentQuery { request_id, query })
                         .is_ok()
                 },
-                NO_AGENT_SUBSCRIBER,
+                Self::NO_AGENT_SUBSCRIBER,
                 "agent query timed out",
             )
             .await

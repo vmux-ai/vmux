@@ -146,27 +146,23 @@ pub(super) struct AcpLaunch {
     env: Vec<(String, String)>,
 }
 
-struct CatalogCommand<'a>(&'a str);
-
-impl CatalogCommand<'_> {
-    fn allowed(&self) -> bool {
-        let command = std::path::Path::new(self.0)
+impl AcpLaunch {
+    fn catalog_command_allowed(command: &str) -> bool {
+        let command = std::path::Path::new(command)
             .file_name()
             .and_then(|name| name.to_str())
-            .unwrap_or(self.0);
+            .unwrap_or(command);
         !matches!(
             command,
             "npx" | "npm" | "pnpm" | "yarn" | "bunx" | "uvx" | "pipx"
         )
     }
-}
 
-impl AcpLaunch {
     pub(super) fn configured_catalog(config: &AcpAgentConfig, shell: &str) -> Result<Self, String> {
         if config.command.trim().is_empty() {
             return Err(format!("ACP command is unavailable: {}", config.id));
         }
-        if !CatalogCommand(&config.command).allowed() {
+        if !Self::catalog_command_allowed(&config.command) {
             return Err(format!(
                 "ACP catalog does not automatically run package manager commands: {}",
                 config.id
@@ -207,9 +203,11 @@ mod tests {
 
     #[test]
     fn catalog_command_rejects_package_runners() {
-        assert!(!CatalogCommand("npx").allowed());
-        assert!(!CatalogCommand("/usr/local/bin/uvx").allowed());
-        assert!(CatalogCommand("/usr/local/bin/custom-acp").allowed());
+        assert!(!AcpLaunch::catalog_command_allowed("npx"));
+        assert!(!AcpLaunch::catalog_command_allowed("/usr/local/bin/uvx"));
+        assert!(AcpLaunch::catalog_command_allowed(
+            "/usr/local/bin/custom-acp"
+        ));
     }
 
     struct InstallFixture {

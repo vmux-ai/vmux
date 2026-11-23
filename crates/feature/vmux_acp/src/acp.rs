@@ -250,6 +250,19 @@ struct AcpSessionShared(Arc<AcpShared>);
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 struct AcpSessionCwd(PathBuf);
 
+impl AcpSessionCwd {
+    fn rebind(&mut self, cwd: PathBuf) -> Result<PathBuf, String> {
+        let cwd = cwd
+            .canonicalize()
+            .map_err(|error| format!("invalid workspace directory: {error}"))?;
+        if !cwd.is_dir() {
+            return Err("workspace path is not a directory".to_string());
+        }
+        self.0 = cwd.clone();
+        Ok(cwd)
+    }
+}
+
 #[derive(Component)]
 struct AcpStartupReady;
 
@@ -949,12 +962,10 @@ fn rebind(
         let mut result = Err("ACP session not found".to_string());
         for (sid, shared, mut session_cwd) in &mut sessions {
             if sid.0 == request.sid {
-                result = shared
-                    .0
-                    .rebind_cwd(std::mem::take(&mut request.cwd))
-                    .map(|()| {
-                        let updated = shared.0.cwd();
-                        session_cwd.0 = updated.clone();
+                result = session_cwd
+                    .rebind(std::mem::take(&mut request.cwd))
+                    .map(|updated| {
+                        shared.0.set_cwd(updated.clone());
                         updated
                     });
                 break;

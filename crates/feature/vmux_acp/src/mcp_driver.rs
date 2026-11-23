@@ -3,8 +3,6 @@ use std::path::{Path, PathBuf};
 use vmux_ecs::ProcessId;
 use vmux_ecs::agent::McpServerConfig;
 
-const LONG_RUN_TIMEOUT_SECS: u64 = 600;
-
 pub(crate) struct McpLaunchSpec {
     cwd: PathBuf,
     anchor: ProcessId,
@@ -13,11 +11,13 @@ pub(crate) struct McpLaunchSpec {
 }
 
 impl McpLaunchSpec {
+    const LONG_RUN_TIMEOUT_SECS: u64 = 600;
+
     pub fn acp(cwd: &Path, anchor: ProcessId, shell: &str) -> Self {
         Self {
             cwd: cwd.to_path_buf(),
             anchor,
-            run_timeout_secs: LONG_RUN_TIMEOUT_SECS,
+            run_timeout_secs: Self::LONG_RUN_TIMEOUT_SECS,
             shell: shell.to_string(),
         }
     }
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn acp_uses_protocol_terminal_and_long_timeout() {
         let acp = McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "");
-        assert_eq!(acp.run_timeout_secs, LONG_RUN_TIMEOUT_SECS);
+        assert_eq!(acp.run_timeout_secs, McpLaunchSpec::LONG_RUN_TIMEOUT_SECS);
     }
 
     #[test]
