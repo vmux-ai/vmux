@@ -1,3 +1,5 @@
-(legacy: [
-    (key: "patches/bevy_cef_debug_render_process-0.5.2/src/main.rs||fn:main", fingerprint: "4aeaab7036112f86", issue: "VMX-253"),
-])
+(
+boundaries: [
+    (key: "patches/bevy_cef_debug_render_process-0.5.2/src/main.rs||fn:main", fingerprint: "2807288188d5afb6", interface: "CEF render-subprocess binary entry point executing RenderProcessAppBuilder", input: "ECS: patches/bevy_cef_core-0.5.2/src/util.rs||struct:CefEmbeddedPageConfig", output: "external: CEF execute_process subprocess exit code", lifetime: "one CEF render subprocess execution", bounds: "loads CEF framework, initializes default CefEmbeddedPageConfig before command-line override, and runs cef::execute_process", teardown: "std::process::exit terminates subprocess", architecture: "ECS ownership boundaries"),
+],
+)

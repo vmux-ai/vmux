@@ -26,6 +26,7 @@ fn main() {
         loader
     };
     let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
+    try_set_cef_embedded_page_config(CefEmbeddedPageConfig::default());
     let mut app = RenderProcessAppBuilder::build();
     let code = execute_process(
         Some(args.as_main_args()),
