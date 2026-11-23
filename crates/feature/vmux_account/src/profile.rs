@@ -23,7 +23,7 @@ impl Binding {
         self.account_id.is_some()
     }
 
-    pub(crate) fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         match &self.account_id {
             Some(id) => {
                 !self.server.is_empty()

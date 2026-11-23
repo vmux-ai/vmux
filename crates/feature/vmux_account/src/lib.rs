@@ -16,6 +16,8 @@ pub use profile::{Failure, FailureKind};
 
 #[cfg(feature = "cloud")]
 pub use availability::AccountCloudFlag;
+#[cfg(feature = "cloud")]
+pub use relay::{RelayAssertion, RelayAssertionUnavailable};
 
 #[cfg(feature = "profile-sync")]
 pub use sync::{CheckpointChange, ExpectedScope, Origin as SyncOrigin, Pending as ProfileOutbox};
@@ -49,6 +51,8 @@ pub mod local;
 pub mod cloud;
 #[cfg(feature = "cloud")]
 pub mod control;
+#[cfg(feature = "cloud")]
+pub mod relay;
 
 #[cfg(feature = "cloud")]
 mod sync;

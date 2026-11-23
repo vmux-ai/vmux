@@ -55,9 +55,13 @@ pub(crate) fn RemoteControl(remote: vmux_api::remote::UiRemote) -> Element {
                     aria_label: translate("live-toggle"),
                     aria_pressed: remote.requested,
                     onclick: move |_| {
-                        let _ = send(&RemoteRequest {
-                            enabled: !remote.requested,
-                        });
+                        if remote.account_required && !remote.requested {
+                            open.set(true);
+                        } else {
+                            let _ = send(&RemoteRequest {
+                                enabled: !remote.requested,
+                            });
+                        }
                     },
                     span {
                         class: if remote.requested {
@@ -137,8 +141,11 @@ fn RemotePanel(remote: vmux_api::remote::UiRemote) -> Element {
                 }
                 button {
                     r#type: "button",
+                    disabled: remote.account_required && !remote.requested,
                     class: if remote.requested {
                         "relative h-5 w-9 shrink-0 rounded-full bg-success transition-colors"
+                    } else if remote.account_required {
+                        "relative h-5 w-9 shrink-0 cursor-not-allowed rounded-full bg-foreground/10 opacity-50 transition-colors"
                     } else {
                         "relative h-5 w-9 shrink-0 rounded-full bg-foreground/15 transition-colors"
                     },
@@ -158,7 +165,11 @@ fn RemotePanel(remote: vmux_api::remote::UiRemote) -> Element {
                     }
                 }
             }
-            if remote.phase == RemotePhase::Error {
+            if remote.account_required {
+                div { class: "mt-2 rounded-md border border-border/70 bg-foreground/[0.03] p-2 text-[10px] leading-4 text-muted-foreground",
+                    {translate("live-account-required")}
+                }
+            } else if remote.phase == RemotePhase::Error {
                 div { class: "mt-2 rounded-md border border-destructive/20 bg-destructive/5 p-2",
                     div { class: "break-words text-[10px] leading-4 text-destructive", "{remote.error}" }
                     button {

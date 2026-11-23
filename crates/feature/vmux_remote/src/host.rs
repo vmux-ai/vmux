@@ -12,11 +12,9 @@ use vmux_api::remote::{
 use vmux_ecs::service::{
     ServiceConnected, ServiceInbound, ServiceMessageIngressSet, ServiceRequest,
 };
-use vmux_ecs::{CreatedAt, Order};
+use vmux_ecs::{Active, CreatedAt, Order, Ready};
 use vmux_feature::flag::Decision;
-use vmux_service::{RelayToken, RemoteAuthorizationStore, RemotePaths};
-
-use std::os::unix::fs::PermissionsExt;
+use vmux_service::{AccountRelayCredential, DeviceId, RemoteAuthorizationStore, RemotePaths};
 
 pub struct RemotePlugin;
 
@@ -41,6 +39,7 @@ impl Plugin for RemotePlugin {
                 (
                     subscribe,
                     observe,
+                    sync_account_credential,
                     reconcile,
                     begin_enable,
                     disable,
@@ -104,7 +103,7 @@ fn revoke(
     let Ok((runtime, mut state, authorizations)) = states.single_mut() else {
         return;
     };
-    let client_id = vmux_service::DeviceId::new(&trigger.event().payload.client_id);
+    let client_id = DeviceId::new(&trigger.event().payload.client_id);
     match authorizations.revoke(&client_id) {
         Ok(true) => {
             for (entity, device, owner) in &devices {
@@ -258,6 +257,89 @@ impl PairingVisibility {
 struct ObservedAvailability(bool);
 
 #[derive(Component, Default)]
+struct PublishedAssertion(Option<(uuid::Uuid, String)>);
+
+type ActiveAccountRoots<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, Option<&'static vmux_account::RelayAssertion>),
+    (With<vmux_account::Root>, With<Active>, With<Ready>),
+>;
+
+type AccountBindings<'w, 's> = Query<
+    'w,
+    's,
+    (&'static ChildOf, Option<&'static vmux_account::Binding>),
+    With<vmux_account::Account>,
+>;
+
+#[derive(SystemParam)]
+struct AccountRelayAccess<'w, 's> {
+    roots: ActiveAccountRoots<'w, 's>,
+    accounts: AccountBindings<'w, 's>,
+}
+
+impl AccountRelayAccess<'_, '_> {
+    fn signed_in(&self) -> bool {
+        let Ok((root, _)) = self.roots.single() else {
+            return false;
+        };
+        self.accounts.iter().any(|(owner, binding)| {
+            owner.parent() == root
+                && binding.is_some_and(|binding| binding.is_linked() && binding.is_valid())
+        })
+    }
+
+    fn assertion(&self) -> Option<&vmux_account::RelayAssertion> {
+        if !self.signed_in() {
+            return None;
+        }
+        let (_, assertion) = self.roots.single().ok()?;
+        assertion
+    }
+}
+
+fn sync_account_credential(
+    account: AccountRelayAccess,
+    mut runtimes: Query<(Entity, Option<&mut PublishedAssertion>), With<RemoteState>>,
+    mut commands: Commands,
+) {
+    let desired = account
+        .assertion()
+        .map(|assertion| (assertion.device_id, assertion.compact.clone()));
+    for (entity, published) in &mut runtimes {
+        let changed = match &published {
+            Some(existing) => existing.0 != desired,
+            None => desired.is_some(),
+        };
+        if !changed {
+            continue;
+        }
+        match &desired {
+            Some((device_id, compact)) => {
+                if let Err(error) = AccountRelayCredential::write_current(
+                    &DeviceId::new(device_id.to_string()),
+                    compact,
+                ) {
+                    bevy::log::warn!(%error, "remote: failed to persist account relay assertion");
+                    continue;
+                }
+            }
+            None => {
+                AccountRelayCredential::clear_current();
+            }
+        }
+        if let Some(mut existing) = published {
+            existing.0 = desired.clone();
+        } else {
+            commands
+                .entity(entity)
+                .insert(PublishedAssertion(desired.clone()));
+        }
+    }
+}
+
+#[derive(Component, Default)]
 struct ServiceObservation {
     epoch: uuid::Uuid,
     revision: u64,
@@ -339,11 +421,12 @@ fn reconcile(
         Option<&ServiceObservation>,
     )>,
     decision: Query<&Decision<bool>, With<Live>>,
+    account: AccountRelayAccess,
     mut enable: MessageWriter<EnableRequest>,
     mut disable: MessageWriter<DisableRequest>,
     mut commands: Commands,
 ) {
-    let available = decision.single().is_ok_and(|decision| decision.value);
+    let available = decision.single().is_ok_and(|decision| decision.value) && account.signed_in();
     for (entity, mut state, mut observed, service) in &mut states {
         if observed.0 == available {
             continue;
@@ -355,8 +438,16 @@ fn reconcile(
             .remove::<RemotePairingInfo>()
             .remove::<RemotePairingRegistration>();
         if !available {
+            if !account.signed_in() && state.enabled {
+                state.enabled = false;
+                let _ = std::fs::remove_file(RemotePaths::current().state());
+            }
             if !ServiceObservation::known(service) {
-                state.phase = RemotePhase::Stopping;
+                state.phase = if !account.signed_in() {
+                    RemotePhase::Disabled
+                } else {
+                    RemotePhase::Stopping
+                };
             }
             continue;
         }
@@ -396,6 +487,7 @@ fn request(
     mut enable: MessageWriter<EnableRequest>,
     mut disable: MessageWriter<DisableRequest>,
     decision: Query<&Decision<bool>, With<Live>>,
+    account: AccountRelayAccess,
 ) {
     let Ok((entity, mut state, mut visibility, service)) = states.single_mut() else {
         return;
@@ -403,6 +495,10 @@ fn request(
     let enabled = trigger.event().payload.enabled;
     if enabled && !decision.single().is_ok_and(|decision| decision.value) {
         state.error = "Live is unavailable for this installation".into();
+        return;
+    }
+    if enabled && !account.signed_in() {
+        state.error = "Sign in to your Vmux account to enable Live".into();
         return;
     }
     if enabled == state.enabled && state.phase != RemotePhase::Error {
@@ -468,6 +564,7 @@ fn begin_enable(
     mut requests: MessageReader<EnableRequest>,
     states: Query<(&RemoteState, &RemoteAuthorizationStore)>,
     decision: Query<&Decision<bool>, With<Live>>,
+    account: AccountRelayAccess,
     mut commands: Commands,
 ) {
     for request in requests.read() {
@@ -477,6 +574,7 @@ fn begin_enable(
         if !state.enabled
             || request.generation != state.operation_generation
             || !decision.single().is_ok_and(|decision| decision.value)
+            || !account.signed_in()
         {
             continue;
         }
@@ -532,6 +630,7 @@ fn poll_enable(
     mut operations: Query<(Entity, &mut EnableOperation)>,
     mut states: Query<(&mut RemoteState, Option<&ServiceObservation>)>,
     decision: Query<&Decision<bool>, With<Live>>,
+    account: AccountRelayAccess,
     mut commands: Commands,
 ) {
     for (operation_entity, mut operation) in &mut operations {
@@ -545,6 +644,7 @@ fn poll_enable(
         if operation.generation != state.operation_generation
             || !state.enabled
             || !decision.single().is_ok_and(|decision| decision.value)
+            || !account.signed_in()
         {
             continue;
         }
@@ -713,8 +813,11 @@ fn project(
     states: HostSnapshots,
     devices: Devices,
     decision: Query<&Decision<bool>, With<Live>>,
+    account: AccountRelayAccess,
 ) {
-    let available = decision.single().is_ok_and(|decision| decision.value);
+    let flag_enabled = decision.single().is_ok_and(|decision| decision.value);
+    let signed_in = account.signed_in();
+    let available = flag_enabled && signed_in;
     for (entity, state, pairing, visibility, previous) in &states {
         let payload = UiRemote {
             available,
@@ -730,6 +833,7 @@ fn project(
             pairing_visible: visibility
                 .0
                 .is_some_and(|deadline| deadline > Instant::now()),
+            account_required: !signed_in,
             devices: devices.rows(entity),
             error: state.error.clone(),
         };
@@ -742,8 +846,8 @@ fn project(
 fn prepare_remote_pairing(
     authorizations: &RemoteAuthorizationStore,
 ) -> Result<RemotePairingRegistration, String> {
-    let relay_token =
-        RelayToken::wait(Duration::from_secs(5)).map_err(|error| error.to_string())?;
+    let _credential =
+        AccountRelayCredential::wait(Duration::from_secs(5)).map_err(|error| error.to_string())?;
     let pairing_token = authorizations
         .pairing_token()
         .map_err(|error| error.to_string())?;
@@ -751,7 +855,7 @@ fn prepare_remote_pairing(
     let now = Instant::now();
     Ok(RemotePairingRegistration {
         relay,
-        relay_token: relay_token.as_str().to_string(),
+        relay_token: String::new(),
         pairing_token,
         deadline: now + Duration::from_secs(20),
         next_check: now,
@@ -761,28 +865,7 @@ fn prepare_remote_pairing(
 fn configured_relay() -> Result<vmux_service::pairing::Relay, String> {
     let relay = vmux_service::pairing::Relay::from_env();
     relay.persist().map_err(|error| error.to_string())?;
-    let _ = ensure_relay_device_id().map_err(|error| error.to_string())?;
     Ok(relay)
-}
-
-fn ensure_relay_device_id() -> std::io::Result<String> {
-    let path = RemotePaths::current().relay_device();
-    if let Ok(existing) = std::fs::read_to_string(&path) {
-        let existing = existing.trim();
-        if !existing.is_empty() {
-            return Ok(existing.to_string());
-        }
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let device_id = uuid::Uuid::new_v4().simple().to_string();
-    std::fs::write(&path, &device_id)?;
-    #[cfg(unix)]
-    {
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(device_id)
 }
 
 fn persist_enabled(enabled: bool) -> std::io::Result<()> {
@@ -905,5 +988,94 @@ mod tests {
             ));
         }
         assert_eq!(fixture.project().phase, RemotePhase::Disabled);
+    }
+
+    #[test]
+    fn signed_out_enable_intent_is_refused_and_marks_account_required() {
+        let mut fixture = Fixture::new(false);
+        fixture.app.world_mut().spawn((
+            Live,
+            Decision {
+                value: vmux_feature::flag::Value::Boolean(true),
+                details: vmux_feature::flag::Details {
+                    variant: None,
+                    reason: vmux_feature::flag::Reason::Default,
+                    source: vmux_feature::flag::Source::Default,
+                    snapshot: None,
+                    context_generation: 0,
+                    declaration_expiry: None,
+                    retained_revision: None,
+                },
+            },
+        ));
+        fixture.app.world_mut().run_schedule(Update);
+        let webview = fixture.app.world_mut().spawn_empty().id();
+        fixture.app.world_mut().trigger(UiInput {
+            webview,
+            payload: RemoteRequest { enabled: true },
+        });
+        let view = fixture.project();
+        assert!(!view.available);
+        assert!(view.account_required);
+        assert!(!view.requested);
+        assert!(!view.error.is_empty());
+        assert!(
+            fixture
+                .app
+                .world()
+                .resource::<Messages<EnableRequest>>()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn signed_in_account_satisfies_relay_gate_and_sign_out_disables_remote() {
+        let mut fixture = Fixture::new(true);
+        fixture.app.world_mut().spawn((
+            Live,
+            Decision {
+                value: vmux_feature::flag::Value::Boolean(true),
+                details: vmux_feature::flag::Details {
+                    variant: None,
+                    reason: vmux_feature::flag::Reason::Default,
+                    source: vmux_feature::flag::Source::Default,
+                    snapshot: None,
+                    context_generation: 0,
+                    declaration_expiry: None,
+                    retained_revision: None,
+                },
+            },
+        ));
+        let root = fixture
+            .app
+            .world_mut()
+            .spawn((vmux_account::Root, Active, Ready))
+            .id();
+        let account = fixture
+            .app
+            .world_mut()
+            .spawn((
+                vmux_account::Account,
+                vmux_account::Binding {
+                    server: "accounts.vmux.ai:443".into(),
+                    account_id: Some(uuid::Uuid::new_v4().to_string()),
+                    credential_generation: 1,
+                },
+                ChildOf(root),
+            ))
+            .id();
+        let view = fixture.project();
+        assert!(view.available);
+        assert!(!view.account_required);
+
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(account)
+            .remove::<vmux_account::Binding>();
+        let after_sign_out = fixture.project();
+        assert!(!after_sign_out.available);
+        assert!(after_sign_out.account_required);
+        assert!(!after_sign_out.requested);
     }
 }

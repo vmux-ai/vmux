@@ -1368,6 +1368,7 @@ gallery-model-description = Modelo de exemplo: { $id }
 gallery-mode-description = Modo de permissões de exemplo: { $id }
 gallery-example-review = Revise este componente de UI
 gallery-completion = e descreva o comportamento esperado
+live-account-required = Entre na sua conta Vmux para usar o Live.
 live-attention = Requer atenção
 live-auto-pair = Abre o Vmux e emparelha automaticamente
 live-connect-device = Conectar um dispositivo

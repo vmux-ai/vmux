@@ -23,15 +23,25 @@ fn configure(
     let Ok((profile, directories)) = profiles.single() else {
         return;
     };
+    let host = std::env::var("VMUX_ACCOUNT_HOST").unwrap_or_else(|_| "accounts.vmux.ai".into());
+    let default_port = if host == "localhost"
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+    {
+        8788
+    } else {
+        443
+    };
     commands.spawn((
         vmux_account::Root::at(directories.0.shared_data(), profile.0.id()),
         Active,
         vmux_account::Server {
-            host: std::env::var("VMUX_ACCOUNT_HOST").unwrap_or_else(|_| "accounts.vmux.ai".into()),
+            host,
             port: std::env::var("VMUX_ACCOUNT_PORT")
                 .ok()
                 .and_then(|port| port.parse().ok())
-                .unwrap_or(8788),
+                .unwrap_or(default_port),
         },
     ));
 }

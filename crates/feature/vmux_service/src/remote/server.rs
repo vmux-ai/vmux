@@ -9,7 +9,7 @@ use vmux_ecs::service::{AbortTask, Executor, Register, Remote};
 use vmux_feature::flag::Decision;
 use vmux_transport::service::RemoteDriver;
 
-use crate::RelayToken;
+use crate::AccountRelayCredential;
 use crate::remote::authorization::RemoteAuthorizations;
 use crate::remote::exposure_driver::RemoteExposure;
 use crate::remote::quic::{RemoteState, SessionEnded, SessionPublisher, SessionStarted};
@@ -44,9 +44,6 @@ impl Plugin for RemotePlugin {
 
 #[derive(Component)]
 struct RemoteLiveness(watch::Sender<bool>);
-
-#[derive(Component, Clone)]
-struct RelayCredential(Arc<str>);
 
 #[derive(Component, Clone)]
 struct RemoteHandler(Arc<dyn RemoteDriver>);
@@ -108,7 +105,7 @@ type RemoteRuntimes<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static RelayCredential,
+        &'static AccountRelayCredential,
         &'static RemoteAuthorizations,
         &'static RemoteHandler,
         &'static RemoteSessionPublisher,
@@ -147,14 +144,8 @@ fn start(mut servers: StartingRemotes, mut commands: Commands) {
         let Some(remote) = remote.0.take() else {
             continue;
         };
-        let relay_token = match RelayToken::ensure() {
-            Ok(token) => token,
-            Err(error) => {
-                tracing::error!(%error, "remote: token setup failed");
-                commands.entity(entity).remove::<Remote>();
-                continue;
-            }
-        };
+        let legacy = crate::RemotePaths::current();
+        let _ = std::fs::remove_file(legacy.relay_token());
         let requested = RemoteExposure::current();
         let exposure = RemoteExposure(false);
         let (liveness, _) = watch::channel(false);
@@ -174,7 +165,6 @@ fn start(mut servers: StartingRemotes, mut commands: Commands) {
             ChildOf(entity),
         ));
         commands.entity(entity).remove::<Remote>().insert((
-            RelayCredential(Arc::from(relay_token.as_str())),
             RemoteHandler(remote),
             RemoteLiveness(liveness),
             RemoteSessionPublisher(sessions),
@@ -184,22 +174,45 @@ fn start(mut servers: StartingRemotes, mut commands: Commands) {
             Requested(requested.0),
             ObservationSource(observation),
         ));
+        if let Some(credential) = AccountRelayCredential::read_current() {
+            commands.entity(entity).insert(credential);
+        }
     }
 }
 
-fn read(mut requested: Query<&mut Requested>) {
-    for mut requested in &mut requested {
-        requested.0 = RemoteExposure::current().0;
+fn read(
+    mut requested: Query<(Entity, &mut Requested, Option<&AccountRelayCredential>)>,
+    mut commands: Commands,
+) {
+    let exposed = RemoteExposure::current().0;
+    let current = AccountRelayCredential::read_current();
+    for (entity, mut requested, previous) in &mut requested {
+        requested.0 = exposed;
+        match (&current, previous) {
+            (Some(next), Some(existing)) if existing == next => {}
+            (Some(next), _) => {
+                commands.entity(entity).insert(next.clone());
+            }
+            (None, Some(_)) => {
+                commands.entity(entity).remove::<AccountRelayCredential>();
+            }
+            (None, None) => {}
+        }
     }
 }
 
 fn refresh(
-    mut runtimes: Query<(&RemoteLiveness, &Requested, &mut RemoteExposure)>,
+    mut runtimes: Query<(
+        &RemoteLiveness,
+        &Requested,
+        Has<AccountRelayCredential>,
+        &mut RemoteExposure,
+    )>,
     decision: Query<&Decision<bool>, With<Live>>,
 ) {
     let available = decision.single().is_ok_and(|decision| decision.value);
-    for (liveness, requested, mut exposure) in &mut runtimes {
-        let current = RemoteExposure(requested.0 && available);
+    for (liveness, requested, has_credential, mut exposure) in &mut runtimes {
+        let current = RemoteExposure(requested.0 && available && has_credential);
         if *exposure == current {
             continue;
         }
@@ -232,7 +245,8 @@ fn dial(
             continue;
         }
         let state = RemoteState {
-            relay_token: credential.0.clone(),
+            device_id: credential.device_id().clone(),
+            relay_token: Arc::from(credential.assertion()),
             authorizations: authorizations.clone(),
             remote: remote.0.clone(),
             sessions: publisher.0.clone(),

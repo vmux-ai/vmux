@@ -752,7 +752,7 @@ mod tests {
                     panic!("Profile synchronization needs the dedicated gateway fixture")
                 }
                 #[cfg(feature = "cloud")]
-                Request::ControlAccess { .. } => {
+                Request::Assertion | Request::ControlAccess { .. } => {
                     panic!("Control access needs the real issuer fixture")
                 }
             }

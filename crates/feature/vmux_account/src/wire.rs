@@ -27,6 +27,8 @@ pub(crate) enum Request {
     },
     Account,
     #[cfg(feature = "cloud")]
+    Assertion,
+    #[cfg(feature = "cloud")]
     ControlAccess {
         environment: String,
     },
@@ -45,6 +47,27 @@ pub(crate) struct ProfileChange {
     pub id: Uuid,
     pub base_revision: u64,
     pub name: Option<String>,
+}
+
+#[cfg(feature = "cloud")]
+#[derive(Clone, Deserialize)]
+pub(crate) struct WireAssertion {
+    pub claims: String,
+    pub signature: String,
+}
+
+#[cfg(feature = "cloud")]
+impl WireAssertion {
+    pub(crate) fn compact(&self) -> Option<String> {
+        if self.claims.is_empty()
+            || self.signature.is_empty()
+            || !self.claims.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || !self.signature.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return None;
+        }
+        Some(format!("a1.{}.{}", self.claims, self.signature))
+    }
 }
 
 #[cfg(feature = "cloud")]
@@ -73,6 +96,10 @@ pub(crate) enum Response {
     NotAuthenticated,
     Account {
         id: Uuid,
+    },
+    Asserted {
+        assertion: WireAssertion,
+        refresh_in_seconds: u64,
     },
     ControlAccess {
         token: vmux_api::control::ControlToken,
@@ -123,6 +150,7 @@ impl Request {
                 Self::Challenge { .. } => matches!(response, Response::Challenge { .. }),
                 Self::Authenticate { .. } => matches!(response, Response::Authenticated),
                 Self::Account => matches!(response, Response::Account { .. }),
+                Self::Assertion => matches!(response, Response::Asserted { .. }),
                 Self::ControlAccess { .. } => matches!(
                     response,
                     Response::ControlAccess { .. }
