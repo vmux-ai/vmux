@@ -473,37 +473,59 @@ impl PinDragVisual {
         }
         format!(
             "transform:translate3d({}, {}, 0);z-index:auto;pointer-events:none;transition:transform 140ms ease;",
-            pin_grid_offset(self.offset_x as isize),
-            pin_grid_offset(self.offset_y as isize)
+            Self::grid_offset(self.offset_x as isize),
+            Self::grid_offset(self.offset_y as isize)
         )
     }
-}
 
-fn pin_grid_offset(delta: isize) -> String {
-    match delta.cmp(&0) {
-        std::cmp::Ordering::Equal => "0px".to_string(),
-        std::cmp::Ordering::Greater => {
-            format!("calc({}% + {}rem)", delta * 100, delta as f64 * 0.375)
+    fn grid_offset(delta: isize) -> String {
+        match delta.cmp(&0) {
+            std::cmp::Ordering::Equal => "0px".to_string(),
+            std::cmp::Ordering::Greater => {
+                format!("calc({}% + {}rem)", delta * 100, delta as f64 * 0.375)
+            }
+            std::cmp::Ordering::Less => format!(
+                "calc({}% - {}rem)",
+                delta * 100,
+                delta.unsigned_abs() as f64 * 0.375
+            ),
         }
-        std::cmp::Ordering::Less => format!(
-            "calc({}% - {}rem)",
-            delta * 100,
-            delta.unsigned_abs() as f64 * 0.375
-        ),
     }
 }
 
 impl BookmarkDragState {
     pub(super) fn begin(
-        state: Signal<Option<Self>>,
+        mut state: Signal<Option<Self>>,
         event: &Event<PointerData>,
         item: BookmarkDragItem,
     ) {
-        begin_bookmark_drag(state, event, item);
+        if event.trigger_button() != Some(MouseButton::Primary) {
+            return;
+        }
+        event.prevent_default();
+        let coordinates = event.client_coordinates();
+        let target = match &item {
+            BookmarkDragItem::Pin {
+                uuid, source_index, ..
+            } => Some(BookmarkDragTarget::Pin {
+                uuid: uuid.clone(),
+                index: *source_index,
+            }),
+            _ => None,
+        };
+        state.set(Some(Self {
+            item,
+            start_x: coordinates.x,
+            start_y: coordinates.y,
+            current_x: coordinates.x,
+            current_y: coordinates.y,
+            active: false,
+            target,
+        }));
     }
 
     pub(super) fn blocks_click(state: Signal<Option<Self>>) -> bool {
-        bookmark_drag_blocks_click(state)
+        state().is_some_and(|drag| drag.active)
     }
 
     pub(super) fn listeners(state: Signal<Option<Self>>) -> Vec<Attribute> {
@@ -512,14 +534,71 @@ impl BookmarkDragState {
         }
 
         vec![
-            dioxus_elements::events::onpointermove(move |event| {
-                update_bookmark_drag(state, &event)
-            }),
-            dioxus_elements::events::onpointerup(move |event| end_bookmark_drag(state, &event)),
-            dioxus_elements::events::onpointercancel(move |event| {
-                cancel_bookmark_drag(state, &event)
-            }),
+            dioxus_elements::events::onpointermove(move |event| Self::update(state, &event)),
+            dioxus_elements::events::onpointerup(move |event| Self::end(state, &event)),
+            dioxus_elements::events::onpointercancel(move |event| Self::cancel(state, &event)),
         ]
+    }
+
+    fn update(mut state: Signal<Option<Self>>, event: &Event<PointerData>) {
+        let Some(mut drag) = state() else {
+            return;
+        };
+        let coordinates = event.client_coordinates();
+        let dx = coordinates.x - drag.start_x;
+        let dy = coordinates.y - drag.start_y;
+        if !drag.active && dx * dx + dy * dy < 16.0 {
+            return;
+        }
+        if !drag.active {
+            BookmarkContext::set_active(true);
+        }
+        drag.current_x = coordinates.x;
+        drag.current_y = coordinates.y;
+        drag.active = true;
+        state.set(Some(drag));
+    }
+
+    fn perform_drop(item: BookmarkDragItem, target: BookmarkDragTarget) {
+        let _ = send(&BookmarkDropRequest {
+            source: BookmarkDropSource::from(item),
+            target: BookmarkDropTarget::from(target),
+        });
+    }
+
+    fn clear_after_click(mut state: Signal<Option<Self>>) {
+        spawn(async move {
+            Platform::sleep(0).await;
+            state.set(None);
+        });
+    }
+
+    fn end(mut state: Signal<Option<Self>>, event: &Event<PointerData>) {
+        let Some(mut drag) = state() else {
+            return;
+        };
+        let coordinates = event.client_coordinates();
+        let dx = coordinates.x - drag.start_x;
+        let dy = coordinates.y - drag.start_y;
+        if !drag.active && dx * dx + dy * dy < 16.0 {
+            state.set(None);
+            return;
+        }
+        event.prevent_default();
+        event.stop_propagation();
+        drag.active = true;
+        BookmarkContext::set_active(false);
+        if let Some(target) = drag.target.clone() {
+            Self::perform_drop(drag.item.clone(), target);
+        }
+        state.set(Some(drag));
+        Self::clear_after_click(state);
+    }
+
+    fn cancel(mut state: Signal<Option<Self>>, event: &Event<PointerData>) {
+        event.prevent_default();
+        BookmarkContext::set_active(false);
+        state.set(None);
     }
 }
 
@@ -527,7 +606,7 @@ pub(super) struct BookmarkContext;
 
 impl BookmarkContext {
     pub(super) fn set_active(active: bool) {
-        set_bookmark_context_menu_active(active);
+        let _ = send(&BookmarkContextMenuRequest { active });
     }
 }
 
@@ -576,7 +655,7 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                         "data-bookmark-drag-source": "true",
                         onpointerdown: {
                             let item = drag_item.clone();
-                            move |event| begin_bookmark_drag(drag_state, &event, item.clone())
+                            move |event| BookmarkDragState::begin(drag_state, &event, item.clone())
                         },
                         style: "{visual.style()}",
                         class: if visual.dragging {
@@ -589,7 +668,7 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                         onclick: {
                             let u = url_open.clone();
                             move |event| {
-                                if bookmark_drag_blocks_click(drag_state) {
+                                if BookmarkDragState::blocks_click(drag_state) {
                                     event.prevent_default();
                                     event.stop_propagation();
                                     return;
@@ -642,97 +721,6 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
     }
 }
 
-fn begin_bookmark_drag(
-    mut state: Signal<Option<BookmarkDragState>>,
-    event: &Event<PointerData>,
-    item: BookmarkDragItem,
-) {
-    if event.trigger_button() != Some(MouseButton::Primary) {
-        return;
-    }
-    event.prevent_default();
-    let coordinates = event.client_coordinates();
-    let target = match &item {
-        BookmarkDragItem::Pin {
-            uuid, source_index, ..
-        } => Some(BookmarkDragTarget::Pin {
-            uuid: uuid.clone(),
-            index: *source_index,
-        }),
-        _ => None,
-    };
-    state.set(Some(BookmarkDragState {
-        item,
-        start_x: coordinates.x,
-        start_y: coordinates.y,
-        current_x: coordinates.x,
-        current_y: coordinates.y,
-        active: false,
-        target,
-    }));
-}
-
-fn update_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Event<PointerData>) {
-    let Some(mut drag) = state() else {
-        return;
-    };
-    let coordinates = event.client_coordinates();
-    let dx = coordinates.x - drag.start_x;
-    let dy = coordinates.y - drag.start_y;
-    if !drag.active && dx * dx + dy * dy < 16.0 {
-        return;
-    }
-    if !drag.active {
-        set_bookmark_context_menu_active(true);
-    }
-    drag.current_x = coordinates.x;
-    drag.current_y = coordinates.y;
-    drag.active = true;
-    state.set(Some(drag));
-}
-
-fn perform_bookmark_drop(item: BookmarkDragItem, target: BookmarkDragTarget) {
-    let _ = send(&BookmarkDropRequest {
-        source: item.into(),
-        target: target.into(),
-    });
-}
-
-fn clear_bookmark_drag_after_click(mut state: Signal<Option<BookmarkDragState>>) {
-    spawn(async move {
-        Platform::sleep(0).await;
-        state.set(None);
-    });
-}
-
-fn end_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Event<PointerData>) {
-    let Some(mut drag) = state() else {
-        return;
-    };
-    let coordinates = event.client_coordinates();
-    let dx = coordinates.x - drag.start_x;
-    let dy = coordinates.y - drag.start_y;
-    if !drag.active && dx * dx + dy * dy < 16.0 {
-        state.set(None);
-        return;
-    }
-    event.prevent_default();
-    event.stop_propagation();
-    drag.active = true;
-    set_bookmark_context_menu_active(false);
-    if let Some(target) = drag.target.clone() {
-        perform_bookmark_drop(drag.item.clone(), target);
-    }
-    state.set(Some(drag));
-    clear_bookmark_drag_after_click(state);
-}
-
-fn cancel_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Event<PointerData>) {
-    event.prevent_default();
-    set_bookmark_context_menu_active(false);
-    state.set(None);
-}
-
 fn set_bookmark_drop_target(
     mut state: Signal<Option<BookmarkDragState>>,
     target: BookmarkDragTarget,
@@ -761,10 +749,6 @@ fn clear_bookmark_drop_target(
     state.set(Some(drag));
 }
 
-fn bookmark_drag_blocks_click(state: Signal<Option<BookmarkDragState>>) -> bool {
-    state().is_some_and(|drag| drag.active)
-}
-
 fn bookmark_drop_targeted(
     state: Signal<Option<BookmarkDragState>>,
     target: &BookmarkDragTarget,
@@ -774,10 +758,6 @@ fn bookmark_drop_targeted(
 
 fn set_bookmark_text_input_active(active: bool) {
     let _ = send(&BookmarkTextInputRequest { active });
-}
-
-fn set_bookmark_context_menu_active(active: bool) {
-    let _ = send(&BookmarkContextMenuRequest { active });
 }
 
 #[component]
@@ -892,7 +872,7 @@ fn BookmarkFolder(
                             class: if folder_targeted { "rounded-md ring-2 ring-ring" } else { "rounded-md" },
                             onpointerdown: {
                                 let item = drag_item.clone();
-                                move |event| begin_bookmark_drag(drag_state, &event, item.clone())
+                                move |event| BookmarkDragState::begin(drag_state, &event, item.clone())
                             },
                             FileTreeRowGroup {
                                 FileTreeRow {
@@ -905,7 +885,7 @@ fn BookmarkFolder(
                                     on_activate: {
                                         let id = uuid.clone();
                                         move |_| {
-                                            if bookmark_drag_blocks_click(drag_state) {
+                                            if BookmarkDragState::blocks_click(drag_state) {
                                                 return;
                                             }
                                             let _ = send(&BookmarkFolderToggleRequest {
@@ -1117,7 +1097,7 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                         "data-bookmark-drag-source": "true",
                         onpointerdown: {
                             let item = drag_item.clone();
-                            move |event| begin_bookmark_drag(drag_state, &event, item.clone())
+                            move |event| BookmarkDragState::begin(drag_state, &event, item.clone())
                         },
                         FileTreeRowGroup {
                             FileTreeRow {
@@ -1136,7 +1116,7 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                                 on_activate: {
                                     let u = url_open.clone();
                                     move |event: MouseEvent| {
-                                        if bookmark_drag_blocks_click(drag_state) {
+                                        if BookmarkDragState::blocks_click(drag_state) {
                                             return;
                                         }
                                         let _ = send(&BookmarkOpenRequest {
@@ -1256,7 +1236,7 @@ pub(super) fn LayoutContextMenu(children: Element) -> Element {
                     event.stop_propagation();
                 }),
             ],
-            on_open_change: set_bookmark_context_menu_active,
+            on_open_change: BookmarkContext::set_active,
             {children}
         }
     }

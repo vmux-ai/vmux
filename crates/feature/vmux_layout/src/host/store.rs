@@ -1,4 +1,5 @@
 use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
@@ -115,6 +116,165 @@ impl PersistedLayout<'_, '_> {
             || !self.panes.is_empty()
             || !self.stacks.is_empty()
     }
+
+    fn restored_page_url(url: &str) -> &str {
+        if url == crate::ErrorPage::url() {
+            return "vmux://start/";
+        }
+        url
+    }
+
+    fn restore_spaces_and_tabs(&self, main: Entity, commands: &mut Commands) {
+        for space in &self.spaces {
+            commands
+                .entity(space)
+                .insert((Space::bundle(), ChildOf(main)));
+        }
+
+        let mut tabs = self
+            .tabs
+            .iter()
+            .map(|(entity, order, created)| {
+                (entity, order.map(|order| order.0), created.map(|v| v.0))
+            })
+            .collect::<Vec<_>>();
+        tabs.sort_by_key(|(_, order, created)| (order.unwrap_or(u32::MAX), created.unwrap_or(0)));
+        for (tab, _, _) in tabs {
+            commands.entity(tab).insert((
+                Transform::default(),
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    ..default()
+                },
+            ));
+            if let Ok(parent) = self.parents.get(tab) {
+                commands.entity(tab).insert(ChildOf(parent.get()));
+            }
+        }
+    }
+
+    fn restore_splits_and_panes(&self, primary_window: Entity, commands: &mut Commands) {
+        for (entity, split) in &self.splits {
+            let flex_direction = match split.direction {
+                PaneSplitDirection::Row => FlexDirection::Row,
+                PaneSplitDirection::Column => FlexDirection::Column,
+            };
+            let gap = split.direction.gaps(crate::event::PANE_GAP_PX);
+            commands.entity(entity).insert((
+                HostWindow(primary_window),
+                Transform::default(),
+                Node {
+                    flex_grow: 1.0,
+                    min_height: Val::Px(0.0),
+                    flex_direction,
+                    column_gap: gap.column_gap,
+                    row_gap: gap.row_gap,
+                    ..default()
+                },
+            ));
+        }
+
+        for pane in &self.panes {
+            let flex_grow = self
+                .pane_sizes
+                .get(pane)
+                .map(|size| size.flex_grow)
+                .unwrap_or(1.0);
+            commands.entity(pane).insert((
+                Transform::default(),
+                Node {
+                    flex_grow,
+                    flex_basis: Val::Px(0.0),
+                    align_items: AlignItems::Stretch,
+                    justify_content: JustifyContent::Stretch,
+                    ..default()
+                },
+            ));
+        }
+    }
+
+    fn restore_stacks(&self, commands: &mut Commands) -> std::collections::HashSet<Entity> {
+        let mut despawned = std::collections::HashSet::new();
+        for (stack, metadata) in &self.stacks {
+            if metadata.url.is_empty() {
+                despawned.insert(stack);
+                commands.entity(stack).despawn();
+                continue;
+            }
+            commands.entity(stack).insert((
+                Transform::default(),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    ..default()
+                },
+            ));
+            let id = PageOpenId::new();
+            let url = Self::restored_page_url(&metadata.url).to_string();
+            if url != metadata.url {
+                commands.entity(stack).insert(PageMetadata {
+                    title: "Start".to_string(),
+                    url: url.clone(),
+                    icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Sparkles),
+                    bg_color: None,
+                });
+            }
+            commands.entity(stack).insert(PageNavigation::new(id));
+            commands.spawn((
+                PageOpenTask {
+                    id,
+                    stack,
+                    url,
+                    request_id: None,
+                },
+                PageRestore,
+            ));
+        }
+        despawned
+    }
+
+    fn repair_children(
+        &self,
+        despawned: &std::collections::HashSet<Entity>,
+        commands: &mut Commands,
+    ) {
+        let mut repaired = std::collections::HashSet::new();
+        for entity in self
+            .splits
+            .iter()
+            .map(|(entity, _)| entity)
+            .chain(self.panes.iter())
+            .chain(self.stacks.iter().map(|(entity, _)| entity))
+        {
+            let Ok(parent) = self.parents.get(entity) else {
+                continue;
+            };
+            let parent = parent.get();
+            if !repaired.insert(parent) {
+                continue;
+            }
+            let Ok(children) = self.children.get(parent) else {
+                continue;
+            };
+            for child in children.iter() {
+                if despawned.contains(&child) {
+                    continue;
+                }
+                if let Ok(parent) = self.parents.get(child) {
+                    commands.entity(child).insert(ChildOf(parent.get()));
+                }
+            }
+        }
+    }
 }
 
 fn request_restore(
@@ -147,149 +307,10 @@ fn restore_views(
         return;
     };
 
-    for space in &layout.spaces {
-        commands
-            .entity(space)
-            .insert((Space::bundle(), ChildOf(main)));
-    }
-
-    let mut tabs = layout
-        .tabs
-        .iter()
-        .map(|(entity, order, created)| (entity, order.map(|order| order.0), created.map(|v| v.0)))
-        .collect::<Vec<_>>();
-    tabs.sort_by_key(|(_, order, created)| (order.unwrap_or(u32::MAX), created.unwrap_or(0)));
-    for (tab, _, _) in tabs {
-        commands.entity(tab).insert((
-            Transform::default(),
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                ..default()
-            },
-        ));
-        if let Ok(parent) = layout.parents.get(tab) {
-            commands.entity(tab).insert(ChildOf(parent.get()));
-        }
-    }
-
-    for (entity, split) in &layout.splits {
-        let flex_direction = match split.direction {
-            PaneSplitDirection::Row => FlexDirection::Row,
-            PaneSplitDirection::Column => FlexDirection::Column,
-        };
-        let gap = split.direction.gaps(crate::event::PANE_GAP_PX);
-        commands.entity(entity).insert((
-            HostWindow(primary_window),
-            Transform::default(),
-            Node {
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                flex_direction,
-                column_gap: gap.column_gap,
-                row_gap: gap.row_gap,
-                ..default()
-            },
-        ));
-    }
-
-    for pane in &layout.panes {
-        let flex_grow = layout
-            .pane_sizes
-            .get(pane)
-            .map(|size| size.flex_grow)
-            .unwrap_or(1.0);
-        commands.entity(pane).insert((
-            Transform::default(),
-            Node {
-                flex_grow,
-                flex_basis: Val::Px(0.0),
-                align_items: AlignItems::Stretch,
-                justify_content: JustifyContent::Stretch,
-                ..default()
-            },
-        ));
-    }
-
-    let mut despawned = std::collections::HashSet::new();
-    for (stack, metadata) in &layout.stacks {
-        if metadata.url.is_empty() {
-            despawned.insert(stack);
-            commands.entity(stack).despawn();
-            continue;
-        }
-        commands.entity(stack).insert((
-            Transform::default(),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                ..default()
-            },
-        ));
-        let id = PageOpenId::new();
-        let url = restored_page_url(&metadata.url).to_string();
-        if url != metadata.url {
-            commands.entity(stack).insert(PageMetadata {
-                title: "Start".to_string(),
-                url: url.clone(),
-                icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Sparkles),
-                bg_color: None,
-            });
-        }
-        commands.entity(stack).insert(PageNavigation::new(id));
-        commands.spawn((
-            PageOpenTask {
-                id,
-                stack,
-                url,
-                request_id: None,
-            },
-            PageRestore,
-        ));
-    }
-
-    let mut repaired = std::collections::HashSet::new();
-    for entity in layout
-        .splits
-        .iter()
-        .map(|(entity, _)| entity)
-        .chain(layout.panes.iter())
-        .chain(layout.stacks.iter().map(|(entity, _)| entity))
-    {
-        let Ok(parent) = layout.parents.get(entity) else {
-            continue;
-        };
-        let parent = parent.get();
-        if !repaired.insert(parent) {
-            continue;
-        }
-        let Ok(children) = layout.children.get(parent) else {
-            continue;
-        };
-        for child in children.iter() {
-            if despawned.contains(&child) {
-                continue;
-            }
-            if let Ok(parent) = layout.parents.get(child) {
-                commands.entity(child).insert(ChildOf(parent.get()));
-            }
-        }
-    }
-}
-
-fn restored_page_url(url: &str) -> &str {
-    if url == crate::ErrorPage::url() {
-        return "vmux://start/";
-    }
-    url
+    layout.restore_spaces_and_tabs(main, &mut commands);
+    layout.restore_splits_and_panes(primary_window, &mut commands);
+    let despawned = layout.restore_stacks(&mut commands);
+    layout.repair_children(&despawned, &mut commands);
 }
 
 #[cfg(test)]
@@ -318,7 +339,13 @@ mod tests {
 
     #[test]
     fn transient_error_page_restores_as_start() {
-        assert_eq!(restored_page_url(crate::ErrorPage::url()), "vmux://start/");
-        assert_eq!(restored_page_url("vmux://sessions/"), "vmux://sessions/");
+        assert_eq!(
+            PersistedLayout::restored_page_url(crate::ErrorPage::url()),
+            "vmux://start/"
+        );
+        assert_eq!(
+            PersistedLayout::restored_page_url("vmux://sessions/"),
+            "vmux://sessions/"
+        );
     }
 }

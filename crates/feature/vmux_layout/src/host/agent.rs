@@ -1,3 +1,4 @@
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, ProcessId};
 use vmux_ecs::agent::{
@@ -15,14 +16,20 @@ pub enum AgentPaneDirection {
     Left,
 }
 
+impl AgentPaneDirection {
+    pub fn into_pane_direction(self) -> vmux_api::open_target::PaneDirection {
+        match self {
+            AgentPaneDirection::Top => vmux_api::open_target::PaneDirection::Top,
+            AgentPaneDirection::Right => vmux_api::open_target::PaneDirection::Right,
+            AgentPaneDirection::Bottom => vmux_api::open_target::PaneDirection::Bottom,
+            AgentPaneDirection::Left => vmux_api::open_target::PaneDirection::Left,
+        }
+    }
+}
+
 impl From<AgentPaneDirection> for vmux_api::open_target::PaneDirection {
     fn from(direction: AgentPaneDirection) -> Self {
-        match direction {
-            AgentPaneDirection::Top => Self::Top,
-            AgentPaneDirection::Right => Self::Right,
-            AgentPaneDirection::Bottom => Self::Bottom,
-            AgentPaneDirection::Left => Self::Left,
-        }
+        direction.into_pane_direction()
     }
 }
 

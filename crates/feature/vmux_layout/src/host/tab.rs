@@ -2,10 +2,13 @@
 use crate::event::TabDropPlacement;
 use crate::event::{TabActivateRequest, TabCloseRequest, TabCreateRequest, TabReorderRequest};
 use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest, host::swap::SiblingOrder};
-use bevy::ecs::system::SystemParam;
+use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::{Commands, SystemParam};
+use bevy::prelude::Changed;
+use bevy::prelude::Component;
+use bevy::prelude::*;
 #[cfg(test)]
-use bevy::window::PrimaryWindow;
-use bevy::{ecs::relationship::Relationship, prelude::*};
+use bevy::window::{PrimaryWindow, Window};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 #[cfg(test)]
@@ -139,24 +142,53 @@ impl TryFrom<&CommandInvocation> for CloseRequest {
 
 #[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FocusRequest(pub TabFocus);
+pub struct FocusRequest {
+    pub kind: TabFocus,
+    pub index: Option<usize>,
+}
+
+impl FocusRequest {
+    pub fn sibling(direction: SiblingDirection) -> Self {
+        Self {
+            kind: match direction {
+                SiblingDirection::Previous => TabFocus::Previous,
+                SiblingDirection::Next => TabFocus::Next,
+            },
+            index: None,
+        }
+    }
+
+    pub fn index(index: usize) -> Self {
+        Self {
+            kind: TabFocus::Index,
+            index: Some(index),
+        }
+    }
+
+    pub fn last() -> Self {
+        Self {
+            kind: TabFocus::Last,
+            index: None,
+        }
+    }
+}
 
 impl TryFrom<&CommandInvocation> for FocusRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         match invocation.id.as_str() {
-            "next_tab" => Ok(Self(TabFocus::Sibling(SiblingDirection::Next))),
-            "prev_tab" => Ok(Self(TabFocus::Sibling(SiblingDirection::Previous))),
-            "tab_select_1" => Ok(Self(TabFocus::Index(0))),
-            "tab_select_2" => Ok(Self(TabFocus::Index(1))),
-            "tab_select_3" => Ok(Self(TabFocus::Index(2))),
-            "tab_select_4" => Ok(Self(TabFocus::Index(3))),
-            "tab_select_5" => Ok(Self(TabFocus::Index(4))),
-            "tab_select_6" => Ok(Self(TabFocus::Index(5))),
-            "tab_select_7" => Ok(Self(TabFocus::Index(6))),
-            "tab_select_8" => Ok(Self(TabFocus::Index(7))),
-            "tab_select_last" => Ok(Self(TabFocus::Last)),
+            "next_tab" => Ok(Self::sibling(SiblingDirection::Next)),
+            "prev_tab" => Ok(Self::sibling(SiblingDirection::Previous)),
+            "tab_select_1" => Ok(Self::index(0)),
+            "tab_select_2" => Ok(Self::index(1)),
+            "tab_select_3" => Ok(Self::index(2)),
+            "tab_select_4" => Ok(Self::index(3)),
+            "tab_select_5" => Ok(Self::index(4)),
+            "tab_select_6" => Ok(Self::index(5)),
+            "tab_select_7" => Ok(Self::index(6)),
+            "tab_select_8" => Ok(Self::index(7)),
+            "tab_select_last" => Ok(Self::last()),
             _ => Err(()),
         }
     }
@@ -180,8 +212,9 @@ impl TryFrom<&CommandInvocation> for MoveRequest {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TabFocus {
-    Sibling(SiblingDirection),
-    Index(usize),
+    Previous,
+    Next,
+    Index,
     Last,
 }
 
@@ -198,7 +231,7 @@ struct CreateFromPageRequest {
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::tab"]
-#[require(Save, crate::presentation::Layer, super::worktree::CheckoutObservation)]
+#[require(Save, super::presentation::Layer, super::worktree::CheckoutObservation)]
 pub struct Tab {
     pub name: String,
     pub startup_dir: Option<String>,
@@ -315,11 +348,8 @@ fn open(
             .filter(|url| !url.is_empty())
             .or_else(|| focused_space.startup_url());
         let content = match requested {
-            Some(url) => TabLayoutSpawnContent::Url {
-                url: url.to_string(),
-                pending_prompt: None,
-            },
-            None => TabLayoutSpawnContent::StartupUrlOrPrompt,
+            Some(url) => TabLayoutSpawnContent::url(url, None),
+            None => TabLayoutSpawnContent::startup_url_or_prompt(),
         };
         layout_requests.write(TabLayoutSpawnRequest {
             space,
@@ -352,7 +382,7 @@ fn create(
             primary_window: window,
             name: Some(format!("Tab {}", tabs.iter().count() + 1)),
             startup_dir,
-            content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+            content: TabLayoutSpawnContent::startup_url_or_prompt(),
             clear_pending_stack: true,
             focus: true,
         });
@@ -386,21 +416,26 @@ fn focus(
         if siblings.is_empty() {
             continue;
         }
-        let target_index = match request.0 {
-            TabFocus::Sibling(direction) => {
+        let target_index = match request.kind {
+            TabFocus::Previous | TabFocus::Next => {
                 if siblings.len() <= 1 {
                     continue;
                 }
                 let Some(index) = siblings.iter().position(|entity| *entity == active) else {
                     continue;
                 };
-                if direction == SiblingDirection::Next {
+                if request.kind == TabFocus::Next {
                     (index + 1) % siblings.len()
                 } else {
                     (index + siblings.len() - 1) % siblings.len()
                 }
             }
-            TabFocus::Index(index) => index,
+            TabFocus::Index => {
+                let Some(index) = request.index else {
+                    continue;
+                };
+                index
+            }
             TabFocus::Last => siblings.len() - 1,
         };
         if target_index >= siblings.len() {
@@ -472,10 +507,10 @@ fn new(
             primary_window: window,
             name: Some(name),
             startup_dir,
-            content: TabLayoutSpawnContent::Url {
-                url: request.url.clone(),
-                pending_prompt: request.pending_prompt.clone(),
-            },
+            content: TabLayoutSpawnContent::url(
+                request.url.clone(),
+                request.pending_prompt.clone(),
+            ),
             clear_pending_stack: true,
             focus: true,
         });
@@ -558,12 +593,9 @@ fn create_from_page(
             continue;
         };
         let content = if startup_url.0.is_empty() {
-            TabLayoutSpawnContent::StartupUrlOrPrompt
+            TabLayoutSpawnContent::startup_url_or_prompt()
         } else {
-            TabLayoutSpawnContent::Url {
-                url: startup_url.0.clone(),
-                pending_prompt: None,
-            }
+            TabLayoutSpawnContent::url(startup_url.0.clone(), None)
         };
         layout_requests.write(TabLayoutSpawnRequest {
             space,
@@ -1201,7 +1233,7 @@ mod tests {
                 primary_window: window,
                 name: None,
                 startup_dir: Some(std::env::current_dir().unwrap()),
-                content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
+                content: crate::TabLayoutSpawnContent::startup_url_or_prompt(),
                 clear_pending_stack: false,
                 focus: true,
             });
@@ -1387,10 +1419,7 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].space, second_space);
         assert_eq!(requests[0].primary_window, second_window);
-        assert!(matches!(
-            requests[0].content,
-            TabLayoutSpawnContent::Url { ref url, .. } if url == "vmux://projects/"
-        ));
+        assert_eq!(requests[0].content.url.as_deref(), Some("vmux://projects/"));
     }
 
     #[test]
@@ -1589,7 +1618,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<FocusRequest>>()
-            .write(FocusRequest(TabFocus::Sibling(SiblingDirection::Next)));
+            .write(FocusRequest::sibling(SiblingDirection::Next));
 
         app.update();
 

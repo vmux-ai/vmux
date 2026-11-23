@@ -79,7 +79,7 @@ impl AgentBrowserResolve<'_, '_> {
         anchor: vmux_ecs::ProcessId,
     ) -> Option<AgentBrowserPaneClaim> {
         let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
-        let profile = vmux_layout::active_pane::ProfileId::Agent(format!("{anchor:?}"));
+        let profile = vmux_layout::active_pane::ProfileId::agent(format!("{anchor:?}"));
         let stack = self
             .active
             .get(&profile)

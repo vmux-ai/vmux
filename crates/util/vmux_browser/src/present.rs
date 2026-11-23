@@ -19,10 +19,7 @@ use vmux_layout::{
     side_sheet::SideSheet,
     stack::LayoutFocus,
     tab::Tab,
-    window::{
-        VmuxWindow, WEBVIEW_Z_BASE, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL,
-        WEBVIEW_Z_SIDE_SHEET, WindowHierarchy,
-    },
+    window::{VmuxWindow, WindowHierarchy},
 };
 
 use vmux_ecs::{KeyboardOwner, PagePresented};
@@ -420,19 +417,19 @@ fn sync_child_transform(
     let tx = delta_px.x / glass_size_px.x;
     let ty = -delta_px.y / glass_size_px.y;
     let z = if is_modal {
-        WEBVIEW_Z_MODAL
+        VmuxWindow::WEBVIEW_Z_MODAL
     } else if is_layout_cef || is_status {
-        WEBVIEW_Z_HEADER
+        VmuxWindow::WEBVIEW_Z_HEADER
     } else if is_side_sheet {
-        WEBVIEW_Z_SIDE_SHEET
+        VmuxWindow::WEBVIEW_Z_SIDE_SHEET
     } else if parent != glass_entity {
         if is_active_stack {
-            WEBVIEW_Z_MAIN
+            VmuxWindow::WEBVIEW_Z_MAIN
         } else {
-            WEBVIEW_Z_MAIN - 0.01
+            VmuxWindow::WEBVIEW_Z_MAIN - 0.01
         }
     } else {
-        WEBVIEW_Z_BASE
+        VmuxWindow::WEBVIEW_Z_BASE
     };
     let history_swipe_tx = if parent != glass_entity && !is_cef_ui {
         history_swipe_visual

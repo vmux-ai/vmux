@@ -1,3 +1,4 @@
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::WebviewSource;
@@ -18,11 +19,15 @@ pub struct WebviewRevealPlugin;
 #[derive(Component)]
 pub struct PendingWebviewReveal(u8);
 
-const REVEAL_FRAMES: u8 = 2;
-
 impl PendingWebviewReveal {
+    const REVEAL_FRAMES: u8 = 2;
+
     pub(crate) fn pending() -> Self {
         Self(0)
+    }
+
+    fn ready(has_page_ready: bool, pending_frames: u8) -> bool {
+        has_page_ready && pending_frames >= Self::REVEAL_FRAMES
     }
 }
 
@@ -52,8 +57,8 @@ fn reveal_webviews(
     )>,
 ) {
     let mut progressed = false;
-    for (entity, source, mut vis, mut pending, ready) in &mut query {
-        if webview_reveal_ready(source, ready, pending.0) {
+    for (entity, _source, mut vis, mut pending, ready) in &mut query {
+        if PendingWebviewReveal::ready(ready, pending.0) {
             *vis = Visibility::Visible;
             commands.entity(entity).remove::<PendingWebviewReveal>();
             progressed = true;
@@ -67,10 +72,6 @@ fn reveal_webviews(
     if progressed && let Some(proxy) = proxy {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
-}
-
-fn webview_reveal_ready(_source: &WebviewSource, has_page_ready: bool, pending_frames: u8) -> bool {
-    has_page_ready && pending_frames >= REVEAL_FRAMES
 }
 
 #[cfg(test)]
@@ -106,38 +107,33 @@ mod tests {
 
     #[test]
     fn vmux_ui_webviews_wait_for_page_ready() {
-        assert!(!webview_reveal_ready(
-            &WebviewSource::new("vmux://header/"),
+        assert!(!PendingWebviewReveal::ready(
             false,
-            REVEAL_FRAMES - 1
+            PendingWebviewReveal::REVEAL_FRAMES - 1
         ));
-        assert!(webview_reveal_ready(
-            &WebviewSource::new("vmux://header/"),
+        assert!(PendingWebviewReveal::ready(
             true,
-            REVEAL_FRAMES
+            PendingWebviewReveal::REVEAL_FRAMES
         ));
     }
 
     #[test]
     fn tab_content_reveal_waits_after_page_ready() {
-        assert!(!webview_reveal_ready(
-            &WebviewSource::new("https://example.com/"),
+        assert!(!PendingWebviewReveal::ready(
             false,
-            REVEAL_FRAMES - 1
+            PendingWebviewReveal::REVEAL_FRAMES - 1
         ));
-        assert!(webview_reveal_ready(
-            &WebviewSource::new("https://example.com/"),
+        assert!(PendingWebviewReveal::ready(
             true,
-            REVEAL_FRAMES
+            PendingWebviewReveal::REVEAL_FRAMES
         ));
     }
 
     #[test]
     fn unknown_vmux_urls_are_treated_as_content() {
-        assert!(webview_reveal_ready(
-            &WebviewSource::new("vmux://unknown/"),
+        assert!(PendingWebviewReveal::ready(
             true,
-            REVEAL_FRAMES
+            PendingWebviewReveal::REVEAL_FRAMES
         ));
     }
 

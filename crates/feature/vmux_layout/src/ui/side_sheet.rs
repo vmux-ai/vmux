@@ -145,7 +145,7 @@ fn SideSheetContent() -> Element {
         state.window_pad_left,
         state.window_pad_top,
         state.window_pad_bottom,
-        crate::event::SPACES_ROW_HEIGHT_PX,
+        crate::event::LayoutGeometry::SPACES_ROW_HEIGHT_PX,
         state.side_sheet_content_width.max(host_sheet_width),
     );
     let active_pane = side_sheet.active_pane;

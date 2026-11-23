@@ -1501,47 +1501,43 @@ fn push_update_notice_emit(
     let unchanged = receipts
         .get(cef_e)
         .is_ok_and(|previous| previous.0 == **state);
-    if unchanged && (!page_ready_changed || **state == UpdateState::Idle) {
+    if unchanged && (!page_ready_changed || state.is_idle()) {
         return;
     }
-    match &*state {
-        UpdateState::Idle => {
+    match state.stage {
+        vmux_layout::UpdateStage::Idle => {
             commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
                 cef_e,
                 &UpdateCleared,
             ));
         }
-        UpdateState::Downloading {
-            version,
-            downloaded,
-            total,
-        } => {
+        vmux_layout::UpdateStage::Downloading => {
             commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
                 cef_e,
                 &UpdateProgress {
-                    version: version.clone(),
-                    downloaded: *downloaded,
-                    total: *total,
+                    version: state.version.clone(),
+                    downloaded: state.downloaded,
+                    total: state.total,
                     installing: false,
                 },
             ));
         }
-        UpdateState::Installing { version } => {
+        vmux_layout::UpdateStage::Installing => {
             commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
                 cef_e,
                 &UpdateProgress {
-                    version: version.clone(),
+                    version: state.version.clone(),
                     downloaded: 0,
                     total: 0,
                     installing: true,
                 },
             ));
         }
-        UpdateState::Ready { version } => {
+        vmux_layout::UpdateStage::Ready => {
             commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
                 cef_e,
                 &UpdateReady {
-                    version: version.clone(),
+                    version: state.version.clone(),
                 },
             ));
         }
@@ -1622,7 +1618,7 @@ mod tests {
                 .init_non_send::<Browsers>()
                 .init_resource::<ProjectionWrites>()
                 .add_observer(record_projections);
-            app.world_mut().spawn(UpdateState::Idle);
+            app.world_mut().spawn(UpdateState::idle());
             let focus = app
                 .world_mut()
                 .spawn(vmux_layout::active_pane::ActiveStack::default().local_bundle())
@@ -2018,9 +2014,7 @@ mod tests {
 
     #[test]
     fn update_notice_replays_on_readiness_and_clears_when_update_finishes() {
-        let mut pages = UpdatePages::new(UpdateState::Ready {
-            version: "v2".into(),
-        });
+        let mut pages = UpdatePages::new(UpdateState::ready("v2".into()));
         let page = pages.page();
         let ready = vec![(
             page,
@@ -2032,7 +2026,7 @@ mod tests {
         assert!(pages.update().is_empty());
         pages.app.world_mut().entity_mut(page).insert(PageReady {});
         assert_eq!(pages.update(), ready);
-        pages.set(UpdateState::Idle);
+        pages.set(UpdateState::idle());
         assert_eq!(pages.update(), vec![(page, None)]);
         pages.app.world_mut().entity_mut(page).insert(PageReady {});
         assert!(pages.update().is_empty());
@@ -2040,7 +2034,7 @@ mod tests {
 
     #[test]
     fn update_notice_restarts_after_layout_owner_is_reattached() {
-        let mut pages = UpdatePages::new(UpdateState::Idle);
+        let mut pages = UpdatePages::new(UpdateState::idle());
         let page = pages.page();
         assert_eq!(pages.update(), vec![(page, None)]);
         assert!(pages.update().is_empty());
@@ -2054,9 +2048,7 @@ mod tests {
 
     #[test]
     fn update_notice_publications_stay_independent_when_window_focus_changes() {
-        let mut pages = UpdatePages::new(UpdateState::Ready {
-            version: "v2".into(),
-        });
+        let mut pages = UpdatePages::new(UpdateState::ready("v2".into()));
         let first_window = pages
             .app
             .world_mut()
@@ -2118,11 +2110,7 @@ mod tests {
 
     #[test]
     fn update_notice_does_not_acknowledge_an_unavailable_browser() {
-        let mut pages = UpdatePages::new(UpdateState::Downloading {
-            version: "v2".into(),
-            downloaded: 3,
-            total: 10,
-        });
+        let mut pages = UpdatePages::new(UpdateState::downloading("v2".into(), 3, 10));
         let page = pages.app.world_mut().spawn((LayoutCef, PageReady {})).id();
         assert!(pages.update().is_empty());
         pages
@@ -2142,9 +2130,7 @@ mod tests {
             )]
         );
         assert!(pages.update().is_empty());
-        pages.set(UpdateState::Installing {
-            version: "v2".into(),
-        });
+        pages.set(UpdateState::installing("v2".into()));
         assert_eq!(
             pages.update(),
             vec![(
@@ -2162,7 +2148,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, StatePlugin))
             .insert_resource(AppSettings::default())
             .init_non_send::<Browsers>();
-        app.world_mut().spawn(UpdateState::Idle);
+        app.world_mut().spawn(UpdateState::idle());
         let layout = app.world_mut().spawn((LayoutCef, PageReady {})).id();
         app.world_mut()
             .non_send_mut::<Browsers>()
@@ -2296,7 +2282,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, StatePlugin))
             .insert_resource(AppSettings::default());
         app.world_mut().insert_non_send(Browsers::default());
-        app.world_mut().spawn(UpdateState::Idle);
+        app.world_mut().spawn(UpdateState::idle());
         app.update();
         let revision = {
             let world = app.world_mut();
@@ -2402,7 +2388,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, StatePlugin))
             .insert_resource(AppSettings::default());
         app.world_mut().insert_non_send(Browsers::default());
-        app.world_mut().spawn(UpdateState::Idle);
+        app.world_mut().spawn(UpdateState::idle());
         app.update();
         let revision = {
             let world = app.world_mut();

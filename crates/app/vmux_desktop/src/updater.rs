@@ -157,19 +157,14 @@ fn apply_update_progress(
                 status.0 = UpdateCheckStatus::Downloading {
                     version: progress.version.clone(),
                 };
-                **state = UpdateState::Downloading {
-                    version: progress.version,
-                    downloaded: progress.downloaded,
-                    total: progress.total,
-                };
+                **state =
+                    UpdateState::downloading(progress.version, progress.downloaded, progress.total);
             }
             UpdateStage::Installing => {
                 status.0 = UpdateCheckStatus::Installing {
                     version: progress.version.clone(),
                 };
-                **state = UpdateState::Installing {
-                    version: progress.version,
-                };
+                **state = UpdateState::installing(progress.version);
             }
         }
     }
@@ -190,14 +185,14 @@ fn apply_update_progress(
                 status.0 = UpdateCheckStatus::Ready {
                     version: version.clone(),
                 };
-                **state = UpdateState::Ready { version };
+                **state = UpdateState::ready(version);
                 checker.done = true;
             }
             Err(error) => {
                 status.0 = UpdateCheckStatus::Failed;
                 bevy::log::debug!("update check failed: {error}");
-                if !matches!(**state, UpdateState::Idle | UpdateState::Ready { .. }) {
-                    **state = UpdateState::Idle;
+                if !state.is_idle() && !state.is_ready() {
+                    **state = UpdateState::idle();
                 }
             }
         }

@@ -1,5 +1,6 @@
 #[cfg(test)]
 use bevy::ecs::message::Messages;
+use bevy::ecs::system::Commands;
 use bevy::{
     ecs::relationship::Relationship,
     prelude::*,
@@ -163,59 +164,86 @@ fn close(
         let Some(sibling) = siblings.into_iter().next() else {
             continue;
         };
-        let sibling_children: Vec<Entity> = panes
-            .children(sibling)
-            .map(|children| children.iter().collect())
+        collapse_single_sibling(
+            active,
+            parent,
+            sibling,
+            &panes,
+            &pane_stacks,
+            &focus,
+            &splits,
+            &stacks,
+            &mut nodes,
+            &mut commands,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collapse_single_sibling(
+    active: Entity,
+    parent: Entity,
+    sibling: Entity,
+    panes: &PaneHierarchy,
+    pane_stacks: &PaneStacks,
+    focus: &LayoutFocus,
+    splits: &Query<&PaneSplit>,
+    stacks: &Query<Entity, With<Stack>>,
+    nodes: &mut Query<&mut Node, With<Pane>>,
+    commands: &mut Commands,
+) {
+    let sibling_children: Vec<Entity> = panes
+        .children(sibling)
+        .map(|children| children.iter().collect())
+        .unwrap_or_default();
+    for &child in &sibling_children {
+        commands.entity(child).insert(ChildOf(parent));
+    }
+
+    let new_active_pane;
+    if splits.contains(sibling) {
+        let direction = splits
+            .get(sibling)
+            .map(|split| split.direction)
             .unwrap_or_default();
-        for &child in &sibling_children {
-            commands.entity(child).insert(ChildOf(parent));
+        new_active_pane = panes.first_leaf(sibling);
+        commands.entity(sibling).remove::<ChildOf>();
+        commands.entity(sibling).despawn();
+        commands.entity(parent).insert(PaneSplit { direction });
+        if let Ok(mut node) = nodes.get_mut(parent) {
+            node.flex_direction = direction.flex_direction();
+            let gaps = direction.gaps(crate::event::PANE_GAP_PX);
+            node.column_gap = gaps.column_gap;
+            node.row_gap = gaps.row_gap;
         }
+    } else {
+        new_active_pane = parent;
+        commands.entity(parent).remove::<PaneSplit>();
+        commands.entity(parent).insert(Node {
+            flex_grow: 1.0,
+            flex_basis: Val::Px(0.0),
+            align_items: AlignItems::Stretch,
+            justify_content: JustifyContent::Stretch,
+            ..default()
+        });
+        commands.entity(sibling).despawn();
+    }
 
-        let new_active_pane;
-        if splits.contains(sibling) {
-            let direction = splits
-                .get(sibling)
-                .map(|split| split.direction)
-                .unwrap_or_default();
-            new_active_pane = panes.first_leaf(sibling);
-            commands.entity(sibling).remove::<ChildOf>();
-            commands.entity(sibling).despawn();
-            commands.entity(parent).insert(PaneSplit { direction });
-            if let Ok(mut node) = nodes.get_mut(parent) {
-                node.flex_direction = direction.flex_direction();
-                let gaps = direction.gaps(crate::event::PANE_GAP_PX);
-                node.column_gap = gaps.column_gap;
-                node.row_gap = gaps.row_gap;
-            }
-        } else {
-            new_active_pane = parent;
-            commands.entity(parent).remove::<PaneSplit>();
-            commands.entity(parent).insert(Node {
-                flex_grow: 1.0,
-                flex_basis: Val::Px(0.0),
-                align_items: AlignItems::Stretch,
-                justify_content: JustifyContent::Stretch,
-                ..default()
-            });
-            commands.entity(sibling).despawn();
-        }
-
-        commands.entity(active).despawn();
-        commands
-            .entity(new_active_pane)
-            .insert(LastActivatedAt::now());
-        let active_stack = focus
-            .stack(new_active_pane)
-            .or_else(|| pane_stacks.first(new_active_pane))
-            .or_else(|| {
-                sibling_children
-                    .iter()
-                    .copied()
-                    .find(|&entity| stacks.contains(entity))
-            });
-        if let Some(stack) = active_stack {
-            commands.entity(stack).insert(LastActivatedAt::now());
-        }
+    commands.entity(active).despawn();
+    commands
+        .entity(new_active_pane)
+        .insert(LastActivatedAt::now());
+    let active_stack = focus
+        .stack(new_active_pane)
+        .or_else(|| pane_stacks.first(new_active_pane))
+        .or_else(|| {
+            sibling_children
+                .iter()
+                .copied()
+                .find(|&entity| stacks.contains(entity))
+        });
+    if let Some(stack) = active_stack {
+        commands.entity(stack).insert(LastActivatedAt::now());
     }
 }
 
@@ -225,24 +253,19 @@ fn pane_has_close_confirmation(
     all_children: &Query<&Children>,
     close_required: &Query<(), With<CloseRequiresConfirmation>>,
 ) -> bool {
-    pane_children.get(pane).is_ok_and(|stacks| {
-        stacks
-            .iter()
-            .any(|stack| entity_tree_has_close_confirmation(stack, all_children, close_required))
-    })
-}
-
-fn entity_tree_has_close_confirmation(
-    entity: Entity,
-    children: &Query<&Children>,
-    close_required: &Query<(), With<CloseRequiresConfirmation>>,
-) -> bool {
-    close_required.contains(entity)
-        || children.get(entity).is_ok_and(|descendants| {
-            descendants
-                .iter()
-                .any(|child| entity_tree_has_close_confirmation(child, children, close_required))
-        })
+    let Ok(stacks) = pane_children.get(pane) else {
+        return false;
+    };
+    let mut pending: Vec<Entity> = stacks.iter().collect();
+    while let Some(entity) = pending.pop() {
+        if close_required.contains(entity) {
+            return true;
+        }
+        if let Ok(descendants) = all_children.get(entity) {
+            pending.extend(descendants.iter());
+        }
+    }
+    false
 }
 
 fn poll_dialogs(

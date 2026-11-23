@@ -110,6 +110,77 @@ impl LayoutTransition {
     fn value(start: f32, end: f32, progress: f32) -> f32 {
         start + (end - start) * progress
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn start(
+        url_only: bool,
+        hide: bool,
+        hide_url: bool,
+        started: std::time::Duration,
+        header_start: f32,
+        side_sheet_start: f32,
+        (pad_top_start, pad_left_start, gap_start): (f32, f32, f32),
+        previous: Option<&Self>,
+        settings: &LayoutSettings,
+    ) -> Self {
+        let side_sheet_open_width =
+            crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped();
+        Self {
+            hide: if url_only {
+                previous.is_some_and(|transition| transition.hide)
+            } else {
+                hide
+            },
+            elapsed: 0.0,
+            started,
+            header_start,
+            side_sheet_start,
+            pad_top_start,
+            pad_left_start,
+            gap_start,
+            header_end: if hide_url {
+                36.0
+            } else {
+                CEF_RESERVED_HEIGHT_PX
+            },
+            side_sheet_end: if url_only {
+                previous
+                    .map(|transition| transition.side_sheet_end)
+                    .unwrap_or(side_sheet_start)
+            } else if hide {
+                0.0
+            } else {
+                side_sheet_open_width
+            },
+            pad_top_end: if url_only {
+                previous
+                    .map(|transition| transition.pad_top_end)
+                    .unwrap_or(pad_top_start)
+            } else if hide {
+                settings.window.pad_top()
+            } else {
+                0.0
+            },
+            pad_left_end: if url_only {
+                previous
+                    .map(|transition| transition.pad_left_end)
+                    .unwrap_or(pad_left_start)
+            } else if hide {
+                settings.window.pad_left()
+            } else {
+                0.0
+            },
+            gap_end: if url_only {
+                previous
+                    .map(|transition| transition.gap_end)
+                    .unwrap_or(gap_start)
+            } else if hide {
+                0.0
+            } else {
+                crate::event::SIDE_SHEET_GAP_PX
+            },
+        }
+    }
 }
 
 fn sync_window_padding(
@@ -218,66 +289,18 @@ fn handle_visibility_requests(
                 (top, left, gap)
             })
             .unwrap_or_default();
-        let previous = if url_only {
-            existing.get(window).ok()
-        } else {
-            None
-        };
-        commands.entity(window).insert(LayoutTransition {
-            hide: if url_only {
-                previous.is_some_and(|transition| transition.hide)
-            } else {
-                hide
-            },
-            elapsed: 0.0,
-            started: time.elapsed(),
+        let previous = url_only.then(|| existing.get(window).ok()).flatten();
+        commands.entity(window).insert(LayoutTransition::start(
+            url_only,
+            hide,
+            hide_url,
+            time.elapsed(),
             header_start,
             side_sheet_start,
-            pad_top_start,
-            pad_left_start,
-            gap_start,
-            header_end: if hide_url {
-                36.0
-            } else {
-                CEF_RESERVED_HEIGHT_PX
-            },
-            side_sheet_end: if url_only {
-                previous
-                    .map(|transition| transition.side_sheet_end)
-                    .unwrap_or(side_sheet_start)
-            } else if hide {
-                0.0
-            } else {
-                crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped()
-            },
-            pad_top_end: if url_only {
-                previous
-                    .map(|transition| transition.pad_top_end)
-                    .unwrap_or(pad_top_start)
-            } else if hide {
-                settings.window.pad_top()
-            } else {
-                0.0
-            },
-            pad_left_end: if url_only {
-                previous
-                    .map(|transition| transition.pad_left_end)
-                    .unwrap_or(pad_left_start)
-            } else if hide {
-                settings.window.pad_left()
-            } else {
-                0.0
-            },
-            gap_end: if url_only {
-                previous
-                    .map(|transition| transition.gap_end)
-                    .unwrap_or(gap_start)
-            } else if hide {
-                0.0
-            } else {
-                crate::event::SIDE_SHEET_GAP_PX
-            },
-        });
+            (pad_top_start, pad_left_start, gap_start),
+            previous,
+            &settings,
+        ));
         for (entity, _) in &header_q {
             if hierarchy.get(entity) == Some(window) {
                 commands.entity(entity).insert(Open);

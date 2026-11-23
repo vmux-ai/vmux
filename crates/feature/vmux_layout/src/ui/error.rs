@@ -4,18 +4,20 @@ use dioxus::prelude::*;
 use vmux_api::error::ErrorPageData;
 use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
+use vmux_ui::theme::ThemeUiState;
 
 #[vmux_page::page(
     page = "error",
     component = Page,
-    states = [vmux_ui::theme::ThemeUiState],
-    takes = vmux_api::error::ErrorPageData,
-    claims = vmux_api::error::ErrorPageData
+    states = [ThemeUiState],
+    takes = ErrorPageData,
+    claims = ErrorPageData
 )]
 pub struct ErrorPage;
 
 #[component]
 pub fn Page() -> Element {
+    let _ = std::marker::PhantomData::<ThemeUiState>;
     use_theme();
     let failure = use_hook(|| try_consume_context::<ErrorPageData>().unwrap_or_default());
 

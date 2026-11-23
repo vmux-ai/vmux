@@ -1,3 +1,5 @@
+use bevy::ecs::system::Commands;
+use bevy::prelude::Changed;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use vmux_ecs::page::{HostsPage, PageReady};
@@ -117,6 +119,10 @@ impl Transition {
 
     pub fn phase(&self) -> Phase {
         self.phase
+    }
+
+    fn surface_presented(hosted: bool, native_presented: bool, presented: bool) -> bool {
+        native_presented || (!hosted && presented)
     }
 
     pub fn matches(&self, surface: Entity, request: PageOpenId) -> bool {
@@ -269,67 +275,16 @@ fn prepare(
             continue;
         }
         let previous_stack = presentation.retained(stack);
-        let current = currents
-            .get(stack)
-            .ok()
-            .and_then(Current::surface)
-            .or_else(|| handoff.retain_visible().then_some(incoming))
-            .or_else(|| {
-                handoff
-                    .previous()
-                    .iter()
-                    .copied()
-                    .find(|surface| surfaces.contains(*surface))
-            })
-            .or_else(|| previous_stack.and_then(|stack| currents.get(stack).ok()?.surface()))
-            .or_else(|| {
-                let previous = previous_stack?;
-                children
-                    .get(previous)
-                    .ok()?
-                    .iter()
-                    .find(|surface| surfaces.contains(*surface))
-            });
-        let pending = metadata
-            .get(incoming)
-            .ok()
-            .cloned()
-            .or_else(|| metadata.get(stack).ok().cloned())
-            .unwrap_or_default();
-        let committed = handoff
-            .fallback()
-            .cloned()
-            .or_else(|| {
-                current
-                    .filter(|surface| *surface != incoming)
-                    .and_then(|surface| metadata.get(surface).ok().cloned())
-            })
-            .or_else(|| {
-                currents
-                    .get(stack)
-                    .ok()
-                    .filter(|current| !current.metadata().url.is_empty())
-                    .map(|current| current.metadata().clone())
-            })
-            .or_else(|| {
-                previous_stack.and_then(|stack| {
-                    currents
-                        .get(stack)
-                        .ok()
-                        .filter(|current| !current.metadata().url.is_empty())
-                        .map(|current| current.metadata().clone())
-                })
-            })
-            .or_else(|| previous_stack.and_then(|stack| metadata.get(stack).ok().cloned()))
-            .or_else(|| {
-                metadata
-                    .get(stack)
-                    .ok()
-                    .filter(|current| !current.url.is_empty() && current.url != pending.url)
-                    .cloned()
-            })
-            .or_else(|| current.and_then(|surface| metadata.get(surface).ok().cloned()))
-            .unwrap_or_default();
+        let (current, pending, committed) = resolve_slot_metadata(
+            stack,
+            incoming,
+            handoff,
+            previous_stack,
+            &currents,
+            &children,
+            &metadata,
+            &surfaces,
+        );
         let mut transition = Transition::new(
             handoff.navigation(),
             incoming,
@@ -351,7 +306,8 @@ fn prepare(
             if painted {
                 transition.acknowledge(AckKind::Painted);
             }
-            if surface_presented(hosted.contains(incoming), native_presented, presented) {
+            if Transition::surface_presented(hosted.contains(incoming), native_presented, presented)
+            {
                 transition.acknowledge(AckKind::Presented);
             }
         }
@@ -370,8 +326,79 @@ fn prepare(
     }
 }
 
-fn surface_presented(hosted: bool, native_presented: bool, presented: bool) -> bool {
-    native_presented || (!hosted && presented)
+#[allow(clippy::too_many_arguments)]
+fn resolve_slot_metadata(
+    stack: Entity,
+    incoming: Entity,
+    handoff: &SurfaceHandoff,
+    previous_stack: Option<Entity>,
+    currents: &Query<&Current>,
+    children: &Query<&Children>,
+    metadata: &Query<&PageMetadata>,
+    surfaces: &Query<(), With<Browser>>,
+) -> (Option<Entity>, PageMetadata, PageMetadata) {
+    let current = currents
+        .get(stack)
+        .ok()
+        .and_then(Current::surface)
+        .or_else(|| handoff.retain_visible().then_some(incoming))
+        .or_else(|| {
+            handoff
+                .previous()
+                .iter()
+                .copied()
+                .find(|surface| surfaces.contains(*surface))
+        })
+        .or_else(|| previous_stack.and_then(|stack| currents.get(stack).ok()?.surface()))
+        .or_else(|| {
+            let previous = previous_stack?;
+            children
+                .get(previous)
+                .ok()?
+                .iter()
+                .find(|surface| surfaces.contains(*surface))
+        });
+    let pending = metadata
+        .get(incoming)
+        .ok()
+        .cloned()
+        .or_else(|| metadata.get(stack).ok().cloned())
+        .unwrap_or_default();
+    let committed = handoff
+        .fallback()
+        .cloned()
+        .or_else(|| {
+            current
+                .filter(|surface| *surface != incoming)
+                .and_then(|surface| metadata.get(surface).ok().cloned())
+        })
+        .or_else(|| {
+            currents
+                .get(stack)
+                .ok()
+                .filter(|current| !current.metadata().url.is_empty())
+                .map(|current| current.metadata().clone())
+        })
+        .or_else(|| {
+            previous_stack.and_then(|stack| {
+                currents
+                    .get(stack)
+                    .ok()
+                    .filter(|current| !current.metadata().url.is_empty())
+                    .map(|current| current.metadata().clone())
+            })
+        })
+        .or_else(|| previous_stack.and_then(|stack| metadata.get(stack).ok().cloned()))
+        .or_else(|| {
+            metadata
+                .get(stack)
+                .ok()
+                .filter(|current| !current.url.is_empty() && current.url != pending.url)
+                .cloned()
+        })
+        .or_else(|| current.and_then(|surface| metadata.get(surface).ok().cloned()))
+        .unwrap_or_default();
+    (current, pending, committed)
 }
 
 fn reconcile(
@@ -492,7 +519,7 @@ fn collect(
         if painted {
             acknowledgements.write(Ack::new(surface, handoff.navigation(), AckKind::Painted));
         }
-        if surface_presented(hosted, native_presented, presented) {
+        if Transition::surface_presented(hosted, native_presented, presented) {
             acknowledgements.write(Ack::new(surface, handoff.navigation(), AckKind::Presented));
         }
     }

@@ -45,7 +45,6 @@ pub mod tab;
 pub mod target;
 pub mod toggle;
 pub mod tool;
-pub mod unit;
 pub mod warm_page;
 pub mod window;
 #[cfg(any(target_os = "macos", test))]
@@ -79,21 +78,62 @@ pub struct Header;
 #[derive(Component)]
 pub struct CloseRequiresConfirmation;
 
-#[derive(Component, Default, Clone, PartialEq, Debug)]
-pub enum UpdateState {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UpdateStage {
     #[default]
     Idle,
-    Downloading {
-        version: String,
-        downloaded: u64,
-        total: u64,
-    },
-    Installing {
-        version: String,
-    },
-    Ready {
-        version: String,
-    },
+    Downloading,
+    Installing,
+    Ready,
+}
+
+#[derive(Component, Default, Clone, PartialEq, Eq, Debug)]
+pub struct UpdateState {
+    pub stage: UpdateStage,
+    pub version: String,
+    pub downloaded: u64,
+    pub total: u64,
+}
+
+impl UpdateState {
+    pub fn idle() -> Self {
+        Self::default()
+    }
+
+    pub fn downloading(version: String, downloaded: u64, total: u64) -> Self {
+        Self {
+            stage: UpdateStage::Downloading,
+            version,
+            downloaded,
+            total,
+        }
+    }
+
+    pub fn installing(version: String) -> Self {
+        Self {
+            stage: UpdateStage::Installing,
+            version,
+            downloaded: 0,
+            total: 0,
+        }
+    }
+
+    pub fn ready(version: String) -> Self {
+        Self {
+            stage: UpdateStage::Ready,
+            version,
+            downloaded: 0,
+            total: 0,
+        }
+    }
+
+    pub fn is_idle(&self) -> bool {
+        self.stage == UpdateStage::Idle
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.stage == UpdateStage::Ready
+    }
 }
 
 #[derive(Message, Clone, Debug)]
@@ -101,13 +141,23 @@ pub struct TerminalLayoutSpawnRequest {
     pub stack: Entity,
 }
 
-#[derive(Clone, Debug)]
-pub enum TabLayoutSpawnContent {
-    StartupUrlOrPrompt,
-    Url {
-        url: String,
-        pending_prompt: Option<String>,
-    },
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TabLayoutSpawnContent {
+    pub url: Option<String>,
+    pub pending_prompt: Option<String>,
+}
+
+impl TabLayoutSpawnContent {
+    pub fn startup_url_or_prompt() -> Self {
+        Self::default()
+    }
+
+    pub fn url(url: impl Into<String>, pending_prompt: Option<String>) -> Self {
+        Self {
+            url: Some(url.into()),
+            pending_prompt,
+        }
+    }
 }
 
 #[derive(Message, Clone, Debug)]

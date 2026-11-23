@@ -1,5 +1,7 @@
 pub use crate::{Hierarchy as PaneHierarchy, Pane, PaneSplit, PaneSplitDirection};
+use bevy::ecs::system::Commands;
 use bevy::ecs::system::SystemParam;
+use bevy::prelude::Changed;
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_ecs::store::StoreAppExt;

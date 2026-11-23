@@ -773,7 +773,7 @@ fn handle_close_tab_requests(
                     primary_window: window,
                     name: Some("Tab 1".to_string()),
                     startup_dir: None,
-                    content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+                    content: TabLayoutSpawnContent::startup_url_or_prompt(),
                     clear_pending_stack: true,
                     focus: true,
                 });

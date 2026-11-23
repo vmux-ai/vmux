@@ -1,4 +1,7 @@
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
+#[cfg(test)]
+use bevy::window::Window;
 use moonshine_save::prelude::*;
 use vmux_ecs::store::StoreAppExt;
 use vmux_ecs::{Active, EffectiveStartupUrl};

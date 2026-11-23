@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use crate::cef::Browser;
 use crate::event::{LayoutOverlayEvent, LayoutOverlayKind};
 use crate::window::VmuxWindow;
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
+#[cfg(test)]
+use bevy::window::Window;
 use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
 use vmux_ecs::overlay::WindowOverlay;
 

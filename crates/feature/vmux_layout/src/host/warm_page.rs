@@ -271,128 +271,184 @@ fn open(
                 commands.entity(task.stack).insert(HostHistory::default());
             }
             if let Some((existing, pending)) = existing {
-                let previous = children
-                    .get(task.stack)
-                    .map(|children| {
-                        children
-                            .iter()
-                            .filter(|child| *child != existing)
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                for surface in &previous {
-                    commands
-                        .entity(*surface)
-                        .try_insert(crate::hosted_page::SurfaceBlocked);
-                }
-                let fallback = if pending {
-                    None
-                } else {
-                    hosted_pages
-                        .p1()
-                        .get_mut(existing)
-                        .ok()
-                        .map(|page_metadata| page_metadata.clone())
-                };
-                if let Ok(mut page_metadata) = hosted_pages.p1().get_mut(existing) {
-                    *page_metadata = next;
-                }
-                if pending {
-                    if let Ok(mut handoff) = hosted_pages.p2().get_mut(existing) {
-                        handoff.retarget(task.id, time.elapsed());
-                    }
-                } else {
-                    commands.entity(existing).insert(
-                        crate::hosted_page::SurfaceHandoff::retaining(
-                            previous,
-                            task.id,
-                            time.elapsed(),
-                        )
-                        .with_fallback(fallback),
-                    );
-                }
-                commands
-                    .entity(existing)
-                    .remove::<crate::hosted_page::SurfacePaintReady>()
-                    .remove::<crate::hosted_page::SurfacePresentationReady>()
-                    .remove::<crate::hosted_page::SurfaceTransitionReady>()
-                    .remove::<crate::hosted_page::SurfaceHandoffFailed>()
-                    .remove::<crate::PendingWebviewReveal>()
-                    .remove::<vmux_ecs::PageIdentity>()
-                    .remove::<(
-                        crate::hosted_page::SurfaceBlocked,
-                        bevy_cef::prelude::BinIpcBlocked,
-                    )>();
-                commands.trigger(UiInput {
-                    webview: existing,
-                    payload: PageReady {},
-                });
-                commands.entity(entity).insert(PageOpenHandled);
+                reuse_existing_surface(
+                    entity,
+                    task,
+                    existing,
+                    pending,
+                    next,
+                    &children,
+                    &mut hosted_pages,
+                    time.elapsed(),
+                    &mut commands,
+                );
                 continue;
             }
-            let previous = children
-                .get(task.stack)
-                .map(|children| children.iter().collect::<Vec<_>>())
-                .unwrap_or_default();
-            for surface in &previous {
-                commands
-                    .entity(*surface)
-                    .try_insert(crate::hosted_page::SurfaceBlocked);
-            }
-            if let Some(spare) = renderers.take(page.url, entity) {
-                if let Ok(mut page_metadata) = hosted_pages.p1().get_mut(spare) {
-                    *page_metadata = next.clone();
-                }
-                commands
-                    .entity(spare)
-                    .insert((
-                        ChildOf(task.stack),
-                        KeyboardOwner,
-                        Visibility::Hidden,
-                        crate::hosted_page::SurfaceHandoff::new(
-                            previous,
-                            task.id,
-                            0,
-                            time.elapsed(),
-                        ),
-                    ))
-                    .remove::<crate::hosted_page::SurfacePaintReady>()
-                    .remove::<crate::hosted_page::SurfacePresentationReady>()
-                    .remove::<vmux_ecs::PageIdentity>()
-                    .remove::<(
-                        crate::hosted_page::SurfaceBlocked,
-                        bevy_cef::prelude::BinIpcBlocked,
-                    )>()
-                    .remove::<(WarmPageSpare, vmux_ecs::page::PrewarmedPage)>();
-                commands.trigger(UiInput {
-                    webview: spare,
-                    payload: PageReady {},
-                });
-            } else {
-                let webview = commands
-                    .spawn((
-                        crate::cef::Browser::hosted_page_with_icon(
-                            &task.url,
-                            &next.title,
-                            next.icon.clone(),
-                        ),
-                        crate::hosted_page::SurfaceHandoff::new(
-                            previous,
-                            task.id,
-                            0,
-                            time.elapsed(),
-                        ),
-                    ))
-                    .id();
-                commands.entity(webview).insert((
-                    ChildOf(task.stack),
-                    KeyboardOwner,
-                    Visibility::Hidden,
-                ));
-            }
-            commands.entity(entity).insert(PageOpenHandled);
+            attach_spare_or_spawn(
+                entity,
+                task,
+                page,
+                next,
+                &mut renderers,
+                &children,
+                &mut hosted_pages,
+                time.elapsed(),
+                &mut commands,
+            );
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reuse_existing_surface(
+    entity: Entity,
+    task: &PageOpenTask,
+    existing: Entity,
+    pending: bool,
+    next: PageMetadata,
+    children: &Query<&Children>,
+    hosted_pages: &mut ParamSet<(
+        Query<
+            (
+                Entity,
+                &'static PageMetadata,
+                Has<crate::hosted_page::SurfaceHandoff>,
+            ),
+            (With<crate::cef::Browser>, With<vmux_ecs::page::HostsPage>),
+        >,
+        Query<&'static mut PageMetadata>,
+        Query<&'static mut crate::hosted_page::SurfaceHandoff>,
+    )>,
+    now: Duration,
+    commands: &mut Commands,
+) {
+    let previous = children
+        .get(task.stack)
+        .map(|children| {
+            children
+                .iter()
+                .filter(|child| *child != existing)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for surface in &previous {
+        commands
+            .entity(*surface)
+            .try_insert(crate::hosted_page::SurfaceBlocked);
+    }
+    let fallback = if pending {
+        None
+    } else {
+        hosted_pages
+            .p1()
+            .get_mut(existing)
+            .ok()
+            .map(|page_metadata| page_metadata.clone())
+    };
+    if let Ok(mut page_metadata) = hosted_pages.p1().get_mut(existing) {
+        *page_metadata = next;
+    }
+    if pending {
+        if let Ok(mut handoff) = hosted_pages.p2().get_mut(existing) {
+            handoff.retarget(task.id, now);
+        }
+    } else {
+        commands.entity(existing).insert(
+            crate::hosted_page::SurfaceHandoff::retaining(previous, task.id, now)
+                .with_fallback(fallback),
+        );
+    }
+    commands
+        .entity(existing)
+        .remove::<crate::hosted_page::SurfacePaintReady>()
+        .remove::<crate::hosted_page::SurfacePresentationReady>()
+        .remove::<crate::hosted_page::SurfaceTransitionReady>()
+        .remove::<crate::hosted_page::SurfaceHandoffFailed>()
+        .remove::<crate::PendingWebviewReveal>()
+        .remove::<vmux_ecs::PageIdentity>()
+        .remove::<(
+            crate::hosted_page::SurfaceBlocked,
+            bevy_cef::prelude::BinIpcBlocked,
+        )>();
+    commands.trigger(UiInput {
+        webview: existing,
+        payload: PageReady {},
+    });
+    commands.entity(entity).insert(PageOpenHandled);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn attach_spare_or_spawn(
+    entity: Entity,
+    task: &PageOpenTask,
+    page: &PrewarmPage,
+    next: PageMetadata,
+    renderers: &mut RendererPool,
+    children: &Query<&Children>,
+    hosted_pages: &mut ParamSet<(
+        Query<
+            (
+                Entity,
+                &'static PageMetadata,
+                Has<crate::hosted_page::SurfaceHandoff>,
+            ),
+            (With<crate::cef::Browser>, With<vmux_ecs::page::HostsPage>),
+        >,
+        Query<&'static mut PageMetadata>,
+        Query<&'static mut crate::hosted_page::SurfaceHandoff>,
+    )>,
+    now: Duration,
+    commands: &mut Commands,
+) {
+    let previous = children
+        .get(task.stack)
+        .map(|children| children.iter().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for surface in &previous {
+        commands
+            .entity(*surface)
+            .try_insert(crate::hosted_page::SurfaceBlocked);
+    }
+    if let Some(spare) = renderers.take(page.url, entity) {
+        if let Ok(mut page_metadata) = hosted_pages.p1().get_mut(spare) {
+            *page_metadata = next.clone();
+        }
+        commands
+            .entity(spare)
+            .insert((
+                ChildOf(task.stack),
+                KeyboardOwner,
+                Visibility::Hidden,
+                crate::hosted_page::SurfaceHandoff::new(previous, task.id, 0, now),
+            ))
+            .remove::<crate::hosted_page::SurfacePaintReady>()
+            .remove::<crate::hosted_page::SurfacePresentationReady>()
+            .remove::<vmux_ecs::PageIdentity>()
+            .remove::<(
+                crate::hosted_page::SurfaceBlocked,
+                bevy_cef::prelude::BinIpcBlocked,
+            )>()
+            .remove::<(WarmPageSpare, vmux_ecs::page::PrewarmedPage)>();
+        commands.trigger(UiInput {
+            webview: spare,
+            payload: PageReady {},
+        });
+    } else {
+        let webview = commands
+            .spawn((
+                crate::cef::Browser::hosted_page_with_icon(
+                    &task.url,
+                    &next.title,
+                    next.icon.clone(),
+                ),
+                crate::hosted_page::SurfaceHandoff::new(previous, task.id, 0, now),
+            ))
+            .id();
+        commands
+            .entity(webview)
+            .insert((ChildOf(task.stack), KeyboardOwner, Visibility::Hidden));
+    }
+    commands.entity(entity).insert(PageOpenHandled);
 }
 
 fn reconcile(
@@ -454,73 +510,105 @@ fn reconcile(
         if !processed.insert(page.url) {
             continue;
         }
-        let mut existing = pool_nodes
-            .iter_mut()
-            .find(|(_, node, _)| node.url == page.url);
-        let fresh = existing.is_none();
-        let node = match existing.as_ref() {
-            Some((entity, _, _)) => *entity,
-            None => commands
-                .spawn((
-                    WarmPagePoolNode { url: page.url },
-                    Node {
-                        width: Val::Px(0.0),
-                        height: Val::Px(0.0),
-                        position_type: PositionType::Absolute,
-                        ..default()
-                    },
-                    Visibility::Hidden,
-                    ChildOf(window),
-                ))
-                .id(),
-        };
-        let mut initial = PoolRetry::default();
-        let retry = match existing.as_mut() {
-            Some((_, _, retry)) => &mut **retry,
-            None => &mut initial,
-        };
-        let failed = spares
-            .iter()
-            .any(|(_, spare, failed, _)| spare.url == page.url && failed);
-        let mut retained = 0;
-        for (entity, spare, failure, ready) in &spares {
-            if spare.url != page.url {
-                continue;
-            }
-            if failure {
-                retry.failed(now);
-                commands.entity(entity).try_despawn();
-                continue;
-            }
-            if ready && !failed {
-                retry.succeeded();
-                wake.cancel(node);
-            }
-            if retained >= limit {
-                commands.entity(entity).try_despawn();
-            } else {
-                retained += 1;
-            }
+        reconcile_page_pool(
+            page,
+            limit,
+            window,
+            now,
+            &metadata,
+            &mut pool_nodes,
+            &spares,
+            &wake,
+            &mut remaining,
+            &mut commands,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reconcile_page_pool(
+    page: &PrewarmPage,
+    limit: usize,
+    window: Entity,
+    now: Duration,
+    metadata: &PageMetadataCatalog,
+    pool_nodes: &mut Query<(Entity, &WarmPagePoolNode, &mut PoolRetry)>,
+    spares: &Query<(
+        Entity,
+        &WarmPageSpare,
+        Has<crate::hosted_page::SurfaceHandoffFailed>,
+        Has<PageReady>,
+    )>,
+    wake: &PoolWake,
+    remaining: &mut usize,
+    commands: &mut Commands,
+) {
+    let mut existing = pool_nodes
+        .iter_mut()
+        .find(|(_, node, _)| node.url == page.url);
+    let fresh = existing.is_none();
+    let node = match existing.as_ref() {
+        Some((entity, _, _)) => *entity,
+        None => commands
+            .spawn((
+                WarmPagePoolNode { url: page.url },
+                Node {
+                    width: Val::Px(0.0),
+                    height: Val::Px(0.0),
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+                Visibility::Hidden,
+                ChildOf(window),
+            ))
+            .id(),
+    };
+    let mut initial = PoolRetry::default();
+    let retry = match existing.as_mut() {
+        Some((_, _, retry)) => &mut **retry,
+        None => &mut initial,
+    };
+    let failed = spares
+        .iter()
+        .any(|(_, spare, failed, _)| spare.url == page.url && failed);
+    let mut retained = 0;
+    for (entity, spare, failure, ready) in spares {
+        if spare.url != page.url {
+            continue;
         }
-        if let Some(after) = retry.waiting(now) {
-            wake.schedule(node, after, now);
-        } else if retained < limit && remaining > 0 {
-            remaining -= 1;
-            let page_metadata = metadata.metadata_for(page.url, &page.title);
-            let webview = commands
-                .spawn(crate::cef::Browser::hosted_page_with_icon(
-                    page.url,
-                    &page_metadata.title,
-                    page_metadata.icon,
-                ))
-                .id();
-            commands
-                .entity(webview)
-                .insert((WarmPageSpare { url: page.url }, ChildOf(node)));
+        if failure {
+            retry.failed(now);
+            commands.entity(entity).try_despawn();
+            continue;
         }
-        if fresh {
-            commands.entity(node).insert(initial);
+        if ready && !failed {
+            retry.succeeded();
+            wake.cancel(node);
         }
+        if retained >= limit {
+            commands.entity(entity).try_despawn();
+        } else {
+            retained += 1;
+        }
+    }
+    if let Some(after) = retry.waiting(now) {
+        wake.schedule(node, after, now);
+    } else if retained < limit && *remaining > 0 {
+        *remaining -= 1;
+        let page_metadata = metadata.metadata_for(page.url, &page.title);
+        let webview = commands
+            .spawn(crate::cef::Browser::hosted_page_with_icon(
+                page.url,
+                &page_metadata.title,
+                page_metadata.icon,
+            ))
+            .id();
+        commands
+            .entity(webview)
+            .insert((WarmPageSpare { url: page.url }, ChildOf(node)));
+    }
+    if fresh {
+        commands.entity(node).insert(initial);
     }
 }
 

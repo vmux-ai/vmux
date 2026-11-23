@@ -1,6 +1,8 @@
 use crate::stack::{ActiveTabParam, LayoutFocus, Stack};
 use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::Commands;
 use bevy::ecs::system::SystemParam;
+use bevy::prelude::Changed;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::PageIcon;
@@ -482,19 +484,25 @@ pub struct ShowBookmarkMenuRequest {
     pub target: BookmarkMenuTarget,
 }
 
-#[derive(Clone, Debug)]
-pub enum BookmarkMenuTarget {
+impl ShowBookmarkMenuRequest {
+    pub fn kind(&self) -> BookmarkMenuKind {
+        self.target.kind
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BookmarkMenuKind {
     Root,
-    Pin {
-        uuid: String,
-    },
-    Entry {
-        uuid: String,
-    },
-    Folder {
-        uuid: String,
-        active_page: Option<PageMetadata>,
-    },
+    Pin,
+    Entry,
+    Folder,
+}
+
+#[derive(Clone, Debug)]
+pub struct BookmarkMenuTarget {
+    pub kind: BookmarkMenuKind,
+    pub uuid: Option<String>,
+    pub active_page: Option<PageMetadata>,
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1313,26 +1321,39 @@ fn request_remove_folder(
 
 impl From<BookmarkMenuRootRequest> for BookmarkMenuTarget {
     fn from(_: BookmarkMenuRootRequest) -> Self {
-        Self::Root
+        Self {
+            kind: BookmarkMenuKind::Root,
+            uuid: None,
+            active_page: None,
+        }
     }
 }
 
 impl From<BookmarkMenuPinRequest> for BookmarkMenuTarget {
     fn from(request: BookmarkMenuPinRequest) -> Self {
-        Self::Pin { uuid: request.uuid }
+        Self {
+            kind: BookmarkMenuKind::Pin,
+            uuid: Some(request.uuid),
+            active_page: None,
+        }
     }
 }
 
 impl From<BookmarkMenuEntryRequest> for BookmarkMenuTarget {
     fn from(request: BookmarkMenuEntryRequest) -> Self {
-        Self::Entry { uuid: request.uuid }
+        Self {
+            kind: BookmarkMenuKind::Entry,
+            uuid: Some(request.uuid),
+            active_page: None,
+        }
     }
 }
 
 impl From<BookmarkMenuFolderRequest> for BookmarkMenuTarget {
     fn from(request: BookmarkMenuFolderRequest) -> Self {
-        Self::Folder {
-            uuid: request.uuid,
+        Self {
+            kind: BookmarkMenuKind::Folder,
+            uuid: Some(request.uuid),
             active_page: request.active_page,
         }
     }
@@ -1765,7 +1786,8 @@ mod tests {
                 folder: None,
             },
         );
-        assert_eq!(count::<With<Bookmark>>(&mut app), 1);
+        let bookmarks = count::<With<Bookmark>>(&mut app);
+        assert_eq!(bookmarks, 1);
     }
 
     #[test]
@@ -2020,7 +2042,8 @@ mod tests {
             metadata: metadata("A"),
         };
         TestRequest::send(&mut app, op());
-        assert_eq!(count::<With<Bookmark>>(&mut app), 1);
+        let bookmarks = count::<With<Bookmark>>(&mut app);
+        assert_eq!(bookmarks, 1);
         TestRequest::send(&mut app, op());
         assert_eq!(count::<With<Bookmark>>(&mut app), 0);
     }
@@ -2187,7 +2210,8 @@ mod tests {
                 folder: Some(fid),
             },
         );
-        assert_eq!(count::<With<Bookmark>>(&mut app), 1);
+        let bookmarks = count::<With<Bookmark>>(&mut app);
+        assert_eq!(bookmarks, 1);
         assert_eq!(count::<(With<Bookmark>, With<ChildOf>)>(&mut app), 1);
         let title = app
             .world_mut()
@@ -2352,7 +2376,8 @@ mod tests {
                 metadata: metadata("A"),
             },
         );
-        assert_eq!(count::<With<Bookmark>>(&mut app), 1);
+        let bookmarks = count::<With<Bookmark>>(&mut app);
+        assert_eq!(bookmarks, 1);
         assert_eq!(count::<With<Pin>>(&mut app), 1);
         assert_eq!(
             count::<(With<Bookmark>, With<Pin>, With<ChildOf>)>(&mut app),
@@ -2376,7 +2401,8 @@ mod tests {
             },
         );
         assert_eq!(count::<With<PageMetadata>>(&mut app), 1);
-        assert_eq!(count::<With<Bookmark>>(&mut app), 1);
+        let bookmarks = count::<With<Bookmark>>(&mut app);
+        assert_eq!(bookmarks, 1);
         assert_eq!(count::<With<Pin>>(&mut app), 1);
         TestRequest::send(
             &mut app,

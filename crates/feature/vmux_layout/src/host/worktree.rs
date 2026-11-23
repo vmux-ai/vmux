@@ -6,6 +6,7 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 
 use crate::tab::{Tab, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
