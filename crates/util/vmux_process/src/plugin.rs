@@ -2429,7 +2429,7 @@ mod tests {
             .spawn(ProcessLaunch {
                 id,
                 command: "/bin/sh".into(),
-                args: vec!["-c".into(), "exit 0".into()],
+                args: vec!["-c".into(), "read dummy; exit 0".into()],
                 cwd: String::new(),
                 env: Vec::new(),
                 cols: 80,
@@ -2438,7 +2438,6 @@ mod tests {
             })
             .expect("spawn")
             .updates;
-        std::thread::sleep(Duration::from_millis(50));
         let (pty_tx, pty_rx) = mpsc::unbounded_channel();
         let entity = fixture.entity(id).expect("process");
         fixture
@@ -2449,6 +2448,10 @@ mod tests {
             .0
             .get()
             .replace_pty_rx(pty_rx);
+        let runtime = fixture.runtime.clone();
+        fixture
+            .run(async move { runtime.input(id, b"\n".to_vec()).await })
+            .expect("signal child exit");
 
         let exit_deadline = Instant::now() + Duration::from_millis(500);
         while fixture
