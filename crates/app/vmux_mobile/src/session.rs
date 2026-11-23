@@ -58,7 +58,7 @@ impl BevyPlugin for MobileSessionPlugin {
                     .chain()
                     .in_set(MaterializeSet),
             )
-            .add_systems(PreUpdate, poll_created_session.in_set(DecideSet));
+            .add_systems(PreUpdate, poll_created.in_set(DecideSet));
     }
 }
 
@@ -462,7 +462,7 @@ fn adopt_create_chat(
     }
 }
 
-fn poll_created_session(
+fn poll_created(
     mut ops: Query<(Entity, &mut StartChatOperation)>,
     sources: Query<(&SourceEpoch, &ActiveConnectionHandle), With<ConnectionSource>>,
     mut ops_cmd: StartChatCommands,

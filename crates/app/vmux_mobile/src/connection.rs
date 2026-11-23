@@ -66,14 +66,14 @@ impl BevyPlugin for MobileConnectionPlugin {
                 PreUpdate,
                 (
                     adopt_loaded_credentials,
-                    adopt_opened_connection,
+                    adopt_opened,
                     adopt_attempt_sessions,
                     adopt_refresh_sessions,
                     adopt_agents,
                     adopt_upgraded_credential,
                     adopt_persisted_credentials,
                     adopt_removed_credentials,
-                    retire_closed_connection,
+                    retire_closed,
                 )
                     .in_set(MaterializeSet),
             )
@@ -741,7 +741,7 @@ fn adopt_loaded_credentials(
     }
 }
 
-fn adopt_opened_connection(
+fn adopt_opened(
     mut ops: Query<(Entity, &mut ConnectionAttempt, &OpenConnectionReceipt)>,
     mut sources: Query<
         (
@@ -1156,7 +1156,7 @@ fn adopt_removed_credentials(
     }
 }
 
-fn retire_closed_connection(
+fn retire_closed(
     ops: Query<Entity, (With<ConnectionCloseOp>, With<CloseConnectionReceipt>)>,
     mut ops_cmd: ConnectionOps,
 ) {

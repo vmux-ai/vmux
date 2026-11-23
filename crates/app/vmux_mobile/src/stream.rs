@@ -37,7 +37,7 @@ impl BevyPlugin for MobileStreamPlugin {
             )
             .add_systems(
                 PreUpdate,
-                (ensure_stream, advance_stream).chain().in_set(DecideSet),
+                (ensure_active, advance).chain().in_set(DecideSet),
             );
     }
 }
@@ -119,7 +119,7 @@ fn cancel_stale(
 }
 
 #[allow(clippy::type_complexity)]
-fn ensure_stream(
+fn ensure_active(
     roots: Query<
         (
             Entity,
@@ -183,7 +183,7 @@ type AdvanceStreamQuery<'w, 's> = Query<
     ),
 >;
 
-fn advance_stream(
+fn advance(
     mut streams: AdvanceStreamQuery,
     sources: Query<(&SourceEpoch, &ActiveConnectionHandle), With<ConnectionSource>>,
     resets: Query<&StreamResetOp>,

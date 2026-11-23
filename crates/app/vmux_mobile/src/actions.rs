@@ -71,7 +71,7 @@ impl BevyPlugin for MobileActionsPlugin {
                 PreUpdate,
                 (
                     adopt_prompt_send,
-                    adopt_simple_actions,
+                    adopt_simple,
                     adopt_models,
                     adopt_media,
                     adopt_team,
@@ -715,7 +715,7 @@ fn adopt_prompt_send(
     }
 }
 
-fn adopt_simple_actions(
+fn adopt_simple(
     cancels: Query<(Entity, &CancelChatReceipt), With<ScopedActionOp>>,
     approves: Query<(Entity, &ApproveCallReceipt), With<ScopedActionOp>>,
     models: Query<(Entity, &SelectRemoteModelReceipt), With<ScopedActionOp>>,
