@@ -507,16 +507,27 @@ impl<'tcx> Ownership<'tcx> {
         {
             return false;
         }
-        let generics = cx.tcx.generics_of(definition);
-        if generics.own_counts().lifetimes > 0 {
-            return true;
-        }
         let ty = cx
             .tcx
             .type_of(definition)
             .instantiate_identity()
             .skip_norm_wip();
-        cx.tcx.type_is_copy_modulo_regions(cx.typing_env(), ty)
+        if cx.tcx.type_is_copy_modulo_regions(cx.typing_env(), ty) {
+            return true;
+        }
+        let generics = cx.tcx.generics_of(definition);
+        if generics.own_counts().lifetimes == 0 {
+            return false;
+        }
+        let TyKind::Adt(owner, arguments) = ty.kind() else {
+            return false;
+        };
+        owner.all_fields().any(|field| {
+            matches!(
+                field.ty(cx.tcx, arguments).skip_norm_wip().kind(),
+                TyKind::Ref(..)
+            )
+        })
     }
 
     fn stateless_unit_adapter(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
@@ -644,9 +655,10 @@ impl<'tcx> ValueGraph<'tcx> {
             }
             TyKind::Adt(owner, arguments) => {
                 if owner.did().is_local() {
+                    let is_copy = cx.tcx.type_is_copy_modulo_regions(cx.typing_env(), ty);
+                    let allowed_retained = self.dtos.contains(&owner.did()) || is_copy;
                     if location != self.root
-                        && (self.canonical.contains(&owner.did())
-                            || retained && !self.dtos.contains(&owner.did()))
+                        && (self.canonical.contains(&owner.did()) || retained && !allowed_retained)
                     {
                         self.issues.push((
                             location,
@@ -654,16 +666,13 @@ impl<'tcx> ValueGraph<'tcx> {
                         ));
                         return false;
                     }
-                    if self.dtos.contains(&owner.did()) {
-                        return true;
-                    }
                     self.values.insert(owner.did());
                     let mut valid = true;
                     for field in owner.all_fields() {
                         valid &= self.check(
                             cx,
                             field.ty(cx.tcx, arguments).skip_norm_wip(),
-                            retained,
+                            retained && !allowed_retained,
                             field.did,
                         );
                     }

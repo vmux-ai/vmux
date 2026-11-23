@@ -12496,16 +12496,19 @@ impl Inventory {
         let has_lifetime = matches!(
             &entry.syntax,
             Some(Item::Struct(structure)) if structure.generics.lifetimes().next().is_some()
-        );
+        ) && entry
+            .field_types
+            .iter()
+            .any(|ty| matches!(ty, Type::Reference(_)));
         let derives_copy = entry.derive_paths.iter().any(|path| {
-            let tail = path.rsplit("::").next().unwrap_or(path);
-            tail == "Copy"
-                && !self.local_binding(&entry.namespace, path)
-                && matches!(
-                    self.external_path(&entry.namespace, path, &mut BTreeSet::new())
-                        .as_deref(),
-                    None | Some("std::marker::Copy" | "core::marker::Copy")
-                )
+            match self
+                .external_path(&entry.namespace, path, &mut BTreeSet::new())
+                .as_deref()
+            {
+                Some("std::marker::Copy" | "core::marker::Copy") => true,
+                None => path == "Copy" && !self.local_binding(&entry.namespace, path),
+                _ => false,
+            }
         });
         if !has_lifetime && !derives_copy {
             return false;
@@ -12550,7 +12553,20 @@ impl Inventory {
         for entry in self.entries.values() {
             if self.value_handle_candidate(entry) {
                 candidates.insert(entry.key.clone());
-                candidate_names.insert(entry.name.as_str());
+                candidate_names.insert(entry.name.clone());
+            }
+        }
+        loop {
+            let before = candidate_names.len();
+            for imports in self.imports.values() {
+                for (alias, target) in &imports.aliases {
+                    if candidate_names.contains(target.rsplit("::").next().unwrap_or(target)) {
+                        candidate_names.insert(alias.clone());
+                    }
+                }
+            }
+            if candidate_names.len() == before {
+                break;
             }
         }
         let mut proved = BTreeSet::new();
@@ -14032,9 +14048,6 @@ impl Inventory {
         if !self.has_process_command(entry) {
             return false;
         }
-        let Some(file) = self.parsed_file(&entry.path) else {
-            return true;
-        };
         struct CargoCall(bool);
         impl<'ast> Visit<'ast> for CargoCall {
             fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
@@ -14056,7 +14069,27 @@ impl Inventory {
             }
         }
         let mut scan = CargoCall(false);
-        scan.visit_file(&file);
+        let mut visited_any = false;
+        let mut sources = vec![entry];
+        if matches!(entry.kind, Kind::Struct | Kind::Enum) {
+            for implementation in self.implementations(entry) {
+                if Self::test_scope(implementation) {
+                    sources.push(implementation);
+                }
+            }
+        }
+        for source in sources {
+            if let Some(item) = &source.syntax {
+                visited_any = true;
+                scan.visit_item(item);
+            }
+        }
+        if !visited_any {
+            let Some(file) = self.parsed_file(&entry.path) else {
+                return true;
+            };
+            scan.visit_file(&file);
+        }
         scan.0
     }
 
@@ -23792,7 +23825,7 @@ fn wave5_copy_handles_borrowed_parsers_and_renderer_contract_impls_prove_safely(
     );
     inventory.source(
         "crates/feature/demo/src/lib.rs",
-        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use dioxus::prelude::*; #[derive(Clone, Copy)] struct HandleId(u32); impl HandleId { fn raw(self) -> u32 { self.0 } } #[derive(Clone, Copy)] struct DeadHandle(u32); struct Parser<'a>(&'a str); impl<'a> Parser<'a> { fn len(&self) -> usize { self.0.len() } } struct DeadParser<'a>(&'a str); #[vmux_api::ui_state] struct DemoState { label: String } #[vmux_api::contract] struct Preset { name: String } impl Preset { fn label(&self) -> &str { &self.name } } #[vmux_page::page(component = DemoView, states = [DemoState])] struct DemoPage; #[component] fn DemoView(preset: Preset) -> Element { let _ = preset.label(); rsx! { div {} } } #[derive(Component)] struct State(u32); fn run(states: Query<&State>) { let _ = (states, HandleId(1).raw(), Parser(\"a\").len()); } struct DemoPlugin; impl Plugin for DemoPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, run); } }",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use core::marker::{Copy, PhantomData}; use dioxus::prelude::*; #[derive(Clone, Copy)] struct HandleId(u32); impl HandleId { fn raw(self) -> u32 { self.0 } } #[derive(Clone, Copy)] struct DeadHandle(u32); struct Parser<'a>(&'a str); impl<'a> Parser<'a> { fn len(&self) -> usize { self.0.len() } } struct PhantomCache<'a>(Vec<u32>, PhantomData<&'a ()>); struct DeadParser<'a>(&'a str); #[vmux_api::ui_state] struct DemoState { label: String } #[vmux_api::contract] struct Preset { name: String } impl Preset { fn label(&self) -> &str { &self.name } } #[vmux_page::page(component = DemoView, states = [DemoState])] struct DemoPage; #[component] fn DemoView(preset: Preset) -> Element { let _ = preset.label(); rsx! { div {} } } #[derive(Component)] struct State(u32); fn run(states: Query<&State>) { let _ = (states, HandleId(1).raw(), Parser(\"a\").len(), PhantomCache(Vec::new(), PhantomData)); } struct DemoPlugin; impl Plugin for DemoPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, run); } }",
     );
     inventory.resolve_usage();
     let policy = Policy::default();
@@ -23811,6 +23844,7 @@ fn wave5_copy_handles_borrowed_parsers_and_renderer_contract_impls_prove_safely(
     for key in [
         "crates/feature/demo/src/lib.rs||struct:DeadHandle",
         "crates/feature/demo/src/lib.rs||struct:DeadParser",
+        "crates/feature/demo/src/lib.rs||struct:PhantomCache",
     ] {
         assert!(
             !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
