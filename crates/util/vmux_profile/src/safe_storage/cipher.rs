@@ -190,17 +190,19 @@ mod tests {
     use super::*;
     use crate::safe_storage::ROOT_KEY_LENGTH;
 
-    fn cipher() -> SafeStorageCipher {
-        let mut root = [0_u8; ROOT_KEY_LENGTH];
-        for (index, byte) in root.iter_mut().enumerate() {
-            *byte = index as u8;
+    impl SafeStorageCipher {
+        fn test_fixture() -> Self {
+            let mut root = [0_u8; ROOT_KEY_LENGTH];
+            for (index, byte) in root.iter_mut().enumerate() {
+                *byte = index as u8;
+            }
+            Self::new(RootKey::new(root))
         }
-        SafeStorageCipher::new(RootKey::new(root))
     }
 
     #[test]
     fn derived_keys_are_domain_separated() {
-        let cipher = cipher();
+        let cipher = SafeStorageCipher::test_fixture();
         let browser = cipher.browser_key().unwrap();
         let mcp = cipher.data_key(MCP_CONTEXT, &[]).unwrap();
         let first_vault = cipher.vault_wrapping_key("first").unwrap();
@@ -213,7 +215,7 @@ mod tests {
 
     #[test]
     fn encrypted_data_requires_the_matching_domain_and_context() {
-        let cipher = cipher();
+        let cipher = SafeStorageCipher::test_fixture();
         let encrypted = cipher.seal_mcp("personal:linear", b"secret").unwrap();
 
         assert_eq!(
@@ -246,7 +248,7 @@ mod tests {
 
     #[test]
     fn encrypted_data_rejects_tampering() {
-        let cipher = cipher();
+        let cipher = SafeStorageCipher::test_fixture();
         let mut encrypted = cipher.wrap_vault_key("vault", b"secret").unwrap();
         *encrypted.last_mut().unwrap() ^= 1;
 

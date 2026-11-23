@@ -13,10 +13,7 @@ pub(super) const MANIFEST_VERSION: u32 = 3;
 pub(crate) const MANIFEST_FILE: &str = "vault.ron";
 pub(crate) const INDEX_FILE: &str = "index.enc";
 pub(crate) const OBJECTS_DIR: &str = "objects";
-const INDEX_AAD: &[u8] = b"vmux-vault-index-v1";
-const OBJECT_AAD_PREFIX: &[u8] = b"vmux-vault-object-v1\0";
 pub(super) const KEY_LEN: usize = 32;
-const NONCE_LEN: usize = 12;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,6 +40,9 @@ pub(super) struct VaultCrypto<'a> {
 }
 
 impl<'a> VaultCrypto<'a> {
+    const INDEX_AAD: &'static [u8] = b"vmux-vault-index-v1";
+    const OBJECT_AAD_PREFIX: &'static [u8] = b"vmux-vault-object-v1\0";
+
     pub(super) fn new(key: &'a [u8]) -> Result<Self, String> {
         if key.len() != KEY_LEN {
             return Err("Vault encryption key has an invalid length".to_string());
@@ -51,7 +51,7 @@ impl<'a> VaultCrypto<'a> {
     }
 
     pub(super) fn encrypt(&self, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, String> {
-        let mut nonce = [0_u8; NONCE_LEN];
+        let mut nonce = [0_u8; aead::NONCE_LEN];
         SystemRandom::new()
             .fill(&mut nonce)
             .map_err(|_| "failed to generate Vault nonce".to_string())?;
@@ -71,15 +71,15 @@ impl<'a> VaultCrypto<'a> {
     }
 
     pub(super) fn decrypt(&self, aad: &[u8], encrypted: &[u8]) -> Result<Vec<u8>, String> {
-        if encrypted.len() < NONCE_LEN + aead::AES_256_GCM.tag_len() {
+        if encrypted.len() < aead::NONCE_LEN + aead::AES_256_GCM.tag_len() {
             return Err("encrypted Vault data is truncated".to_string());
         }
-        let nonce = <[u8; NONCE_LEN]>::try_from(&encrypted[..NONCE_LEN])
+        let nonce = <[u8; aead::NONCE_LEN]>::try_from(&encrypted[..aead::NONCE_LEN])
             .map_err(|_| "invalid Vault nonce".to_string())?;
         let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, self.key)
             .map_err(|_| "invalid Vault encryption key".to_string())?;
         let key = aead::LessSafeKey::new(unbound);
-        let mut data = encrypted[NONCE_LEN..].to_vec();
+        let mut data = encrypted[aead::NONCE_LEN..].to_vec();
         let plaintext = key
             .open_in_place(
                 aead::Nonce::assume_unique_for_key(nonce),
@@ -93,6 +93,12 @@ impl<'a> VaultCrypto<'a> {
     fn object_id(&self, path: &str) -> String {
         let key = hmac::Key::new(hmac::HMAC_SHA256, self.key);
         Hex::encode(hmac::sign(&key, path.as_bytes()).as_ref())
+    }
+
+    fn object_aad(path: &str) -> Vec<u8> {
+        let mut aad = Self::OBJECT_AAD_PREFIX.to_vec();
+        aad.extend_from_slice(path.as_bytes());
+        aad
     }
 }
 
@@ -108,11 +114,11 @@ impl Hex {
     }
 
     pub(super) fn encode(bytes: &[u8]) -> String {
-        const DIGITS: &[u8; 16] = b"0123456789abcdef";
+        let digits = b"0123456789abcdef";
         let mut output = String::with_capacity(bytes.len() * 2);
         for byte in bytes {
-            output.push(DIGITS[(byte >> 4) as usize] as char);
-            output.push(DIGITS[(byte & 0x0f) as usize] as char);
+            output.push(digits[(byte >> 4) as usize] as char);
+            output.push(digits[(byte & 0x0f) as usize] as char);
         }
         output
     }
@@ -258,7 +264,7 @@ impl VaultRepositoryPath {
     ) -> Result<(), String> {
         let repository = self.path();
         let crypto = VaultCrypto::new(key)?;
-        if previous.is_some_and(|previous| same_files(previous, files))
+        if previous.is_some_and(|previous| Self::same_files(previous, files))
             && repository.join(MANIFEST_FILE).is_file()
             && repository.join(INDEX_FILE).is_file()
             && self
@@ -281,7 +287,7 @@ impl VaultRepositoryPath {
                 .is_some_and(|old| LocalEntry::same(Some(old), Some(entry)))
                 && object_path.is_file();
             if !unchanged {
-                let encrypted = crypto.encrypt(&object_aad(path), &entry.data)?;
+                let encrypted = crypto.encrypt(&VaultCrypto::object_aad(path), &entry.data)?;
                 vmux_path::AtomicFile::write(&object_path, &encrypted)
                     .map_err(|error| error.to_string())?;
             }
@@ -309,7 +315,7 @@ impl VaultRepositoryPath {
         let index_source = ron::ser::to_string(&index)
             .map_err(|error| error.to_string())?
             .into_bytes();
-        let encrypted_index = crypto.encrypt(INDEX_AAD, &index_source)?;
+        let encrypted_index = crypto.encrypt(VaultCrypto::INDEX_AAD, &index_source)?;
         vmux_path::AtomicFile::write(repository.join(INDEX_FILE), &encrypted_index)
             .map_err(|error| error.to_string())?;
         let manifest = RemoteManifest {
@@ -331,7 +337,7 @@ impl VaultRepositoryPath {
         let manifest = self.manifest()?;
         let encrypted_index = std::fs::read(repository.join(&manifest.index))
             .map_err(|error| format!("failed to read encrypted Vault index: {error}"))?;
-        let index_source = crypto.decrypt(INDEX_AAD, &encrypted_index)?;
+        let index_source = crypto.decrypt(VaultCrypto::INDEX_AAD, &encrypted_index)?;
         let index_source = std::str::from_utf8(&index_source)
             .map_err(|error| format!("invalid encrypted Vault index: {error}"))?;
         let index = ron::from_str::<EncryptedIndex>(index_source)
@@ -351,7 +357,7 @@ impl VaultRepositoryPath {
             }
             let encrypted = std::fs::read(repository.join(OBJECTS_DIR).join(&file.object))
                 .map_err(|error| format!("missing encrypted Vault object: {error}"))?;
-            let data = crypto.decrypt(&object_aad(&file.path), &encrypted)?;
+            let data = crypto.decrypt(&VaultCrypto::object_aad(&file.path), &encrypted)?;
             let actual_digest = file.kind.digest(file.mode, &data);
             if actual_digest != file.digest {
                 return Err(format!(
@@ -379,17 +385,14 @@ impl VaultRepositoryPath {
         }
         Ok((manifest, files))
     }
-}
 
-fn same_files(left: &BTreeMap<String, LocalEntry>, right: &BTreeMap<String, LocalEntry>) -> bool {
-    left.len() == right.len()
-        && left
-            .iter()
-            .all(|(path, entry)| LocalEntry::same(Some(entry), right.get(path)))
-}
-
-fn object_aad(path: &str) -> Vec<u8> {
-    let mut aad = OBJECT_AAD_PREFIX.to_vec();
-    aad.extend_from_slice(path.as_bytes());
-    aad
+    fn same_files(
+        left: &BTreeMap<String, LocalEntry>,
+        right: &BTreeMap<String, LocalEntry>,
+    ) -> bool {
+        left.len() == right.len()
+            && left
+                .iter()
+                .all(|(path, entry)| LocalEntry::same(Some(entry), right.get(path)))
+    }
 }

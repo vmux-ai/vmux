@@ -13,10 +13,6 @@ use super::snapshot::{Hex, KEY_LEN, LocalEntry, RemoteManifest, VaultCrypto};
 
 pub(crate) const RECOVERY_DIR: &str = "keys/recovery";
 pub(crate) const RECOVERY_FILE: &str = "default.ron";
-const RECOVERY_AAD_PREFIX: &[u8] = b"vmux-vault-recovery-v1\0";
-const RECOVERY_KDF_PREFIX: &[u8] = b"vmux-vault-recovery-kdf-v1\0";
-const FORMAT_VERSION: u32 = 1;
-const MANIFEST_VERSION: u32 = 3;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct RecoveryEnvelope {
@@ -89,6 +85,10 @@ impl GeneratedRecoveryKey {
 }
 
 impl VaultRecovery {
+    const RECOVERY_AAD_PREFIX: &'static [u8] = b"vmux-vault-recovery-v1\0";
+    const RECOVERY_KDF_PREFIX: &'static [u8] = b"vmux-vault-recovery-kdf-v1\0";
+    const MANIFEST_VERSION: u32 = 3;
+
     pub fn current() -> Self {
         let storage = VaultStorage::current();
         Self::from_storage(&storage)
@@ -124,11 +124,11 @@ impl VaultRecovery {
         let manifest = vault.manifest()?;
         let envelope = RecoveryEnvelope::read(&self.repository)?
             .ok_or_else(|| "This Vault has no Recovery Key".to_string())?;
-        let wrapping_key = derive_recovery_wrapping_key(&recovery_key, &manifest.vault_id)?;
-        let key = Zeroizing::new(
-            VaultCrypto::new(&wrapping_key)?
-                .decrypt(&recovery_aad(&manifest.vault_id), &envelope.wrapped_key)?,
-        );
+        let wrapping_key = Self::derive_recovery_wrapping_key(&recovery_key, &manifest.vault_id)?;
+        let key = Zeroizing::new(VaultCrypto::new(&wrapping_key)?.decrypt(
+            &Self::recovery_aad(&manifest.vault_id),
+            &envelope.wrapped_key,
+        )?);
         VaultCrypto::new(&key)?;
         let (_, remote_files) = vault.load_encrypted_snapshot(&key)?;
         Ok((manifest, key, remote_files))
@@ -155,11 +155,11 @@ impl VaultRecovery {
         let previous_manifest = manifest.clone();
         let key = RepositoryKey::new(&self.repository, keys).load(&manifest.vault_id)?;
         VaultCrypto::new(recovery_key)?;
-        let wrapping_key = derive_recovery_wrapping_key(recovery_key, &manifest.vault_id)?;
+        let wrapping_key = Self::derive_recovery_wrapping_key(recovery_key, &manifest.vault_id)?;
         let wrapping_crypto = VaultCrypto::new(&wrapping_key)?;
         let envelope = RecoveryEnvelope {
-            version: FORMAT_VERSION,
-            wrapped_key: wrapping_crypto.encrypt(&recovery_aad(&manifest.vault_id), &key)?,
+            version: RecoveryEnvelope::FORMAT_VERSION,
+            wrapped_key: wrapping_crypto.encrypt(&Self::recovery_aad(&manifest.vault_id), &key)?,
         };
         let source = ron::ser::to_string_pretty(&envelope, ron::ser::PrettyConfig::new())
             .map_err(|error| error.to_string())?;
@@ -171,7 +171,7 @@ impl VaultRecovery {
         )
         .map_err(|error| error.to_string())?;
         let finalization = (|| {
-            manifest.version = MANIFEST_VERSION;
+            manifest.version = Self::MANIFEST_VERSION;
             vault.write_manifest(&manifest)?;
             vault.validate_encrypted_worktree()?;
             git.commit("Add Vault Recovery Key")
@@ -192,9 +192,36 @@ impl VaultRecovery {
         }
         Ok(RecoveryKeyCreation { pending_upload })
     }
+
+    fn derive_recovery_wrapping_key(
+        recovery_key: &[u8],
+        vault_id: &str,
+    ) -> Result<[u8; KEY_LEN], String> {
+        VaultCrypto::new(recovery_key)?;
+        let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, vault_id.as_bytes());
+        let prk = salt.extract(recovery_key);
+        let info = [Self::RECOVERY_KDF_PREFIX];
+        let output = prk
+            .expand(&info, RecoveryKeyLength)
+            .map_err(|_| "failed to derive Vault Recovery Key".to_string())?;
+        let mut key = [0_u8; KEY_LEN];
+        output
+            .fill(&mut key)
+            .map_err(|_| "failed to derive Vault Recovery Key".to_string())?;
+        Ok(key)
+    }
+
+    fn recovery_aad(vault_id: &str) -> Vec<u8> {
+        let mut aad = Vec::with_capacity(Self::RECOVERY_AAD_PREFIX.len() + vault_id.len());
+        aad.extend_from_slice(Self::RECOVERY_AAD_PREFIX);
+        aad.extend_from_slice(vault_id.as_bytes());
+        aad
+    }
 }
 
 impl RecoveryEnvelope {
+    const FORMAT_VERSION: u32 = 1;
+
     pub(crate) fn read(repository: &Path) -> Result<Option<Self>, String> {
         let path = repository.join(RECOVERY_DIR).join(RECOVERY_FILE);
         if !path.exists() {
@@ -203,7 +230,7 @@ impl RecoveryEnvelope {
         let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
         let envelope = ron::from_str::<Self>(&source)
             .map_err(|error| format!("invalid Vault Recovery Key recipient: {error}"))?;
-        if envelope.version != FORMAT_VERSION {
+        if envelope.version != Self::FORMAT_VERSION {
             return Err("unsupported Vault Recovery Key recipient".to_string());
         }
         Ok(Some(envelope))
@@ -232,29 +259,4 @@ impl<'a, K: KeyStore> RepositoryKey<'a, K> {
             }
         })
     }
-}
-
-fn derive_recovery_wrapping_key(
-    recovery_key: &[u8],
-    vault_id: &str,
-) -> Result<[u8; KEY_LEN], String> {
-    VaultCrypto::new(recovery_key)?;
-    let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, vault_id.as_bytes());
-    let prk = salt.extract(recovery_key);
-    let info = [RECOVERY_KDF_PREFIX];
-    let output = prk
-        .expand(&info, RecoveryKeyLength)
-        .map_err(|_| "failed to derive Vault Recovery Key".to_string())?;
-    let mut key = [0_u8; KEY_LEN];
-    output
-        .fill(&mut key)
-        .map_err(|_| "failed to derive Vault Recovery Key".to_string())?;
-    Ok(key)
-}
-
-fn recovery_aad(vault_id: &str) -> Vec<u8> {
-    let mut aad = Vec::with_capacity(RECOVERY_AAD_PREFIX.len() + vault_id.len());
-    aad.extend_from_slice(RECOVERY_AAD_PREFIX);
-    aad.extend_from_slice(vault_id.as_bytes());
-    aad
 }

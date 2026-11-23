@@ -8,9 +8,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use super::VaultStorage;
-use super::repository::{GitHubCli, OutputText};
-
-const GITHUB_VIEWER_QUERY: &str = "query { viewer { login organizations(first: 100) { nodes { login viewerCanCreateRepositories } } } }";
+use super::repository::{GitHubCli, GitRepository};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VaultRepository {
@@ -101,8 +99,8 @@ impl GitHubAuthorization {
             .take()
             .ok_or_else(|| "failed to read gh errors".to_string())?;
         let (sender, receiver) = mpsc::channel();
-        let stdout_reader = spawn_line_reader(stdout, sender.clone());
-        let stderr_reader = spawn_line_reader(stderr, sender);
+        let stdout_reader = Self::spawn_line_reader(stdout, sender.clone());
+        let stderr_reader = Self::spawn_line_reader(stderr, sender);
         let mut lines = Vec::new();
         let mut reported_code = false;
         let status = loop {
@@ -165,19 +163,19 @@ impl GitHubAuthorization {
             })
             .map(str::to_string)
     }
-}
 
-fn spawn_line_reader<R>(reader: R, sender: mpsc::Sender<String>) -> thread::JoinHandle<()>
-where
-    R: Read + Send + 'static,
-{
-    thread::spawn(move || {
-        for line in BufReader::new(reader).lines().map_while(Result::ok) {
-            if sender.send(line).is_err() {
-                break;
+    fn spawn_line_reader<R>(reader: R, sender: mpsc::Sender<String>) -> thread::JoinHandle<()>
+    where
+        R: Read + Send + 'static,
+    {
+        thread::spawn(move || {
+            for line in BufReader::new(reader).lines().map_while(Result::ok) {
+                if sender.send(line).is_err() {
+                    break;
+                }
             }
-        }
-    })
+        })
+    }
 }
 
 impl VaultStorage {
@@ -218,15 +216,17 @@ impl VaultStorage {
         if canceled() {
             return Err("GitHub authorization canceled".to_string());
         }
-        GitHubCli::command()?
+        let output = GitHubCli::command()?
             .args(["api", "user", "--jq", ".login"])
             .output()
-            .map_err(|error| format!("failed to run gh: {error}"))?
-            .success_text()
+            .map_err(|error| format!("failed to run gh: {error}"))?;
+        GitRepository::output_text(output)
     }
 }
 
 impl GitHubAuthorization {
+    const VIEWER_QUERY: &'static str = "query { viewer { login organizations(first: 100) { nodes { login viewerCanCreateRepositories } } } }";
+
     pub(super) fn identity_and_repositories()
     -> Result<(String, Vec<String>, Vec<VaultRepository>), String> {
         if !Self::has_saved_account()? {
@@ -235,15 +235,15 @@ impl GitHubAuthorization {
         let mut command = GitHubCli::command()?;
         command
             .args(["api", "graphql", "-f"])
-            .arg(format!("query={GITHUB_VIEWER_QUERY}"));
-        let source = command
+            .arg(format!("query={}", Self::VIEWER_QUERY));
+        let output = command
             .output()
-            .map_err(|error| format!("failed to run gh: {error}"))?
-            .success_text()?;
+            .map_err(|error| format!("failed to run gh: {error}"))?;
+        let source = GitRepository::output_text(output)?;
         let (owner, owners) = Self::owners_from_graphql(&source)?;
         let mut repositories = Vec::new();
         for repository_owner in &owners {
-            let Ok(source) = GitHubCli::command()?
+            let output = GitHubCli::command()?
                 .args([
                     "repo",
                     "list",
@@ -254,9 +254,8 @@ impl GitHubAuthorization {
                     "nameWithOwner,isPrivate,url,isEmpty",
                 ])
                 .output()
-                .map_err(|error| format!("failed to run gh: {error}"))?
-                .success_text()
-            else {
+                .map_err(|error| format!("failed to run gh: {error}"))?;
+            let Ok(source) = GitRepository::output_text(output) else {
                 continue;
             };
             repositories.extend(

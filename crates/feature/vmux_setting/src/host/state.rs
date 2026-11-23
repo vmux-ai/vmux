@@ -50,14 +50,12 @@ impl Plugin for StatePlugin {
 
 #[derive(Component, Default)]
 #[require(
-    SettingsUiStateUpdates,
+    UiState<SettingsUiState>,
     SettingsSchema,
     SettingsRenderProjection,
     SettingsViewState
 )]
 pub struct Settings;
-
-type SettingsUiStateUpdates = UiState<SettingsUiState>;
 
 #[derive(Component, Default)]
 pub(super) struct SettingsViewState {

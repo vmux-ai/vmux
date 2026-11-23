@@ -115,6 +115,15 @@ struct VaultWorkflow {
     state: VaultWorkflowState,
 }
 
+impl VaultWorkflow {
+    fn owner_choice(
+        value: String,
+        kind: crate::state::VaultOwnerKind,
+    ) -> crate::state::VaultOwnerChoice {
+        crate::state::VaultOwnerChoice { value, kind }
+    }
+}
+
 impl VaultSubscriber {
     fn pending(operation_id: u64, kind: VaultOperationKind) -> Self {
         let mut subscriber = Self::default();
@@ -198,16 +207,10 @@ impl VaultSubscriber {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum VaultOperationTarget {
-    Webview(Entity),
-    Automatic,
-}
-
 #[derive(Component)]
 struct VaultOperationContext {
     operation_id: u64,
-    target: VaultOperationTarget,
+    webview: Option<Entity>,
     kind: VaultOperationKind,
 }
 

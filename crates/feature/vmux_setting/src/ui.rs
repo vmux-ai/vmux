@@ -11,6 +11,7 @@ use crate::state::{
     SettingsUiState,
 };
 use dioxus::prelude::*;
+use vmux_api::BuiltinIcon;
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_api::page_location::PageLocationUiState;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
@@ -42,6 +43,21 @@ struct SettingsRenderCatalog {
 }
 
 impl SettingsRenderCatalog {
+    fn section_icon(id: &str) -> BuiltinIcon {
+        match id {
+            "appearance" => BuiltinIcon::Sparkles,
+            "layout" => BuiltinIcon::Layers,
+            "agent" => BuiltinIcon::Brain,
+            "shortcuts" => BuiltinIcon::Keyboard,
+            "terminal" => BuiltinIcon::Terminal,
+            "browser" => BuiltinIcon::Globe,
+            "editor" => BuiltinIcon::Code,
+            "recording" => BuiltinIcon::Activity,
+            "spaces" => BuiltinIcon::Planet,
+            _ => BuiltinIcon::Settings,
+        }
+    }
+
     fn field(&self, id: SettingsRenderFieldId) -> Option<SettingsRenderField> {
         self.fields.get(id.0 as usize).cloned()
     }
@@ -77,7 +93,7 @@ pub fn Page() -> Element {
         .iter()
         .map(|section| AddressOption {
             label: section.title.clone(),
-            icon: Some(section.icon()),
+            icon: Some(SettingsRenderCatalog::section_icon(&section.id)),
             intent: Some(AddressIntent::Section {
                 id: section.id.clone(),
             }),
@@ -86,7 +102,7 @@ pub fn Page() -> Element {
         .collect::<Vec<_>>();
     let mut address = PageAddress::default();
     if let Some(section) = current_section {
-        let icon = section.icon();
+        let icon = SettingsRenderCatalog::section_icon(&section.id);
         address.fixed.push(AddressCrumb {
             entry: AddressOption {
                 label: section.title,
@@ -136,7 +152,7 @@ pub fn Page() -> Element {
                                 count: 0,
                                 show_count: false,
                                 text_class: "text-sm".to_string(),
-                                builtin_icon: Some(section.icon()),
+                                builtin_icon: Some(SettingsRenderCatalog::section_icon(&section.id)),
                                 onclick: {
                                     let id = section.id.clone();
                                     move |_| navigation.select(id.clone())
@@ -623,16 +639,15 @@ fn SubgroupHeading(label: String) -> Element {
     }
 }
 
-const KEY_CAPTURE_ID: &str = "vmux-settings-key-capture";
-
 #[component]
 fn ChordEditor(path: String, text: String) -> Element {
+    let key_capture_id = "vmux-settings-key-capture";
     let mut recording = use_signal(|| false);
     let mut feedback = use_signal(|| None::<String>);
 
     use_effect(move || {
         if recording() {
-            FocusClaim::new(KEY_CAPTURE_ID).request();
+            FocusClaim::new(key_capture_id).request();
         }
     });
 
@@ -641,7 +656,7 @@ fn ChordEditor(path: String, text: String) -> Element {
         rsx! {
             button {
                 r#type: "button",
-                id: KEY_CAPTURE_ID,
+                id: key_capture_id,
                 tabindex: "0",
                 class: "inline-flex animate-pulse items-center gap-2 rounded-md border border-primary bg-primary/15 px-3 py-1 font-mono text-[11px] text-foreground outline-none",
                 onkeydown: move |event: KeyboardEvent| {

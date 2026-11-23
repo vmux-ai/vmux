@@ -8,19 +8,6 @@ use super::snapshot::{
     SnapshotPath,
 };
 
-const IGNORED_ROOTS: [&str; 9] = [
-    "agents",
-    "extensions",
-    "lsp",
-    "local",
-    "profiles",
-    "projects",
-    "spaces",
-    "workspace",
-    "worktrees",
-];
-const FORMAT_VERSION: u32 = 1;
-
 pub(crate) struct VaultSync;
 
 pub(crate) struct VaultLocalState;
@@ -37,120 +24,134 @@ impl VaultSync {
         if !root.exists() {
             return Ok(files);
         }
-        collect_directory(root, root, &mut files)?;
+        Self::collect_directory(root, root, &mut files)?;
         Ok(files)
     }
-}
 
-fn collect_directory(
-    root: &Path,
-    directory: &Path,
-    files: &mut BTreeMap<String, LocalEntry>,
-) -> Result<(), String> {
-    let mut entries = std::fs::read_dir(directory)
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-    for entry in entries {
-        let path = entry.path();
-        let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
-        if ManagedPath(relative).ignored() {
-            continue;
+    fn collect_directory(
+        root: &Path,
+        directory: &Path,
+        files: &mut BTreeMap<String, LocalEntry>,
+    ) -> Result<(), String> {
+        let mut entries = std::fs::read_dir(directory)
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        entries.sort_by_key(std::fs::DirEntry::file_name);
+        for entry in entries {
+            let path = entry.path();
+            let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
+            if ManagedPath(relative).ignored() {
+                continue;
+            }
+            let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+            if metadata.file_type().is_dir() {
+                Self::collect_directory(root, &path, files)?;
+                continue;
+            }
+            let kind = if metadata.file_type().is_symlink() {
+                EntryKind::Symlink
+            } else if metadata.file_type().is_file() {
+                EntryKind::File
+            } else {
+                continue;
+            };
+            let relative = relative
+                .to_str()
+                .ok_or_else(|| "Vault paths must be valid UTF-8".to_string())?
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            SnapshotPath(&relative).validate()?;
+            let data = match kind {
+                EntryKind::File => std::fs::read(&path).map_err(|error| error.to_string())?,
+                EntryKind::Symlink => FileAttributes::symlink_target(&path)?,
+            };
+            let mode = FileAttributes::mode(&metadata);
+            let (modified_secs, modified_nanos) = FileTimestamp(&metadata).get();
+            let digest = kind.digest(mode, &data);
+            files.insert(
+                relative,
+                LocalEntry {
+                    kind,
+                    mode,
+                    size: metadata.len(),
+                    modified_secs,
+                    modified_nanos,
+                    data,
+                    digest,
+                },
+            );
         }
-        let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
-        if metadata.file_type().is_dir() {
-            collect_directory(root, &path, files)?;
-            continue;
-        }
-        let kind = if metadata.file_type().is_symlink() {
-            EntryKind::Symlink
-        } else if metadata.file_type().is_file() {
-            EntryKind::File
-        } else {
-            continue;
-        };
-        let relative = relative
-            .to_str()
-            .ok_or_else(|| "Vault paths must be valid UTF-8".to_string())?
-            .replace(std::path::MAIN_SEPARATOR, "/");
-        SnapshotPath(&relative).validate()?;
-        let data = match kind {
-            EntryKind::File => std::fs::read(&path).map_err(|error| error.to_string())?,
-            EntryKind::Symlink => FileAttributes::symlink_target(&path)?,
-        };
-        let mode = FileAttributes::mode(&metadata);
-        let (modified_secs, modified_nanos) = FileTimestamp(&metadata).get();
-        let digest = kind.digest(mode, &data);
-        files.insert(
-            relative,
-            LocalEntry {
-                kind,
-                mode,
-                size: metadata.len(),
-                modified_secs,
-                modified_nanos,
-                data,
-                digest,
-            },
-        );
+        Ok(())
     }
-    Ok(())
-}
 
-fn collect_local_fingerprints(root: &Path) -> Result<BTreeMap<String, LocalFingerprint>, String> {
-    let mut files = BTreeMap::new();
-    if root.exists() {
-        collect_fingerprint_directory(root, root, &mut files)?;
+    fn collect_local_fingerprints(
+        root: &Path,
+    ) -> Result<BTreeMap<String, LocalFingerprint>, String> {
+        let mut files = BTreeMap::new();
+        if root.exists() {
+            Self::collect_fingerprint_directory(root, root, &mut files)?;
+        }
+        Ok(files)
     }
-    Ok(files)
-}
 
-fn collect_fingerprint_directory(
-    root: &Path,
-    directory: &Path,
-    files: &mut BTreeMap<String, LocalFingerprint>,
-) -> Result<(), String> {
-    for entry in std::fs::read_dir(directory).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let path = entry.path();
-        let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
-        if ManagedPath(relative).ignored() {
-            continue;
+    fn collect_fingerprint_directory(
+        root: &Path,
+        directory: &Path,
+        files: &mut BTreeMap<String, LocalFingerprint>,
+    ) -> Result<(), String> {
+        for entry in std::fs::read_dir(directory).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
+            if ManagedPath(relative).ignored() {
+                continue;
+            }
+            let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+            if metadata.file_type().is_dir() {
+                Self::collect_fingerprint_directory(root, &path, files)?;
+                continue;
+            }
+            let kind = if metadata.file_type().is_symlink() {
+                EntryKind::Symlink
+            } else if metadata.file_type().is_file() {
+                EntryKind::File
+            } else {
+                continue;
+            };
+            let relative = relative
+                .to_str()
+                .ok_or_else(|| "Vault paths must be valid UTF-8".to_string())?
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            SnapshotPath(&relative).validate()?;
+            let (modified_secs, modified_nanos) = FileTimestamp(&metadata).get();
+            files.insert(
+                relative,
+                LocalFingerprint {
+                    kind,
+                    mode: FileAttributes::mode(&metadata),
+                    size: metadata.len(),
+                    modified_secs,
+                    modified_nanos,
+                },
+            );
         }
-        let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
-        if metadata.file_type().is_dir() {
-            collect_fingerprint_directory(root, &path, files)?;
-            continue;
-        }
-        let kind = if metadata.file_type().is_symlink() {
-            EntryKind::Symlink
-        } else if metadata.file_type().is_file() {
-            EntryKind::File
-        } else {
-            continue;
-        };
-        let relative = relative
-            .to_str()
-            .ok_or_else(|| "Vault paths must be valid UTF-8".to_string())?
-            .replace(std::path::MAIN_SEPARATOR, "/");
-        SnapshotPath(&relative).validate()?;
-        let (modified_secs, modified_nanos) = FileTimestamp(&metadata).get();
-        files.insert(
-            relative,
-            LocalFingerprint {
-                kind,
-                mode: FileAttributes::mode(&metadata),
-                size: metadata.len(),
-                modified_secs,
-                modified_nanos,
-            },
-        );
+        Ok(())
     }
-    Ok(())
 }
 
 impl ManagedPath<'_> {
+    const IGNORED_ROOTS: [&'static str; 9] = [
+        "agents",
+        "extensions",
+        "lsp",
+        "local",
+        "profiles",
+        "projects",
+        "spaces",
+        "workspace",
+        "worktrees",
+    ];
+
     pub(super) fn ignored(&self) -> bool {
         if self.0.file_name().is_some_and(|name| name == ".DS_Store") {
             return true;
@@ -164,7 +165,7 @@ impl ManagedPath<'_> {
                 _ => None,
             });
         first.is_some_and(|name| {
-            name == ".git" || name == ".vmux-vault" || IGNORED_ROOTS.contains(&name)
+            name == ".git" || name == ".vmux-vault" || Self::IGNORED_ROOTS.contains(&name)
         })
     }
 }
@@ -203,10 +204,12 @@ impl LocalPath<'_> {
 }
 
 impl VaultLocalState {
+    const FORMAT_VERSION: u32 = 1;
+
     pub(crate) fn write(root: &Path, repository: &Path) -> Result<(), String> {
         let files = VaultSync::collect(root)?;
         let state = LocalState {
-            version: FORMAT_VERSION,
+            version: Self::FORMAT_VERSION,
             files: files
                 .into_iter()
                 .map(|(path, entry)| LocalStateEntry {
@@ -230,7 +233,7 @@ impl VaultLocalState {
     }
 
     pub(crate) fn baseline(repository: &Path) -> Result<BTreeMap<String, LocalEntry>, String> {
-        read_local_state(repository)?
+        Self::read_local_state(repository)?
             .into_iter()
             .map(|(path, entry)| {
                 let data = entry
@@ -253,8 +256,8 @@ impl VaultLocalState {
     }
 
     pub(super) fn change_count(root: &Path, repository: &Path) -> Result<u32, String> {
-        let local = collect_local_fingerprints(root)?;
-        let state = read_local_state(repository).unwrap_or_default();
+        let local = VaultSync::collect_local_fingerprints(root)?;
+        let state = Self::read_local_state(repository).unwrap_or_default();
         let paths = local
             .keys()
             .chain(state.keys())
@@ -279,19 +282,19 @@ impl VaultLocalState {
             })
             .count() as u32)
     }
-}
 
-fn read_local_state(repository: &Path) -> Result<BTreeMap<String, LocalStateEntry>, String> {
-    let source = std::fs::read(VaultRepositoryPath::at(repository).state_path())
-        .map_err(|error| error.to_string())?;
-    let source = std::str::from_utf8(&source).map_err(|error| error.to_string())?;
-    let state = ron::from_str::<LocalState>(source).map_err(|error| error.to_string())?;
-    if state.version != FORMAT_VERSION {
-        return Err("unsupported Vault local state".to_string());
+    fn read_local_state(repository: &Path) -> Result<BTreeMap<String, LocalStateEntry>, String> {
+        let source = std::fs::read(VaultRepositoryPath::at(repository).state_path())
+            .map_err(|error| error.to_string())?;
+        let source = std::str::from_utf8(&source).map_err(|error| error.to_string())?;
+        let state = ron::from_str::<LocalState>(source).map_err(|error| error.to_string())?;
+        if state.version != Self::FORMAT_VERSION {
+            return Err("unsupported Vault local state".to_string());
+        }
+        Ok(state
+            .files
+            .into_iter()
+            .map(|entry| (entry.path.clone(), entry))
+            .collect())
     }
-    Ok(state
-        .files
-        .into_iter()
-        .map(|entry| (entry.path.clone(), entry))
-        .collect())
 }

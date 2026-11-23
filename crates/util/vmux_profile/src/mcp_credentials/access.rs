@@ -99,11 +99,8 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    static TEST_ACCESS: Mutex<()> = Mutex::new(());
-
     #[test]
     fn writes_invalidate_prepared_launches() {
-        let _test = TEST_ACCESS.lock().unwrap();
         let access = McpCredentialAccess::default();
         let revision = access.stable_revision().unwrap();
         assert_eq!(
@@ -123,7 +120,6 @@ mod tests {
 
     #[test]
     fn launch_validation_does_not_wait_for_writes() {
-        let _test = TEST_ACCESS.lock().unwrap();
         let access = McpCredentialAccess::default();
         let revision = access.stable_revision().unwrap();
         let (started_tx, started_rx) = mpsc::channel();
