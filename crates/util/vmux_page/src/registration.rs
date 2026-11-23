@@ -75,7 +75,8 @@ pub struct PageClaimDirty;
 
 struct PageDependencyPlugin<C>(std::marker::PhantomData<fn() -> C>);
 
-struct ReactivePageDependencyPlugin<C>(std::marker::PhantomData<fn() -> C>);
+#[derive(Resource)]
+struct ReactivePageDependency<C>(std::marker::PhantomData<fn() -> C>);
 
 impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
@@ -156,8 +157,8 @@ impl PagePlugin {
 
     fn track_reactive_dependency<C: Component>(app: &mut App) {
         Self::track_dependency::<C>(app);
-        if !app.is_plugin_added::<ReactivePageDependencyPlugin<C>>() {
-            app.add_plugins(ReactivePageDependencyPlugin::<C>(std::marker::PhantomData));
+        if !app.world().contains_resource::<ReactivePageDependency<C>>() {
+            app.insert_resource(ReactivePageDependency::<C>(std::marker::PhantomData));
         }
     }
 
@@ -182,13 +183,11 @@ impl PagePlugin {
 impl<C: Component> Plugin for PageDependencyPlugin<C> {
     fn build(&self, app: &mut App) {
         app.add_observer(mark_dependency_added::<C>)
-            .add_observer(mark_dependency_removed::<C>);
-    }
-}
-
-impl<C: Component> Plugin for ReactivePageDependencyPlugin<C> {
-    fn build(&self, app: &mut App) {
-        app.add_systems(First, mark_dependency_changed::<C>);
+            .add_observer(mark_dependency_removed::<C>)
+            .add_systems(
+                First,
+                mark_dependency_changed::<C>.run_if(resource_exists::<ReactivePageDependency<C>>),
+            );
     }
 }
 
@@ -201,6 +200,7 @@ fn mark_dependency_removed<C: Component>(event: On<Remove, C>, mut commands: Com
 }
 
 fn mark_dependency_changed<C: Component>(
+    _reactive: Res<ReactivePageDependency<C>>,
     changed: Query<Entity, Changed<C>>,
     mut commands: Commands,
 ) {
@@ -303,7 +303,10 @@ mod tests {
         );
 
         assert!(app.is_plugin_added::<PageDependencyPlugin<Context>>());
-        assert!(app.is_plugin_added::<ReactivePageDependencyPlugin<Context>>());
+        assert!(
+            app.world()
+                .contains_resource::<ReactivePageDependency<Context>>()
+        );
         assert!(app.is_plugin_added::<PageDependencyPlugin<Claimed>>());
     }
 }
