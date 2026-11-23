@@ -363,64 +363,44 @@ impl Range {
     }
 }
 
-enum Condition {
-    True,
-    False,
-    Unknown,
-}
+struct Condition;
 
 impl Condition {
-    fn of(meta: &Meta) -> Self {
+    fn of(meta: &Meta) -> Option<bool> {
         Self::evaluate(meta, false)
     }
 
-    fn evaluate(meta: &Meta, linux_tests: bool) -> Self {
+    fn evaluate(meta: &Meta, linux_tests: bool) -> Option<bool> {
         match meta {
-            Meta::Path(path) if path.is_ident("test") => {
-                if linux_tests {
-                    Self::True
-                } else {
-                    Self::False
-                }
-            }
+            Meta::Path(path) if path.is_ident("test") => Some(linux_tests),
             Meta::Path(path) if linux_tests && (path.is_ident("unix") || path.is_ident("host")) => {
-                Self::True
+                Some(true)
             }
             Meta::List(list) => {
                 let Ok(parts) =
                     list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
                 else {
-                    return Self::Unknown;
+                    return None;
                 };
                 if list.path.is_ident("not") && parts.len() == 1 {
-                    return match Self::evaluate(&parts[0], linux_tests) {
-                        Self::False => Self::True,
-                        Self::True => Self::False,
-                        Self::Unknown => Self::Unknown,
-                    };
+                    return Self::evaluate(&parts[0], linux_tests).map(|value| !value);
                 }
                 let all = list.path.is_ident("all");
                 if !all && !list.path.is_ident("any") {
-                    return Self::Unknown;
+                    return None;
                 }
                 let mut unknown = false;
                 for part in parts {
                     match Self::evaluate(&part, linux_tests) {
-                        Self::False if all => return Self::False,
-                        Self::True if !all => return Self::True,
-                        Self::Unknown => unknown = true,
+                        Some(false) if all => return Some(false),
+                        Some(true) if !all => return Some(true),
+                        None => unknown = true,
                         _ => {}
                     }
                 }
-                if unknown {
-                    Self::Unknown
-                } else if all {
-                    Self::True
-                } else {
-                    Self::False
-                }
+                if unknown { None } else { Some(all) }
             }
-            _ => Self::Unknown,
+            _ => None,
         }
     }
 
@@ -503,12 +483,12 @@ impl Condition {
         };
         let value = Self::evaluate(condition, true);
         if list.path.is_ident("cfg") {
-            return parts.len() == 1 && matches!(value, Self::True);
+            return parts.len() == 1 && value == Some(true);
         }
         match value {
-            Self::False => return true,
-            Self::Unknown => return false,
-            Self::True => {}
+            Some(false) => return true,
+            None => return false,
+            Some(true) => {}
         }
         for attribute in parts.iter().skip(1) {
             if !Self::linux_attribute(attribute) {
@@ -600,7 +580,7 @@ impl Collector {
             };
             if attribute.path().is_ident("cfg")
                 && parts.len() == 1
-                && matches!(Condition::of(condition), Condition::False)
+                && Condition::of(condition) == Some(false)
             {
                 self.excluded.push(Range::of(span));
             }

@@ -121,6 +121,44 @@ impl Native {
         let version = self.workspace_version()?;
         let values = self.artifact_values(&version)?;
         let tag = &values["VMUX_RELEASE_TAG"];
+        let found = self.fetch_release_assets(tag, &values)?;
+        let digest = found[values["VMUX_DMG_NAME"].as_str()]
+            .get("digest")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("Missing DMG digest")?;
+        let checksum = digest.strip_prefix("sha256:").ok_or("Invalid DMG digest")?;
+        if checksum.len() != 64 || !checksum.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err("Invalid DMG checksum".into());
+        }
+        let temporary = Temporary::create(&std::env::temp_dir(), "vmux-release-metadata")?;
+        let signature = self.download_release_signature(
+            tag,
+            &values["VMUX_APP_SIGNATURE_NAME"],
+            temporary.path(),
+            "Empty update signature",
+        )?;
+        let cli_signature = self.download_release_signature(
+            tag,
+            &values["VMUX_CLI_SIGNATURE_NAME"],
+            temporary.path(),
+            "Empty CLI update signature",
+        )?;
+        self.apply_release_metadata(
+            &version,
+            &values,
+            &found,
+            checksum,
+            signature,
+            cli_signature,
+            check,
+        )
+    }
+
+    fn fetch_release_assets(
+        &self,
+        tag: &str,
+        values: &std::collections::BTreeMap<String, String>,
+    ) -> Result<std::collections::BTreeMap<String, serde_json::Value>> {
         let release: serde_json::Value = serde_json::from_slice(&self.output(
             "gh",
             &[
@@ -141,7 +179,7 @@ impl Native {
                 .get("name")
                 .and_then(serde_json::Value::as_str)
                 .ok_or("Missing release asset name")?;
-            if found.insert(name, asset).is_some() {
+            if found.insert(name.to_string(), asset.clone()).is_some() {
                 return Err("Duplicate release asset".into());
             }
         }
@@ -157,15 +195,16 @@ impl Native {
                 return Err(format!("Release is missing {}", values[key]).into());
             }
         }
-        let digest = found[values["VMUX_DMG_NAME"].as_str()]
-            .get("digest")
-            .and_then(serde_json::Value::as_str)
-            .ok_or("Missing DMG digest")?;
-        let checksum = digest.strip_prefix("sha256:").ok_or("Invalid DMG digest")?;
-        if checksum.len() != 64 || !checksum.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Err("Invalid DMG checksum".into());
-        }
-        let temporary = Temporary::create(&std::env::temp_dir(), "vmux-release-metadata")?;
+        Ok(found)
+    }
+
+    fn download_release_signature(
+        &self,
+        tag: &str,
+        pattern: &str,
+        dir: &std::path::Path,
+        empty_error: &str,
+    ) -> Result<String> {
         self.run_command(
             "gh",
             &[
@@ -173,33 +212,30 @@ impl Native {
                 OsStr::new("download"),
                 OsStr::new(tag),
                 OsStr::new("--pattern"),
-                OsStr::new(&values["VMUX_APP_SIGNATURE_NAME"]),
+                OsStr::new(pattern),
                 OsStr::new("--dir"),
-                temporary.path().as_os_str(),
+                dir.as_os_str(),
             ],
         )?;
-        let signature =
-            fs::read_to_string(temporary.path().join(&values["VMUX_APP_SIGNATURE_NAME"]))?;
+        let signature = fs::read_to_string(dir.join(pattern))?;
         if signature.trim().is_empty() {
-            return Err("Empty update signature".into());
+            return Err(empty_error.into());
         }
-        self.run_command(
-            "gh",
-            &[
-                OsStr::new("release"),
-                OsStr::new("download"),
-                OsStr::new(tag),
-                OsStr::new("--pattern"),
-                OsStr::new(&values["VMUX_CLI_SIGNATURE_NAME"]),
-                OsStr::new("--dir"),
-                temporary.path().as_os_str(),
-            ],
-        )?;
-        let cli_signature =
-            fs::read_to_string(temporary.path().join(&values["VMUX_CLI_SIGNATURE_NAME"]))?;
-        if cli_signature.trim().is_empty() {
-            return Err("Empty CLI update signature".into());
-        }
+        Ok(signature)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_release_metadata(
+        &self,
+        version: &str,
+        values: &std::collections::BTreeMap<String, String>,
+        found: &std::collections::BTreeMap<String, serde_json::Value>,
+        checksum: &str,
+        signature: String,
+        cli_signature: String,
+        check: bool,
+    ) -> Result<()> {
+        let tag = &values["VMUX_RELEASE_TAG"];
         let manifest_path = self.checkout.root.join("website/public/updates.json");
         let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(&manifest_path)?)?;
         let original_manifest = manifest.clone();

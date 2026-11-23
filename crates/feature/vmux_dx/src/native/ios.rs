@@ -11,6 +11,36 @@ use crate::temporary::Temporary;
 impl Native {
     pub fn ios_release(&mut self) -> Result<()> {
         let product = self.product()?;
+        let (team, provisioning, _keychain) = self.prepare_ios_signing()?;
+        let temporary = Temporary::create(&std::env::temp_dir(), "vmux-ios-release")?;
+        let profile = self.decode_ios_profile(
+            temporary.path(),
+            &provisioning,
+            &team,
+            product.value("VMUX_HOST_MOBILE_ID"),
+        )?;
+        self.tool(
+            OsStr::new("dx"),
+            &[
+                "build",
+                "--platform",
+                "ios",
+                "--release",
+                "-p",
+                "vmux_mobile",
+                "--target",
+                "aarch64-apple-ios",
+            ]
+            .map(Into::into),
+        )?;
+        self.resources_ios()?;
+        let app = self.ios_bundle();
+        self.sign_ios_bundle(&app, &profile, temporary.path(), &product, &team)?;
+        self.verify_ios(true)?;
+        self.archive_ios_ipa(&app, temporary.path(), product.value("VMUX_HOST_NAME"))
+    }
+
+    fn prepare_ios_signing(&mut self) -> Result<(String, std::ffi::OsString, Keychain)> {
         let team = self
             .environment
             .required("APPLE_TEAM_ID")?
@@ -48,8 +78,17 @@ impl Native {
             let path = keychain.install(&self.checkout.root, &self.environment)?;
             self.environment.set("CODESIGN_KEYCHAIN", path.as_os_str());
         }
-        let temporary = Temporary::create(&std::env::temp_dir(), "vmux-ios-release")?;
-        let profile = temporary.path().join("profile.mobileprovision");
+        Ok((team, provisioning, keychain))
+    }
+
+    fn decode_ios_profile(
+        &self,
+        stage: &std::path::Path,
+        provisioning: &OsStr,
+        team: &str,
+        mobile_id: &str,
+    ) -> Result<PathBuf> {
+        let profile = stage.join("profile.mobileprovision");
         let mut decode = self.command("base64");
         decode.arg("--decode");
         let bytes = Execution::new(decode)
@@ -73,34 +112,27 @@ impl Native {
             "-",
         ]);
         let identifier = Execution::new(inspect).output(Some(&profile_xml))?.stdout;
-        if std::str::from_utf8(&identifier)?.trim()
-            != format!("{team}.{}", product.value("VMUX_HOST_MOBILE_ID"))
-        {
+        if std::str::from_utf8(&identifier)?.trim() != format!("{team}.{mobile_id}") {
             return Err("Provisioning profile does not match the selected application".into());
         }
-        self.tool(
-            OsStr::new("dx"),
-            &[
-                "build",
-                "--platform",
-                "ios",
-                "--release",
-                "-p",
-                "vmux_mobile",
-                "--target",
-                "aarch64-apple-ios",
-            ]
-            .map(Into::into),
-        )?;
-        self.resources_ios()?;
-        let app = self.ios_bundle();
-        self.copy(&profile, &app.join("embedded.mobileprovision"))?;
-        let entitlements = temporary.path().join("host.entitlements");
+        Ok(profile)
+    }
+
+    fn sign_ios_bundle(
+        &self,
+        app: &std::path::Path,
+        profile: &std::path::Path,
+        stage: &std::path::Path,
+        product: &crate::product::ProductMetadata,
+        team: &str,
+    ) -> Result<()> {
+        self.copy(profile, &app.join("embedded.mobileprovision"))?;
+        let entitlements = stage.join("host.entitlements");
         let mut projected =
             plist::Value::from_file(product.value("VMUX_HOST_MOBILE_ENTITLEMENTS"))?;
         Self::project_mobile_entitlements(
             &mut projected,
-            &team,
+            team,
             product.value("VMUX_HOST_MOBILE_ID"),
         );
         let values = projected
@@ -112,7 +144,7 @@ impl Native {
         );
         values.insert(
             "com.apple.developer.team-identifier".into(),
-            team.clone().into(),
+            team.to_string().into(),
         );
         projected.to_file_xml(&entitlements)?;
         let mut sign = self.command("codesign");
@@ -129,7 +161,7 @@ impl Native {
         if let Some(path) = self.environment.get("CODESIGN_KEYCHAIN") {
             sign.arg("--keychain").arg(path);
         }
-        sign.arg(&app);
+        sign.arg(app);
         Execution::new(sign).run()?;
         self.run_command(
             "codesign",
@@ -139,23 +171,20 @@ impl Native {
                 OsStr::new("--strict"),
                 app.as_os_str(),
             ],
-        )?;
-        self.verify_ios(true)?;
-        let manifest: toml::Table =
-            fs::read_to_string(self.checkout.root.join("Cargo.toml"))?.parse()?;
-        let version = manifest
-            .get("workspace")
-            .and_then(|value| value.get("package"))
-            .and_then(|value| value.get("version"))
-            .and_then(toml::Value::as_str)
-            .ok_or("Missing workspace version")?;
+        )
+    }
+
+    fn archive_ios_ipa(
+        &self,
+        app: &std::path::Path,
+        stage: &std::path::Path,
+        host_name: &str,
+    ) -> Result<()> {
+        let version = self.workspace_version()?;
         let out = app.parent().unwrap().join("ipa");
         fs::create_dir_all(&out)?;
-        let ipa = out.join(format!(
-            "{}_{version}_aarch64.ipa",
-            product.value("VMUX_HOST_NAME")
-        ));
-        let payload = temporary.path().join("Payload");
+        let ipa = out.join(format!("{host_name}_{version}_aarch64.ipa"));
+        let payload = stage.join("Payload");
         fs::create_dir(&payload)?;
         self.run_command(
             "cp",
@@ -163,7 +192,7 @@ impl Native {
         )?;
         let mut archive = self.command("ditto");
         archive
-            .current_dir(temporary.path())
+            .current_dir(stage)
             .args(["-c", "-k", "--sequesterRsrc", "--keepParent", "Payload"])
             .arg(&ipa);
         Execution::new(archive).run()?;
@@ -244,6 +273,17 @@ impl Native {
         if !app.join("Info.plist").is_file() {
             return Err("iOS build produced no bundle Info.plist".into());
         }
+        self.compile_ios_assets(&app, &product)?;
+        let plist = app.join("Info.plist");
+        self.write_ios_info_plist(&plist, &product)?;
+        self.stamp_ios_sdk_metadata(&plist)
+    }
+
+    fn compile_ios_assets(
+        &self,
+        app: &std::path::Path,
+        product: &crate::product::ProductMetadata,
+    ) -> Result<()> {
         let packaging = self.checkout.root.join("packaging/ios");
         let stage = Temporary::create(&std::env::temp_dir(), "vmux-ios-assets")?;
         let catalog = stage.path().join("Assets.xcassets");
@@ -307,17 +347,16 @@ impl Native {
         self.copy(
             &PathBuf::from(product.value("VMUX_HOST_MOBILE_PRIVACY")),
             &app.join("PrivacyInfo.xcprivacy"),
-        )?;
-        let manifest: toml::Table =
-            fs::read_to_string(self.checkout.root.join("Cargo.toml"))?.parse()?;
-        let version = manifest
-            .get("workspace")
-            .and_then(|value| value.get("package"))
-            .and_then(|value| value.get("version"))
-            .and_then(toml::Value::as_str)
-            .ok_or("Missing workspace version")?;
-        let plist = app.join("Info.plist");
-        let mut info = plist::Value::from_file(&plist)?;
+        )
+    }
+
+    fn write_ios_info_plist(
+        &self,
+        plist: &std::path::Path,
+        product: &crate::product::ProductMetadata,
+    ) -> Result<()> {
+        let version = self.workspace_version()?;
+        let mut info = plist::Value::from_file(plist)?;
         let selected = plist::Value::from_file(product.value("VMUX_HOST_MOBILE_PLIST"))?;
         let template = selected
             .as_dictionary()
@@ -338,7 +377,7 @@ impl Native {
                 "CFBundleDisplayName",
                 product.value("VMUX_HOST_NAME").to_string(),
             ),
-            ("CFBundleShortVersionString", version.to_string()),
+            ("CFBundleShortVersionString", version),
             (
                 "CFBundleVersion",
                 self.get("VMUX_IOS_BUILD_NUMBER", "1")
@@ -358,7 +397,11 @@ impl Native {
                 }
             }
         }
-        info.to_file_xml(&plist)?;
+        info.to_file_xml(plist)?;
+        Ok(())
+    }
+
+    fn stamp_ios_sdk_metadata(&self, plist: &std::path::Path) -> Result<()> {
         let sdk = self.text(
             "xcrun",
             &[
@@ -402,8 +445,8 @@ impl Native {
             ("DTXcodeBuild", xcode_build.into()),
             ("BuildMachineOSBuild", system_build.trim().into()),
         ] {
-            if self.plist(&plist, &format!("Set :{key} {value}")).is_err() {
-                self.plist(&plist, &format!("Add :{key} string {value}"))?;
+            if self.plist(plist, &format!("Set :{key} {value}")).is_err() {
+                self.plist(plist, &format!("Add :{key} string {value}"))?;
             }
         }
         Ok(())
