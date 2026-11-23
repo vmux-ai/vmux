@@ -1,7 +1,6 @@
-pub use platform::*;
-
 #[cfg(target_os = "ios")]
 mod platform {
+    use bevy_window::AppLifecycle;
     use objc2::rc::Retained;
     use objc2::runtime::NSObjectProtocol;
     use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
@@ -11,39 +10,58 @@ mod platform {
         UIApplicationWillEnterForegroundNotification,
     };
 
-    use bevy_window::AppLifecycle;
-
     use crate::runtime::RuntimeHandle;
 
-    pub fn install(runtime: RuntimeHandle) {
-        let Some(mtm) = MainThreadMarker::new() else {
-            tracing::error!("runtime: the lifecycle observer must be installed on the main thread");
-            return;
-        };
-        let observer = LifecycleObserver::new(mtm, runtime);
-        let center = NSNotificationCenter::defaultCenter();
-        unsafe {
-            center.addObserver_selector_name_object(
-                &observer,
-                sel!(didEnterBackground:),
-                Some(UIApplicationDidEnterBackgroundNotification),
-                None,
-            );
-            center.addObserver_selector_name_object(
-                &observer,
-                sel!(willEnterForeground:),
-                Some(UIApplicationWillEnterForegroundNotification),
-                None,
-            );
-            center.addObserver_selector_name_object(
-                &observer,
-                sel!(didBecomeActive:),
-                Some(UIApplicationDidBecomeActiveNotification),
-                None,
-            );
+    pub(crate) struct LifecycleGuard {
+        observer: Option<Retained<LifecycleObserver>>,
+    }
+
+    impl Drop for LifecycleGuard {
+        fn drop(&mut self) {
+            let Some(observer) = self.observer.take() else {
+                return;
+            };
+            unsafe {
+                NSNotificationCenter::defaultCenter().removeObserver(&observer);
+            }
         }
-        std::mem::forget(observer);
-        tracing::info!("runtime: lifecycle observer installed");
+    }
+
+    impl RuntimeHandle {
+        pub(crate) fn install_lifecycle(&self) -> LifecycleGuard {
+            let Some(mtm) = MainThreadMarker::new() else {
+                tracing::error!(
+                    "runtime: the lifecycle observer must be installed on the main thread"
+                );
+                return LifecycleGuard { observer: None };
+            };
+            let observer = LifecycleObserver::new(mtm, self.clone());
+            let center = NSNotificationCenter::defaultCenter();
+            unsafe {
+                center.addObserver_selector_name_object(
+                    &observer,
+                    sel!(didEnterBackground:),
+                    Some(UIApplicationDidEnterBackgroundNotification),
+                    None,
+                );
+                center.addObserver_selector_name_object(
+                    &observer,
+                    sel!(willEnterForeground:),
+                    Some(UIApplicationWillEnterForegroundNotification),
+                    None,
+                );
+                center.addObserver_selector_name_object(
+                    &observer,
+                    sel!(didBecomeActive:),
+                    Some(UIApplicationDidBecomeActiveNotification),
+                    None,
+                );
+            }
+            tracing::info!("runtime: lifecycle observer installed");
+            LifecycleGuard {
+                observer: Some(observer),
+            }
+        }
     }
 
     define_class!(
@@ -87,7 +105,12 @@ mod platform {
 
     use crate::runtime::RuntimeHandle;
 
-    pub fn install(runtime: RuntimeHandle) {
-        runtime.report_lifecycle(AppLifecycle::Running);
+    pub(crate) struct UnsupportedLifecycleGuard;
+
+    impl RuntimeHandle {
+        pub(crate) fn install_lifecycle(&self) -> UnsupportedLifecycleGuard {
+            self.report_lifecycle(AppLifecycle::Running);
+            UnsupportedLifecycleGuard
+        }
     }
 }

@@ -1,13 +1,14 @@
+#[cfg(target_os = "ios")]
+pub use platform::ScannerSupport;
 #[cfg(not(target_os = "ios"))]
 pub use platform::UnsupportedScanner as ScannerSupport;
-pub use platform::*;
 
 #[cfg(target_os = "ios")]
 mod platform {
-    use crate::pairing::ScanRequest;
     use std::cell::{Cell, RefCell};
     use std::ptr;
 
+    use bevy_ecs::entity::Entity;
     use block2::RcBlock;
     use dioxus::mobile::tao::platform::ios::WindowExtIOS;
     use dispatch2::DispatchQueue;
@@ -30,19 +31,62 @@ mod platform {
         UIColor, UIControlEvents, UIControlState, UIFont, UILabel, UIModalPresentationStyle,
         UIViewController,
     };
+    use vmux_ecs::EntityTarget;
     use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-    use crate::pairing::{PairRequest, PairingFailure};
+    use crate::connection::{ActiveScan, CancelScan, ScanCompleted, ScanRequest, ScanTicket};
     use crate::runtime::RuntimeHandle;
 
-    thread_local! {
-        static ROOT_CONTROLLER: Cell<*mut UIViewController> = const { Cell::new(ptr::null_mut()) };
-        static ACTIVE: Cell<bool> = const { Cell::new(false) };
-        static REQUESTING: Cell<bool> = const { Cell::new(false) };
-        static RUNTIME: RefCell<Option<RuntimeHandle>> = const { RefCell::new(None) };
+    struct ScannerHost {
+        root_controller: *mut UIViewController,
+        root_generation: u64,
+        active: Option<ScanTicket>,
+        controller: Option<Retained<ScannerController>>,
+        requesting: Option<ScanTicket>,
+        runtime: Option<RuntimeHandle>,
+    }
+
+    impl ScannerHost {
+        const fn empty() -> Self {
+            Self {
+                root_controller: ptr::null_mut(),
+                root_generation: 0,
+                active: None,
+                controller: None,
+                requesting: None,
+                runtime: None,
+            }
+        }
+
+        fn with<R>(f: impl FnOnce(&Self) -> R) -> R {
+            thread_local! {
+                static HOST: RefCell<ScannerHost> = const { RefCell::new(ScannerHost::empty()) };
+            }
+            HOST.with_borrow(f)
+        }
+
+        fn with_mut<R>(f: impl FnOnce(&mut Self) -> R) -> R {
+            thread_local! {
+                static HOST: RefCell<ScannerHost> = const { RefCell::new(ScannerHost::empty()) };
+            }
+            HOST.with_borrow_mut(f)
+        }
+
+        fn next_root_generation() -> u64 {
+            thread_local! {
+                static NEXT_ROOT_GENERATION: Cell<u64> = const { Cell::new(0) };
+            }
+            NEXT_ROOT_GENERATION.with(|cell| {
+                let next = cell.get().wrapping_add(1).max(1);
+                cell.set(next);
+                next
+            })
+        }
     }
 
     struct ScannerIvars {
+        ticket: ScanTicket,
+        root_generation: u64,
         capture: Option<Capture>,
         title: Retained<UILabel>,
         cancel: Retained<UIButton>,
@@ -58,7 +102,7 @@ mod platform {
         #[unsafe(super(UIViewController))]
         #[thread_kind = MainThreadOnly]
         #[name = "VmuxQrScannerController"]
-        #[ivars = ScannerIvars]
+        #[ivars = (EntityTarget<ActiveScan>, ScannerIvars)]
         struct ScannerController;
 
         impl ScannerController {
@@ -69,12 +113,12 @@ mod platform {
                 }
                 let Some(view) = self.view() else { return };
                 view.setBackgroundColor(Some(&UIColor::blackColor()));
-                match &self.ivars().capture {
+                match &self.ivars().1.capture {
                     Some(capture) => view.layer().addSublayer(&capture.preview),
-                    None => view.addSubview(&self.ivars().settings),
+                    None => view.addSubview(&self.ivars().1.settings),
                 }
-                view.addSubview(&self.ivars().title);
-                view.addSubview(&self.ivars().cancel);
+                view.addSubview(&self.ivars().1.title);
+                view.addSubview(&self.ivars().1.cancel);
             }
 
             #[unsafe(method(viewDidLayoutSubviews))]
@@ -86,29 +130,29 @@ mod platform {
                 let bounds = view.bounds();
                 let safe = view.safeAreaInsets();
                 let width = (bounds.size.width - 64.0).max(0.0);
-                if let Some(capture) = &self.ivars().capture {
+                if let Some(capture) = &self.ivars().1.capture {
                     capture.preview.setFrame(bounds);
                 }
-                let title_top = if self.ivars().capture.is_some() {
+                let title_top = if self.ivars().1.capture.is_some() {
                     safe.top + 54.0
                 } else {
                     (bounds.size.height * 0.32).max(safe.top + 54.0)
                 };
-                let title_height = if self.ivars().capture.is_some() {
+                let title_height = if self.ivars().1.capture.is_some() {
                     56.0
                 } else {
                     140.0
                 };
-                self.ivars().title.setFrame(CGRect::new(
+                self.ivars().1.title.setFrame(CGRect::new(
                     CGPoint::new(32.0, title_top),
                     CGSize::new(width, title_height),
                 ));
-                self.ivars().cancel.setFrame(CGRect::new(
+                self.ivars().1.cancel.setFrame(CGRect::new(
                     CGPoint::new(18.0, safe.top + 8.0),
                     CGSize::new(76.0, 40.0),
                 ));
-                if self.ivars().capture.is_none() {
-                    self.ivars().settings.setFrame(CGRect::new(
+                if self.ivars().1.capture.is_none() {
+                    self.ivars().1.settings.setFrame(CGRect::new(
                         CGPoint::new(32.0, title_top + title_height + 24.0),
                         CGSize::new(width, 48.0),
                     ));
@@ -117,7 +161,7 @@ mod platform {
 
             #[unsafe(method(cancel))]
             fn cancel(&self) {
-                self.close(None);
+                ScannerHost::close_controller(self, None);
             }
 
             #[unsafe(method(openSettings))]
@@ -133,12 +177,12 @@ mod platform {
                     UIApplication::sharedApplication(marker)
                         .openURL_options_completionHandler(&url, &NSDictionary::new(), None);
                 }
-                self.close(None);
+                ScannerHost::close_controller(self, None);
             }
 
             #[unsafe(method(sessionRuntimeError:))]
             fn session_runtime_error(&self, _notification: &NSNotification) {
-                self.close(Some(Err(translate("mobile-qr-session-error"))));
+                ScannerHost::close_controller(self, Some(Err(translate("mobile-qr-session-error"))));
             }
         }
 
@@ -160,21 +204,23 @@ mod platform {
                     let Some(value) = (unsafe { code.stringValue() }) else {
                         continue;
                     };
-                    self.close(Some(Ok(value.to_string())));
+                    ScannerHost::close_controller(self, Some(Ok(value.to_string())));
                     return;
                 }
             }
         }
     );
 
-    impl ScannerController {
-        fn new(
+    impl ScannerHost {
+        fn new_controller(
             marker: MainThreadMarker,
+            source: Entity,
+            ticket: ScanTicket,
+            root_generation: u64,
             capture: Option<Capture>,
             message: &str,
-        ) -> Retained<Self> {
+        ) -> Retained<ScannerController> {
             let denied = capture.is_none();
-
             let title = UILabel::initWithFrame(UILabel::alloc(marker), CGRect::ZERO);
             title.setText(Some(&NSString::from_str(message)));
             unsafe {
@@ -202,56 +248,96 @@ mod platform {
             settings.setBackgroundColor(Some(&UIColor::whiteColor()));
             settings.layer().setCornerRadius(16.0);
 
-            let this = Self::alloc(marker).set_ivars(ScannerIvars {
-                capture,
-                title,
-                cancel,
-                settings,
-            });
-            let this: Retained<Self> = unsafe { msg_send![super(this), init] };
+            let this = ScannerController::alloc(marker).set_ivars((
+                EntityTarget::new(source),
+                ScannerIvars {
+                    ticket,
+                    root_generation,
+                    capture,
+                    title,
+                    cancel,
+                    settings,
+                },
+            ));
+            let this: Retained<ScannerController> = unsafe { msg_send![super(this), init] };
+            Self::bind_controller(&this);
+            this
+        }
+
+        fn bind_controller(controller: &ScannerController) {
             unsafe {
-                this.ivars().cancel.addTarget_action_forControlEvents(
-                    Some(&this),
-                    sel!(cancel),
-                    UIControlEvents::TouchUpInside,
-                );
-                this.ivars().settings.addTarget_action_forControlEvents(
-                    Some(&this),
-                    sel!(openSettings),
-                    UIControlEvents::TouchUpInside,
-                );
-                if let Some(capture) = &this.ivars().capture {
+                controller
+                    .ivars()
+                    .1
+                    .cancel
+                    .addTarget_action_forControlEvents(
+                        Some(controller),
+                        sel!(cancel),
+                        UIControlEvents::TouchUpInside,
+                    );
+                controller
+                    .ivars()
+                    .1
+                    .settings
+                    .addTarget_action_forControlEvents(
+                        Some(controller),
+                        sel!(openSettings),
+                        UIControlEvents::TouchUpInside,
+                    );
+                if let Some(capture) = &controller.ivars().1.capture {
                     NSNotificationCenter::defaultCenter().addObserver_selector_name_object(
-                        &this,
+                        controller,
                         sel!(sessionRuntimeError:),
                         Some(AVCaptureSessionRuntimeErrorNotification),
                         Some(&capture.session),
                     );
                 }
             }
-            this
         }
 
-        fn close(&self, result: Option<Result<String, String>>) {
-            if !ACTIVE.replace(false) {
-                return;
-            }
-            if let Some(capture) = &self.ivars().capture {
+        fn stop_capture(controller: &ScannerController) {
+            if let Some(capture) = &controller.ivars().1.capture {
                 unsafe {
-                    NSNotificationCenter::defaultCenter().removeObserver(self);
+                    NSNotificationCenter::defaultCenter().removeObserver(controller);
                     capture.session.stopRunning();
                 }
             }
-            if let Some(result) = result {
-                report(result);
+        }
+
+        fn close_controller(
+            controller: &ScannerController,
+            result: Option<Result<String, String>>,
+        ) {
+            let ticket = controller.ivars().1.ticket;
+            let root_generation = controller.ivars().1.root_generation;
+            let deliver = Self::with_mut(|host| {
+                if host.active != Some(ticket) {
+                    return false;
+                }
+                host.active = None;
+                host.controller = None;
+                host.root_generation == root_generation
+            });
+            Self::stop_capture(controller);
+            if deliver && let Some(result) = result {
+                report(ticket, result);
             }
-            self.dismissViewControllerAnimated_completion(true, None);
+            controller.dismissViewControllerAnimated_completion(true, None);
         }
     }
 
-    pub fn install(window: &dioxus::mobile::DesktopContext, runtime: RuntimeHandle) {
-        ROOT_CONTROLLER.set(window.window.ui_view_controller().cast());
-        RUNTIME.with_borrow_mut(|installed| *installed = Some(runtime));
+    impl CancelScan {
+        pub(crate) fn cancel_native() {
+            let displaced = ScannerHost::with_mut(|host| {
+                host.active = None;
+                host.requesting = None;
+                host.controller.take()
+            });
+            if let Some(previous) = displaced {
+                ScannerHost::stop_capture(&previous);
+                previous.dismissViewControllerAnimated_completion(true, None);
+            }
+        }
     }
 
     pub struct ScannerSupport(Option<String>);
@@ -283,11 +369,41 @@ mod platform {
     }
 
     impl ScanRequest {
-        pub(crate) fn open(&self) -> Result<(), String> {
+        pub(crate) fn install_host(
+            window: &dioxus::mobile::DesktopContext,
+            runtime: RuntimeHandle,
+        ) {
+            let generation = ScannerHost::next_root_generation();
+            let controller: *mut UIViewController = window.window.ui_view_controller().cast();
+            let displaced = ScannerHost::with_mut(|host| {
+                host.root_controller = controller;
+                host.root_generation = generation;
+                host.active = None;
+                host.requesting = None;
+                host.runtime = Some(runtime);
+                host.controller.take()
+            });
+            if let Some(previous) = displaced {
+                ScannerHost::stop_capture(&previous);
+                previous.dismissViewControllerAnimated_completion(false, None);
+            }
+        }
+
+        pub(crate) fn open_with_ticket(
+            &self,
+            source: Entity,
+            ticket: ScanTicket,
+        ) -> Result<(), String> {
             if !self.permitted() {
                 return Err(translate("mobile-qr-camera-unavailable"));
             }
-            if ACTIVE.get() || REQUESTING.get() {
+            let (busy, root_generation) = ScannerHost::with(|host| {
+                (
+                    host.active.is_some() || host.requesting.is_some(),
+                    host.root_generation,
+                )
+            });
+            if busy {
                 return Ok(());
             }
             let marker = MainThreadMarker::new()
@@ -296,54 +412,86 @@ mod platform {
                 .ok_or_else(|| translate("mobile-qr-camera-unavailable"))?;
 
             match unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) } {
-                AVAuthorizationStatus::Authorized => present(marker),
+                AVAuthorizationStatus::Authorized => {
+                    present(marker, source, ticket, root_generation)
+                }
                 AVAuthorizationStatus::Denied | AVAuthorizationStatus::Restricted => {
-                    present_denied(marker)
+                    present_denied(marker, source, ticket, root_generation)
                 }
-                _ => {
-                    REQUESTING.set(true);
-                    let handler = RcBlock::new(move |granted: Bool| {
-                        DispatchQueue::main().exec_async(move || {
-                            REQUESTING.set(false);
-                            let Some(marker) = MainThreadMarker::new() else {
-                                return;
-                            };
-                            let outcome = if granted.as_bool() {
-                                present(marker)
-                            } else {
-                                present_denied(marker)
-                            };
-                            if let Err(message) = outcome {
-                                report(Err(message));
-                            }
-                        });
-                    });
-                    unsafe {
-                        AVCaptureDevice::requestAccessForMediaType_completionHandler(
-                            media_type, &handler,
-                        );
-                    }
-                    Ok(())
-                }
+                _ => request_permission(media_type, source, ticket, root_generation),
             }
         }
     }
 
-    fn present_denied(marker: MainThreadMarker) -> Result<(), String> {
-        let root = ROOT_CONTROLLER
-            .with(|pointer| unsafe { Retained::retain(pointer.get()) })
-            .ok_or_else(|| translate("mobile-qr-unavailable"))?;
-        let controller = ScannerController::new(marker, None, &translate("mobile-qr-denied"));
+    fn request_permission(
+        media_type: &'static objc2_av_foundation::AVMediaType,
+        source: Entity,
+        ticket: ScanTicket,
+        root_generation: u64,
+    ) -> Result<(), String> {
+        ScannerHost::with_mut(|host| host.requesting = Some(ticket));
+        let handler = RcBlock::new(move |granted: Bool| {
+            DispatchQueue::main().exec_async(move || {
+                let current = ScannerHost::with_mut(|host| {
+                    if host.requesting != Some(ticket) || host.root_generation != root_generation {
+                        return false;
+                    }
+                    host.requesting = None;
+                    true
+                });
+                if !current {
+                    return;
+                }
+                let Some(marker) = MainThreadMarker::new() else {
+                    return;
+                };
+                let outcome = if granted.as_bool() {
+                    present(marker, source, ticket, root_generation)
+                } else {
+                    present_denied(marker, source, ticket, root_generation)
+                };
+                if let Err(message) = outcome {
+                    report(ticket, Err(message));
+                }
+            });
+        });
+        unsafe {
+            AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &handler);
+        }
+        Ok(())
+    }
+
+    fn present_denied(
+        marker: MainThreadMarker,
+        source: Entity,
+        ticket: ScanTicket,
+        root_generation: u64,
+    ) -> Result<(), String> {
+        let root = current_root(root_generation)?;
+        let controller = ScannerHost::new_controller(
+            marker,
+            source,
+            ticket,
+            root_generation,
+            None,
+            &translate("mobile-qr-denied"),
+        );
         controller.setModalPresentationStyle(UIModalPresentationStyle::FullScreen);
-        ACTIVE.set(true);
+        ScannerHost::with_mut(|host| {
+            host.active = Some(ticket);
+            host.controller = Some(controller.clone());
+        });
         root.presentViewController_animated_completion(&controller, true, None);
         Ok(())
     }
 
-    fn present(marker: MainThreadMarker) -> Result<(), String> {
-        let root = ROOT_CONTROLLER
-            .with(|pointer| unsafe { Retained::retain(pointer.get()) })
-            .ok_or_else(|| translate("mobile-qr-unavailable"))?;
+    fn present(
+        marker: MainThreadMarker,
+        source: Entity,
+        ticket: ScanTicket,
+        root_generation: u64,
+    ) -> Result<(), String> {
+        let root = current_root(root_generation)?;
         let media_type =
             unsafe { AVMediaTypeVideo }.ok_or_else(|| translate("mobile-qr-camera-unavailable"))?;
         let device = unsafe { AVCaptureDevice::defaultDeviceWithMediaType(media_type) }
@@ -360,26 +508,21 @@ mod platform {
         if !unsafe { session.canAddInput(&input) } {
             return Err(translate("mobile-qr-camera-input-unavailable"));
         }
-        unsafe {
-            session.addInput(&input);
-        }
-
+        unsafe { session.addInput(&input) };
         let output = unsafe { AVCaptureMetadataOutput::new() };
         if !unsafe { session.canAddOutput(&output) } {
             return Err(translate("mobile-qr-unsupported-device"));
         }
-        unsafe {
-            session.addOutput(&output);
-        }
-
+        unsafe { session.addOutput(&output) };
         let preview = unsafe { AVCaptureVideoPreviewLayer::layerWithSession(&session) };
         if let Some(gravity) = unsafe { AVLayerVideoGravityResizeAspectFill } {
-            unsafe {
-                preview.setVideoGravity(gravity);
-            }
+            unsafe { preview.setVideoGravity(gravity) };
         }
-        let controller = ScannerController::new(
+        let controller = ScannerHost::new_controller(
             marker,
+            source,
+            ticket,
+            root_generation,
             Some(Capture {
                 session: session.clone(),
                 preview,
@@ -396,32 +539,41 @@ mod platform {
             session.startRunning();
         }
         controller.setModalPresentationStyle(UIModalPresentationStyle::FullScreen);
-        ACTIVE.set(true);
+        ScannerHost::with_mut(|host| {
+            host.active = Some(ticket);
+            host.controller = Some(controller.clone());
+        });
         root.presentViewController_animated_completion(&controller, true, None);
         Ok(())
     }
 
-    fn report(result: Result<String, String>) {
-        RUNTIME.with_borrow(|installed| {
-            let Some(runtime) = installed else {
+    fn current_root(root_generation: u64) -> Result<Retained<UIViewController>, String> {
+        ScannerHost::with(|host| {
+            if host.root_generation != root_generation {
+                return None;
+            }
+            unsafe { Retained::retain(host.root_controller) }
+        })
+        .ok_or_else(|| translate("mobile-qr-unavailable"))
+    }
+
+    fn report(ticket: ScanTicket, result: Result<String, String>) {
+        ScannerHost::with(|host| {
+            let Some(runtime) = host.runtime.as_ref() else {
                 return;
             };
-            match result {
-                Ok(value) => runtime.send(PairRequest(value)),
-                Err(message) => runtime.send(PairingFailure(message)),
-            }
+            runtime.send(ScanCompleted { ticket, result });
         });
     }
 }
 
 #[cfg(not(target_os = "ios"))]
 mod platform {
+    use bevy_ecs::entity::Entity;
     use vmux_ui::i18n::translate;
 
-    use crate::pairing::ScanRequest;
+    use crate::connection::{CancelScan, ScanRequest, ScanTicket};
     use crate::runtime::RuntimeHandle;
-
-    pub fn install(_: &dioxus::mobile::DesktopContext, _: RuntimeHandle) {}
 
     pub struct UnsupportedScanner(Option<String>);
 
@@ -438,8 +590,18 @@ mod platform {
         }
     }
 
+    impl CancelScan {
+        pub(crate) fn cancel_native() {}
+    }
+
     impl ScanRequest {
-        pub(crate) fn open(&self) -> Result<(), String> {
+        pub(crate) fn install_host(_: &dioxus::mobile::DesktopContext, _: RuntimeHandle) {}
+
+        pub(crate) fn open_with_ticket(
+            &self,
+            _source: Entity,
+            _ticket: ScanTicket,
+        ) -> Result<(), String> {
             if !self.permitted() {
                 return Err(translate("mobile-qr-camera-unavailable"));
             }
