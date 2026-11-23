@@ -3,7 +3,6 @@ legacy: [
 ],
 values: [
     (key: "crates/app/vmux_mobile/src/connection.rs||struct:ScanTicket", owner: "crates/app/vmux_mobile/src/connection.rs||struct:ActiveScan", lifetime: "source-epoch and scan-generation ticket correlating native QR callbacks with ActiveScan"),
-    (key: "crates/app/vmux_mobile/src/runtime.rs||struct:MountId", owner: "crates/app/vmux_mobile/src/actions.rs||struct:MountInterest", lifetime: "mounted root identifier carried by MountInterest entities and MountRetired messages"),
 ],
 boundaries: [
     (key: "crates/app/vmux_mobile/src/logs.rs||struct:Logs", fingerprint: "6052929b2e74d8fd", interface: "Rolling file tracing subscriber and panic hook bootstrap for vmux_mobile", input: "external: VMUX_LOG env filter and mobile Application Support log directory", output: "ECS: crates/app/vmux_mobile/src/connection.rs||struct:PairRequest", lifetime: "mobile application process lifetime", bounds: "configures daily rolling log file and panic hook only; owns no domain state", teardown: "process exit flushes non-blocking writer", architecture: "ECS ownership boundaries", owner: Some("crates/app/vmux_mobile/src/main.rs||fn:main")),

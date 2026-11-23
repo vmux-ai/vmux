@@ -1,5 +1,0 @@
-(legacy: [
-], boundaries: [
-    (key: "examples/framework-consumer/tests/jobs.rs||struct:RenamePlugin", fingerprint: "513bd3a78f9bd714", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/util/vmux_ecs/src/operation.rs||enum:OperationState", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
-    (key: "examples/framework-consumer/tests/jobs.rs||impl:Plugin for RenamePlugin", fingerprint: "af9122b73ab29455", interface: "Bevy App plugin registration and composition", input: "external: selected Bevy App capability", output: "ECS: crates/util/vmux_ecs/src/operation.rs||enum:OperationState", lifetime: "one owning plugin installation", bounds: "registration of static messages, private schedules and child plugins only; no parallel domain state", teardown: "App teardown removes registered schedules and canonical state", architecture: "ECS ownership boundaries"),
-])
