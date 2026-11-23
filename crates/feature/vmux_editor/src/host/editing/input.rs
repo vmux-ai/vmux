@@ -187,7 +187,10 @@ impl SyntaxInput for ExInputRequest {
         _: KeymapKind,
         _: &mut crate::keymap::vim::VimKeymap,
     ) -> (Vec<EditCommand>, EditMode) {
-        (crate::edit::ex::ExLine::edits(&self.line), mode)
+        (
+            crate::edit::ex::ExCommand::edits_from_line(&self.line),
+            mode,
+        )
     }
 }
 

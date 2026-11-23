@@ -1,30 +1,39 @@
 use std::fs;
-use std::path::{Path, PathBuf};
-
-const ALLOWED_PREFIXES: &[&str] = &["crates/feature/vmux_extension/"];
-const ALLOWED_FILES: &[&str] = &[
-    "crates/util/vmux_mcp/src/tools/param.rs",
-    "crates/util/vmux_browser/src/lib.rs",
-    "crates/util/vmux_browser/src/page_life.rs",
-];
+use std::path::PathBuf;
 
 #[test]
 fn browser_brand_terms_stay_in_browser_compatibility_code() {
+    let allowed_prefixes = ["crates/feature/vmux_extension/"];
+    let allowed_files = [
+        "crates/util/vmux_mcp/src/tools/param.rs",
+        "crates/util/vmux_browser/src/lib.rs",
+        "crates/util/vmux_browser/src/page_life.rs",
+    ];
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(3)
         .unwrap()
         .to_path_buf();
     let mut rust_files = Vec::new();
-    collect_rust_files(&root.join("crates"), &mut rust_files);
+    let mut pending = vec![root.join("crates")];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                rust_files.push(path);
+            }
+        }
+    }
     let forbidden = ["chro", "me"].concat();
     let mut violations = Vec::new();
     for path in rust_files {
         let relative = path.strip_prefix(&root).unwrap().to_string_lossy();
-        if ALLOWED_PREFIXES
+        if allowed_prefixes
             .iter()
             .any(|prefix| relative.starts_with(prefix))
-            || ALLOWED_FILES.contains(&relative.as_ref())
+            || allowed_files.contains(&relative.as_ref())
             || matches!(
                 relative.as_ref(),
                 "crates/feature/vmux_dx/src/native/cef_source.rs"
@@ -45,15 +54,4 @@ fn browser_brand_terms_stay_in_browser_compatibility_code() {
         "reserved browser-brand term used outside compatibility code:\n{}",
         violations.join("\n")
     );
-}
-
-fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) {
-    for entry in fs::read_dir(directory).unwrap() {
-        let path = entry.unwrap().path();
-        if path.is_dir() {
-            collect_rust_files(&path, files);
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
-            files.push(path);
-        }
-    }
 }

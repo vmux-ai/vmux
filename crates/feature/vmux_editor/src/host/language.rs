@@ -1,7 +1,9 @@
 use crate::host::editor::{EditReadOnly, EditReadOnlyItem};
-use bevy::ecs::system::Commands;
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
+use bevy::prelude::{
+    App, Commands, Component, Entity, EntityEvent, MessageWriter, On, Plugin, Query, With,
+};
+use bevy_cef::prelude::{UiEventPlugin, UiEventSystems, UiInput};
 use vmux_ecs::event::*;
 
 use crate::event::*;
@@ -64,7 +66,7 @@ impl Plugin for LanguagePlugin {
                 Update,
                 flush_lsp_changes
                     .before(vmux_lsp::Set::Documents)
-                    .after(bevy_cef::prelude::UiEventSystems::Flush),
+                    .after(UiEventSystems::Flush),
             );
     }
 }
@@ -72,6 +74,27 @@ impl Plugin for LanguagePlugin {
 #[derive(Component)]
 #[require(LspChangeElapsed)]
 pub(super) struct LspEditDirty;
+
+#[derive(Component, Default)]
+struct FileRenamePrompt {
+    open: bool,
+    line: u32,
+    col: u32,
+    current: String,
+    draft: String,
+}
+
+impl FileRenamePrompt {
+    fn snapshot(&self) -> FileRenameState {
+        FileRenameState {
+            open: self.open,
+            line: self.line,
+            col: self.col,
+            current: self.current.clone(),
+            draft: self.draft.clone(),
+        }
+    }
+}
 
 #[derive(Component, Default)]
 struct LspChangeElapsed(std::time::Duration);
@@ -184,63 +207,49 @@ impl From<Entity> for EditorCodeActionRequest {
     }
 }
 
-struct LspPosition {
-    line: u32,
-    utf16_col: u32,
-    char_col: usize,
-    line_text: String,
-}
-
-impl LspPosition {
-    fn from_char_col(line: u32, line_text: String, char_col: usize) -> Self {
+impl EditReadOnlyItem<'_, '_> {
+    fn from_char_col(line: u32, line_text: String, char_col: usize) -> (u32, u32, usize, String) {
         let char_col = char_col.min(line_text.chars().count());
         let line_text = LspLine::new(line_text);
         let utf16_col = line_text.utf16_col(char_col as u32);
-        Self {
-            line,
-            utf16_col,
-            char_col,
-            line_text: line_text.into_string(),
-        }
+        (line, utf16_col, char_col, line_text.into_string())
     }
 
-    fn word_start_col(&self) -> u32 {
-        let chars: Vec<char> = self.line_text.chars().collect();
-        let mut start = self.char_col;
+    fn word_start_col(line_text: &str, char_col: usize) -> u32 {
+        let chars: Vec<char> = line_text.chars().collect();
+        let mut start = char_col.min(chars.len());
         while start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == '_') {
             start -= 1;
         }
         start as u32
     }
 
-    fn word(&self) -> String {
-        let chars: Vec<char> = self.line_text.chars().collect();
-        let start = self.word_start_col() as usize;
-        let mut end = self.char_col;
+    fn word_at(line_text: &str, char_col: usize) -> String {
+        let chars: Vec<char> = line_text.chars().collect();
+        let start = Self::word_start_col(line_text, char_col) as usize;
+        let mut end = char_col.min(chars.len());
         while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
             end += 1;
         }
         chars[start..end].iter().collect()
     }
-}
 
-impl EditReadOnlyItem<'_, '_> {
-    fn caret_lsp_position(&self) -> LspPosition {
+    fn caret_lsp_position(&self) -> (u32, u32, usize, String) {
         let head = self.core.primary().head;
         let (line, char_col) = self.core.buffer.char_to_coords(head);
         self.lsp_position_at_char(line as u32, char_col)
     }
 
-    fn lsp_position_at_cell(&self, line: u32, cell: u32) -> LspPosition {
+    fn lsp_position_at_cell(&self, line: u32, cell: u32) -> (u32, u32, usize, String) {
         let line = line.min(self.core.buffer.len_lines().saturating_sub(1) as u32);
         let line_text = self.line_text(line);
         let char_col = DisplayCells::from(line_text.as_str()).char_at(cell);
-        LspPosition::from_char_col(line, line_text, char_col)
+        Self::from_char_col(line, line_text, char_col)
     }
 
-    fn lsp_position_at_char(&self, line: u32, char_col: usize) -> LspPosition {
+    fn lsp_position_at_char(&self, line: u32, char_col: usize) -> (u32, u32, usize, String) {
         let line = line.min(self.core.buffer.len_lines().saturating_sub(1) as u32);
-        LspPosition::from_char_col(line, self.line_text(line), char_col)
+        Self::from_char_col(line, self.line_text(line), char_col)
     }
 
     fn line_text(&self, line: u32) -> String {
@@ -264,13 +273,13 @@ fn hover(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let position = edit.caret_lsp_position();
+    let (line, utf16_col, char_col, _) = edit.caret_lsp_position();
     let request = manager.hover(
         entity,
         &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
-        position.char_col as u32,
+        line,
+        utf16_col,
+        char_col as u32,
     );
     if let Some(request) = request {
         commands.spawn(request.bundle());
@@ -287,13 +296,8 @@ fn definition(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let position = edit.caret_lsp_position();
-    let request = manager.definition(
-        entity,
-        &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
-    );
+    let (line, utf16_col, _, _) = edit.caret_lsp_position();
+    let request = manager.definition(entity, &edit.core.buffer.path, line, utf16_col);
     if let Some(request) = request {
         commands.spawn(request.bundle());
     }
@@ -309,13 +313,8 @@ fn references(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let position = edit.caret_lsp_position();
-    let request = manager.references(
-        entity,
-        &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
-    );
+    let (line, utf16_col, _, _) = edit.caret_lsp_position();
+    let request = manager.references(entity, &edit.core.buffer.path, line, utf16_col);
     if let Some(request) = request {
         commands.spawn(request.bundle());
     }
@@ -331,21 +330,21 @@ fn rename(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let position = edit.caret_lsp_position();
-    let current = position.word();
+    let (line, _, char_col, line_text) = edit.caret_lsp_position();
+    let current = EditReadOnlyItem::word_at(&line_text, char_col);
     if current.is_empty() || !browsers.can_emit_to(&entity) {
         return;
     }
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
-        entity,
-        &FileRenameState {
-            open: true,
-            line: position.line,
-            col: position.char_col as u32,
-            current: current.clone(),
-            draft: current,
-        },
-    ));
+    let prompt = FileRenamePrompt {
+        open: true,
+        line,
+        col: char_col as u32,
+        current: current.clone(),
+        draft: current,
+    };
+    let state = prompt.snapshot();
+    commands.entity(entity).insert(prompt);
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
     commands.trigger(super::feedback::ClearEditFailure(entity));
 }
 
@@ -359,13 +358,13 @@ fn completion(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let position = edit.caret_lsp_position();
+    let (line, utf16_col, char_col, line_text) = edit.caret_lsp_position();
     let request = manager.completion(
         entity,
         &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
-        position.word_start_col(),
+        line,
+        utf16_col,
+        EditReadOnlyItem::word_start_col(&line_text, char_col),
     );
     if let Some(request) = request {
         commands.spawn(request.bundle());
@@ -382,13 +381,8 @@ fn declaration(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let position = edit.caret_lsp_position();
-    let request = manager.declaration(
-        entity,
-        &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
-    );
+    let (line, utf16_col, _, _) = edit.caret_lsp_position();
+    let request = manager.declaration(entity, &edit.core.buffer.path, line, utf16_col);
     if let Some(request) = request {
         commands.spawn(request.bundle());
     }
@@ -404,13 +398,8 @@ fn type_definition(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let position = edit.caret_lsp_position();
-    let request = manager.type_definition(
-        entity,
-        &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
-    );
+    let (line, utf16_col, _, _) = edit.caret_lsp_position();
+    let request = manager.type_definition(entity, &edit.core.buffer.path, line, utf16_col);
     if let Some(request) = request {
         commands.spawn(request.bundle());
     }
@@ -426,13 +415,8 @@ fn implementation(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let position = edit.caret_lsp_position();
-    let request = manager.implementation(
-        entity,
-        &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
-    );
+    let (line, utf16_col, _, _) = edit.caret_lsp_position();
+    let request = manager.implementation(entity, &edit.core.buffer.path, line, utf16_col);
     if let Some(request) = request {
         commands.spawn(request.bundle());
     }
@@ -531,13 +515,13 @@ fn request_hover(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let position = edit.lsp_position_at_cell(request.line, request.col);
+    let (line, utf16_col, char_col, _) = edit.lsp_position_at_cell(request.line, request.col);
     let request = manager.hover(
         entity,
         &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
-        position.char_col as u32,
+        line,
+        utf16_col,
+        char_col as u32,
     );
     if let Some(request) = request {
         commands.spawn(request.bundle());
@@ -562,13 +546,8 @@ fn request_definition(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let position = edit.lsp_position_at_cell(request.line, request.col);
-    let request = manager.definition(
-        entity,
-        &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
-    );
+    let (line, utf16_col, _, _) = edit.lsp_position_at_cell(request.line, request.col);
+    let request = manager.definition(entity, &edit.core.buffer.path, line, utf16_col);
     if let Some(request) = request {
         commands.spawn(request.bundle());
     }
@@ -696,6 +675,7 @@ fn request_rename(
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
+    commands.entity(entity).remove::<FileRenamePrompt>();
     commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         entity,
         &FileRenameState::default(),
@@ -707,12 +687,12 @@ fn request_rename(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let position = edit.lsp_position_at_cell(request.line, request.col);
+    let (line, utf16_col, _, _) = edit.lsp_position_at_cell(request.line, request.col);
     let request = manager.rename(
         entity,
         &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
+        line,
+        utf16_col,
         &request.new_name,
     );
     if let Some(request) = request {
@@ -722,27 +702,26 @@ fn request_rename(
 
 fn edit_rename(
     trigger: On<UiInput<FileRenameDraftRequest>>,
-    states: Query<&vmux_ecs::FileUiStateUpdates>,
+    mut prompts: Query<&mut FileRenamePrompt>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let Ok(state) = states.get(entity) else {
+    let Ok(mut prompt) = prompts.get_mut(entity) else {
         return;
     };
-    let Some(current) = state.current() else {
-        return;
-    };
-    let mut rename = current.language.rename.clone();
-    if !rename.open {
+    if !prompt.open {
         return;
     }
-    rename.draft.clone_from(&trigger.event().payload.draft);
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &rename));
+    prompt.draft.clone_from(&trigger.event().payload.draft);
+    let state = prompt.snapshot();
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
 }
 
 fn dismiss_rename(trigger: On<UiInput<FileRenameDismissRequest>>, mut commands: Commands) {
+    let entity = trigger.event().webview;
+    commands.entity(entity).remove::<FileRenamePrompt>();
     commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
-        trigger.event().webview,
+        entity,
         &FileRenameState::default(),
     ));
 }
@@ -758,13 +737,8 @@ fn request_references(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let position = edit.lsp_position_at_cell(request.line, request.col);
-    let request = manager.references(
-        entity,
-        &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
-    );
+    let (line, utf16_col, _, _) = edit.lsp_position_at_cell(request.line, request.col);
+    let request = manager.references(entity, &edit.core.buffer.path, line, utf16_col);
     if let Some(request) = request {
         commands.spawn(request.bundle());
     }
@@ -798,13 +772,14 @@ fn request_completion(
         ));
         return;
     }
-    let position = edit.lsp_position_at_cell(request.line, request.col);
+    let (line, utf16_col, char_col, line_text) =
+        edit.lsp_position_at_cell(request.line, request.col);
     let request = manager.completion(
         entity,
         &edit.core.buffer.path,
-        position.line,
-        position.utf16_col,
-        position.word_start_col(),
+        line,
+        utf16_col,
+        EditReadOnlyItem::word_start_col(&line_text, char_col),
     );
     if let Some(request) = request {
         commands.spawn(request.bundle());
@@ -913,21 +888,9 @@ mod tests {
     fn rename_prefill_is_the_identifier_around_the_caret() {
         let text = "let some_name = 1;";
 
-        assert_eq!(
-            LspPosition::from_char_col(0, text.to_string(), 8).word(),
-            "some_name"
-        );
-        assert_eq!(
-            LspPosition::from_char_col(0, text.to_string(), 4).word(),
-            "some_name"
-        );
-        assert_eq!(
-            LspPosition::from_char_col(0, text.to_string(), 13).word(),
-            "some_name"
-        );
-        assert_eq!(
-            LspPosition::from_char_col(0, text.to_string(), 14).word(),
-            ""
-        );
+        assert_eq!(EditReadOnlyItem::word_at(text, 8), "some_name");
+        assert_eq!(EditReadOnlyItem::word_at(text, 4), "some_name");
+        assert_eq!(EditReadOnlyItem::word_at(text, 13), "some_name");
+        assert_eq!(EditReadOnlyItem::word_at(text, 14), "");
     }
 }

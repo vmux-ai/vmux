@@ -578,22 +578,22 @@ mod tests {
     use super::super::file_lifecycle::FileDir;
     use crate::host::navigation::NavigationPlugin;
 
-    fn app() -> App {
-        let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            NavigationPlugin,
-            TabsPlugin,
-            PageOpenPlugin,
-            vmux_layout::hosted_page::HostedPagePlugin,
-        ));
-
-        app
-    }
-
     struct PageOpenFixture;
 
     impl PageOpenFixture {
+        fn app() -> App {
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                NavigationPlugin,
+                TabsPlugin,
+                PageOpenPlugin,
+                vmux_layout::hosted_page::HostedPagePlugin,
+            ));
+
+            app
+        }
+
         fn task(app: &mut App, stack: Entity, url: &str) -> PageOpenTask {
             let id = PageOpenId::new();
             app.world_mut()
@@ -620,7 +620,7 @@ mod tests {
 
     impl EditorStack {
         fn empty() -> Self {
-            let mut app = app();
+            let mut app = PageOpenFixture::app();
             let stack = app.world_mut().spawn_empty().id();
             Self { app, stack }
         }
@@ -717,7 +717,7 @@ mod tests {
 
     #[test]
     fn file_open_records_history_visit() {
-        let mut app = app();
+        let mut app = PageOpenFixture::app();
         let stack = app.world_mut().spawn_empty().id();
         PageOpenFixture::spawn(&mut app, stack, "file:///etc/hostname#L3");
         app.update();
@@ -938,7 +938,7 @@ mod tests {
 
     #[test]
     fn claims_files_url_and_attaches_fileview() {
-        let mut app = app();
+        let mut app = PageOpenFixture::app();
         let stack = app.world_mut().spawn_empty().id();
         let task = PageOpenFixture::spawn(&mut app, stack, "file:///etc/hostname");
         app.update();
@@ -954,7 +954,7 @@ mod tests {
 
     #[test]
     fn opening_editor_retains_the_previous_surface_until_paint() {
-        let mut app = app();
+        let mut app = PageOpenFixture::app();
         let navigation = PageOpenId::new();
         let stack = app
             .world_mut()
@@ -997,7 +997,7 @@ mod tests {
 
     #[test]
     fn ignores_non_files_url() {
-        let mut app = app();
+        let mut app = PageOpenFixture::app();
         let stack = app.world_mut().spawn_empty().id();
         let task = PageOpenFixture::spawn(&mut app, stack, "vmux://terminal/");
         app.update();

@@ -184,11 +184,13 @@ impl Mappings {
 mod tests {
     use super::*;
 
-    fn spec(mode: &str, lhs: &str, rhs: &str) -> vmux_api::editor::KeyMapping {
-        vmux_api::editor::KeyMapping {
-            mode: mode.into(),
-            lhs: lhs.into(),
-            rhs: rhs.into(),
+    impl Mappings {
+        fn spec(mode: &str, lhs: &str, rhs: &str) -> vmux_api::editor::KeyMapping {
+            vmux_api::editor::KeyMapping {
+                mode: mode.into(),
+                lhs: lhs.into(),
+                rhs: rhs.into(),
+            }
         }
     }
 
@@ -212,7 +214,13 @@ mod tests {
 
     #[test]
     fn an_exact_match_expands_and_a_prefix_pends() {
-        let maps = Mappings::new(&[spec("n", "gh", "^"), spec("n", "ghi", "$")], " ");
+        let maps = Mappings::new(
+            &[
+                Mappings::spec("n", "gh", "^"),
+                Mappings::spec("n", "ghi", "$"),
+            ],
+            " ",
+        );
         let g = KeyInput::parse("g", "");
         assert!(matches!(
             maps.match_keys(EditMode::Normal, &g),
@@ -232,7 +240,7 @@ mod tests {
 
     #[test]
     fn scope_limits_which_mode_sees_a_mapping() {
-        let maps = Mappings::new(&[spec("i", "jk", "<Esc>")], " ");
+        let maps = Mappings::new(&[Mappings::spec("i", "jk", "<Esc>")], " ");
         let j = KeyInput::parse("j", "");
         assert!(matches!(
             maps.match_keys(EditMode::Insert, &j),

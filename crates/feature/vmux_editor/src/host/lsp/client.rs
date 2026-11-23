@@ -276,7 +276,7 @@ impl ServerClient {
                         full: Some(lsp_types::SemanticTokensFullOptions::Bool(true)),
                         range: Some(false),
                     },
-                    token_types: crate::lsp::semantic::SEMANTIC_TOKEN_TYPES
+                    token_types: crate::lsp::semantic::SemanticLegend::TOKEN_TYPES
                         .iter()
                         .map(|name| lsp_types::SemanticTokenType::new(name))
                         .collect(),
@@ -402,13 +402,15 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn advertising(capabilities: serde_json::Value) -> Capabilities {
-        Capabilities::from(&json!({ "id": 1, "result": { "capabilities": capabilities } }))
+    impl Capabilities {
+        fn advertising(capabilities: serde_json::Value) -> Self {
+            Self::from(&json!({ "id": 1, "result": { "capabilities": capabilities } }))
+        }
     }
 
     #[test]
     fn a_server_that_said_nothing_is_asked_for_nothing() {
-        let caps = advertising(json!({}));
+        let caps = Capabilities::advertising(json!({}));
         assert!(!caps.allows("textDocument/hover"));
         assert!(!caps.allows("textDocument/foldingRange"));
         assert!(!caps.allows("textDocument/documentSymbol"));
@@ -417,16 +419,18 @@ mod tests {
     #[test]
     fn an_explicit_false_is_honoured() {
         assert!(
-            !advertising(json!({ "definitionProvider": false })).allows("textDocument/definition")
+            !Capabilities::advertising(json!({ "definitionProvider": false }))
+                .allows("textDocument/definition")
         );
         assert!(
-            advertising(json!({ "definitionProvider": true })).allows("textDocument/definition")
+            Capabilities::advertising(json!({ "definitionProvider": true }))
+                .allows("textDocument/definition")
         );
     }
 
     #[test]
     fn options_objects_count_as_provided() {
-        let caps = advertising(json!({
+        let caps = Capabilities::advertising(json!({
             "renameProvider": { "prepareProvider": true },
             "codeActionProvider": { "codeActionKinds": ["quickfix"] },
             "hoverProvider": { "workDoneProgress": false },
@@ -438,7 +442,7 @@ mod tests {
 
     #[test]
     fn a_method_we_do_not_model_is_not_blocked() {
-        assert!(advertising(json!({})).allows("textDocument/didOpen"));
+        assert!(Capabilities::advertising(json!({})).allows("textDocument/didOpen"));
     }
 
     #[test]

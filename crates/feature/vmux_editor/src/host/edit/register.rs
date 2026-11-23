@@ -30,27 +30,31 @@ impl RegisterValue {
     }
 }
 
-pub const UNNAMED: char = '"';
-pub const BLACKHOLE: char = '_';
-pub const SMALL_DELETE: char = '-';
-
 #[derive(bevy::prelude::Component, Default)]
 pub struct Registers {
     slots: BTreeMap<char, RegisterValue>,
     pub clipboard_shadow: String,
 }
 
-fn is_clipboard(name: char) -> bool {
-    name == '+' || name == '*'
-}
-
 impl Registers {
+    pub const UNNAMED: char = '"';
+    pub const BLACKHOLE: char = '_';
+    pub const SMALL_DELETE: char = '-';
+
+    fn is_clipboard(name: char) -> bool {
+        name == '+' || name == '*'
+    }
+
     pub fn read(&self, name: Option<char>) -> Option<&RegisterValue> {
-        let name = name.unwrap_or(UNNAMED);
-        if name == BLACKHOLE {
+        let name = name.unwrap_or(Self::UNNAMED);
+        if name == Self::BLACKHOLE {
             return None;
         }
-        let name = if is_clipboard(name) { UNNAMED } else { name };
+        let name = if Self::is_clipboard(name) {
+            Self::UNNAMED
+        } else {
+            name
+        };
         self.slots.get(&name.to_ascii_lowercase())
     }
 
@@ -59,30 +63,30 @@ impl Registers {
     }
 
     pub fn set_unnamed(&mut self, value: RegisterValue) {
-        self.slots.insert(UNNAMED, value);
+        self.slots.insert(Self::UNNAMED, value);
     }
 
     pub fn write_yank(&mut self, name: Option<char>, value: RegisterValue) {
-        if name == Some(BLACKHOLE) {
+        if name == Some(Self::BLACKHOLE) {
             return;
         }
         match name {
-            Some(name) if !is_clipboard(name) => {
+            Some(name) if !Self::is_clipboard(name) => {
                 self.write_named(name, value.clone());
             }
             _ => {
                 self.slots.insert('0', value.clone());
             }
         }
-        self.slots.insert(UNNAMED, value);
+        self.slots.insert(Self::UNNAMED, value);
     }
 
     pub fn write_delete(&mut self, name: Option<char>, value: RegisterValue) {
-        if name == Some(BLACKHOLE) {
+        if name == Some(Self::BLACKHOLE) {
             return;
         }
         match name {
-            Some(name) if !is_clipboard(name) => {
+            Some(name) if !Self::is_clipboard(name) => {
                 self.write_named(name, value.clone());
             }
             _ => {
@@ -91,11 +95,11 @@ impl Registers {
                     self.shift_numbered();
                     self.slots.insert('1', value.clone());
                 } else {
-                    self.slots.insert(SMALL_DELETE, value.clone());
+                    self.slots.insert(Self::SMALL_DELETE, value.clone());
                 }
             }
         }
-        self.slots.insert(UNNAMED, value);
+        self.slots.insert(Self::UNNAMED, value);
     }
 
     fn write_named(&mut self, name: char, value: RegisterValue) {
@@ -153,7 +157,7 @@ mod tests {
     fn small_delete_avoids_the_numbered_ring() {
         let mut r = Registers::default();
         r.write_delete(None, RegisterValue::charwise("ab"));
-        assert_eq!(r.read(Some(SMALL_DELETE)).unwrap().text, "ab");
+        assert_eq!(r.read(Some(Registers::SMALL_DELETE)).unwrap().text, "ab");
         assert!(r.read(Some('1')).is_none());
     }
 
@@ -161,7 +165,7 @@ mod tests {
     fn blackhole_discards_without_touching_unnamed() {
         let mut r = Registers::default();
         r.write_yank(None, RegisterValue::charwise("keep"));
-        r.write_delete(Some(BLACKHOLE), RegisterValue::charwise("gone"));
+        r.write_delete(Some(Registers::BLACKHOLE), RegisterValue::charwise("gone"));
         assert_eq!(r.read(None).unwrap().text, "keep");
     }
 

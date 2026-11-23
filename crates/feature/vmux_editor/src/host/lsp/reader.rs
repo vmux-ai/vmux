@@ -231,6 +231,20 @@ mod tests {
             self.reader.dispatch(msg);
             self.sent.try_recv().expect("a request must be answered")
         }
+
+        fn with_response_wake(
+            mut self,
+            response: crossbeam_channel::Receiver<Value>,
+            delivered: mpsc::Sender<Value>,
+        ) -> Self {
+            self.reader =
+                self.reader
+                    .with_wake(Some(Waker::from(std::sync::Arc::new(ResponseWake {
+                        response,
+                        delivered,
+                    }))));
+            self
+        }
     }
 
     struct ResponseWake {
@@ -252,16 +266,11 @@ mod tests {
 
     #[test]
     fn response_is_published_before_the_runner_is_woken() {
-        let mut harness = Harness::start();
+        let harness = Harness::start();
         let (sender, response) = crossbeam_channel::bounded(1);
         harness.reader.pending.lock().unwrap().insert(5, sender);
         let (delivered, received) = mpsc::channel();
-        harness.reader = harness
-            .reader
-            .with_wake(Some(Waker::from(std::sync::Arc::new(ResponseWake {
-                response,
-                delivered,
-            }))));
+        let harness = harness.with_response_wake(response, delivered);
         harness
             .reader
             .dispatch(json!({ "jsonrpc": "2.0", "id": 5, "result": "ready" }));

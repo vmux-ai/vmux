@@ -2,13 +2,13 @@ use std::io::{self, BufRead, Read, Write};
 
 use serde_json::Value;
 
-const MAX_HEADER_BYTES: usize = 16 * 1024;
-const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
-
 #[derive(Debug)]
 pub struct LspFrame(Value);
 
 impl LspFrame {
+    const MAX_HEADER_BYTES: usize = 16 * 1024;
+    const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+
     pub fn new(message: Value) -> Self {
         Self(message)
     }
@@ -18,7 +18,7 @@ impl LspFrame {
         let mut header_bytes = 0usize;
         loop {
             let mut line = String::new();
-            let remaining = MAX_HEADER_BYTES.saturating_sub(header_bytes);
+            let remaining = Self::MAX_HEADER_BYTES.saturating_sub(header_bytes);
             if remaining == 0 {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -60,7 +60,7 @@ impl LspFrame {
         }
         let len = content_len
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length"))?;
-        if len > MAX_MESSAGE_BYTES {
+        if len > Self::MAX_MESSAGE_BYTES {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "LSP message is too large",
@@ -139,8 +139,13 @@ mod tests {
 
     #[test]
     fn oversized_message_is_rejected_before_allocation() {
-        let mut cur =
-            Cursor::new(format!("Content-Length: {}\r\n\r\n", MAX_MESSAGE_BYTES + 1).into_bytes());
+        let mut cur = Cursor::new(
+            format!(
+                "Content-Length: {}\r\n\r\n",
+                LspFrame::MAX_MESSAGE_BYTES + 1
+            )
+            .into_bytes(),
+        );
         assert_eq!(
             LspFrame::read(&mut cur).unwrap_err().to_string(),
             "LSP message is too large"
@@ -149,7 +154,7 @@ mod tests {
 
     #[test]
     fn oversized_or_ambiguous_headers_are_rejected() {
-        let mut oversized = Cursor::new(vec![b'x'; MAX_HEADER_BYTES + 1]);
+        let mut oversized = Cursor::new(vec![b'x'; LspFrame::MAX_HEADER_BYTES + 1]);
         assert_eq!(
             LspFrame::read(&mut oversized).unwrap_err().to_string(),
             "LSP header is too large"

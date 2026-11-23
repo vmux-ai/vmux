@@ -28,74 +28,74 @@ pub enum ExRange {
     Lines(usize, usize),
 }
 
-fn parse_address(text: &str) -> Option<usize> {
-    text.parse::<usize>().ok().map(|n| n.saturating_sub(1))
-}
+impl ExCommand {
+    fn parse_address(text: &str) -> Option<usize> {
+        text.parse::<usize>().ok().map(|n| n.saturating_sub(1))
+    }
 
-fn split_range(input: &str) -> (Option<ExRange>, &str) {
-    if let Some(rest) = input.strip_prefix('%') {
-        return (Some(ExRange::WholeFile), rest);
-    }
-    if let Some(rest) = input.strip_prefix("'<,'>") {
-        return (Some(ExRange::Selection), rest);
-    }
-    let digits: String = input.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if digits.is_empty() {
-        return (None, input);
-    }
-    let rest = &input[digits.len()..];
-    let Some(first) = parse_address(&digits) else {
-        return (None, input);
-    };
-    if let Some(after) = rest.strip_prefix(',') {
-        let second: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if let Some(last) = parse_address(&second) {
-            return (Some(ExRange::Lines(first, last)), &after[second.len()..]);
+    fn split_range(input: &str) -> (Option<ExRange>, &str) {
+        if let Some(rest) = input.strip_prefix('%') {
+            return (Some(ExRange::WholeFile), rest);
         }
+        if let Some(rest) = input.strip_prefix("'<,'>") {
+            return (Some(ExRange::Selection), rest);
+        }
+        let digits: String = input.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if digits.is_empty() {
+            return (None, input);
+        }
+        let rest = &input[digits.len()..];
+        let Some(first) = Self::parse_address(&digits) else {
+            return (None, input);
+        };
+        if let Some(after) = rest.strip_prefix(',') {
+            let second: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Some(last) = Self::parse_address(&second) {
+                return (Some(ExRange::Lines(first, last)), &after[second.len()..]);
+            }
+        }
+        (Some(ExRange::Lines(first, first)), rest)
     }
-    (Some(ExRange::Lines(first, first)), rest)
-}
 
-fn split_substitute(body: &str) -> Option<(String, String, String)> {
-    let mut chars = body.chars();
-    let delim = chars.next()?;
-    let mut parts = vec![String::new()];
-    let mut escaped = false;
-    for c in chars {
-        if escaped {
-            if c != delim {
-                parts.last_mut()?.push('\\');
+    fn split_substitute(body: &str) -> Option<(String, String, String)> {
+        let mut chars = body.chars();
+        let delim = chars.next()?;
+        let mut parts = vec![String::new()];
+        let mut escaped = false;
+        for c in chars {
+            if escaped {
+                if c != delim {
+                    parts.last_mut()?.push('\\');
+                }
+                parts.last_mut()?.push(c);
+                escaped = false;
+                continue;
+            }
+            if c == '\\' {
+                escaped = true;
+                continue;
+            }
+            if c == delim {
+                if parts.len() == 3 {
+                    break;
+                }
+                parts.push(String::new());
+                continue;
             }
             parts.last_mut()?.push(c);
-            escaped = false;
-            continue;
         }
-        if c == '\\' {
-            escaped = true;
-            continue;
-        }
-        if c == delim {
-            if parts.len() == 3 {
-                break;
-            }
+        while parts.len() < 3 {
             parts.push(String::new());
-            continue;
         }
-        parts.last_mut()?.push(c);
+        Some((parts[0].clone(), parts[1].clone(), parts[2].clone()))
     }
-    while parts.len() < 3 {
-        parts.push(String::new());
-    }
-    Some((parts[0].clone(), parts[1].clone(), parts[2].clone()))
-}
 
-impl ExCommand {
     pub fn parse(input: &str) -> Option<Self> {
         let input = input.trim();
         if input.is_empty() {
             return None;
         }
-        let (range, rest) = split_range(input);
+        let (range, rest) = Self::split_range(input);
         let rest = rest.trim();
 
         if rest.is_empty() {
@@ -109,7 +109,7 @@ impl ExCommand {
         if let Some(body) = rest.strip_prefix("s").filter(|b| !b.is_empty())
             && !body.starts_with(|c: char| c.is_alphanumeric())
         {
-            let (pattern, replacement, flags) = split_substitute(body)?;
+            let (pattern, replacement, flags) = Self::split_substitute(body)?;
             return Some(Self::Substitute {
                 range,
                 pattern,
@@ -152,13 +152,8 @@ impl ExCommand {
             }],
         }
     }
-}
-
-pub struct ExLine;
-
-impl ExLine {
-    pub fn edits(line: &str) -> Vec<EditCommand> {
-        let Some(command) = ExCommand::parse(line) else {
+    pub fn edits_from_line(line: &str) -> Vec<EditCommand> {
+        let Some(command) = Self::parse(line) else {
             return Vec::new();
         };
         command.edits()
@@ -281,19 +276,19 @@ mod tests {
 
     #[test]
     fn a_line_reaches_the_editor_without_a_keymap() {
-        assert_eq!(ExLine::edits("w"), vec![EditCommand::Save]);
-        assert_eq!(ExLine::edits("q"), Vec::new());
-        assert_eq!(ExLine::edits("bogus"), Vec::new());
+        assert_eq!(ExCommand::edits_from_line("w"), vec![EditCommand::Save]);
+        assert_eq!(ExCommand::edits_from_line("q"), Vec::new());
+        assert_eq!(ExCommand::edits_from_line("bogus"), Vec::new());
         assert_eq!(
-            ExLine::edits("noh"),
+            ExCommand::edits_from_line("noh"),
             vec![EditCommand::ClearSearchHighlight]
         );
         assert_eq!(
-            ExLine::edits("12"),
+            ExCommand::edits_from_line("12"),
             vec![EditCommand::Move(Motion::GotoLine(11))]
         );
         assert_eq!(
-            ExLine::edits("%s/a/b/g"),
+            ExCommand::edits_from_line("%s/a/b/g"),
             vec![EditCommand::Substitute {
                 range: ExRange::WholeFile,
                 pattern: "a".into(),
@@ -305,7 +300,7 @@ mod tests {
 
     #[test]
     fn a_substitute_with_no_pattern_leaves_the_buffer_alone() {
-        assert_eq!(ExLine::edits("s/"), Vec::new());
-        assert_eq!(ExLine::edits("%s//x/g"), Vec::new());
+        assert_eq!(ExCommand::edits_from_line("s/"), Vec::new());
+        assert_eq!(ExCommand::edits_from_line("%s//x/g"), Vec::new());
     }
 }

@@ -3,9 +3,12 @@ use crate::host::editor::Editor;
 use crate::host::editor::{Edit, EditItem};
 use std::path::{Path, PathBuf};
 
-use bevy::ecs::system::Commands;
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
+use bevy::prelude::{
+    App, Commands, Component, Entity, EntityEvent, MessageReader, MessageWriter, On, Plugin, Query,
+    Ref,
+};
+use bevy_cef::prelude::UiInput;
 use vmux_ecs::PageMetadata;
 use vmux_ecs::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen, RecordVisitRequest};
 
@@ -434,7 +437,7 @@ fn knowledge_link_open(
     trigger: On<UiInput<KnowledgeLinkOpen>>,
     mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
     mut visits: FileVisitRecorder,
-    browsers: NonSend<Browsers>,
+    browsers: crate::host::delivery::Surface,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -638,15 +641,15 @@ mod tests {
     use super::*;
     use crate::edit::highlight_cache::HighlightCache;
     use crate::keymap::EditorKeymap;
+    use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
+    use std::sync::{Arc, Mutex};
     use vmux_api::BinEvent;
     use vmux_ecs::event::FileUiState;
-
-    #[derive(Resource, Default)]
-    struct Emitted(Vec<FileUiState>);
 
     struct GotoSession {
         app: App,
         view: Entity,
+        emitted: Arc<Mutex<Vec<FileUiState>>>,
     }
 
     impl GotoSession {
@@ -665,6 +668,8 @@ mod tests {
                 HighlightCache::new(path),
                 crate::fold::FoldState::default(),
             );
+            let emitted = Arc::new(Mutex::new(Vec::new()));
+            let sink = emitted.clone();
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<crate::lsp::manager::LspGoto>()
@@ -672,33 +677,31 @@ mod tests {
                     NavigationPlugin,
                     vmux_ecs::UiStatePlugin::<FileUiState>::default(),
                 ))
-                .init_resource::<Emitted>()
-                .add_observer(
-                    |trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>| {
-                        if trigger.event().id() != FileUiState::id() {
-                            return;
+                .add_observer(move |trigger: On<BinHostEmitEvent>| {
+                    if trigger.event().id() != FileUiState::id() {
+                        return;
+                    }
+                    trigger.event().mark_delivered();
+                    let frame = rkyv::from_bytes::<
+                        vmux_api::UiStateFrame<
+                            FileUiState,
+                            <FileUiState as vmux_api::UiState>::Update,
+                        >,
+                        rkyv::rancor::Error,
+                    >(trigger.event().payload())
+                    .unwrap();
+                    let mut list = sink.lock().unwrap();
+                    let event = match frame {
+                        vmux_api::UiStateFrame::Snapshot(state) => state,
+                        vmux_api::UiStateFrame::Updates(updates) => {
+                            <FileUiState as vmux_api::UiState>::from_updates(
+                                list.last().cloned(),
+                                updates,
+                            )
                         }
-                        trigger.event().mark_delivered();
-                        let frame = rkyv::from_bytes::<
-                            vmux_api::UiStateFrame<
-                                FileUiState,
-                                <FileUiState as vmux_api::UiState>::Update,
-                            >,
-                            rkyv::rancor::Error,
-                        >(trigger.event().payload())
-                        .unwrap();
-                        let event = match frame {
-                            vmux_api::UiStateFrame::Snapshot(state) => state,
-                            vmux_api::UiStateFrame::Updates(updates) => {
-                                <FileUiState as vmux_api::UiState>::from_updates(
-                                    emitted.0.last().cloned(),
-                                    updates,
-                                )
-                            }
-                        };
-                        emitted.0.push(event);
-                    },
-                );
+                    };
+                    list.push(event);
+                });
 
             let view = app
                 .world_mut()
@@ -735,7 +738,7 @@ mod tests {
                 owns_subtree: false,
                 permissions: &["FileUiState"],
             });
-            Self { app, view }
+            Self { app, view, emitted }
         }
 
         fn goto(&mut self, line: u32) {
@@ -845,15 +848,14 @@ mod tests {
         assert!(top > 0, "jumping to line 500 has to move the window");
         assert!(
             session
-                .app
-                .world()
-                .resource::<Emitted>()
-                .0
+                .emitted
+                .lock()
+                .unwrap()
                 .iter()
                 .any(|state| state.viewport.scroll_by.is_some()),
             "the window was repainted at row {top}, so a page still parked at row 0 \
              would render the band off screen unless the move is announced: {:?}",
-            session.app.world().resource::<Emitted>().0
+            session.emitted.lock().unwrap()
         );
     }
 }

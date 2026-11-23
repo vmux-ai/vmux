@@ -199,33 +199,51 @@ impl TextBuffer {
 mod tests {
     use super::*;
 
-    fn buf(text: &str) -> TextBuffer {
-        TextBuffer::from_text(PathBuf::from("a.txt"), "Plain Text".into(), text)
+    impl TextBuffer {
+        fn sample(text: &str) -> Self {
+            Self::from_text(PathBuf::from("a.txt"), "Plain Text".into(), text)
+        }
+
+        fn edit(start: (u32, u32), end: (u32, u32), new_text: &str) -> lsp_types::TextEdit {
+            lsp_types::TextEdit {
+                range: lsp_types::Range {
+                    start: lsp_types::Position {
+                        line: start.0,
+                        character: start.1,
+                    },
+                    end: lsp_types::Position {
+                        line: end.0,
+                        character: end.1,
+                    },
+                },
+                new_text: new_text.to_string(),
+            }
+        }
     }
 
     #[test]
     fn line_len_excludes_newline() {
-        let b = buf("ab\ncde\n");
+        let b = TextBuffer::sample("ab\ncde\n");
         assert_eq!(b.line_len_chars(0), 2);
         assert_eq!(b.line_len_chars(1), 3);
     }
 
     #[test]
     fn coords_roundtrip() {
-        let b = buf("ab\ncde\n");
+        let b = TextBuffer::sample("ab\ncde\n");
         assert_eq!(b.char_to_coords(4), (1, 1));
         assert_eq!(b.coords_to_char(1, 1), 4);
     }
 
     #[test]
     fn coords_to_char_clamps_col() {
-        let b = buf("ab\ncde\n");
+        let b = TextBuffer::sample("ab\ncde\n");
         assert_eq!(b.coords_to_char(0, 99), 2);
     }
 
     #[test]
     fn insert_remove() {
-        let mut b = buf("ac");
+        let mut b = TextBuffer::sample("ac");
         b.insert(1, "b");
         assert_eq!(b.text(), "abc");
         b.remove(1..2);
@@ -234,36 +252,20 @@ mod tests {
 
     #[test]
     fn next_grapheme_advances_one() {
-        let b = buf("あb");
+        let b = TextBuffer::sample("あb");
         assert_eq!(b.next_grapheme(0), 1);
         assert_eq!(b.next_grapheme(1), 2);
         assert_eq!(b.next_grapheme(2), 2);
     }
 
-    fn edit(start: (u32, u32), end: (u32, u32), new_text: &str) -> lsp_types::TextEdit {
-        lsp_types::TextEdit {
-            range: lsp_types::Range {
-                start: lsp_types::Position {
-                    line: start.0,
-                    character: start.1,
-                },
-                end: lsp_types::Position {
-                    line: end.0,
-                    character: end.1,
-                },
-            },
-            new_text: new_text.to_string(),
-        }
-    }
-
     #[test]
     fn later_edits_do_not_shift_earlier_ones() {
-        let b = buf("one two three\n");
+        let b = TextBuffer::sample("one two three\n");
         let out = b
             .with_lsp_edits(&[
-                edit((0, 0), (0, 3), "1"),
-                edit((0, 8), (0, 13), "3"),
-                edit((0, 4), (0, 7), "2"),
+                TextBuffer::edit((0, 0), (0, 3), "1"),
+                TextBuffer::edit((0, 8), (0, 13), "3"),
+                TextBuffer::edit((0, 4), (0, 7), "2"),
             ])
             .unwrap();
         assert_eq!(out, "1 2 3\n");
@@ -272,48 +274,63 @@ mod tests {
 
     #[test]
     fn columns_are_utf16_not_chars() {
-        let b = buf("let 😀 = old;\n");
-        let out = b.with_lsp_edits(&[edit((0, 9), (0, 12), "new")]).unwrap();
+        let b = TextBuffer::sample("let 😀 = old;\n");
+        let out = b
+            .with_lsp_edits(&[TextBuffer::edit((0, 9), (0, 12), "new")])
+            .unwrap();
         assert_eq!(out, "let 😀 = new;\n");
     }
 
     #[test]
     fn overlapping_edits_are_refused() {
-        let b = buf("abcdef\n");
+        let b = TextBuffer::sample("abcdef\n");
         let err = b
-            .with_lsp_edits(&[edit((0, 0), (0, 4), "x"), edit((0, 2), (0, 6), "y")])
+            .with_lsp_edits(&[
+                TextBuffer::edit((0, 0), (0, 4), "x"),
+                TextBuffer::edit((0, 2), (0, 6), "y"),
+            ])
             .unwrap_err();
         assert_eq!(err, LspEditError::Overlapping);
     }
 
     #[test]
     fn touching_edits_are_allowed() {
-        let b = buf("abcdef\n");
+        let b = TextBuffer::sample("abcdef\n");
         let out = b
-            .with_lsp_edits(&[edit((0, 0), (0, 3), "x"), edit((0, 3), (0, 6), "y")])
+            .with_lsp_edits(&[
+                TextBuffer::edit((0, 0), (0, 3), "x"),
+                TextBuffer::edit((0, 3), (0, 6), "y"),
+            ])
             .unwrap();
         assert_eq!(out, "xy\n");
     }
 
     #[test]
     fn insertion_past_the_last_line_appends() {
-        let b = buf("a\n");
-        let out = b.with_lsp_edits(&[edit((9, 0), (9, 0), "b\n")]).unwrap();
+        let b = TextBuffer::sample("a\n");
+        let out = b
+            .with_lsp_edits(&[TextBuffer::edit((9, 0), (9, 0), "b\n")])
+            .unwrap();
         assert_eq!(out, "a\nb\n");
     }
 
     #[test]
     fn crlf_line_endings_survive_an_edit() {
-        let b = buf("one\r\ntwo\r\n");
-        let out = b.with_lsp_edits(&[edit((1, 0), (1, 3), "2")]).unwrap();
+        let b = TextBuffer::sample("one\r\ntwo\r\n");
+        let out = b
+            .with_lsp_edits(&[TextBuffer::edit((1, 0), (1, 3), "2")])
+            .unwrap();
         assert_eq!(out, "one\r\n2\r\n");
     }
 
     #[test]
     fn two_insertions_at_one_offset_keep_their_given_order() {
-        let b = buf("ac\n");
+        let b = TextBuffer::sample("ac\n");
         let out = b
-            .with_lsp_edits(&[edit((0, 1), (0, 1), "b1"), edit((0, 1), (0, 1), "b2")])
+            .with_lsp_edits(&[
+                TextBuffer::edit((0, 1), (0, 1), "b1"),
+                TextBuffer::edit((0, 1), (0, 1), "b2"),
+            ])
             .unwrap();
         assert_eq!(out, "ab1b2c\n");
     }

@@ -3,9 +3,6 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 
-const MAX_ARCHIVE_ENTRIES: usize = 100_000;
-const MAX_EXPANDED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-
 struct ZipEntryMode(Option<u32>);
 
 impl ZipEntryMode {
@@ -122,23 +119,25 @@ impl TarLink {
 struct ExpandedSize(u64);
 
 impl ExpandedSize {
+    const MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
     fn add(&mut self, size: u64) -> Result<(), String> {
         self.0 = self
             .0
             .checked_add(size)
             .ok_or_else(|| "archive expanded size overflow".to_string())?;
-        if self.0 > MAX_EXPANDED_BYTES {
-            return Err(format!("archive expands beyond {MAX_EXPANDED_BYTES} bytes"));
+        if self.0 > Self::MAX_BYTES {
+            return Err(format!("archive expands beyond {} bytes", Self::MAX_BYTES));
         }
         Ok(())
     }
 
     fn copy(mut reader: impl Read, mut writer: impl Write) -> Result<(), String> {
-        let mut limited = reader.by_ref().take(MAX_EXPANDED_BYTES + 1);
+        let mut limited = reader.by_ref().take(Self::MAX_BYTES + 1);
         let written =
             std::io::copy(&mut limited, &mut writer).map_err(|error| error.to_string())?;
-        if written > MAX_EXPANDED_BYTES {
-            return Err(format!("archive expands beyond {MAX_EXPANDED_BYTES} bytes"));
+        if written > Self::MAX_BYTES {
+            return Err(format!("archive expands beyond {} bytes", Self::MAX_BYTES));
         }
         writer.flush().map_err(|error| error.to_string())?;
         Ok(())
@@ -146,6 +145,8 @@ impl ExpandedSize {
 }
 
 impl ArchiveKind {
+    const MAX_ENTRIES: usize = 100_000;
+
     pub fn for_file(file: &str) -> Self {
         let file = file.to_ascii_lowercase();
         if file.ends_with(".tar.gz") || file.ends_with(".tgz") {
@@ -199,9 +200,10 @@ impl ArchiveKind {
         let mut links = Vec::new();
         for entry in entries {
             entry_count += 1;
-            if entry_count > MAX_ARCHIVE_ENTRIES {
+            if entry_count > Self::MAX_ENTRIES {
                 return Err(format!(
-                    "archive contains more than {MAX_ARCHIVE_ENTRIES} entries"
+                    "archive contains more than {} entries",
+                    Self::MAX_ENTRIES
                 ));
             }
             let mut entry = entry.map_err(|error| error.to_string())?;
@@ -250,9 +252,10 @@ impl ArchiveKind {
         let mut headers = std::fs::File::open(file).map_err(|error| error.to_string())?;
         let file = std::fs::File::open(file).map_err(|error| error.to_string())?;
         let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
-        if archive.len() > MAX_ARCHIVE_ENTRIES {
+        if archive.len() > Self::MAX_ENTRIES {
             return Err(format!(
-                "archive contains more than {MAX_ARCHIVE_ENTRIES} entries"
+                "archive contains more than {} entries",
+                Self::MAX_ENTRIES
             ));
         }
         let mut expanded = ExpandedSize::default();
