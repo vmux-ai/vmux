@@ -40,23 +40,37 @@ impl ProductMetadata {
                 "A custom host name cannot alias Vmux on a case-insensitive filesystem".into(),
             );
         }
+        let mut product = Self {
+            values: BTreeMap::new(),
+        };
+        product.parse_identity(input, &name, &namespace, custom)?;
+        product.parse_assets(root, input)?;
+        product.parse_endpoints(input, custom)?;
+        product.parse_capabilities(input, custom)?;
+        Ok(product)
+    }
+
+    fn parse_identity(
+        &mut self,
+        input: &BTreeMap<String, String>,
+        name: &str,
+        namespace: &str,
+        custom: bool,
+    ) -> Result<(), String> {
         let config = if custom {
             format!(".{}", namespace.replace('.', "-"))
         } else {
             ".vmux".into()
         };
-        let mut product = Self {
-            values: BTreeMap::new(),
-        };
         for (key, value) in [
-            ("VMUX_HOST_NAME", name.clone()),
-            ("VMUX_HOST_NAMESPACE", namespace.clone()),
+            ("VMUX_HOST_NAME", name.to_string()),
+            ("VMUX_HOST_NAMESPACE", namespace.to_string()),
             (
                 "VMUX_HOST_DATA_NAME",
                 Self::input(
                     input,
                     "VMUX_HOST_DATA_NAME",
-                    if custom { &namespace } else { &name },
+                    if custom { namespace } else { name },
                 ),
             ),
             (
@@ -96,13 +110,13 @@ impl ProductMetadata {
             ("VMUX_HOST_KEYCHAIN_LABEL", format!("{name} Safe Storage")),
         ] {
             Self::segment(&value)?;
-            product.values.insert(key, value);
+            self.values.insert(key, value);
         }
         if custom
-            && (product
+            && (self
                 .value("VMUX_HOST_DATA_NAME")
                 .eq_ignore_ascii_case("Vmux")
-                || product
+                || self
                     .value("VMUX_HOST_CONFIG_NAME")
                     .eq_ignore_ascii_case(".vmux"))
         {
@@ -110,6 +124,14 @@ impl ProductMetadata {
                 "A custom host cannot share the Vmux data or configuration directory".into(),
             );
         }
+        Ok(())
+    }
+
+    fn parse_assets(
+        &mut self,
+        root: &Path,
+        input: &BTreeMap<String, String>,
+    ) -> Result<(), String> {
         for (key, default) in [
             ("VMUX_HOST_ICON", "packaging/macos/Vmux.icns"),
             ("VMUX_HOST_TRAY_ICON", "packaging/macos/tray.png"),
@@ -149,8 +171,16 @@ impl ProductMetadata {
         ] {
             let path = Self::input(input, key, default);
             let path = Self::asset(root, &path)?;
-            product.values.insert(key, path);
+            self.values.insert(key, path);
         }
+        Ok(())
+    }
+
+    fn parse_endpoints(
+        &mut self,
+        input: &BTreeMap<String, String>,
+        custom: bool,
+    ) -> Result<(), String> {
         for (key, default) in [
             ("VMUX_HOST_STABLE_ENDPOINT", "https://vmux.ai/updates.json"),
             (
@@ -164,8 +194,16 @@ impl ProductMetadata {
                     "{key} must be an HTTPS URL or empty to disable the channel"
                 ));
             }
-            product.values.insert(key, endpoint);
+            self.values.insert(key, endpoint);
         }
+        Ok(())
+    }
+
+    fn parse_capabilities(
+        &mut self,
+        input: &BTreeMap<String, String>,
+        custom: bool,
+    ) -> Result<(), String> {
         for key in [
             "VMUX_HOST_CAMERA",
             "VMUX_HOST_MICROPHONE",
@@ -175,9 +213,9 @@ impl ProductMetadata {
             if !matches!(value.as_str(), "true" | "false") {
                 return Err(format!("{key} must be true or false"));
             }
-            product.values.insert(key, value);
+            self.values.insert(key, value);
         }
-        Ok(product)
+        Ok(())
     }
 
     pub fn value(&self, key: &str) -> &str {

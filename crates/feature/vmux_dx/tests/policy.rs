@@ -12489,6 +12489,8 @@ impl Inventory {
                     | "crates/build_platform_cfg.rs"
                     | "crates/build_product.rs"
                     | "crates/build_cfg_product.rs"
+                    | "scripts/ui_build.rs"
+                    | "scripts/ui_stylesheet.rs"
             )
             || path.ends_with("/build.rs")
     }
@@ -12625,8 +12627,12 @@ impl Inventory {
         true
     }
 
+    fn test_scope(entry: &Declaration) -> bool {
+        !entry.production || entry.path.contains("/tests/")
+    }
+
     fn automatic_test_fixture(&self, entry: &Declaration) -> bool {
-        if entry.production {
+        if !Self::test_scope(entry) {
             return false;
         }
         self.ensure_test_fixtures();
@@ -12643,7 +12649,7 @@ impl Inventory {
         let mut fixtures = BTreeSet::new();
         let mut queue = Vec::new();
         for entry in self.entries.values() {
-            if !entry.production && entry.test {
+            if Self::test_scope(entry) && entry.test {
                 queue.push(entry.key.clone());
             }
         }
@@ -12653,7 +12659,7 @@ impl Inventory {
             let mut origins = vec![source];
             if matches!(source.kind, Kind::Struct | Kind::Enum) {
                 for implementation in self.implementations(source) {
-                    if !implementation.production && !implementation.plugin {
+                    if Self::test_scope(implementation) && !implementation.plugin {
                         origins.push(implementation);
                     }
                 }
@@ -12688,7 +12694,7 @@ impl Inventory {
             let entry = &self.entries[key];
             if matches!(entry.kind, Kind::Struct | Kind::Enum) {
                 for implementation in self.implementations(entry) {
-                    if !implementation.production && !implementation.plugin {
+                    if Self::test_scope(implementation) && !implementation.plugin {
                         finalized.insert(implementation.key.clone());
                     }
                 }
@@ -12733,7 +12739,7 @@ impl Inventory {
         let mut sources = vec![entry];
         if matches!(entry.kind, Kind::Struct | Kind::Enum) {
             for implementation in self.implementations(entry) {
-                if !implementation.production {
+                if Self::test_scope(implementation) {
                     sources.push(implementation);
                 }
             }
@@ -12759,7 +12765,7 @@ impl Inventory {
     }
 
     fn valid_test_fixture_target(&self, entry: &Declaration) -> bool {
-        if entry.production
+        if !Self::test_scope(entry)
             || entry.plugin
             || entry.path.starts_with("crates/feature/vmux_dx/lints/")
             || self.has_cargo_command(entry)
@@ -13096,6 +13102,9 @@ impl Inventory {
             return false;
         }
         if shape.payloads == 0 && !shape.component && !self.enum_job(entry) {
+            if self.automatic_pre_world_boundary(entry) {
+                return true;
+            }
             let system_set = entry.derive_paths.iter().any(|path| {
                 self.framework_handle(&entry.namespace, path, &mut BTreeSet::new())
                     .as_deref()
@@ -14066,7 +14075,17 @@ impl Inventory {
             if root.is_some_and(|root| {
                 matches!(
                     root.split("::").next(),
-                    Some("bevy" | "bevy_app" | "bevy_ecs" | "bevy_cef" | "bevy_cef_core")
+                    Some(
+                        "bevy"
+                            | "bevy_app"
+                            | "bevy_asset"
+                            | "bevy_ecs"
+                            | "bevy_tasks"
+                            | "bevy_time"
+                            | "bevy_window"
+                            | "bevy_cef"
+                            | "bevy_cef_core"
+                    )
                 )
             }) {
                 continue;
@@ -14099,6 +14118,9 @@ impl Inventory {
                 | "crates/util/vmux_ecs/src/store.rs||struct:SchemaPlugin"
                 | "crates/util/vmux_ecs/src/identity.rs||struct:IdentityIndexPlugin"
                 | "crates/util/vmux_ecs/src/jobs.rs||struct:JobPlugin"
+                | "crates/util/vmux_ecs/src/operation.rs||struct:OperationPlugin"
+                | "crates/util/vmux_ecs/src/wake.rs||struct:WakePlugin"
+                | "patches/bevy_cef-0.5.2/src/common/ipc/ui_event.rs||struct:UiEventPlugin"
         )
     }
 
@@ -14284,7 +14306,11 @@ impl Inventory {
         let syn::PathArguments::AngleBracketed(arguments) = &method.arguments else {
             return false;
         };
-        if arguments.args.len() != 1 || !matches!(&arguments.args[0], syn::GenericArgument::Type(_))
+        if arguments.args.is_empty()
+            || !arguments
+                .args
+                .iter()
+                .all(|arg| matches!(arg, syn::GenericArgument::Type(_)))
         {
             return false;
         }
@@ -21795,6 +21821,56 @@ fn registered_compiler_helpers_moonshine_observers_and_git_test_fixtures_prove_s
         assert!(
             inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
             "expected proved test fixture: {key}"
+        );
+    }
+}
+
+#[test]
+fn pre_world_unit_enums_build_scripts_and_integration_test_fixtures_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_macro/src/kind.rs",
+        "pub(crate) enum Direction { Host, Ui } pub(crate) enum Command { Run(String), Stop }",
+    );
+    inventory.source(
+        "scripts/ui_build.rs",
+        "fn main() { println!(\"cargo:rerun-if-changed=x\"); }",
+    );
+    inventory.source(
+        "examples/demo/src/lib.rs",
+        "pub struct ProdLeak { count: u32 }",
+    );
+    inventory.source(
+        "examples/demo/tests/flow.rs",
+        "struct Harness { count: u32 } impl Harness { fn new() -> Self { Self { count: 1 } } } struct UnusedFixture { x: u32 } #[test] fn runs() { let _ = (Harness::new(), demo::ProdLeak { count: 0 }); }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    assert!(inventory.automatic_enum_purpose(
+        &inventory.entries["crates/util/vmux_macro/src/kind.rs||enum:Direction"],
+        &policy
+    ));
+    assert!(!inventory.automatic_enum_purpose(
+        &inventory.entries["crates/util/vmux_macro/src/kind.rs||enum:Command"],
+        &policy
+    ));
+    assert!(inventory.automatic_boundary(&inventory.entries["scripts/ui_build.rs||fn:main"]));
+    for key in [
+        "examples/demo/tests/flow.rs||struct:Harness",
+        "examples/demo/tests/flow.rs||impl:Harness",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved integration test fixture: {key}"
+        );
+    }
+    for key in [
+        "examples/demo/tests/flow.rs||struct:UnusedFixture",
+        "examples/demo/src/lib.rs||struct:ProdLeak",
+    ] {
+        assert!(
+            !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected rejected declaration: {key}"
         );
     }
 }

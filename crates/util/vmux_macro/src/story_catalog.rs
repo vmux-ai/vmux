@@ -194,11 +194,22 @@ struct Entry {
 impl Entry {
     fn parse(variant: Ident, attr: syn::Attribute) -> syn::Result<Self> {
         let values = attr.parse_args_with(Punctuated::<Meta, syn::Token![,]>::parse_terminated)?;
+        let mut entry = Self {
+            id: LitStr::new("", variant.span()),
+            name: LitStr::new(&variant.to_string(), variant.span()),
+            category: LitStr::new("gallery-category-primitives", variant.span()),
+            components: LitStr::new(&variant.to_string(), variant.span()),
+            controls: Vec::new(),
+            component: syn::parse_quote!(Self),
+            metadata_source: LitStr::new("", variant.span()),
+            metadata_path: LitStr::new(
+                concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"),
+                variant.span(),
+            ),
+            arg_checks: Vec::new(),
+            variant,
+        };
         let mut id = None;
-        let mut name = LitStr::new(&variant.to_string(), variant.span());
-        let mut category = LitStr::new("gallery-category-primitives", variant.span());
-        let mut components = name.clone();
-        let mut controls = Vec::new();
         let mut component = None;
         let mut metadata = None;
         for value in values {
@@ -226,23 +237,21 @@ impl Entry {
                     ));
                 };
                 for value in array.elems {
-                    controls.push(syn::parse2(quote! { #value })?);
+                    entry.controls.push(syn::parse2(quote! { #value })?);
                 }
                 continue;
             }
             let text: LitStr = syn::parse2(value.value.to_token_stream())?;
             if value.path.is_ident("metadata") {
                 metadata = Some(text);
-                continue;
-            }
-            if value.path.is_ident("id") {
+            } else if value.path.is_ident("id") {
                 id = Some(text);
             } else if value.path.is_ident("name") {
-                name = text;
+                entry.name = text;
             } else if value.path.is_ident("category") {
-                category = text;
+                entry.category = text;
             } else if value.path.is_ident("components") {
-                components = text;
+                entry.components = text;
             } else {
                 return Err(syn::Error::new_spanned(
                     value.path,
@@ -250,51 +259,35 @@ impl Entry {
                 ));
             }
         }
-        let (metadata_source, metadata_path, arg_checks) = if let Some(file) = metadata {
-            let path =
-                PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join(file.value());
-            let body = std::fs::read_to_string(&path)
-                .map_err(|error| syn::Error::new_spanned(&file, error.to_string()))?;
-            let definition: Definition = ron::from_str(&body)
-                .map_err(|error| syn::Error::new_spanned(&file, error.to_string()))?;
-            let arg_checks = definition.validate()?;
-            id = Some(LitStr::new(&definition.id, file.span()));
-            name = LitStr::new(&definition.title, file.span());
-            category = LitStr::new(&definition.category, file.span());
-            components = LitStr::new(&definition.components.join(" · "), file.span());
-            controls = definition
-                .controls
-                .iter()
-                .map(|value| LitStr::new(value, file.span()))
-                .collect();
-            (
-                LitStr::new(&body, file.span()),
-                LitStr::new(&path.to_string_lossy(), file.span()),
-                arg_checks,
-            )
-        } else {
-            (
-                LitStr::new("", variant.span()),
-                LitStr::new(
-                    concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"),
-                    variant.span(),
-                ),
-                Vec::new(),
-            )
-        };
-        Ok(Self {
-            variant: variant.clone(),
-            id: id.ok_or_else(|| syn::Error::new_spanned(&variant, "story requires id"))?,
-            name,
-            category,
-            components,
-            controls,
-            component: component
-                .ok_or_else(|| syn::Error::new_spanned(&variant, "story requires component"))?,
-            metadata_source,
-            metadata_path,
-            arg_checks,
-        })
+        if let Some(file) = metadata {
+            id = Some(entry.load_metadata(file)?);
+        }
+        entry.id =
+            id.ok_or_else(|| syn::Error::new_spanned(&entry.variant, "story requires id"))?;
+        entry.component = component
+            .ok_or_else(|| syn::Error::new_spanned(&entry.variant, "story requires component"))?;
+        Ok(entry)
+    }
+
+    fn load_metadata(&mut self, file: LitStr) -> syn::Result<LitStr> {
+        let path =
+            PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join(file.value());
+        let body = std::fs::read_to_string(&path)
+            .map_err(|error| syn::Error::new_spanned(&file, error.to_string()))?;
+        let definition: Definition = ron::from_str(&body)
+            .map_err(|error| syn::Error::new_spanned(&file, error.to_string()))?;
+        self.arg_checks = definition.validate()?;
+        self.name = LitStr::new(&definition.title, file.span());
+        self.category = LitStr::new(&definition.category, file.span());
+        self.components = LitStr::new(&definition.components.join(" · "), file.span());
+        self.controls = definition
+            .controls
+            .iter()
+            .map(|value| LitStr::new(value, file.span()))
+            .collect();
+        self.metadata_source = LitStr::new(&body, file.span());
+        self.metadata_path = LitStr::new(&path.to_string_lossy(), file.span());
+        Ok(LitStr::new(&definition.id, file.span()))
     }
 }
 
