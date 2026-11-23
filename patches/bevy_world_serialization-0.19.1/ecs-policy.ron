@@ -1,4 +1,0 @@
-(legacy: [
-    (key: "patches/bevy_world_serialization-0.19.1/src/components.rs||struct:DynamicWorldRoot", fingerprint: "6d8d11f64664f568", issue: "VMX-253"),
-    (key: "patches/bevy_world_serialization-0.19.1/src/components.rs||struct:WorldAssetRoot", fingerprint: "7b89ff1d4b78d127", issue: "VMX-253"),
-])
