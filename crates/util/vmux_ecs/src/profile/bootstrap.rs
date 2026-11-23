@@ -17,10 +17,10 @@ impl Plugin for BootstrapPlugin {
         app.add_systems(
             PreStartup,
             (
-                seed_default_bootstrap,
+                seed_default,
                 read_display_name,
-                resolve_profile_label,
-                publish_active_profile,
+                resolve_label,
+                publish_active,
             )
                 .chain()
                 .after(MigrationBarrierSet),
@@ -84,10 +84,7 @@ struct ObservedDisplayName(Option<String>);
 #[derive(Component)]
 struct ResolvedProfileLabel(String);
 
-fn seed_default_bootstrap(
-    existing: Query<Entity, With<ProfileBootstrapSpec>>,
-    mut commands: Commands,
-) {
+fn seed_default(existing: Query<Entity, With<ProfileBootstrapSpec>>, mut commands: Commands) {
     if !existing.is_empty() {
         return;
     }
@@ -111,7 +108,7 @@ fn read_display_name(
     }
 }
 
-fn resolve_profile_label(
+fn resolve_label(
     specs: Query<
         (Entity, &ProfileBootstrapSpec, &ObservedDisplayName),
         Without<ResolvedProfileLabel>,
@@ -131,7 +128,7 @@ fn resolve_profile_label(
     }
 }
 
-fn publish_active_profile(
+fn publish_active(
     specs: Query<(Entity, &ProfileBootstrapSpec, &ResolvedProfileLabel), Without<ActiveProfile>>,
     mut commands: Commands,
 ) {
