@@ -1,3 +1,6 @@
+#[cfg(test)]
+use bevy::ecs::system::Commands;
+use bevy::prelude::Changed;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_api::PageIcon;

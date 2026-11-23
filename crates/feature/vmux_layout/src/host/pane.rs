@@ -1,12 +1,13 @@
 #[cfg(test)]
 use super::command::LayoutRequestPlugin;
-use super::target::SiblingDirection;
 use crate::host::zoom::PaneZoomPlugin;
 pub use crate::host::zoom::Zoomed;
 use crate::stack::Stack;
 #[cfg(test)]
 use crate::tab::Tab;
 use arrangement::ArrangementPlugin;
+#[cfg(test)]
+use bevy::ecs::system::Commands;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 #[cfg(test)]
@@ -111,22 +112,14 @@ impl Plugin for PanePlugin {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PaneFocus {
-    Next,
-    Direction(PaneDirection),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaneArrangement {
-    Swap(SiblingDirection),
-    Rotate(SiblingDirection),
-    Mirror(Option<PaneSplitDirection>),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PaneResize {
-    Equalize,
-    Direction(PaneDirection),
+    SwapPrevious,
+    SwapNext,
+    RotateForward,
+    RotateBackward,
+    MirrorAuto,
+    MirrorHorizontal,
+    MirrorVertical,
 }
 
 #[vmux_command::command(message)]
@@ -202,18 +195,32 @@ impl TryFrom<&CommandInvocation> for CloseRequest {
 
 #[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FocusRequest(pub PaneFocus);
+pub struct FocusRequest {
+    pub direction: Option<PaneDirection>,
+}
+
+impl FocusRequest {
+    pub fn next() -> Self {
+        Self { direction: None }
+    }
+
+    pub fn direction(direction: PaneDirection) -> Self {
+        Self {
+            direction: Some(direction),
+        }
+    }
+}
 
 impl TryFrom<&CommandInvocation> for FocusRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         match invocation.id.as_str() {
-            "toggle_pane" => Ok(Self(PaneFocus::Next)),
-            "select_pane_left" => Ok(Self(PaneFocus::Direction(PaneDirection::Left))),
-            "select_pane_right" => Ok(Self(PaneFocus::Direction(PaneDirection::Right))),
-            "select_pane_up" => Ok(Self(PaneFocus::Direction(PaneDirection::Top))),
-            "select_pane_down" => Ok(Self(PaneFocus::Direction(PaneDirection::Bottom))),
+            "toggle_pane" => Ok(Self::next()),
+            "select_pane_left" => Ok(Self::direction(PaneDirection::Left)),
+            "select_pane_right" => Ok(Self::direction(PaneDirection::Right)),
+            "select_pane_up" => Ok(Self::direction(PaneDirection::Top)),
+            "select_pane_down" => Ok(Self::direction(PaneDirection::Bottom)),
             _ => Err(()),
         }
     }
@@ -228,17 +235,13 @@ impl TryFrom<&CommandInvocation> for ArrangeRequest {
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         match invocation.id.as_str() {
-            "swap_pane_prev" => Ok(Self(PaneArrangement::Swap(SiblingDirection::Previous))),
-            "swap_pane_next" => Ok(Self(PaneArrangement::Swap(SiblingDirection::Next))),
-            "rotate_forward" => Ok(Self(PaneArrangement::Rotate(SiblingDirection::Next))),
-            "rotate_backward" => Ok(Self(PaneArrangement::Rotate(SiblingDirection::Previous))),
-            "mirror_panes" => Ok(Self(PaneArrangement::Mirror(None))),
-            "mirror_panes_horizontal" => {
-                Ok(Self(PaneArrangement::Mirror(Some(PaneSplitDirection::Row))))
-            }
-            "mirror_panes_vertical" => Ok(Self(PaneArrangement::Mirror(Some(
-                PaneSplitDirection::Column,
-            )))),
+            "swap_pane_prev" => Ok(Self(PaneArrangement::SwapPrevious)),
+            "swap_pane_next" => Ok(Self(PaneArrangement::SwapNext)),
+            "rotate_forward" => Ok(Self(PaneArrangement::RotateForward)),
+            "rotate_backward" => Ok(Self(PaneArrangement::RotateBackward)),
+            "mirror_panes" => Ok(Self(PaneArrangement::MirrorAuto)),
+            "mirror_panes_horizontal" => Ok(Self(PaneArrangement::MirrorHorizontal)),
+            "mirror_panes_vertical" => Ok(Self(PaneArrangement::MirrorVertical)),
             _ => Err(()),
         }
     }
@@ -246,18 +249,32 @@ impl TryFrom<&CommandInvocation> for ArrangeRequest {
 
 #[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ResizeRequest(pub PaneResize);
+pub struct ResizeRequest {
+    pub direction: Option<PaneDirection>,
+}
+
+impl ResizeRequest {
+    pub fn equalize() -> Self {
+        Self { direction: None }
+    }
+
+    pub fn direction(direction: PaneDirection) -> Self {
+        Self {
+            direction: Some(direction),
+        }
+    }
+}
 
 impl TryFrom<&CommandInvocation> for ResizeRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         match invocation.id.as_str() {
-            "equalize_pane_size" => Ok(Self(PaneResize::Equalize)),
-            "resize_pane_left" => Ok(Self(PaneResize::Direction(PaneDirection::Left))),
-            "resize_pane_right" => Ok(Self(PaneResize::Direction(PaneDirection::Right))),
-            "resize_pane_up" => Ok(Self(PaneResize::Direction(PaneDirection::Top))),
-            "resize_pane_down" => Ok(Self(PaneResize::Direction(PaneDirection::Bottom))),
+            "equalize_pane_size" => Ok(Self::equalize()),
+            "resize_pane_left" => Ok(Self::direction(PaneDirection::Left)),
+            "resize_pane_right" => Ok(Self::direction(PaneDirection::Right)),
+            "resize_pane_up" => Ok(Self::direction(PaneDirection::Top)),
+            "resize_pane_down" => Ok(Self::direction(PaneDirection::Bottom)),
             _ => Err(()),
         }
     }
@@ -2484,7 +2501,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<FocusRequest>>()
-            .write(FocusRequest(PaneFocus::Direction(PaneDirection::Left)));
+            .write(FocusRequest::direction(PaneDirection::Left));
         app.update();
 
         assert!(

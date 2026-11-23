@@ -6,11 +6,15 @@ use crate::{
     side_sheet::{SideSheet, SideSheetPosition},
     stack::Stack,
     tab::Tab,
-    unit::WindowExt,
 };
-use bevy::{
-    asset::Asset, ecs::system::SystemParam, prelude::*, window::PrimaryWindow, winit::WINIT_WINDOWS,
-};
+use bevy::asset::{Asset, Assets};
+use bevy::ecs::system::{Commands, SystemParam};
+#[cfg(test)]
+use bevy::prelude::Changed;
+use bevy::prelude::*;
+use bevy::prelude::{App, Plugin};
+use bevy::window::{PrimaryWindow, Window};
+use bevy::winit::WINIT_WINDOWS;
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
@@ -192,26 +196,6 @@ impl NewWindowWorkspace {
     }
 }
 
-pub const SIDE_SHEET_TOP_PADDING_PX: f32 = 22.0;
-
-pub const WEBVIEW_Z_BASE: f32 = 0.01;
-pub const WEBVIEW_Z_MAIN: f32 = 0.018;
-pub const WEBVIEW_Z_FOCUS_RING: f32 = 0.02;
-pub const WEBVIEW_Z_HEADER: f32 = 0.022;
-pub const WEBVIEW_Z_SIDE_SHEET: f32 = 0.022;
-pub const WEBVIEW_Z_MODAL: f32 = 0.06;
-pub const WEBVIEW_MESH_DEPTH_BIAS: f32 = 0.0;
-
-const _: () = {
-    assert!(WEBVIEW_Z_BASE < WEBVIEW_Z_MAIN);
-    assert!(WEBVIEW_Z_MAIN <= 0.025);
-    assert!(WEBVIEW_Z_FOCUS_RING > WEBVIEW_Z_MAIN);
-    assert!(WEBVIEW_Z_HEADER <= 0.03);
-    assert!(WEBVIEW_Z_SIDE_SHEET <= 0.03);
-    assert!(WEBVIEW_Z_MODAL <= 0.08);
-    assert!(WEBVIEW_MESH_DEPTH_BIAS >= 0.0);
-};
-
 #[derive(Asset, TypePath)]
 pub struct WindowMaterial;
 
@@ -247,27 +231,28 @@ fn minimize_focused(
     }
 }
 
-#[derive(Bundle)]
-struct WindowBundle {
-    marker: VmuxWindow,
-    host_window: HostWindow,
-    viewport: FlexViewport,
-    surface: WindowSurface,
-    transform: Transform,
-    node: Node,
-}
-
 #[derive(Component)]
 pub struct VmuxWindow;
+
+impl VmuxWindow {
+    pub const PIXELS_PER_METER: f32 = 100.0;
+    pub const SIDE_SHEET_TOP_PADDING_PX: f32 = 22.0;
+    pub const WEBVIEW_Z_BASE: f32 = 0.01;
+    pub const WEBVIEW_Z_MAIN: f32 = 0.018;
+    pub const WEBVIEW_Z_HEADER: f32 = 0.022;
+    pub const WEBVIEW_Z_SIDE_SHEET: f32 = 0.022;
+    pub const WEBVIEW_Z_MODAL: f32 = 0.06;
+
+    pub fn meters(window: &Window) -> Vec2 {
+        Vec2::new(window.width(), window.height()) / Self::PIXELS_PER_METER
+    }
+}
 
 #[derive(Component)]
 pub struct Main;
 
 #[derive(Component)]
 pub struct MainColumn;
-
-#[derive(Component)]
-pub struct WindowSurface;
 
 #[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq)]
 #[reflect(Component)]
@@ -452,19 +437,18 @@ fn spawn_window_shell(
     window: &Window,
     settings: &LayoutSettings,
 ) -> Entity {
-    let m = window.meters();
+    let m = VmuxWindow::meters(window);
 
-    let root_commands = commands.spawn(WindowBundle {
-        marker: VmuxWindow,
-        host_window: HostWindow(window_entity),
-        viewport: FlexViewport(window_entity),
-        surface: WindowSurface,
-        transform: Transform {
+    let root_commands = commands.spawn((
+        VmuxWindow,
+        HostWindow(window_entity),
+        FlexViewport(window_entity),
+        Transform {
             translation: Vec3::new(0.0, m.y * 0.5, 0.0),
             scale: Vec3::new(m.x, m.y, 1.0),
             ..default()
         },
-        node: Node {
+        Node {
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
             position_type: PositionType::Relative,
@@ -478,7 +462,7 @@ fn spawn_window_shell(
             column_gap: Val::Px(crate::event::SIDE_SHEET_GAP_PX),
             ..default()
         },
-    });
+    ));
     let root = root_commands.id();
 
     let _left_side_sheet = commands
@@ -496,7 +480,7 @@ fn spawn_window_shell(
                 flex_shrink: 0.0,
                 flex_direction: FlexDirection::Column,
                 padding: UiRect {
-                    top: Val::Px(SIDE_SHEET_TOP_PADDING_PX),
+                    top: Val::Px(VmuxWindow::SIDE_SHEET_TOP_PADDING_PX),
                     ..default()
                 },
                 ..default()
@@ -547,6 +531,12 @@ fn spawn_window_shell(
         ))
         .id();
 
+    spawn_side_sheets(commands, root, settings);
+    commands.spawn((LayoutCef::bundle(window_entity), ChildOf(root)));
+    main
+}
+
+fn spawn_side_sheets(commands: &mut Commands, root: Entity, settings: &LayoutSettings) {
     commands.spawn((
         SideSheet,
         SideSheetPosition::Right,
@@ -578,9 +568,6 @@ fn spawn_window_shell(
         },
         ChildOf(root),
     ));
-
-    commands.spawn((LayoutCef::bundle(window_entity), ChildOf(root)));
-    main
 }
 
 fn spawn_new_window_workspace(
@@ -616,11 +603,8 @@ fn spawn_new_window_workspace(
         startup_dir,
         content: startup_url
             .filter(|url| !url.is_empty())
-            .map(|url| TabLayoutSpawnContent::Url {
-                url,
-                pending_prompt: None,
-            })
-            .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt),
+            .map(|url| TabLayoutSpawnContent::url(url, None))
+            .unwrap_or_else(TabLayoutSpawnContent::startup_url_or_prompt),
         clear_pending_stack: false,
         focus: true,
     });
@@ -649,7 +633,7 @@ fn request_default(
             .unwrap_or(Entity::PLACEHOLDER),
         name: None,
         startup_dir: startup_dir.clone(),
-        content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+        content: TabLayoutSpawnContent::startup_url_or_prompt(),
         clear_pending_stack: false,
         focus: true,
     });
@@ -770,28 +754,19 @@ fn spawn_requested_tab_layouts(
             commands.entity(leaf).insert(LastActivatedAt(0));
             commands.entity(stack).insert(LastActivatedAt(0));
         }
-        match &request.content {
-            TabLayoutSpawnContent::StartupUrlOrPrompt => {
-                page_open_requests.write(PageOpenRequest {
-                    target: PageOpenTarget::Stack(stack),
-                    url: startup_url.0.clone(),
-                    request_id: None,
-                });
-            }
-            TabLayoutSpawnContent::Url {
-                url,
-                pending_prompt,
-            } => {
-                if let Some(prompt) = pending_prompt {
-                    commands.entity(stack).insert(PendingPrompt(prompt.clone()));
-                }
-                page_open_requests.write(PageOpenRequest {
-                    target: PageOpenTarget::Stack(stack),
-                    url: url.clone(),
-                    request_id: None,
-                });
-            }
+        if let Some(prompt) = &request.content.pending_prompt {
+            commands.entity(stack).insert(PendingPrompt(prompt.clone()));
         }
+        let url = request
+            .content
+            .url
+            .clone()
+            .unwrap_or_else(|| startup_url.0.clone());
+        page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url,
+            request_id: None,
+        });
     }
 }
 
@@ -901,14 +876,14 @@ fn gap(
 }
 
 fn fit_to_screen(
-    windows: Query<&bevy::window::Window>,
+    windows: Query<&Window>,
     mut roots: Query<(&HostWindow, &mut Transform), With<VmuxWindow>>,
 ) {
     for (host, mut transform) in &mut roots {
         let Ok(window) = windows.get(host.0) else {
             continue;
         };
-        let m = window.meters();
+        let m = VmuxWindow::meters(window);
         let translation = Vec3::new(0.0, m.y * 0.5, 0.0);
         let scale = Vec3::new(m.x, m.y, 1.0);
         if transform.translation.abs_diff_eq(translation, 0.0005)
@@ -1192,7 +1167,7 @@ mod tests {
 
         let count = app
             .world_mut()
-            .query_filtered::<Entity, With<WindowSurface>>()
+            .query_filtered::<Entity, With<VmuxWindow>>()
             .iter(app.world())
             .count();
 
@@ -1336,10 +1311,10 @@ mod tests {
             .expect("tab request");
         assert_eq!(request.primary_window, target_window);
         assert_eq!(request.startup_dir.as_deref(), Some(startup_dir.path()));
-        assert!(matches!(
-            request.content,
-            TabLayoutSpawnContent::Url { ref url, .. } if url == "vmux://projects/source"
-        ));
+        assert_eq!(
+            request.content.url.as_deref(),
+            Some("vmux://projects/source")
+        );
     }
 
     #[test]
@@ -1587,7 +1562,7 @@ mod tests {
                 primary_window: window,
                 name: None,
                 startup_dir: Some(root.path().join("missing")),
-                content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
+                content: crate::TabLayoutSpawnContent::startup_url_or_prompt(),
                 clear_pending_stack: false,
                 focus: true,
             });
@@ -1623,7 +1598,7 @@ mod tests {
                 primary_window: window,
                 name: None,
                 startup_dir: Some(startup_dir.path().to_path_buf()),
-                content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
+                content: crate::TabLayoutSpawnContent::startup_url_or_prompt(),
                 clear_pending_stack: false,
                 focus: true,
             });

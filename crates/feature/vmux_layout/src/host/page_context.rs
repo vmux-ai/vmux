@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
+use bevy::ecs::system::Commands;
 use bevy::ecs::system::SystemParam;
+use bevy::prelude::Changed;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::event::space::ProjectActivateRequest;

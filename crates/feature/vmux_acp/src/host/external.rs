@@ -927,10 +927,7 @@ impl ResumeOpener<'_> {
                 primary_window: window,
                 name: None,
                 startup_dir: None,
-                content: TabLayoutSpawnContent::Url {
-                    url,
-                    pending_prompt: None,
-                },
+                content: TabLayoutSpawnContent::url(url, None),
                 clear_pending_stack: true,
                 focus: true,
             });

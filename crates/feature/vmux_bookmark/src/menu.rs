@@ -35,7 +35,7 @@ mod macos {
     };
     use vmux_ecs::{Bookmark, Collapsed, Folder, PageMetadata, Pin, UiStateWrite, Uuid};
     use vmux_layout::bookmark::{
-        AddRequest, BookmarkMenuTarget, MoveFolderRequest, MoveRequest, PinRequest,
+        AddRequest, BookmarkMenuKind, MoveFolderRequest, MoveRequest, PinRequest,
         RemoveFolderRequest, RemoveRequest, ShowBookmarkMenuRequest, ToggleFolderRequest,
         UnpinRequest,
     };
@@ -447,22 +447,37 @@ mod macos {
         let locale = Locale::requested(Some(&builder.settings.appearance.locale));
         let folders = builder.folders();
         let menu = builder.commands.spawn(OsContextMenu::new(view_ptr)).id();
-        match request.target {
-            BookmarkMenuTarget::Root => {
+        match request.target.kind {
+            BookmarkMenuKind::Root => {
                 root_menu(menu, &mut builder.commands, &locale, request.webview)
             }
-            BookmarkMenuTarget::Pin { uuid } => pin_menu(
-                menu,
-                &mut builder.commands,
-                &locale,
-                &builder.entries,
-                &uuid,
-            ),
-            BookmarkMenuTarget::Entry { uuid } => {
-                builder.entry(menu, &locale, &folders, &uuid, request.webview)
+            BookmarkMenuKind::Pin => {
+                if let Some(uuid) = request.target.uuid {
+                    pin_menu(
+                        menu,
+                        &mut builder.commands,
+                        &locale,
+                        &builder.entries,
+                        &uuid,
+                    );
+                }
             }
-            BookmarkMenuTarget::Folder { uuid, active_page } => {
-                builder.folder(menu, &locale, &folders, &uuid, active_page, request.webview)
+            BookmarkMenuKind::Entry => {
+                if let Some(uuid) = request.target.uuid {
+                    builder.entry(menu, &locale, &folders, &uuid, request.webview);
+                }
+            }
+            BookmarkMenuKind::Folder => {
+                if let Some(uuid) = request.target.uuid {
+                    builder.folder(
+                        menu,
+                        &locale,
+                        &folders,
+                        &uuid,
+                        request.target.active_page,
+                        request.webview,
+                    );
+                }
             }
         }
     }

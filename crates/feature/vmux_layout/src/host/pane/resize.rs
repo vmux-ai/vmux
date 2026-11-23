@@ -15,16 +15,13 @@ use vmux_history::LastActivatedAt;
 
 use crate::settings::LayoutSettings;
 
-use super::{Pane, PaneResize, PaneSplit, PaneSplitDirection, ResizeRequest};
+use super::{Pane, PaneSplit, PaneSplitDirection, ResizeRequest};
 #[cfg(test)]
 use crate::stack::Stack;
 use crate::{
     host::command::LayoutRequestSet,
     stack::{ActiveTabParam, LayoutFocus},
 };
-
-const MIN_PANE_PX: f32 = 60.0;
-const RESIZE_STEP: f32 = 0.05;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PointerResizeSet;
@@ -69,6 +66,29 @@ pub struct PaneDrag {
 }
 
 impl PaneDrag {
+    const MIN_PANE_PX: f32 = 60.0;
+    const RESIZE_STEP: f32 = 0.05;
+
+    fn resized_pair(
+        pane_grow: f32,
+        sibling_grow: f32,
+        delta: f32,
+        parent_length: f32,
+    ) -> (f32, f32) {
+        let total = pane_grow + sibling_grow;
+        let mut pane_grow = pane_grow + delta;
+        let mut sibling_grow = sibling_grow - delta;
+        let minimum = Self::MIN_PANE_PX / parent_length.max(1.0) * total;
+        pane_grow = pane_grow.max(minimum);
+        sibling_grow = sibling_grow.max(minimum);
+        let adjusted_total = pane_grow + sibling_grow;
+        if adjusted_total > 0.0 {
+            pane_grow = pane_grow / adjusted_total * total;
+            sibling_grow = sibling_grow / adjusted_total * total;
+        }
+        (pane_grow, sibling_grow)
+    }
+
     fn matches(&self, split: &PaneSplit, siblings: impl Iterator<Item = Entity>) -> bool {
         if self.direction != split.direction {
             return false;
@@ -94,16 +114,15 @@ fn from_commands(
     mut sizes: ParamSet<(Query<&mut Node>, Query<&mut PaneSize>, Query<&ComputedNode>)>,
 ) {
     for request in reader.read() {
-        let resize = request.0;
         let (_, Some(active), _) = focus.resolve(active_tab.get()) else {
             continue;
         };
 
-        match resize {
-            PaneResize::Equalize => {
+        match request.direction {
+            None => {
                 equalize_siblings(active, &parents, &splits, &all_children, &mut sizes);
             }
-            PaneResize::Direction(direction) => {
+            Some(direction) => {
                 resize_active_pane(
                     active,
                     direction,
@@ -219,10 +238,10 @@ fn resize_active_pane(
         )
     };
     let total_grow = pane_grow + sibling_grow;
-    let (pane_grow, sibling_grow) = resized_pair(
+    let (pane_grow, sibling_grow) = PaneDrag::resized_pair(
         pane_grow,
         sibling_grow,
-        RESIZE_STEP * total_grow,
+        PaneDrag::RESIZE_STEP * total_grow,
         parent_length,
     );
 
@@ -242,21 +261,6 @@ fn resize_active_pane(
     if let Ok(mut size) = pane_sizes.get_mut(sibling) {
         size.flex_grow = sibling_grow;
     }
-}
-
-fn resized_pair(pane_grow: f32, sibling_grow: f32, delta: f32, parent_length: f32) -> (f32, f32) {
-    let total = pane_grow + sibling_grow;
-    let mut pane_grow = pane_grow + delta;
-    let mut sibling_grow = sibling_grow - delta;
-    let minimum = MIN_PANE_PX / parent_length.max(1.0) * total;
-    pane_grow = pane_grow.max(minimum);
-    sibling_grow = sibling_grow.max(minimum);
-    let adjusted_total = pane_grow + sibling_grow;
-    if adjusted_total > 0.0 {
-        pane_grow = pane_grow / adjusted_total * total;
-        sibling_grow = sibling_grow / adjusted_total * total;
-    }
-    (pane_grow, sibling_grow)
 }
 
 #[derive(Component, Clone, Debug, PartialEq)]
@@ -610,7 +614,7 @@ fn dragging(
         let delta = (position - drag.start_position) / parent_length
             * (drag.previous_grow + drag.next_grow);
         let (previous_grow, next_grow) =
-            resized_pair(drag.previous_grow, drag.next_grow, delta, parent_length);
+            PaneDrag::resized_pair(drag.previous_grow, drag.next_grow, delta, parent_length);
         if let Ok(mut node) = sizes.nodes.get_mut(drag.previous) {
             node.flex_grow = previous_grow;
         }
@@ -923,11 +927,11 @@ mod tests {
             pane
         }
 
-        fn send(&mut self, resize: PaneResize) {
+        fn send(&mut self, request: ResizeRequest) {
             self.app
                 .world_mut()
                 .resource_mut::<Messages<ResizeRequest>>()
-                .write(ResizeRequest(resize));
+                .write(request);
             self.app.update();
         }
 
@@ -1345,7 +1349,7 @@ mod tests {
     fn resize_command_updates_node_and_persisted_size() {
         let mut fixture = ResizeFixture::new(1.0, 1.0);
 
-        fixture.send(PaneResize::Direction(PaneDirection::Right));
+        fixture.send(ResizeRequest::direction(PaneDirection::Right));
 
         let left = fixture.grows(fixture.left);
         let right = fixture.grows(fixture.right);
@@ -1359,7 +1363,7 @@ mod tests {
     fn equalize_command_updates_node_and_persisted_size() {
         let mut fixture = ResizeFixture::new(2.0, 1.0);
 
-        fixture.send(PaneResize::Equalize);
+        fixture.send(ResizeRequest::equalize());
 
         assert_eq!(fixture.grows(fixture.left), (1.0, 1.0));
         assert_eq!(fixture.grows(fixture.right), (1.0, 1.0));

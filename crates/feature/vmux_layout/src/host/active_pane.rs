@@ -1,5 +1,6 @@
 use crate::pane::{Pane, PaneSplit};
 use crate::stack::ComputeFocusSet;
+use bevy::ecs::system::Commands;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::ops::Deref;
@@ -20,9 +21,28 @@ impl Plugin for ActivePanePlugin {
 }
 
 #[derive(Component, Clone, PartialEq, Eq, Hash, Debug)]
-pub enum ProfileId {
-    Local,
-    Agent(String),
+pub struct ProfileId {
+    agent: Option<String>,
+}
+
+impl ProfileId {
+    pub fn local() -> Self {
+        Self { agent: None }
+    }
+
+    pub fn agent(id: impl Into<String>) -> Self {
+        Self {
+            agent: Some(id.into()),
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        self.agent.is_none()
+    }
+
+    pub fn agent_id(&self) -> Option<&str> {
+        self.agent.as_deref()
+    }
 }
 
 #[derive(Component, Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -34,7 +54,7 @@ pub struct ActiveStack {
 
 impl ActiveStack {
     pub fn local_bundle(self) -> impl Bundle {
-        (Name::new("Local active pane"), ProfileId::Local, self)
+        (Name::new("Local active pane"), ProfileId::local(), self)
     }
 }
 
@@ -51,9 +71,9 @@ pub struct FocusedStack<'w, 's> {
 
 impl FocusedStack<'_, '_> {
     pub fn as_ref(&self) -> Option<&ActiveStack> {
-        self.profiles.iter().find_map(|(profile, active)| {
-            (*profile == ProfileId::Local).then_some(active.into_inner())
-        })
+        self.profiles
+            .iter()
+            .find_map(|(profile, active)| profile.is_local().then_some(active.into_inner()))
     }
 
     pub fn as_deref(&self) -> Option<&ActiveStack> {
@@ -63,9 +83,7 @@ impl FocusedStack<'_, '_> {
     pub fn is_changed(&self) -> bool {
         self.profiles
             .iter()
-            .find_map(|(profile, active)| {
-                (*profile == ProfileId::Local).then_some(active.is_changed())
-            })
+            .find_map(|(profile, active)| profile.is_local().then_some(active.is_changed()))
             .unwrap_or(false)
     }
 }
@@ -91,15 +109,13 @@ impl ActivePaneQuery<'_, '_> {
     }
 
     pub fn local(&self) -> ActiveStack {
-        self.get(&ProfileId::Local).unwrap_or_default()
+        self.get(&ProfileId::local()).unwrap_or_default()
     }
 
     pub fn agent_in_pane(&self, pane: Entity) -> Option<(&str, ActiveStack)> {
         self.profiles.iter().find_map(|(profile, active)| {
-            let ProfileId::Agent(id) = profile else {
-                return None;
-            };
-            (active.pane == Some(pane)).then_some((id.as_str(), *active))
+            let id = profile.agent_id()?;
+            (active.pane == Some(pane)).then_some((id, *active))
         })
     }
 }
@@ -146,9 +162,9 @@ fn apply_requests(
         }
     }
     for (profile, active) in pending {
-        let name = match &profile {
-            ProfileId::Local => "Local active pane".to_string(),
-            ProfileId::Agent(id) => format!("Agent active pane: {id}"),
+        let name = match profile.agent_id() {
+            None => "Local active pane".to_string(),
+            Some(id) => format!("Agent active pane: {id}"),
         };
         commands.spawn((Name::new(name), profile, active));
     }
@@ -160,7 +176,7 @@ fn prune_entities(
     mut commands: Commands,
 ) {
     for (entity, profile, active) in &profiles {
-        if *profile != ProfileId::Local && !active.pane.is_some_and(|pane| panes.contains(pane)) {
+        if !profile.is_local() && !active.pane.is_some_and(|pane| panes.contains(pane)) {
             commands.entity(entity).despawn();
         }
     }
@@ -180,7 +196,7 @@ mod tests {
             (world.spawn(Pane).id(), world.spawn(Pane).id())
         };
         app.world_mut().write_message(ActivatePane {
-            profile: ProfileId::Local,
+            profile: ProfileId::local(),
             active: ActiveStack {
                 tab: None,
                 pane: Some(user_pane),
@@ -188,7 +204,7 @@ mod tests {
             },
         });
         app.world_mut().write_message(ActivatePane {
-            profile: ProfileId::Agent("a1".to_string()),
+            profile: ProfileId::agent("a1"),
             active: ActiveStack {
                 tab: None,
                 pane: Some(agent_pane),
@@ -200,13 +216,11 @@ mod tests {
         let mut profiles = app.world_mut().query::<(&ProfileId, &ActiveStack)>();
         let local = profiles
             .iter(app.world())
-            .find_map(|(profile, active)| (*profile == ProfileId::Local).then_some(*active))
+            .find_map(|(profile, active)| profile.is_local().then_some(*active))
             .unwrap();
         let agent = profiles
             .iter(app.world())
-            .find_map(|(profile, active)| {
-                (*profile == ProfileId::Agent("a1".to_string())).then_some(*active)
-            })
+            .find_map(|(profile, active)| (*profile == ProfileId::agent("a1")).then_some(*active))
             .unwrap();
         assert_eq!(local.pane, Some(user_pane));
         assert_eq!(agent.pane, Some(agent_pane));
@@ -220,7 +234,7 @@ mod tests {
 
         let agent_pane = app.world_mut().spawn(Pane).id();
         app.world_mut().write_message(ActivatePane {
-            profile: ProfileId::Agent("a1".to_string()),
+            profile: ProfileId::agent("a1"),
             active: ActiveStack {
                 tab: None,
                 pane: Some(agent_pane),
@@ -232,13 +246,11 @@ mod tests {
         let mut profiles = app.world_mut().query::<(&ProfileId, &ActiveStack)>();
         let local = profiles
             .iter(app.world())
-            .find_map(|(profile, active)| (*profile == ProfileId::Local).then_some(*active))
+            .find_map(|(profile, active)| profile.is_local().then_some(*active))
             .unwrap();
         let agent = profiles
             .iter(app.world())
-            .find_map(|(profile, active)| {
-                (*profile == ProfileId::Agent("a1".to_string())).then_some(*active)
-            })
+            .find_map(|(profile, active)| (*profile == ProfileId::agent("a1")).then_some(*active))
             .unwrap();
         assert_eq!(local.pane, None);
         assert_eq!(agent.pane, Some(agent_pane));

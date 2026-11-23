@@ -15,9 +15,39 @@ pub enum SiblingDirection {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BrowserTarget {
-    Pane(Entity),
-    Stack(Entity),
+pub enum BrowserTargetKind {
+    Pane,
+    Stack,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BrowserTarget {
+    kind: BrowserTargetKind,
+    entity: Entity,
+}
+
+impl BrowserTarget {
+    pub fn pane(entity: Entity) -> Self {
+        Self {
+            kind: BrowserTargetKind::Pane,
+            entity,
+        }
+    }
+
+    pub fn stack(entity: Entity) -> Self {
+        Self {
+            kind: BrowserTargetKind::Stack,
+            entity,
+        }
+    }
+
+    pub fn kind(self) -> BrowserTargetKind {
+        self.kind
+    }
+
+    pub fn entity(self) -> Entity {
+        self.entity
+    }
 }
 
 #[derive(SystemParam)]
@@ -76,15 +106,15 @@ impl BrowserTargets<'_, '_> {
             let entity = Entity::try_from_bits(bits)?;
             return match kind {
                 vmux_api::protocol::NodeKind::Pane if self.panes.contains(entity) => {
-                    Some(BrowserTarget::Pane(entity))
+                    Some(BrowserTarget::pane(entity))
                 }
                 vmux_api::protocol::NodeKind::Stack if self.stacks.contains(entity) => {
-                    Some(BrowserTarget::Stack(entity))
+                    Some(BrowserTarget::stack(entity))
                 }
                 _ => None,
             };
         }
-        self.pane(value).map(BrowserTarget::Pane)
+        self.pane(value).map(BrowserTarget::pane)
     }
 
     pub fn active_stack(&self, pane: Entity) -> Option<Entity> {
@@ -92,9 +122,9 @@ impl BrowserTargets<'_, '_> {
     }
 
     pub fn webview(&self, target: BrowserTarget) -> Option<Entity> {
-        let stack = match target {
-            BrowserTarget::Pane(pane) => self.active_stack(pane),
-            BrowserTarget::Stack(stack) => Some(stack),
+        let stack = match target.kind() {
+            BrowserTargetKind::Pane => self.active_stack(target.entity()),
+            BrowserTargetKind::Stack => Some(target.entity()),
         };
         self.active_webview(stack)
     }

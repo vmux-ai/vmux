@@ -26,13 +26,13 @@ pub struct LayoutGeometry {
     pub header_open: bool,
     #[serde(default)]
     pub side_sheet_open: bool,
-    #[serde(default = "default_header_height")]
+    #[serde(default = "LayoutGeometry::default_header_height")]
     pub header_height: f32,
-    #[serde(default = "default_side_sheet_width")]
+    #[serde(default = "LayoutGeometry::default_side_sheet_width")]
     pub side_sheet_width: f32,
-    #[serde(default = "default_side_sheet_width")]
+    #[serde(default = "LayoutGeometry::default_side_sheet_width")]
     pub side_sheet_content_width: f32,
-    #[serde(default = "default_pane_gap")]
+    #[serde(default = "LayoutGeometry::default_pane_gap")]
     pub pane_gap: f32,
     #[serde(default)]
     pub radius: f32,
@@ -44,15 +44,33 @@ pub struct LayoutGeometry {
     pub header_right: Option<f32>,
     #[serde(default)]
     pub window_pad_top: f32,
-    #[serde(default = "default_window_pad")]
+    #[serde(default = "LayoutGeometry::default_window_pad")]
     pub window_pad_right: f32,
-    #[serde(default = "default_window_pad")]
+    #[serde(default = "LayoutGeometry::default_window_pad")]
     pub window_pad_bottom: f32,
     #[serde(default)]
     pub window_pad_left: f32,
 }
 
 impl LayoutGeometry {
+    pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
+
+    fn default_header_height() -> f32 {
+        HEADER_HEIGHT_PX
+    }
+
+    fn default_side_sheet_width() -> f32 {
+        280.0
+    }
+
+    fn default_pane_gap() -> f32 {
+        SIDE_SHEET_GAP_PX
+    }
+
+    fn default_window_pad() -> f32 {
+        WINDOW_PAD_PX
+    }
+
     pub fn main_cef_left(&self) -> f32 {
         if self.side_sheet_open {
             self.window_pad_left + self.side_sheet_width + self.pane_gap
@@ -86,24 +104,7 @@ impl LayoutGeometry {
     }
 }
 
-fn default_header_height() -> f32 {
-    HEADER_HEIGHT_PX
-}
-
-fn default_side_sheet_width() -> f32 {
-    280.0
-}
-
-fn default_pane_gap() -> f32 {
-    SIDE_SHEET_GAP_PX
-}
-
-fn default_window_pad() -> f32 {
-    WINDOW_PAD_PX
-}
-
 pub const HEADER_HEIGHT_PX: f32 = 76.0;
-pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
 pub const TRAFFIC_LIGHTS_PAD_PX: f32 = 80.0;
 

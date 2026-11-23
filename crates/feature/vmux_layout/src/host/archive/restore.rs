@@ -1,5 +1,6 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::window::Window;
 use vmux_ecs::EntityTarget;
 
 use super::topology::{

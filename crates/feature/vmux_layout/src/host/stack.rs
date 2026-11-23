@@ -377,35 +377,42 @@ fn close_stack(
         commands.entity(request.stack).try_despawn();
         return;
     }
+    activate_successor(request.stack, &stacks_in_pane, closer, commands);
+}
+
+fn activate_successor(
+    stack: Entity,
+    stacks_in_pane: &[Entity],
+    closer: &StackCloser,
+    commands: &mut Commands,
+) {
     let successor = LastActivatedAt::latest(
         stacks_in_pane
             .iter()
-            .filter(|&&entity| entity != request.stack)
+            .filter(|&&entity| entity != stack)
             .filter_map(|&entity| closer.stack_ts.get(entity).ok())
             .map(|(entity, activated_at)| (entity, *activated_at)),
     );
-    if let Some(successor) = successor {
-        let pending = closer.transitions.get(request.stack).ok();
-        let visible = closer
-            .presentation
-            .retained(request.stack)
-            .unwrap_or(request.stack);
-        if successor == visible {
-            if let Some(pending) = pending {
-                for entity in pending.retired() {
-                    commands.entity(*entity).try_remove::<Retiring>();
-                }
+    let Some(successor) = successor else {
+        return;
+    };
+    let pending = closer.transitions.get(stack).ok();
+    let visible = closer.presentation.retained(stack).unwrap_or(stack);
+    if successor == visible {
+        if let Some(pending) = pending {
+            for entity in pending.retired() {
+                commands.entity(*entity).try_remove::<Retiring>();
             }
-            commands.entity(successor).insert(LastActivatedAt::now());
-            commands.entity(request.stack).try_despawn();
-            return;
         }
-        commands.entity(request.stack).insert(Retiring);
-        commands.entity(successor).insert((
-            LastActivatedAt::now(),
-            Transition::retiring(visible, request.stack, pending),
-        ));
+        commands.entity(successor).insert(LastActivatedAt::now());
+        commands.entity(stack).try_despawn();
+        return;
     }
+    commands.entity(stack).insert(Retiring);
+    commands.entity(successor).insert((
+        LastActivatedAt::now(),
+        Transition::retiring(visible, stack, pending),
+    ));
 }
 
 fn close_last_stack_in_pane(
@@ -483,7 +490,7 @@ fn close_last_stack_in_pane(
             .unwrap_or(pane_siblings[0]);
         let focus_leaf = closer.panes.first_leaf(new_active_pane);
         commands.entity(focus_leaf).insert(LastActivatedAt::now());
-        if let Some(next) = first_stack_to_activate(focus_leaf, closer) {
+        if let Some(next) = closer.first_stack_to_activate(focus_leaf) {
             commands.entity(next).insert(LastActivatedAt::now());
         }
         return;
@@ -492,6 +499,16 @@ fn close_last_stack_in_pane(
     let Some(sibling) = pane_siblings.into_iter().next() else {
         return;
     };
+    collapse_pane_sibling(pane, parent, sibling, closer, commands);
+}
+
+fn collapse_pane_sibling(
+    pane: Entity,
+    parent: Entity,
+    sibling: Entity,
+    closer: &StackCloser,
+    commands: &mut Commands,
+) {
     let sibling_children: Vec<Entity> = closer
         .panes
         .children(sibling)
@@ -532,7 +549,7 @@ fn close_last_stack_in_pane(
     commands
         .entity(new_active_pane)
         .insert(LastActivatedAt::now());
-    let next = first_stack_to_activate(new_active_pane, closer).or_else(|| {
+    let next = closer.first_stack_to_activate(new_active_pane).or_else(|| {
         sibling_children
             .iter()
             .copied()
@@ -543,20 +560,31 @@ fn close_last_stack_in_pane(
     }
 }
 
-fn first_stack_to_activate(pane: Entity, closer: &StackCloser) -> Option<Entity> {
-    closer
-        .active_stack(pane)
-        .or_else(|| closer.pane_stacks.first(pane))
+impl StackCloser<'_, '_> {
+    fn first_stack_to_activate(&self, pane: Entity) -> Option<Entity> {
+        self.active_stack(pane)
+            .or_else(|| self.pane_stacks.first(pane))
+    }
+
+    fn tree_contains_stack_other_than(&self, root: Entity, ignored_stack: Entity) -> bool {
+        let mut pending = vec![root];
+        while let Some(entity) = pending.pop() {
+            if self.stacks.contains(entity)
+                && entity != ignored_stack
+                && !self.retiring.contains(entity)
+            {
+                return true;
+            }
+            if let Ok(children) = self.all_children.get(entity) {
+                pending.extend(children.iter());
+            }
+        }
+        false
+    }
 }
 
 fn closes_tab(tab: Entity, stack: Entity, closer: &mut StackCloser) -> bool {
-    if entity_tree_contains_stack_other_than(
-        tab,
-        stack,
-        &closer.all_children,
-        &closer.stacks,
-        &closer.retiring,
-    ) {
+    if closer.tree_contains_stack_other_than(tab, stack) {
         return false;
     }
     let Ok(parent) = closer.child_of.get(tab) else {
@@ -792,7 +820,7 @@ fn compute_focused(
     let (_, pane, stack) = focus.resolve(tab);
     let next = ActiveStack { tab, pane, stack };
     for (profile, mut active) in &mut profiles {
-        if *profile == ProfileId::Local {
+        if profile.is_local() {
             if *active != next {
                 changes.write(crate::presentation::FocusChanged {
                     previous: *active,
@@ -1143,27 +1171,6 @@ fn shift(
     }
 }
 
-fn entity_tree_contains_stack_other_than(
-    entity: Entity,
-    ignored_stack: Entity,
-    all_children: &Query<&Children>,
-    stack_q: &Query<Entity, With<Stack>>,
-    retiring: &Query<(), With<Retiring>>,
-) -> bool {
-    (stack_q.contains(entity) && entity != ignored_stack && !retiring.contains(entity))
-        || all_children.get(entity).is_ok_and(|children| {
-            children.iter().any(|child| {
-                entity_tree_contains_stack_other_than(
-                    child,
-                    ignored_stack,
-                    all_children,
-                    stack_q,
-                    retiring,
-                )
-            })
-        })
-}
-
 fn open_startup_url_if_no_stacks(
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
@@ -1180,8 +1187,14 @@ fn open_startup_url_if_no_stacks(
         return;
     };
     let (_, active_pane, _) = focus.resolve(Some(active_tab));
-    if entity_tree_contains_stack(active_tab, &focus.all_children, &stack_q) {
-        return;
+    let mut pending = vec![active_tab];
+    while let Some(entity) = pending.pop() {
+        if stack_q.contains(entity) {
+            return;
+        }
+        if let Ok(children) = focus.all_children.get(entity) {
+            pending.extend(children.iter());
+        }
     }
     let Some(pane) = active_pane else {
         return;
@@ -1194,19 +1207,6 @@ fn open_startup_url_if_no_stacks(
         url: focused_space.resolved_startup_url(),
         request_id: None,
     });
-}
-
-fn entity_tree_contains_stack(
-    entity: Entity,
-    all_children: &Query<&Children>,
-    stack_q: &Query<Entity, With<Stack>>,
-) -> bool {
-    stack_q.contains(entity)
-        || all_children.get(entity).is_ok_and(|children| {
-            children
-                .iter()
-                .any(|child| entity_tree_contains_stack(child, all_children, stack_q))
-        })
 }
 
 #[cfg(test)]
@@ -1433,7 +1433,7 @@ mod tests {
         fn selected(&mut self) -> ActiveStack {
             let mut profiles = self.app.world_mut().query::<(&ProfileId, &ActiveStack)>();
             for (profile, active) in profiles.iter(self.app.world()) {
-                if *profile == ProfileId::Local {
+                if profile.is_local() {
                     return *active;
                 }
             }

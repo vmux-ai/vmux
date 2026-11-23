@@ -4,7 +4,7 @@ pub use vmux_command::ResolvedLocale;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Resource)]
 pub struct LayoutSettings {
-    #[serde(default = "default_radius")]
+    #[serde(default = "LayoutSettings::default_radius")]
     pub radius: f32,
     #[serde(default)]
     pub window: WindowSettings,
@@ -14,6 +14,12 @@ pub struct LayoutSettings {
     pub side_sheet: SideSheetSettings,
     #[serde(default)]
     pub focus_ring: FocusRingSettings,
+}
+
+impl LayoutSettings {
+    fn default_radius() -> f32 {
+        8.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Resource)]
@@ -29,29 +35,35 @@ impl Default for ConfirmCloseSettings {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SideSheetSettings {
-    #[serde(default = "default_side_sheet_width")]
+    #[serde(default = "SideSheetSettings::default_width")]
     pub width: f32,
+}
+
+impl SideSheetSettings {
+    fn default_width() -> f32 {
+        crate::event::SIDE_SHEET_WIDTH_PX
+    }
 }
 
 impl Default for SideSheetSettings {
     fn default() -> Self {
         Self {
-            width: default_side_sheet_width(),
+            width: Self::default_width(),
         }
     }
 }
 
-fn default_side_sheet_width() -> f32 {
-    crate::event::SIDE_SHEET_WIDTH_PX
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WindowSettings {
-    #[serde(default = "default_window_padding")]
+    #[serde(default = "WindowSettings::default_padding")]
     pub padding: f32,
 }
 
 impl WindowSettings {
+    fn default_padding() -> f32 {
+        crate::event::WINDOW_PAD_PX
+    }
+
     pub fn pad_top(&self) -> f32 {
         self.padding
     }
@@ -72,17 +84,9 @@ impl WindowSettings {
 impl Default for WindowSettings {
     fn default() -> Self {
         Self {
-            padding: default_window_padding(),
+            padding: Self::default_padding(),
         }
     }
-}
-
-fn default_window_padding() -> f32 {
-    crate::event::WINDOW_PAD_PX
-}
-
-fn default_radius() -> f32 {
-    8.0
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -104,27 +108,29 @@ impl Default for FocusRingColor {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FocusRingSettings {
-    #[serde(default = "default_focus_ring_width")]
+    #[serde(default = "FocusRingSettings::default_width")]
     pub width: f32,
-    #[serde(default = "default_focus_ring_color")]
+    #[serde(default = "FocusRingSettings::default_color")]
     pub color: FocusRingColor,
+}
+
+impl FocusRingSettings {
+    fn default_width() -> f32 {
+        2.0
+    }
+
+    fn default_color() -> FocusRingColor {
+        FocusRingColor::default()
+    }
 }
 
 impl Default for FocusRingSettings {
     fn default() -> Self {
         Self {
-            width: default_focus_ring_width(),
-            color: default_focus_ring_color(),
+            width: Self::default_width(),
+            color: Self::default_color(),
         }
     }
-}
-
-fn default_focus_ring_width() -> f32 {
-    2.0
-}
-
-fn default_focus_ring_color() -> FocusRingColor {
-    FocusRingColor::default()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

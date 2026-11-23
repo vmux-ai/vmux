@@ -1,3 +1,5 @@
+use bevy::ecs::system::Commands;
+use bevy::prelude::Changed;
 use bevy::prelude::*;
 use vmux_ecs::page::{
     HostHistory, HostHistoryObserve, HostHistorySet, HostHistoryTraversed, HostsPage, PageManifest,
@@ -634,210 +636,298 @@ fn finish_handoffs(
         let current = currents.get(stack).ok();
         let intent = metadata.get(stack).ok();
         if transition.phase() == crate::page_slot::Phase::Failed {
-            if handoff.error_fallback {
-                previous_surfaces.restore_previous(
-                    handoff,
-                    current.and_then(crate::page_slot::Current::surface),
-                    &mut commands,
-                );
-                let mut stack_commands = commands.entity(stack);
-                if let Some(current) = current {
-                    stack_commands.try_insert(current.metadata().clone());
-                }
-                stack_commands.try_remove::<(PageNavigation, crate::page_slot::Transition)>();
-                commands
-                    .entity(entity)
-                    .try_remove::<crate::page_slot::SurfaceOpacity>()
-                    .try_despawn();
-                continue;
-            }
-            let fallback = current
-                .map(|current| current.metadata().clone())
-                .filter(|metadata| !metadata.url.is_empty())
-                .or_else(|| {
-                    handoff
-                        .previous
-                        .iter()
-                        .filter(|previous| !previous_surfaces.transitions.contains(**previous))
-                        .find_map(|previous| metadata.get(*previous).ok().cloned())
-                });
-            if handoff.rollback {
-                let failed_url = intent.map(|intent| intent.url.clone()).unwrap_or_default();
-                let mut previous = vec![entity];
-                for candidate in &handoff.previous {
-                    if !previous.contains(candidate) {
-                        previous.push(*candidate);
-                    }
-                }
-                spawn_error(&mut commands, stack, previous, failed_url, time.elapsed());
-                continue;
-            }
-            let rollback = if handoff.retain_visible() {
-                fallback
-                    .clone()
-                    .map(|fallback| (entity, fallback, handoff.previous.clone()))
-            } else {
-                handoff.previous.iter().find_map(|previous| {
-                    let (_, previous_handoff, previous_parent) = handoffs.get(*previous).ok()?;
-                    if previous_parent.parent() != stack || !previous_handoff.retain_visible() {
-                        return None;
-                    }
-                    let fallback = previous_handoff.fallback.clone()?;
-                    let mut rollback_previous = handoff
-                        .previous
-                        .iter()
-                        .copied()
-                        .filter(|candidate| candidate != previous)
-                        .collect::<Vec<_>>();
-                    for candidate in &previous_handoff.previous {
-                        if *candidate != *previous && !rollback_previous.contains(candidate) {
-                            rollback_previous.push(*candidate);
-                        }
-                    }
-                    Some((*previous, fallback, rollback_previous))
-                })
-            };
-            if let Some((rollback_surface, fallback, rollback_previous)) = rollback {
-                let rollback = PageOpenId::new();
-                commands.entity(stack).try_insert((
-                    fallback.clone(),
-                    PageNavigation::new(rollback),
-                    crate::page_slot::Current::new(Some(rollback_surface), fallback.clone()),
-                ));
-                commands
-                    .entity(stack)
-                    .try_remove::<crate::page_slot::Transition>();
-                commands
-                    .entity(rollback_surface)
-                    .try_insert((
-                        fallback,
-                        Visibility::Visible,
-                        SurfaceHandoff::rollback(rollback_previous, rollback, time.elapsed()),
-                    ))
-                    .try_remove::<(
-                        SurfacePaintReady,
-                        SurfacePresentationReady,
-                        SurfaceTransitionReady,
-                        SurfaceHandoffFailed,
-                        crate::PendingWebviewReveal,
-                        RetiredSurface,
-                        SurfaceBlocked,
-                        bevy_cef::prelude::BinIpcBlocked,
-                        crate::page_slot::SurfaceOpacity,
-                    )>();
-                commands.queue_silenced(bevy::ecs::system::command::trigger(
-                    bevy_cef::prelude::UiInput {
-                        webview: rollback_surface,
-                        payload: PageReady {},
-                    },
-                ));
-                if rollback_surface != entity {
-                    commands.entity(entity).try_despawn();
-                }
-                continue;
-            }
-            let restored = previous_surfaces.restore_previous(
+            handle_failed_handoff(
+                entity,
+                stack,
                 handoff,
-                current.and_then(crate::page_slot::Current::surface),
+                current,
+                intent,
+                &handoffs,
+                &metadata,
+                &previous_surfaces,
+                time.elapsed(),
                 &mut commands,
             );
-            if restored {
-                if let Some(fallback) = fallback {
-                    let surface = current.and_then(crate::page_slot::Current::surface);
-                    commands.entity(stack).try_insert((
-                        fallback.clone(),
-                        crate::page_slot::Current::new(surface, fallback),
-                    ));
-                }
-                commands
-                    .entity(stack)
-                    .try_remove::<(PageNavigation, crate::page_slot::Transition)>();
-                commands
-                    .entity(entity)
-                    .try_remove::<crate::page_slot::SurfaceOpacity>()
-                    .try_despawn();
-            } else {
-                let failed_url = intent.map(|intent| intent.url.clone()).unwrap_or_default();
-                let mut previous = vec![entity];
-                for candidate in &handoff.previous {
-                    if !previous.contains(candidate) {
-                        previous.push(*candidate);
-                    }
-                }
-                spawn_error(&mut commands, stack, previous, failed_url, time.elapsed());
-            }
             continue;
         }
         if transition.phase() != crate::page_slot::Phase::Committed {
             continue;
         }
-        for previous in &handoff.previous {
-            if let Ok(mut previous) = commands.get_entity(*previous) {
-                previous
-                    .try_insert((Visibility::Hidden, RetiredSurface))
-                    .try_remove::<crate::page_slot::SurfaceOpacity>();
-            }
+        commit_handoff(
+            entity,
+            stack,
+            handoff,
+            current,
+            intent,
+            &metadata,
+            &identities,
+            &histories,
+            &mut history_observations,
+            &mut commands,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_failed_handoff(
+    entity: Entity,
+    stack: Entity,
+    handoff: &SurfaceHandoff,
+    current: Option<&crate::page_slot::Current>,
+    intent: Option<&PageMetadata>,
+    handoffs: &Query<(Entity, &SurfaceHandoff, &ChildOf)>,
+    metadata: &Query<&PageMetadata>,
+    previous_surfaces: &PreviousSurfaces,
+    now: std::time::Duration,
+    commands: &mut Commands,
+) {
+    if handoff.error_fallback {
+        previous_surfaces.restore_previous(
+            handoff,
+            current.and_then(crate::page_slot::Current::surface),
+            commands,
+        );
+        let mut stack_commands = commands.entity(stack);
+        if let Some(current) = current {
+            stack_commands.try_insert(current.metadata().clone());
         }
-        if let Some(previous) = current.and_then(crate::page_slot::Current::surface)
-            && previous != entity
-            && !handoff.previous.contains(&previous)
-        {
-            commands
-                .entity(previous)
-                .try_remove::<crate::page_slot::SurfaceOpacity>();
+        stack_commands.try_remove::<(PageNavigation, crate::page_slot::Transition)>();
+        commands
+            .entity(entity)
+            .try_remove::<crate::page_slot::SurfaceOpacity>()
+            .try_despawn();
+        return;
+    }
+    let fallback = current
+        .map(|current| current.metadata().clone())
+        .filter(|metadata| !metadata.url.is_empty())
+        .or_else(|| {
+            handoff
+                .previous
+                .iter()
+                .filter(|previous| !previous_surfaces.transitions.contains(**previous))
+                .find_map(|previous| metadata.get(*previous).ok().cloned())
+        });
+    if handoff.rollback {
+        spawn_handoff_error(commands, stack, entity, handoff, intent, now);
+        return;
+    }
+    if let Some((rollback_surface, fallback, rollback_previous)) =
+        find_rollback_target(entity, stack, handoff, fallback.as_ref(), handoffs)
+    {
+        apply_handoff_rollback(
+            commands,
+            entity,
+            stack,
+            rollback_surface,
+            fallback,
+            rollback_previous,
+            now,
+        );
+        return;
+    }
+    let restored = previous_surfaces.restore_previous(
+        handoff,
+        current.and_then(crate::page_slot::Current::surface),
+        commands,
+    );
+    if restored {
+        if let Some(fallback) = fallback {
+            let surface = current.and_then(crate::page_slot::Current::surface);
+            commands.entity(stack).try_insert((
+                fallback.clone(),
+                crate::page_slot::Current::new(surface, fallback),
+            ));
         }
-        let pending = intent
-            .cloned()
-            .or_else(|| metadata.get(entity).ok().cloned())
-            .unwrap_or_default();
-        commands.entity(stack).try_insert((
-            pending.clone(),
-            crate::page_slot::Current::new(Some(entity), pending.clone()),
-        ));
         commands
             .entity(stack)
-            .try_remove::<crate::page_slot::Transition>();
-        match identities.get(entity) {
-            Ok(identity) => {
-                commands.entity(stack).try_insert(identity.clone());
-            }
-            Err(_) => {
-                commands
-                    .entity(stack)
-                    .try_remove::<vmux_ecs::PageIdentity>();
+            .try_remove::<(PageNavigation, crate::page_slot::Transition)>();
+        commands
+            .entity(entity)
+            .try_remove::<crate::page_slot::SurfaceOpacity>()
+            .try_despawn();
+    } else {
+        spawn_handoff_error(commands, stack, entity, handoff, intent, now);
+    }
+}
+
+fn spawn_handoff_error(
+    commands: &mut Commands,
+    stack: Entity,
+    entity: Entity,
+    handoff: &SurfaceHandoff,
+    intent: Option<&PageMetadata>,
+    now: std::time::Duration,
+) {
+    let failed_url = intent.map(|intent| intent.url.clone()).unwrap_or_default();
+    let mut previous = vec![entity];
+    for candidate in &handoff.previous {
+        if !previous.contains(candidate) {
+            previous.push(*candidate);
+        }
+    }
+    spawn_error(commands, stack, previous, failed_url, now);
+}
+
+fn find_rollback_target(
+    entity: Entity,
+    stack: Entity,
+    handoff: &SurfaceHandoff,
+    fallback: Option<&PageMetadata>,
+    handoffs: &Query<(Entity, &SurfaceHandoff, &ChildOf)>,
+) -> Option<(Entity, PageMetadata, Vec<Entity>)> {
+    if handoff.retain_visible() {
+        return fallback
+            .cloned()
+            .map(|fallback| (entity, fallback, handoff.previous.clone()));
+    }
+    handoff.previous.iter().find_map(|previous| {
+        let (_, previous_handoff, previous_parent) = handoffs.get(*previous).ok()?;
+        if previous_parent.parent() != stack || !previous_handoff.retain_visible() {
+            return None;
+        }
+        let fallback = previous_handoff.fallback.clone()?;
+        let mut rollback_previous = handoff
+            .previous
+            .iter()
+            .copied()
+            .filter(|candidate| candidate != previous)
+            .collect::<Vec<_>>();
+        for candidate in &previous_handoff.previous {
+            if *candidate != *previous && !rollback_previous.contains(candidate) {
+                rollback_previous.push(*candidate);
             }
         }
-        if let Ok(mut current) = commands.get_entity(entity) {
-            current
-                .try_insert((
-                    Visibility::Visible,
-                    pending.clone(),
-                    SurfaceInteractionRestore,
-                ))
-                .try_remove::<(
-                    SurfaceHandoff,
-                    SurfacePaintReady,
-                    SurfaceTransitionReady,
-                    SurfaceHandoffFailed,
-                    SurfaceBlocked,
-                    bevy_cef::prelude::BinIpcBlocked,
-                    crate::PendingWebviewReveal,
-                    crate::page_slot::SurfaceOpacity,
-                    vmux_ecs::PageTransition,
-                )>();
-            commands.queue_silenced(bevy::ecs::system::command::trigger(
-                vmux_ecs::page::PageActivated::new(entity),
-            ));
-            if histories
-                .get(stack)
-                .is_ok_and(|history| !history.showing(&pending.url, 0))
-            {
-                history_observations.write(HostHistoryObserve {
-                    webview: stack,
-                    url: pending.url.clone(),
-                    top_line: 0,
-                });
-            }
+        Some((*previous, fallback, rollback_previous))
+    })
+}
+
+fn apply_handoff_rollback(
+    commands: &mut Commands,
+    entity: Entity,
+    stack: Entity,
+    rollback_surface: Entity,
+    fallback: PageMetadata,
+    rollback_previous: Vec<Entity>,
+    now: std::time::Duration,
+) {
+    let rollback = PageOpenId::new();
+    commands.entity(stack).try_insert((
+        fallback.clone(),
+        PageNavigation::new(rollback),
+        crate::page_slot::Current::new(Some(rollback_surface), fallback.clone()),
+    ));
+    commands
+        .entity(stack)
+        .try_remove::<crate::page_slot::Transition>();
+    commands
+        .entity(rollback_surface)
+        .try_insert((
+            fallback,
+            Visibility::Visible,
+            SurfaceHandoff::rollback(rollback_previous, rollback, now),
+        ))
+        .try_remove::<(
+            SurfacePaintReady,
+            SurfacePresentationReady,
+            SurfaceTransitionReady,
+            SurfaceHandoffFailed,
+            crate::PendingWebviewReveal,
+            RetiredSurface,
+            SurfaceBlocked,
+            bevy_cef::prelude::BinIpcBlocked,
+            crate::page_slot::SurfaceOpacity,
+        )>();
+    commands.queue_silenced(bevy::ecs::system::command::trigger(
+        bevy_cef::prelude::UiInput {
+            webview: rollback_surface,
+            payload: PageReady {},
+        },
+    ));
+    if rollback_surface != entity {
+        commands.entity(entity).try_despawn();
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn commit_handoff(
+    entity: Entity,
+    stack: Entity,
+    handoff: &SurfaceHandoff,
+    current: Option<&crate::page_slot::Current>,
+    intent: Option<&PageMetadata>,
+    metadata: &Query<&PageMetadata>,
+    identities: &Query<&vmux_ecs::PageIdentity>,
+    histories: &Query<&HostHistory>,
+    history_observations: &mut MessageWriter<HostHistoryObserve>,
+    commands: &mut Commands,
+) {
+    for previous in &handoff.previous {
+        if let Ok(mut previous) = commands.get_entity(*previous) {
+            previous
+                .try_insert((Visibility::Hidden, RetiredSurface))
+                .try_remove::<crate::page_slot::SurfaceOpacity>();
+        }
+    }
+    if let Some(previous) = current.and_then(crate::page_slot::Current::surface)
+        && previous != entity
+        && !handoff.previous.contains(&previous)
+    {
+        commands
+            .entity(previous)
+            .try_remove::<crate::page_slot::SurfaceOpacity>();
+    }
+    let pending = intent
+        .cloned()
+        .or_else(|| metadata.get(entity).ok().cloned())
+        .unwrap_or_default();
+    commands.entity(stack).try_insert((
+        pending.clone(),
+        crate::page_slot::Current::new(Some(entity), pending.clone()),
+    ));
+    commands
+        .entity(stack)
+        .try_remove::<crate::page_slot::Transition>();
+    match identities.get(entity) {
+        Ok(identity) => {
+            commands.entity(stack).try_insert(identity.clone());
+        }
+        Err(_) => {
+            commands
+                .entity(stack)
+                .try_remove::<vmux_ecs::PageIdentity>();
+        }
+    }
+    if let Ok(mut current) = commands.get_entity(entity) {
+        current
+            .try_insert((
+                Visibility::Visible,
+                pending.clone(),
+                SurfaceInteractionRestore,
+            ))
+            .try_remove::<(
+                SurfaceHandoff,
+                SurfacePaintReady,
+                SurfaceTransitionReady,
+                SurfaceHandoffFailed,
+                SurfaceBlocked,
+                bevy_cef::prelude::BinIpcBlocked,
+                crate::PendingWebviewReveal,
+                crate::page_slot::SurfaceOpacity,
+                vmux_ecs::PageTransition,
+            )>();
+        commands.queue_silenced(bevy::ecs::system::command::trigger(
+            vmux_ecs::page::PageActivated::new(entity),
+        ));
+        if histories
+            .get(stack)
+            .is_ok_and(|history| !history.showing(&pending.url, 0))
+        {
+            history_observations.write(HostHistoryObserve {
+                webview: stack,
+                url: pending.url.clone(),
+                top_line: 0,
+            });
         }
     }
 }

@@ -1,4 +1,5 @@
 use crate::host::swap::SiblingOrder;
+use bevy::ecs::system::Commands;
 use bevy::{
     ecs::{relationship::Relationship, system::SystemParam},
     prelude::*,
@@ -8,7 +9,6 @@ use super::{ArrangeRequest, ArrangementSet, Pane, PaneArrangement, PaneSplit, Pa
 use crate::{
     host::command::LayoutRequestSet,
     stack::{ActiveTabParam, LayoutFocus},
-    target::SiblingDirection,
 };
 
 pub(super) struct ArrangementPlugin;
@@ -39,7 +39,7 @@ fn arrange_from_commands(
         };
 
         match arrangement {
-            PaneArrangement::Swap(direction) => {
+            PaneArrangement::SwapPrevious | PaneArrangement::SwapNext => {
                 let Ok(parent) = tree.parents.get(active).map(Relationship::get) else {
                     continue;
                 };
@@ -61,7 +61,7 @@ fn arrange_from_commands(
                 else {
                     continue;
                 };
-                let pair = if direction == SiblingDirection::Previous {
+                let pair = if arrangement == PaneArrangement::SwapPrevious {
                     SiblingOrder::previous(active_index)
                 } else {
                     SiblingOrder::next(active_index, pane_positions.len())
@@ -70,15 +70,22 @@ fn arrange_from_commands(
                     order.swap(parent, children, &pane_positions, from, to);
                 }
             }
-            PaneArrangement::Rotate(direction) => {
+            PaneArrangement::RotateForward | PaneArrangement::RotateBackward => {
                 let Some(tab) = tab else {
                     continue;
                 };
-                tree.rotate(tab, direction == SiblingDirection::Next);
+                tree.rotate(tab, arrangement == PaneArrangement::RotateForward);
             }
-            PaneArrangement::Mirror(direction) => {
+            PaneArrangement::MirrorAuto
+            | PaneArrangement::MirrorHorizontal
+            | PaneArrangement::MirrorVertical => {
                 let Some(tab) = tab else {
                     continue;
+                };
+                let direction = match arrangement {
+                    PaneArrangement::MirrorHorizontal => Some(PaneSplitDirection::Row),
+                    PaneArrangement::MirrorVertical => Some(PaneSplitDirection::Column),
+                    _ => None,
                 };
                 tree.mirror(tab, direction);
             }

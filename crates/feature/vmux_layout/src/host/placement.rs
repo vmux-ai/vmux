@@ -1,4 +1,7 @@
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
+#[cfg(test)]
+use bevy::window::Window;
 use vmux_api::open_target::PaneDirection;
 use vmux_ecs::{EntityTarget, Operation, OperationRetained, OperationState, Order};
 

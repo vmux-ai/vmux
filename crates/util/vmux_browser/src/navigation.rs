@@ -345,7 +345,7 @@ fn navigate(
                         .id();
                     if let Some(profile) = profile {
                         activate.write(vmux_layout::active_pane::ActivatePane {
-                            profile: vmux_layout::active_pane::ProfileId::Agent(profile),
+                            profile: vmux_layout::active_pane::ProfileId::agent(profile),
                             active: vmux_layout::active_pane::ActiveStack {
                                 tab: None,
                                 pane: Some(target),

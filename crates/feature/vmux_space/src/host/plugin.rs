@@ -800,11 +800,8 @@ impl SpaceGraph<'_, '_> {
             .map(|settings| settings.startup_url(&template.0, startup_page))
             .or_else(|| Some(startup_page.to_string()))
             .filter(|url| !url.is_empty())
-            .map(|url| TabLayoutSpawnContent::Url {
-                url,
-                pending_prompt: None,
-            })
-            .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt);
+            .map(|url| TabLayoutSpawnContent::url(url, None))
+            .unwrap_or_else(TabLayoutSpawnContent::startup_url_or_prompt);
         TabLayoutSpawnRequest {
             space,
             primary_window: window,
@@ -1114,10 +1111,7 @@ fn create(
         primary_window: window,
         name: None,
         startup_dir,
-        content: TabLayoutSpawnContent::Url {
-            url: SpacePlugin::manifest().url.to_string(),
-            pending_prompt: None,
-        },
+        content: TabLayoutSpawnContent::url(SpacePlugin::manifest().url, None),
         clear_pending_stack: true,
         focus: true,
     });
@@ -1175,17 +1169,11 @@ fn handle_open_in_new(
             .url
             .as_deref()
             .filter(|url| !url.is_empty())
-            .map(|url| TabLayoutSpawnContent::Url {
-                url: url.to_string(),
-                pending_prompt: None,
-            })
+            .map(|url| TabLayoutSpawnContent::url(url, None))
             .or_else(|| {
-                (!startup_url.is_empty()).then(|| TabLayoutSpawnContent::Url {
-                    url: startup_url.clone(),
-                    pending_prompt: None,
-                })
+                (!startup_url.is_empty()).then(|| TabLayoutSpawnContent::url(&startup_url, None))
             })
-            .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt);
+            .unwrap_or_else(TabLayoutSpawnContent::startup_url_or_prompt);
         layout_requests.write(TabLayoutSpawnRequest {
             space,
             primary_window: window,
@@ -1477,8 +1465,9 @@ mod tests {
         let request = cursor.read(requests).last().unwrap();
         assert_eq!(request.space, space);
         assert_eq!(request.primary_window, fixture.window);
-        assert!(
-            matches!(&request.content, TabLayoutSpawnContent::Url { url, .. } if url == "https://example.com/requested")
+        assert_eq!(
+            request.content.url.as_deref(),
+            Some("https://example.com/requested")
         );
     }
 

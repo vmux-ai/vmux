@@ -8,7 +8,7 @@ use vmux_api::input::KeyModifiers;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
-use super::{FocusRequest, Pane, PaneDrag, PaneFocus, PaneSplit};
+use super::{FocusRequest, Pane, PaneDrag, PaneSplit};
 #[cfg(test)]
 use crate::stack::Stack;
 use crate::{
@@ -78,8 +78,6 @@ fn select(
     mut selections: MessageWriter<crate::SelectRequest>,
 ) {
     for request in reader.read() {
-        let focus = &request.0;
-
         let Some(tab) = active_tab_param.get() else {
             continue;
         };
@@ -90,14 +88,14 @@ fn select(
         let Some(current) = focus_query.pane(tab) else {
             continue;
         };
-        let target = match focus {
-            PaneFocus::Next => {
+        let target = match request.direction {
+            None => {
                 let Some(index) = panes.iter().position(|pane| *pane == current) else {
                     continue;
                 };
                 panes[(index + 1) % panes.len()]
             }
-            PaneFocus::Direction(direction) => {
+            Some(direction) => {
                 let direction = match direction {
                     vmux_api::open_target::PaneDirection::Left => Vec2::new(-1.0, 0.0),
                     vmux_api::open_target::PaneDirection::Right => Vec2::new(1.0, 0.0),
@@ -371,7 +369,7 @@ mod tests {
             self.app
                 .world_mut()
                 .resource_mut::<Messages<FocusRequest>>()
-                .write(FocusRequest(PaneFocus::Direction(direction)));
+                .write(FocusRequest::direction(direction));
             self.app.update();
         }
     }

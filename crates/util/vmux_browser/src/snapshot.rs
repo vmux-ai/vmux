@@ -169,7 +169,7 @@ impl BrowserTarget<'_, '_> {
                 .local()
                 .pane
                 .filter(|pane| self.targets.contains_pane(*pane))
-                .map(vmux_layout::target::BrowserTarget::Pane),
+                .map(vmux_layout::target::BrowserTarget::pane),
         }?;
         self.targets
             .webview(target)
