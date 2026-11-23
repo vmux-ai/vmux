@@ -8685,7 +8685,7 @@ struct BodyShape {
     bootstrap_defaults: Option<BTreeSet<String>>,
     bootstrap_factories: Option<BTreeSet<String>>,
     bootstrap_app: Option<String>,
-    identity_constructor: Option<String>,
+    identity_constructor: Option<(String, usize)>,
     returns_self: bool,
     default_markers: Option<Vec<String>>,
 }
@@ -8928,13 +8928,17 @@ impl BodyShape {
         }
     }
 
-    fn identity_constructor(method: &syn::ImplItemFn) -> Option<String> {
-        if !method.sig.inputs.is_empty() || method.sig.generics.params.len() != 1 {
+    fn identity_constructor(method: &syn::ImplItemFn) -> Option<(String, usize)> {
+        if !method.sig.inputs.is_empty() || method.sig.generics.params.is_empty() {
             return None;
         }
-        let syn::GenericParam::Type(parameter) = &method.sig.generics.params[0] else {
-            return None;
-        };
+        let mut parameters = Vec::with_capacity(method.sig.generics.params.len());
+        for param in &method.sig.generics.params {
+            let syn::GenericParam::Type(parameter) = param else {
+                return None;
+            };
+            parameters.push(parameter.ident.to_string());
+        }
         if !matches!(&method.sig.output, syn::ReturnType::Type(_, output)
             if matches!(output.as_ref(), Type::Path(path) if path.qself.is_none() && path.path.is_ident("Self")))
             || method.block.stmts.len() != 1
@@ -8985,9 +8989,23 @@ impl BodyShape {
         if method.ident != "of" || arguments.args.len() != 1 {
             return None;
         }
-        if !matches!(&arguments.args[0], syn::GenericArgument::Type(Type::Path(value))
-            if value.qself.is_none() && value.path.is_ident(&parameter.ident.to_string()))
-        {
+        let matches_parameters = match (&arguments.args[0], parameters.as_slice()) {
+            (syn::GenericArgument::Type(Type::Path(value)), [parameter]) => {
+                value.qself.is_none() && value.path.is_ident(parameter)
+            }
+            (syn::GenericArgument::Type(Type::Tuple(tuple)), params)
+                if params.len() >= 2 && tuple.elems.len() == params.len() =>
+            {
+                tuple.elems.iter().zip(params).all(|(elem, parameter)| {
+                    matches!(
+                        elem,
+                        Type::Path(value) if value.qself.is_none() && value.path.is_ident(parameter)
+                    )
+                })
+            }
+            _ => false,
+        };
+        if !matches_parameters {
             return None;
         }
         let mut path = value.path.clone();
@@ -8999,7 +9017,7 @@ impl BodyShape {
         {
             return None;
         }
-        Some(References::path(&path))
+        Some((References::path(&path), parameters.len()))
     }
 
     fn default_markers(block: &syn::Block) -> Option<Vec<String>> {
@@ -14369,9 +14387,12 @@ impl Inventory {
                 if !body.production || method.ident != body.name {
                     continue;
                 }
-                let Some(identity) = &body.identity_constructor else {
+                let Some((identity, arity)) = &body.identity_constructor else {
                     return false;
                 };
+                if *arity != arguments.args.len() {
+                    return false;
+                }
                 if !matches!(
                     self.external_path(&implementation.namespace, identity, &mut BTreeSet::new())
                         .as_deref(),
@@ -21873,4 +21894,9 @@ fn pre_world_unit_enums_build_scripts_and_integration_test_fixtures_prove_safely
             "expected rejected declaration: {key}"
         );
     }
+    let multi = Inventory::fixture(
+        "use std::any::TypeId; use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)] struct PairSet(TypeId); impl PairSet { fn of<K: 'static, T: 'static>() -> Self { Self(TypeId::of::<(K, T)>()) } } fn tick() {} struct PairPlugin; impl Plugin for PairPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, tick.after(PairSet::of::<u32, u64>())); } }",
+    );
+    assert!(multi.automatic_boundary(&multi.entries[&multi.key("struct:PairPlugin")]));
+    assert!(multi.automatic_boundary(&multi.entries[&multi.key("impl:Plugin for PairPlugin")]));
 }
