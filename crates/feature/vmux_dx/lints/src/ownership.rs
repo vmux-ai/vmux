@@ -40,6 +40,8 @@ impl<'tcx> Ownership<'tcx> {
                 ("bevy_ecs", "Bundle") => "bundle",
                 ("bevy_app", "Plugin") => "plugin",
                 ("vmux_ecs", "Job") => "job",
+                ("vmux_ecs", "Schema") => "schema",
+                ("vmux_page", "Page" | "PageComponent") => "page",
                 ("vmux_feature", "FeatureManifestSource") => "manifest",
                 ("vmux_api", "UiState" | "UiEvent" | "Contract") => "contract",
                 _ => continue,
@@ -305,7 +307,9 @@ impl<'tcx> Ownership<'tcx> {
             ) || cx.tcx.def_span(definition).from_expansion()
                 || self.stateless_plugin(cx, definition)
                 || self.stateless_system_set(cx, definition)
-                || self.stateless_manifest(cx, definition)
+                || self.stateless_unit_role(cx, definition, "manifest")
+                || self.stateless_unit_role(cx, definition, "schema")
+                || self.stateless_unit_role(cx, definition, "page")
                 || self.concrete_job_struct(cx, definition)
                 || self.has_role(definition, "contract")
                 || self.used.contains(&definition)
@@ -390,8 +394,8 @@ impl<'tcx> Ownership<'tcx> {
         true
     }
 
-    fn stateless_manifest(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
-        if !self.has_role(definition, "manifest") {
+    fn stateless_unit_role(&self, cx: &LateContext<'tcx>, definition: DefId, role: &str) -> bool {
+        if !self.has_role(definition, role) {
             return false;
         }
         let ty = cx

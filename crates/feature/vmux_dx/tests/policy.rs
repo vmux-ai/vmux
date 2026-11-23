@@ -9874,6 +9874,7 @@ struct Inventory {
     automatic_boundary_keys: RefCell<Option<Vec<String>>>,
     renderer_graph: RefCell<Option<(BTreeSet<String>, BTreeSet<String>)>>,
     job_adapters: RefCell<Option<BTreeSet<String>>>,
+    compiler_helpers: RefCell<Option<BTreeSet<String>>>,
     enum_owner_candidates: RefCell<Option<BTreeMap<String, Vec<String>>>>,
     owned_values: RefCell<Option<BTreeSet<String>>>,
     test_fixtures: RefCell<Option<BTreeSet<String>>>,
@@ -11046,6 +11047,7 @@ impl Inventory {
         *self.automatic_boundary_keys.get_mut() = None;
         *self.renderer_graph.get_mut() = None;
         *self.job_adapters.get_mut() = None;
+        *self.compiler_helpers.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -11786,6 +11788,7 @@ impl Inventory {
         *self.automatic_boundary_keys.get_mut() = None;
         *self.renderer_graph.get_mut() = None;
         *self.job_adapters.get_mut() = None;
+        *self.compiler_helpers.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -11854,6 +11857,7 @@ impl Inventory {
         *self.automatic_boundary_keys.get_mut() = None;
         *self.renderer_graph.get_mut() = None;
         *self.job_adapters.get_mut() = None;
+        *self.compiler_helpers.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -12310,6 +12314,7 @@ impl Inventory {
     fn automatic_boundary(&self, entry: &Declaration) -> bool {
         self.compiler_registration(entry)
             || self.registered_compiler_owner(entry)
+            || self.automatic_compiler_helper(entry)
             || self.fixture_lock(entry)
             || self.framework_bootstrap(entry)
             || self.manifest_source(entry)
@@ -12319,6 +12324,85 @@ impl Inventory {
             || self.automatic_renderer(entry)
             || self.automatic_job_adapter(entry)
             || self.automatic_pre_world_boundary(entry)
+    }
+
+    fn automatic_compiler_helper(&self, entry: &Declaration) -> bool {
+        if !entry.production {
+            return false;
+        }
+        self.ensure_compiler_helpers();
+        self.compiler_helpers
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn ensure_compiler_helpers(&self) {
+        if self.compiler_helpers.borrow().is_some() {
+            return;
+        }
+        let mut helpers = BTreeSet::new();
+        let mut queue = Vec::new();
+        for entry in self.entries.values() {
+            if entry.production && self.registered_compiler_owner(entry) {
+                queue.push(entry.key.clone());
+            }
+        }
+        while let Some(source_key) = queue.pop() {
+            let source = &self.entries[&source_key];
+            let source_crate = source.namespace.split("::").next();
+            let mut origins = vec![source];
+            if matches!(source.kind, Kind::Struct | Kind::Enum) {
+                for implementation in self.implementations(source) {
+                    if implementation.production {
+                        origins.push(implementation);
+                    }
+                }
+            }
+            for origin in origins {
+                for path in origin
+                    .field_paths
+                    .iter()
+                    .chain(origin.reference_paths.iter())
+                {
+                    let target = self
+                        .resolve_path_or_prefix(&origin.namespace, path)
+                        .or_else(|| {
+                            self.function_reference(&origin.namespace, path, &mut BTreeSet::new())
+                        });
+                    let Some(target) = target else {
+                        continue;
+                    };
+                    if !target.production
+                        || target.namespace.split("::").next() != source_crate
+                        || target.ecs
+                        || target.projection
+                        || self.has_bevy_runtime_access(target)
+                        || !matches!(
+                            target.kind,
+                            Kind::Struct | Kind::Enum | Kind::Function | Kind::Const | Kind::Alias
+                        )
+                    {
+                        continue;
+                    }
+                    if helpers.insert(target.key.clone()) {
+                        queue.push(target.key.clone());
+                    }
+                }
+            }
+        }
+        let mut finalized = helpers.clone();
+        for key in &helpers {
+            let entry = &self.entries[key];
+            if matches!(entry.kind, Kind::Struct | Kind::Enum) {
+                for implementation in self.implementations(entry) {
+                    if implementation.production && !self.has_bevy_runtime_access(implementation) {
+                        finalized.insert(implementation.key.clone());
+                    }
+                }
+            }
+        }
+        *self.compiler_helpers.borrow_mut() = Some(finalized);
     }
 
     fn store_schema(&self, entry: &Declaration) -> bool {
@@ -12569,10 +12653,7 @@ impl Inventory {
             let mut origins = vec![source];
             if matches!(source.kind, Kind::Struct | Kind::Enum) {
                 for implementation in self.implementations(source) {
-                    if !implementation.production
-                        && !implementation.plugin
-                        && implementation.plugin_path.is_none()
-                    {
+                    if !implementation.production && !implementation.plugin {
                         origins.push(implementation);
                     }
                 }
@@ -12607,17 +12688,45 @@ impl Inventory {
             let entry = &self.entries[key];
             if matches!(entry.kind, Kind::Struct | Kind::Enum) {
                 for implementation in self.implementations(entry) {
-                    if !implementation.production
-                        && !implementation.plugin
-                        && implementation.plugin_path.is_none()
-                        && !implementation.local
-                    {
+                    if !implementation.production && !implementation.plugin {
                         finalized.insert(implementation.key.clone());
                     }
                 }
             }
         }
         *self.test_fixtures.borrow_mut() = Some(finalized);
+    }
+
+    fn has_cargo_command(&self, entry: &Declaration) -> bool {
+        if !self.has_process_command(entry) {
+            return false;
+        }
+        let Some(file) = self.parsed_file(&entry.path) else {
+            return true;
+        };
+        struct CargoCall(bool);
+        impl<'ast> Visit<'ast> for CargoCall {
+            fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+                if let syn::Expr::Path(path) = call.func.as_ref()
+                    && path
+                        .path
+                        .segments
+                        .last()
+                        .is_some_and(|segment| segment.ident == "new")
+                    && let Some(syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(program),
+                        ..
+                    })) = call.args.first()
+                    && program.value() == "cargo"
+                {
+                    self.0 = true;
+                }
+                visit::visit_expr_call(self, call);
+            }
+        }
+        let mut scan = CargoCall(false);
+        scan.visit_file(&file);
+        scan.0
     }
 
     fn has_process_command(&self, entry: &Declaration) -> bool {
@@ -12651,11 +12760,9 @@ impl Inventory {
 
     fn valid_test_fixture_target(&self, entry: &Declaration) -> bool {
         if entry.production
-            || entry.local
             || entry.plugin
-            || entry.plugin_path.is_some()
             || entry.path.starts_with("crates/feature/vmux_dx/lints/")
-            || self.has_process_command(entry)
+            || self.has_cargo_command(entry)
         {
             return false;
         }
@@ -12663,7 +12770,7 @@ impl Inventory {
             && self
                 .implementations(entry)
                 .into_iter()
-                .any(|implementation| implementation.plugin || implementation.plugin_path.is_some())
+                .any(|implementation| implementation.plugin)
         {
             return false;
         }
@@ -13902,11 +14009,21 @@ impl Inventory {
                     {
                         return false;
                     }
-                    if self
-                        .framework_handle(&implementation.namespace, callback, &mut BTreeSet::new())
-                        .as_deref()
-                        == Some("ApplyDeferred")
-                    {
+                    if matches!(
+                        self.framework_handle(
+                            &implementation.namespace,
+                            callback,
+                            &mut BTreeSet::new(),
+                        )
+                        .as_deref(),
+                        Some(
+                            "ApplyDeferred"
+                                | "save_on"
+                                | "load_on"
+                                | "save_on_default_event"
+                                | "load_on_default_event"
+                        )
+                    ) {
                         return true;
                     }
                     self.function_reference(
@@ -15568,6 +15685,12 @@ impl Inventory {
                         | "bevy::ecs::prelude"
                         | "bevy::prelude"
                 ),
+                "save_on" | "save_on_default_event" => {
+                    matches!(prefix, "moonshine_save::prelude" | "moonshine_save::save")
+                }
+                "load_on" | "load_on_default_event" => {
+                    matches!(prefix, "moonshine_save::prelude" | "moonshine_save::load")
+                }
                 "On" => matches!(
                     prefix,
                     "bevy_ecs::observer"
@@ -15661,6 +15784,7 @@ impl Inventory {
                                 | "bevy::ecs::prelude"
                                 | "bevy_ecs::prelude"
                                 | "bevy_app::prelude"
+                                | "moonshine_save::prelude"
                         ) && !self.local_glob_free_of(
                             current,
                             prefix,
@@ -15716,6 +15840,10 @@ impl Inventory {
                 | "EntityCommands"
                 | "SystemSet"
                 | "ApplyDeferred"
+                | "save_on"
+                | "load_on"
+                | "save_on_default_event"
+                | "load_on_default_event"
                 | "On"
                 | "MessageReader"
                 | "MessageWriter"
@@ -16605,6 +16733,7 @@ impl Inventory {
         *self.automatic_boundary_keys.get_mut() = None;
         *self.renderer_graph.get_mut() = None;
         *self.job_adapters.get_mut() = None;
+        *self.compiler_helpers.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -21628,4 +21757,44 @@ fn story_catalog_proves_referenced_dioxus_story_components_only() {
         !inventory
             .automatic_boundary(&inventory.entries["crates/feature/gallery/src/lib.rs||fn:Orphan"])
     );
+}
+
+#[test]
+fn registered_compiler_helpers_moonshine_observers_and_git_test_fixtures_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/feature/lint_demo/src/lib.rs",
+        "use rustc_lint::{LateLintPass, LintStore}; use rustc_session::Session; struct Helper { count: usize } impl Helper { fn add(&mut self) { self.count += 1; } } struct Unregistered { count: usize } struct Pass { helper: Helper } impl LateLintPass for Pass {} #[unsafe(no_mangle)] fn register_lints(_: &Session, store: &mut LintStore) { store.register_late_lint_pass(Box::new(|_| Box::new(Pass { helper: Helper { count: 0 } }))); }",
+    );
+    inventory.source(
+        "crates/feature/store_demo/src/lib.rs",
+        "use bevy_app::{App, Plugin}; use moonshine_save::prelude::{load_on, save_on}; struct Filter; struct StorePlugin; impl Plugin for StorePlugin { fn build(&self, app: &mut App) { app.add_observer(save_on::<Filter>).add_observer(load_on::<Filter>); } } #[cfg(test)] mod tests { use std::process::Command; use std::sync::mpsc; struct SyncFixture { tx: mpsc::Sender<()> } impl SyncFixture { fn new() -> Self { let (tx, _) = mpsc::channel(); Self { tx } } } impl Drop for SyncFixture { fn drop(&mut self) {} } struct GitRepo; impl GitRepo { fn init() { let _ = Command::new(\"git\").arg(\"init\"); } } #[test] fn runs() { let _ = (SyncFixture::new(), GitRepo::init()); } }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/feature/lint_demo/src/lib.rs||struct:Helper",
+        "crates/feature/lint_demo/src/lib.rs||impl:Helper",
+        "crates/feature/store_demo/src/lib.rs||struct:StorePlugin",
+        "crates/feature/store_demo/src/lib.rs||impl:Plugin for StorePlugin",
+    ] {
+        assert!(
+            inventory.automatic_boundary(&inventory.entries[key]),
+            "expected proved boundary: {key}"
+        );
+    }
+    assert!(!inventory.automatic_boundary(
+        &inventory.entries["crates/feature/lint_demo/src/lib.rs||struct:Unregistered"]
+    ));
+    for key in [
+        "crates/feature/store_demo/src/lib.rs|tests|struct:SyncFixture",
+        "crates/feature/store_demo/src/lib.rs|tests|impl:SyncFixture",
+        "crates/feature/store_demo/src/lib.rs|tests|struct:GitRepo",
+        "crates/feature/store_demo/src/lib.rs|tests|impl:GitRepo",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved test fixture: {key}"
+        );
+    }
 }
