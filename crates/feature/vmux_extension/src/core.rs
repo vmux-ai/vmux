@@ -948,163 +948,58 @@ fn finish(
     }
 }
 
-impl Reconcile {
-    fn reconcile_associations(
-        &self,
-        entity: Entity,
-        entry: &ExtEntry,
-        previous: Option<&ExtEntry>,
-        associations: &Query<
-            (
-                Entity,
-                &ProfileId,
-                &ChildOf,
-                Option<&Revision>,
-                Has<Installed>,
-            ),
-            With<Association>,
-        >,
-        commands: &mut Commands,
-    ) {
-        let mut profiles = HashMap::new();
-        for (association, profile, parent, revision, committed) in associations {
-            if parent.parent() == entity {
-                profiles.insert(
-                    profile.0.as_str(),
-                    (
-                        association,
-                        revision.copied().unwrap_or_default(),
-                        committed,
-                    ),
-                );
-            }
-        }
-        for (profile, enabled) in &entry.profile_enabled {
-            let changed = previous.is_none_or(|previous| {
-                !previous.installed_for(profile)
-                    || previous.enabled_for(profile) != *enabled
-                    || previous.pinned_for(profile) != entry.pinned_for(profile)
-                    || previous.grants_for(profile) != entry.grants_for(profile)
-            });
-            let (association, previous_revision, _) = match profiles.remove(profile.as_str()) {
-                Some(existing) => existing,
-                None => (
-                    commands
-                        .spawn((Association, ProfileId(profile.clone()), ChildOf(entity)))
-                        .id(),
-                    self.revision,
-                    false,
-                ),
-            };
-            commands.entity(association).insert((
-                Installed,
-                Grants(entry.grants_for(profile)),
-                if changed {
-                    self.revision
-                } else {
-                    previous_revision
-                },
-            ));
-            if *enabled {
-                commands.entity(association).insert(Enabled);
-            } else {
-                commands.entity(association).remove::<Enabled>();
-            }
-            if entry.pinned_for(profile) {
-                commands.entity(association).insert(Pinned);
-            } else {
-                commands.entity(association).remove::<Pinned>();
-            }
-        }
-        for (entity, _, committed) in profiles.values() {
-            if *committed {
-                commands.entity(*entity).despawn();
-            }
-        }
-    }
-
-    fn prune_packages(
-        existing: &HashMap<&str, (Entity, Revision, bool, bool)>,
-        retained: &HashSet<Entity>,
-        associations: &Query<
-            (
-                Entity,
-                &ProfileId,
-                &ChildOf,
-                Option<&Revision>,
-                Has<Installed>,
-            ),
-            With<Association>,
-        >,
-        commands: &mut Commands,
-    ) {
-        for (entity, _, committed, installing) in existing.values() {
-            if !retained.contains(entity) && *committed {
-                if *installing {
-                    commands.entity(*entity).remove::<(
-                        Name,
-                        Version,
-                        Popup,
-                        Icon,
-                        Permissions,
-                        OptionalPermissions,
-                        HostPermissions,
-                        OptionalHostPermissions,
-                        SourceHash,
-                        PublicKey,
-                    )>();
-                    for (association, _, parent, _, committed) in associations {
-                        if parent.parent() == *entity && committed {
-                            commands.entity(association).despawn();
-                        }
-                    }
-                } else {
-                    commands.entity(*entity).despawn();
-                }
-            }
-        }
-    }
-}
-
-fn reconcile(
-    mut updates: MessageReader<Reconcile>,
-    roots: Query<(&Root, &Scope)>,
-    catalog: Catalog,
+#[derive(SystemParam)]
+struct Reconciler<'w, 's> {
+    roots: Query<'w, 's, (&'static Root, &'static Scope)>,
+    catalog: Catalog<'w, 's>,
     packages: Query<
+        'w,
+        's,
         (
             Entity,
-            &Id,
-            &ChildOf,
-            &Revision,
+            &'static Id,
+            &'static ChildOf,
+            &'static Revision,
             Has<Version>,
-            Option<&Installing>,
+            Option<&'static Installing>,
         ),
         With<Package>,
     >,
     associations: Query<
+        'w,
+        's,
         (
             Entity,
-            &ProfileId,
-            &ChildOf,
-            Option<&Revision>,
+            &'static ProfileId,
+            &'static ChildOf,
+            Option<&'static Revision>,
             Has<Installed>,
         ),
         With<Association>,
     >,
-    mut commands: Commands,
-) {
-    for update in updates.read() {
-        if !roots.get(update.ticket.owner).is_ok_and(|(root, scope)| {
-            root.0 == update.ticket.directory && scope.0 == update.ticket
-        }) {
-            continue;
+    commands: Commands<'w, 's>,
+}
+
+impl Reconciler<'_, '_> {
+    fn apply(&mut self, update: &Reconcile) {
+        if !self
+            .roots
+            .get(update.ticket.owner)
+            .is_ok_and(|(root, scope)| {
+                root.0 == update.ticket.directory && scope.0 == update.ticket
+            })
+        {
+            return;
         }
-        let before = catalog.snapshot(update.ticket.owner).unwrap_or_default();
+        let before = self
+            .catalog
+            .snapshot(update.ticket.owner)
+            .unwrap_or_default();
         let mut existing = HashMap::new();
-        for (entity, id, parent, revision, committed, installing) in &packages {
+        for (entity, id, parent, revision, committed, installing) in &self.packages {
             if parent.parent() == update.ticket.owner {
                 existing.insert(
-                    id.0.as_str(),
+                    id.0.clone(),
                     (entity, *revision, committed, installing.is_some()),
                 );
             }
@@ -1115,7 +1010,7 @@ fn reconcile(
                 .entries
                 .iter()
                 .find(|previous| previous.id == entry.id);
-            let (entity, revision) = match existing.get(entry.id.as_str()) {
+            let (entity, revision) = match existing.get(&entry.id) {
                 Some((entity, revision, _, _)) => (
                     *entity,
                     if previous == Some(entry) {
@@ -1125,14 +1020,14 @@ fn reconcile(
                     },
                 ),
                 None => (
-                    commands
+                    self.commands
                         .spawn((Package, Id(entry.id.clone()), ChildOf(update.ticket.owner)))
                         .id(),
                     update.revision,
                 ),
             };
             retained.insert(entity);
-            commands.entity(entity).insert((
+            self.commands.entity(entity).insert((
                 Name::new(if entry.name.is_empty() {
                     entry.id.clone()
                 } else {
@@ -1149,9 +1044,107 @@ fn reconcile(
                 PublicKey(entry.public_key_b64.clone()),
                 revision,
             ));
-            update.reconcile_associations(entity, entry, previous, &associations, &mut commands);
+            self.reconcile_associations(entity, entry, previous, update.revision);
         }
-        Reconcile::prune_packages(&existing, &retained, &associations, &mut commands);
+        self.prune_packages(&existing, &retained);
+    }
+
+    fn reconcile_associations(
+        &mut self,
+        entity: Entity,
+        entry: &ExtEntry,
+        previous: Option<&ExtEntry>,
+        revision: Revision,
+    ) {
+        let mut profiles = HashMap::new();
+        for (association, profile, parent, association_revision, committed) in &self.associations {
+            if parent.parent() == entity {
+                profiles.insert(
+                    profile.0.clone(),
+                    (
+                        association,
+                        association_revision.copied().unwrap_or_default(),
+                        committed,
+                    ),
+                );
+            }
+        }
+        for (profile, enabled) in &entry.profile_enabled {
+            let changed = previous.is_none_or(|previous| {
+                !previous.installed_for(profile)
+                    || previous.enabled_for(profile) != *enabled
+                    || previous.pinned_for(profile) != entry.pinned_for(profile)
+                    || previous.grants_for(profile) != entry.grants_for(profile)
+            });
+            let (association, previous_revision, _) = match profiles.remove(profile) {
+                Some(existing) => existing,
+                None => (
+                    self.commands
+                        .spawn((Association, ProfileId(profile.clone()), ChildOf(entity)))
+                        .id(),
+                    revision,
+                    false,
+                ),
+            };
+            self.commands.entity(association).insert((
+                Installed,
+                Grants(entry.grants_for(profile)),
+                if changed { revision } else { previous_revision },
+            ));
+            if *enabled {
+                self.commands.entity(association).insert(Enabled);
+            } else {
+                self.commands.entity(association).remove::<Enabled>();
+            }
+            if entry.pinned_for(profile) {
+                self.commands.entity(association).insert(Pinned);
+            } else {
+                self.commands.entity(association).remove::<Pinned>();
+            }
+        }
+        for (entity, _, committed) in profiles.values() {
+            if *committed {
+                self.commands.entity(*entity).despawn();
+            }
+        }
+    }
+
+    fn prune_packages(
+        &mut self,
+        existing: &HashMap<String, (Entity, Revision, bool, bool)>,
+        retained: &HashSet<Entity>,
+    ) {
+        for (entity, _, committed, installing) in existing.values() {
+            if !retained.contains(entity) && *committed {
+                if *installing {
+                    self.commands.entity(*entity).remove::<(
+                        Name,
+                        Version,
+                        Popup,
+                        Icon,
+                        Permissions,
+                        OptionalPermissions,
+                        HostPermissions,
+                        OptionalHostPermissions,
+                        SourceHash,
+                        PublicKey,
+                    )>();
+                    for (association, _, parent, _, committed) in &self.associations {
+                        if parent.parent() == *entity && committed {
+                            self.commands.entity(association).despawn();
+                        }
+                    }
+                } else {
+                    self.commands.entity(*entity).despawn();
+                }
+            }
+        }
+    }
+}
+
+fn reconcile(mut updates: MessageReader<Reconcile>, mut reconciler: Reconciler) {
+    for update in updates.read() {
+        reconciler.apply(update);
     }
 }
 
