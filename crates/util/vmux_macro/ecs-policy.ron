@@ -62,12 +62,9 @@ legacy: [
     (key: "crates/util/vmux_macro/src/variant_names.rs||fn:expand", fingerprint: "b33e59ff0412d471", issue: "VMX-253"),
 ],
 boundaries: [
-
-    (key: "crates/util/vmux_macro/src/page.rs||enum:Placement", fingerprint: "dc7bfe1854cbc8e8", interface: "Rust attribute-macro TokenStream and syn AST integration", input: "pre-world: bounded Rust attribute metadata and syntax tree", output: "pre-world: typed generated binding registration and framework entry points", lifetime: "one compiler macro expansion", bounds: "compiler syntax and owner/selectors only; feature.ron parsing and declaration-dependent decisions remain in vmux_feature", teardown: "syntax and generated token buffers drop after compiler expansion", architecture: "ECS ownership boundaries"),
 ],
 shape: (
   enums: [
-    (key: "crates/util/vmux_macro/src/page.rs||enum:Placement", fingerprint: "dc7bfe1854cbc8e8", role: Boundary, owner: "crates/util/vmux_macro/src/page.rs||enum:Placement", reason: "Fixed Rust attribute vocabulary selecting the generated page registration adapter; it does not dispatch runtime operations."),
   ],
   bodies: [
     (key: "crates/util/vmux_macro/src/story_catalog.rs||impl:Entry::parse", fingerprint: "54ce913c74a74902", boundary: "crates/util/vmux_macro/src/story_catalog.rs||impl:Entry", reason: "One bounded compiler conversion of registration attribute syntax and its explicitly named RON source into typed metadata; it performs no runtime domain workflow or registry mutation."),
