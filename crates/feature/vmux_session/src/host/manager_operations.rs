@@ -809,7 +809,7 @@ fn dispatch_stage(
             }
             let mut request = crate::mutation::Request::local(
                 id.clone(),
-                crate::mutation::Mutation::ChangeStage(operation.stage.clone()),
+                crate::mutation::Mutation::change_stage(operation.stage.clone()),
             );
             request.operation.clone_from(&uuid.0);
             local.write(request);
@@ -899,7 +899,7 @@ fn dispatch_archive(
             }
             let mut request = crate::mutation::Request::local(
                 id.clone(),
-                crate::mutation::Mutation::Archive(
+                crate::mutation::Mutation::archive(
                     operation.archived.then_some(operation.accepted_at),
                 ),
             );
@@ -967,16 +967,20 @@ fn dispatch_cleanup(
                 .remove::<OperationRetained>();
             continue;
         }
-        let target = if let Some(session) = session {
-            crate::CleanupTarget::Session(session.clone())
+        let request = if let Some(session) = session {
+            crate::CleanupRequest {
+                sessions: vec![session.clone()],
+                providers: Vec::new(),
+            }
         } else if let (Some(kind), Some(id)) = (kind, id) {
-            crate::CleanupTarget::Provider(ProviderSessionKey::new(kind.clone(), id.clone()))
+            crate::CleanupRequest {
+                sessions: Vec::new(),
+                providers: vec![ProviderSessionKey::new(kind.clone(), id.clone())],
+            }
         } else {
             continue;
         };
-        requests.write(crate::CleanupRequest {
-            targets: vec![target],
-        });
+        requests.write(request);
         commands
             .entity(entity)
             .insert((Dispatched, OperationState::Running));
@@ -1462,7 +1466,7 @@ mod tests {
             .iter(fixture.app.world())
             .filter(|(mutation, owner)| {
                 owner.parent() == session
-                    && matches!(mutation, crate::mutation::Mutation::ChangeStage(_))
+                    && mutation.kind == crate::mutation::MutationKind::ChangeStage
             })
             .count();
         assert_eq!(records, 1);

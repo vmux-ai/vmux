@@ -55,7 +55,7 @@ fn send_continuations(
         let (Some(session_id), Some(mut state)) = (acp, state) else {
             continue;
         };
-        if !matches!(*state, RunState::Idle | RunState::Errored(_)) {
+        if !matches!(*state, RunState::Idle | RunState::Errored) {
             continue;
         }
         service_requests.write(ServiceRequest(

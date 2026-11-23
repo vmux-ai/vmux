@@ -21,9 +21,6 @@ use vmux_api::prompt_media::{PromptComposerAttachment, PromptMediaOption};
 use vmux_ecs::Cwd;
 use vmux_ui::file_icon::FilePath;
 
-const MAX_COMPOSER_FILE_RESULTS: usize = 100;
-const MAX_COMPOSER_FILE_SCAN: usize = 100_000;
-
 pub struct ChatMediaPlugin;
 
 impl Plugin for ChatMediaPlugin {
@@ -101,7 +98,7 @@ impl AttachmentTasks<'_, '_> {
                         == Some(vmux_api::media::MediaKind::Video)
                 {
                     let local = super::video::Source::path(&path.to_string_lossy());
-                    let Some(mut attachment) = chat_attachment(local.clone()) else {
+                    let Some(mut attachment) = ChatAttachmentTask::attachment(local.clone()) else {
                         continue;
                     };
                     let Ok(source) = super::video::Source::open(&local) else {
@@ -114,8 +111,8 @@ impl AttachmentTasks<'_, '_> {
                     continue;
                 }
                 let attachment = match delivery {
-                    ChatAttachmentDelivery::Hydrated => chat_attachment_preview(path),
-                    ChatAttachmentDelivery::Selected => chat_attachment(path),
+                    ChatAttachmentDelivery::Hydrated => ChatAttachmentTask::preview(path),
+                    ChatAttachmentDelivery::Selected => ChatAttachmentTask::attachment(path),
                 };
                 if let Some(attachment) = attachment {
                     result.attachments.push(attachment);
@@ -200,12 +197,37 @@ struct ComposerFileQuery {
 }
 
 impl ComposerFileQuery {
+    const MAX_RESULTS: usize = 100;
+    const MAX_SCAN: usize = 100_000;
+
     fn new(root: PathBuf, query: String) -> Self {
         Self { root, query }
     }
 
+    fn decode_path(value: &str) -> PathBuf {
+        let bytes = value.as_bytes();
+        let mut decoded = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] == b'%'
+                && index + 2 < bytes.len()
+                && let (Some(high), Some(low)) = (
+                    char::from(bytes[index + 1]).to_digit(16),
+                    char::from(bytes[index + 2]).to_digit(16),
+                )
+            {
+                decoded.push(((high << 4) | low) as u8);
+                index += 3;
+            } else {
+                decoded.push(bytes[index]);
+                index += 1;
+            }
+        }
+        PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
+    }
+
     fn search(self, request_id: u64) -> ChatMediaEntries {
-        let query = decode_media_query_path(&self.query)
+        let query = Self::decode_path(&self.query)
             .to_string_lossy()
             .trim_start_matches("./")
             .to_ascii_lowercase();
@@ -218,7 +240,7 @@ impl ComposerFileQuery {
             .git_exclude(true)
             .follow_links(false)
             .build();
-        for entry in walk.take(MAX_COMPOSER_FILE_SCAN) {
+        for entry in walk.take(Self::MAX_SCAN) {
             let Ok(entry) = entry else {
                 continue;
             };
@@ -243,7 +265,7 @@ impl ComposerFileQuery {
             });
         }
         hits.sort_by(ComposerFileHit::compare);
-        hits.truncate(MAX_COMPOSER_FILE_RESULTS);
+        hits.truncate(Self::MAX_RESULTS);
         let mut entries = Vec::with_capacity(hits.len());
         for hit in hits {
             entries.push(hit.entry());
@@ -339,7 +361,7 @@ impl ComposerFileHit {
         let mime_type = if self.is_dir {
             String::new()
         } else {
-            attachment_mime(&self.path)
+            ChatAttachmentTask::mime(&self.path)
         };
         ChatMediaEntry {
             path: self.path.to_string_lossy().into_owned(),
@@ -524,95 +546,95 @@ impl ChatAttachmentProjection {
     }
 }
 
-const MEDIA_THUMBNAIL_SOURCE_LIMIT: u64 = 25 * 1024 * 1024;
+impl ChatAttachmentTask {
+    const THUMBNAIL_SOURCE_LIMIT: u64 = 25 * 1024 * 1024;
+    const THUMBNAIL_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
+    const THUMBNAIL_MAX_EDGE: u32 = 512;
 
-const MEDIA_THUMBNAIL_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
+    fn mime(path: &Path) -> String {
+        let path_str = path.to_string_lossy();
+        if let Some(mime) = vmux_api::media::MediaKind::mime(&path_str) {
+            return mime.to_string();
+        }
+        let extension = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        match extension.as_str() {
+            "tif" | "tiff" => "image/tiff",
+            "heic" | "heif" => "image/heic",
+            "json" => "application/json",
+            "csv" => "text/csv",
+            "html" | "htm" => "text/html",
+            "md" | "markdown" => "text/markdown",
+            "txt" | "rs" | "toml" | "ron" | "yaml" | "yml" | "js" | "ts" | "tsx" | "jsx"
+            | "css" | "sh" | "zsh" | "bash" | "py" | "go" | "c" | "h" | "cc" | "cpp" | "hpp"
+            | "java" | "kt" | "swift" => "text/plain",
+            "zip" => "application/zip",
+            "gz" => "application/gzip",
+            "tar" => "application/x-tar",
+            _ => "application/octet-stream",
+        }
+        .to_string()
+    }
 
-const MEDIA_THUMBNAIL_MAX_EDGE: u32 = 512;
+    fn attachment(path: PathBuf) -> Option<ChatAttachment> {
+        let metadata = std::fs::metadata(&path).ok()?;
+        if !metadata.is_file() {
+            return None;
+        }
+        let name = path.file_name()?.to_string_lossy().into_owned();
+        let mime_type = Self::mime(&path);
+        Some(ChatAttachment {
+            path: path.to_string_lossy().into_owned(),
+            name,
+            mime_type,
+            size: metadata.len(),
+            preview_data_url: String::new(),
+            media_url: String::new(),
+        })
+    }
 
-fn attachment_mime(path: &Path) -> String {
-    let path_str = path.to_string_lossy();
-    if let Some(mime) = vmux_api::media::MediaKind::mime(&path_str) {
-        return mime.to_string();
+    fn thumbnail_data_url(path: &Path, source_size: u64) -> String {
+        if source_size > Self::THUMBNAIL_SOURCE_LIMIT {
+            return String::new();
+        }
+        let Some(mime) = vmux_api::media::MediaKind::image_mime(&path.to_string_lossy()) else {
+            return String::new();
+        };
+        if mime == "image/svg+xml" || mime == "image/avif" {
+            return String::new();
+        }
+        let Ok(bytes) = std::fs::read(path) else {
+            return String::new();
+        };
+        let Ok(image) = image::load_from_memory(&bytes) else {
+            return String::new();
+        };
+        let thumbnail = image.thumbnail(Self::THUMBNAIL_MAX_EDGE, Self::THUMBNAIL_MAX_EDGE);
+        let mut output = std::io::Cursor::new(Vec::new());
+        if thumbnail
+            .write_to(&mut output, image::ImageFormat::Png)
+            .is_err()
+        {
+            return String::new();
+        }
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(output.into_inner())
+        )
     }
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    match extension.as_str() {
-        "tif" | "tiff" => "image/tiff",
-        "heic" | "heif" => "image/heic",
-        "json" => "application/json",
-        "csv" => "text/csv",
-        "html" | "htm" => "text/html",
-        "md" | "markdown" => "text/markdown",
-        "txt" | "rs" | "toml" | "ron" | "yaml" | "yml" | "js" | "ts" | "tsx" | "jsx" | "css"
-        | "sh" | "zsh" | "bash" | "py" | "go" | "c" | "h" | "cc" | "cpp" | "hpp" | "java"
-        | "kt" | "swift" => "text/plain",
-        "zip" => "application/zip",
-        "gz" => "application/gzip",
-        "tar" => "application/x-tar",
-        _ => "application/octet-stream",
-    }
-    .to_string()
-}
 
-fn chat_attachment(path: PathBuf) -> Option<ChatAttachment> {
-    let metadata = std::fs::metadata(&path).ok()?;
-    if !metadata.is_file() {
-        return None;
+    fn preview(path: PathBuf) -> Option<ChatAttachment> {
+        let mut attachment = Self::attachment(path)?;
+        if !attachment.mime_type.starts_with("image/") {
+            return None;
+        }
+        attachment.preview_data_url =
+            Self::thumbnail_data_url(Path::new(&attachment.path), attachment.size);
+        (!attachment.preview_data_url.is_empty()).then_some(attachment)
     }
-    let name = path.file_name()?.to_string_lossy().into_owned();
-    let mime_type = attachment_mime(&path);
-    Some(ChatAttachment {
-        path: path.to_string_lossy().into_owned(),
-        name,
-        mime_type,
-        size: metadata.len(),
-        preview_data_url: String::new(),
-        media_url: String::new(),
-    })
-}
-
-fn media_thumbnail_data_url(path: &Path, source_size: u64) -> String {
-    if source_size > MEDIA_THUMBNAIL_SOURCE_LIMIT {
-        return String::new();
-    }
-    let Some(mime) = vmux_api::media::MediaKind::image_mime(&path.to_string_lossy()) else {
-        return String::new();
-    };
-    if mime == "image/svg+xml" || mime == "image/avif" {
-        return String::new();
-    }
-    let Ok(bytes) = std::fs::read(path) else {
-        return String::new();
-    };
-    let Ok(image) = image::load_from_memory(&bytes) else {
-        return String::new();
-    };
-    let thumbnail = image.thumbnail(MEDIA_THUMBNAIL_MAX_EDGE, MEDIA_THUMBNAIL_MAX_EDGE);
-    let mut output = std::io::Cursor::new(Vec::new());
-    if thumbnail
-        .write_to(&mut output, image::ImageFormat::Png)
-        .is_err()
-    {
-        return String::new();
-    }
-    format!(
-        "data:image/png;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(output.into_inner())
-    )
-}
-
-fn chat_attachment_preview(path: PathBuf) -> Option<ChatAttachment> {
-    let mut attachment = chat_attachment(path)?;
-    if !attachment.mime_type.starts_with("image/") {
-        return None;
-    }
-    attachment.preview_data_url =
-        media_thumbnail_data_url(Path::new(&attachment.path), attachment.size);
-    (!attachment.preview_data_url.is_empty()).then_some(attachment)
 }
 
 type ChangedMediaViews<'w, 's> = Query<
@@ -673,28 +695,6 @@ fn project(views: ChangedMediaViews, mut commands: Commands) {
     }
 }
 
-fn decode_media_query_path(value: &str) -> PathBuf {
-    let bytes = value.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%'
-            && index + 2 < bytes.len()
-            && let (Some(high), Some(low)) = (
-                char::from(bytes[index + 1]).to_digit(16),
-                char::from(bytes[index + 2]).to_digit(16),
-            )
-        {
-            decoded.push(((high << 4) | low) as u8);
-            index += 3;
-        } else {
-            decoded.push(bytes[index]);
-            index += 1;
-        }
-    }
-    PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
-}
-
 fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
     let Some((home, directory, filter)) = resolve_media_directory(&query) else {
         return ChatMediaEntries {
@@ -720,7 +720,7 @@ fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
             let mime_type = if is_dir {
                 String::new()
             } else {
-                attachment_mime(&path)
+                ChatAttachmentTask::mime(&path)
             };
             if !is_dir
                 && !mime_type.starts_with("image/")
@@ -769,13 +769,13 @@ fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
 fn resolve_media_directory(query: &str) -> Option<(PathBuf, PathBuf, String)> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let candidate = if let Some(rest) = query.strip_prefix("file://") {
-        decode_media_query_path(rest)
+        ComposerFileQuery::decode_path(rest)
     } else if let Some(rest) = query.strip_prefix("~/") {
-        home.join(decode_media_query_path(rest))
+        home.join(ComposerFileQuery::decode_path(rest))
     } else if query == "~" {
         home.clone()
     } else {
-        let path = decode_media_query_path(query);
+        let path = ComposerFileQuery::decode_path(query);
         if path.is_absolute() {
             path
         } else {
@@ -806,7 +806,7 @@ fn resolve_media_directory(query: &str) -> Option<(PathBuf, PathBuf, String)> {
 }
 
 fn chat_media_previews(mut response: ChatMediaEntries) -> ChatMediaEntries {
-    let mut remaining_thumbnail_bytes = MEDIA_THUMBNAIL_TOTAL_LIMIT;
+    let mut remaining_thumbnail_bytes = ChatAttachmentTask::THUMBNAIL_TOTAL_LIMIT;
     for entry in &mut response.entries {
         if entry.is_dir || !entry.mime_type.starts_with("image/") {
             continue;
@@ -817,7 +817,8 @@ fn chat_media_previews(mut response: ChatMediaEntries) -> ChatMediaEntries {
         if source_size > remaining_thumbnail_bytes {
             continue;
         }
-        entry.preview_data_url = media_thumbnail_data_url(Path::new(&entry.path), source_size);
+        entry.preview_data_url =
+            ChatAttachmentTask::thumbnail_data_url(Path::new(&entry.path), source_size);
         if !entry.preview_data_url.is_empty() {
             remaining_thumbnail_bytes = remaining_thumbnail_bytes.saturating_sub(source_size);
         }
@@ -1345,7 +1346,7 @@ mod tests {
     #[test]
     fn media_query_paths_decode_percent_escapes() {
         assert_eq!(
-            decode_media_query_path("Pictures/My%20Image%25.png"),
+            ComposerFileQuery::decode_path("Pictures/My%20Image%25.png"),
             PathBuf::from("Pictures/My Image%.png")
         );
     }
@@ -1358,7 +1359,7 @@ mod tests {
         image.save(&path).unwrap();
         let source_size = std::fs::metadata(&path).unwrap().len();
 
-        let data_url = media_thumbnail_data_url(&path, source_size);
+        let data_url = ChatAttachmentTask::thumbnail_data_url(&path, source_size);
 
         std::fs::remove_file(path).unwrap();
         let encoded = data_url.strip_prefix("data:image/png;base64,").unwrap();
@@ -1368,7 +1369,7 @@ mod tests {
         let thumbnail = image::load_from_memory(&bytes).unwrap();
         assert_eq!(
             thumbnail.width().max(thumbnail.height()),
-            MEDIA_THUMBNAIL_MAX_EDGE,
+            ChatAttachmentTask::THUMBNAIL_MAX_EDGE,
             "a preview is bounded by the edge the composer and the transcript draw it at"
         );
     }

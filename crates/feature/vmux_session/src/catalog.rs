@@ -1105,10 +1105,11 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<crate::CleanupRequest>>()
             .write(crate::CleanupRequest {
-                targets: vec![crate::CleanupTarget::Provider(ProviderSessionKey::new(
+                sessions: Vec::new(),
+                providers: vec![ProviderSessionKey::new(
                     ProviderKind("acp:codex".into()),
                     ProviderSessionId("provider-session".into()),
-                ))],
+                )],
             });
         app.update();
         assert!(

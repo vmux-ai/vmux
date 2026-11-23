@@ -485,15 +485,10 @@ pub struct ProviderStageChangeRequest {
     pub source_updated_at: i64,
 }
 
-#[derive(Message, Clone, Debug)]
+#[derive(Message, Clone, Debug, Default)]
 pub struct CleanupRequest {
-    pub targets: Vec<CleanupTarget>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum CleanupTarget {
-    Session(SessionId),
-    Provider(ProviderSessionKey),
+    pub sessions: Vec<SessionId>,
+    pub providers: Vec<ProviderSessionKey>,
 }
 
 #[cfg(host)]
@@ -803,7 +798,7 @@ fn create(
         let now = vmux_ecs::UnixMillis::now().0;
         let mut mutation = crate::mutation::Request::local(
             request.id.clone(),
-            crate::mutation::Mutation::Create(crate::mutation::Creation {
+            crate::mutation::Mutation::create(crate::mutation::Creation {
                 name: request.name.clone(),
                 description: request.description.clone(),
                 cwd: request.cwd.clone(),
@@ -888,7 +883,7 @@ fn sync_conversation_title(
         if !title.is_empty() && name.as_str() != title {
             mutations.write(crate::mutation::Request::local(
                 id.clone(),
-                crate::mutation::Mutation::Rename(title.to_string()),
+                crate::mutation::Mutation::rename(title.to_string()),
             ));
         }
     }
@@ -902,7 +897,7 @@ fn rename(
     for request in requests.read() {
         mutations.write(crate::mutation::Request::local(
             request.id.clone(),
-            crate::mutation::Mutation::Rename(request.name.clone()),
+            crate::mutation::Mutation::rename(request.name.clone()),
         ));
     }
 }
@@ -915,7 +910,7 @@ fn update_description(
     for request in requests.read() {
         mutations.write(crate::mutation::Request::local(
             request.id.clone(),
-            crate::mutation::Mutation::Describe(request.description.clone()),
+            crate::mutation::Mutation::describe(request.description.clone()),
         ));
     }
 }
@@ -928,7 +923,7 @@ fn change_stage(
     for request in requests.read() {
         mutations.write(crate::mutation::Request::local(
             request.id.clone(),
-            crate::mutation::Mutation::ChangeStage(request.stage.clone()),
+            crate::mutation::Mutation::change_stage(request.stage.clone()),
         ));
     }
 }
@@ -941,7 +936,7 @@ fn archive(
     for request in requests.read() {
         mutations.write(crate::mutation::Request::local(
             request.id.clone(),
-            crate::mutation::Mutation::Archive(request.archived_at),
+            crate::mutation::Mutation::archive(request.archived_at),
         ));
     }
 }
@@ -1194,15 +1189,11 @@ fn cleanup(
     let mut requested_sessions = HashSet::new();
     let mut dismissed_providers = HashSet::new();
     for request in requests.read() {
-        for target in &request.targets {
-            match target {
-                CleanupTarget::Session(id) => {
-                    requested_sessions.insert(id.clone());
-                }
-                CleanupTarget::Provider(key) => {
-                    dismissed_providers.insert(key.clone());
-                }
-            }
+        for id in &request.sessions {
+            requested_sessions.insert(id.clone());
+        }
+        for key in &request.providers {
+            dismissed_providers.insert(key.clone());
         }
     }
     if requested_sessions.is_empty() && dismissed_providers.is_empty() {
@@ -1351,7 +1342,7 @@ fn canonicalize_provider_sessions(
                 archived,
                 active: matches!(
                     runtime,
-                    Some(crate::RunState::Streaming | crate::RunState::AwaitingApproval { .. })
+                    Some(crate::RunState::Streaming | crate::RunState::AwaitingApproval)
                 ),
                 targeted: targeted.contains(&entity),
                 activated_at: activated_at.map(|value| value.0).unwrap_or_default(),
@@ -1887,7 +1878,8 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<CleanupRequest>>()
             .write(CleanupRequest {
-                targets: vec![CleanupTarget::Session(SessionId("session-1".into()))],
+                sessions: vec![SessionId("session-1".into())],
+                providers: Vec::new(),
             });
 
         app.update();
@@ -1915,7 +1907,8 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<CleanupRequest>>()
             .write(CleanupRequest {
-                targets: vec![CleanupTarget::Session(SessionId("canonical".into()))],
+                sessions: vec![SessionId("canonical".into())],
+                providers: Vec::new(),
             });
 
         app.update();

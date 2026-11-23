@@ -308,7 +308,7 @@ fn track_start(
     mut commands: Commands,
 ) {
     for request in requests.read() {
-        if !matches!(request.mutation, crate::mutation::Mutation::Create(_)) {
+        if request.mutation.kind != crate::mutation::MutationKind::Create {
             continue;
         }
         for (entity, start, state) in &pending {
@@ -616,10 +616,10 @@ fn set_conversation_title(
                     } else if let Ok(id) = metadata.get(session) {
                         commands.queue(crate::mutation::Request::local(
                             id.clone(),
-                            crate::mutation::Mutation::Summarize {
-                                title: title.to_string(),
-                                description: summary.to_string(),
-                            },
+                            crate::mutation::Mutation::summarize(
+                                title.to_string(),
+                                summary.to_string(),
+                            ),
                         ));
                         AgentCommandResult::Ok
                     } else {
@@ -1211,7 +1211,7 @@ mod tests {
         let (operation, id) = fixture.request("retained", stack);
         let mut request = crate::mutation::Request::local(
             id.clone(),
-            crate::mutation::Mutation::Create(crate::mutation::Creation {
+            crate::mutation::Mutation::create(crate::mutation::Creation {
                 name: "start".into(),
                 description: String::new(),
                 cwd: std::path::PathBuf::new(),
@@ -1232,6 +1232,8 @@ mod tests {
                 operation: "other-operation".into(),
                 session: id.clone(),
                 reason: crate::mutation::Rejection::MissingStage,
+                expected: None,
+                actual: None,
             });
         fixture.0.update();
         assert_eq!(
@@ -1245,6 +1247,8 @@ mod tests {
                 operation: "accepted-create".into(),
                 session: id,
                 reason: crate::mutation::Rejection::MissingStage,
+                expected: None,
+                actual: None,
             });
         fixture.0.update();
         assert_eq!(
@@ -1576,14 +1580,7 @@ mod tests {
         let conversation = Conversation::start(&mut app);
         conversation.rename(&mut app, "working session");
         let favicon = conversation.reported(&app).icon;
-        conversation.run(
-            &mut app,
-            vmux_session::RunState::AwaitingApproval {
-                call_id: "1".into(),
-                name: "run".into(),
-                args: serde_json::Value::Null,
-            },
-        );
+        conversation.run(&mut app, vmux_session::RunState::AwaitingApproval);
         assert_eq!(conversation.reported(&app).icon, favicon);
         assert_eq!(
             favicon,

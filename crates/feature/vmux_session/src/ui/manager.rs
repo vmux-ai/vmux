@@ -1526,32 +1526,6 @@ fn SessionGroupMenuItem(
 }
 
 #[component]
-fn SessionArchiveButton(onclick: EventHandler<MouseEvent>) -> Element {
-    rsx! {
-        button {
-            r#type: "button",
-            class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-foreground/75 transition-colors hover:bg-foreground/[0.08] hover:text-foreground",
-            onclick: move |event| onclick.call(event),
-            LineIconView { icon: LineIcon::Archive, class: "size-3.5 shrink-0".to_string() }
-            span { {translate("common-archive")} }
-        }
-    }
-}
-
-#[component]
-fn SessionDeleteButton(onclick: EventHandler<MouseEvent>) -> Element {
-    rsx! {
-        button {
-            r#type: "button",
-            class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-ansi-1 transition-colors hover:bg-ansi-1/10",
-            onclick: move |event| onclick.call(event),
-            LineIconView { icon: LineIcon::Trash, class: "size-3.5 shrink-0".to_string() }
-            span { {translate("sessions-delete")} }
-        }
-    }
-}
-
-#[component]
 fn StagePicker(target: StageTarget, selected: String, stages: Vec<StageSummary>) -> Element {
     let mut open = use_signal(|| false);
     let stage_dot = StageVisual::for_id(&selected).dot;
