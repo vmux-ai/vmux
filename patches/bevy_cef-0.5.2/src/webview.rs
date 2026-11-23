@@ -180,7 +180,7 @@ fn sync_windowless_frame_rate(
                 .and_then(|e| windows.get(e).ok())
                 .map(|w| (w.visible, w.focused))
                 .unwrap_or((true, true));
-            let mut windowless_frame_rate = effective_windowless_frame_rate(
+            let mut windowless_frame_rate = Browsers::effective_windowless_frame_rate(
                 windowless_frame_rate_from_refresh_millihertz(refresh_rate_millihertz),
                 visible,
                 focused,
@@ -241,6 +241,37 @@ fn opaque_windowed_background_color(mode: CefColorMode) -> u32 {
         CefColorMode::Light => 0xFFF0F0F0,
         CefColorMode::Dark | CefColorMode::System => 0xFF141414,
     }
+}
+
+fn webview_background_color(
+    windowed: bool,
+    opaque_windowed_background: bool,
+    transparent: bool,
+    mode: CefColorMode,
+) -> Option<u32> {
+    if windowed && opaque_windowed_background {
+        Some(opaque_windowed_background_color(mode))
+    } else if transparent {
+        Some(0x00000000)
+    } else {
+        None
+    }
+}
+
+fn collect_preload_scripts(
+    initialize_scripts: &PreloadScripts,
+    private_initialize_scripts: Option<&PrivatePreloadScripts>,
+) -> Vec<String> {
+    initialize_scripts
+        .0
+        .iter()
+        .chain(
+            private_initialize_scripts
+                .into_iter()
+                .flat_map(|scripts| scripts.0.iter()),
+        )
+        .cloned()
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -321,17 +352,8 @@ fn create_webview(
                 .map(|w| w.resolution.scale_factor())
                 .filter(|s| s.is_finite() && *s > 0.0)
                 .unwrap_or(1.0);
-            let initialize_scripts = initialize_scripts
-                .0
-                .iter()
-                .chain(
-                    private_initialize_scripts
-                        .into_iter()
-                        .flat_map(|scripts| scripts.0.iter()),
-                )
-                .cloned()
-                .collect::<Vec<_>>();
-
+            let initialize_scripts =
+                collect_preload_scripts(initialize_scripts, private_initialize_scripts);
             let winit_window = window_entity.and_then(|e| winit_windows.get_window(e));
             let refresh_rate_millihertz = winit_window
                 .and_then(|window| window.current_monitor())
@@ -348,6 +370,12 @@ fn create_webview(
             if windowed && host_window.is_none() {
                 continue;
             }
+            let background_color = webview_background_color(
+                windowed,
+                opaque_windowed_background,
+                transparent,
+                cef_settings.2.0,
+            );
             browsers.create_browser(
                 entity,
                 &uri.0,
@@ -370,13 +398,7 @@ fn create_webview(
                 host_window,
                 cef_settings.0.0.as_deref(),
                 &cef_settings.1.0,
-                if windowed && opaque_windowed_background {
-                    Some(opaque_windowed_background_color(cef_settings.2.0))
-                } else if transparent {
-                    Some(0x00000000)
-                } else {
-                    None
-                },
+                background_color,
                 windowless_frame_rate,
                 windowed,
                 shared_texture_enabled(windowed),

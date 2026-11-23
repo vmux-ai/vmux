@@ -30,7 +30,6 @@ use std::sync::Once;
 use std::time::Duration;
 
 mod devtool_render_handler;
-mod keyboard;
 
 use crate::browser_process::browsers::devtool_render_handler::DevToolRenderHandlerBuilder;
 use crate::browser_process::display_handler::{
@@ -47,7 +46,6 @@ use crate::browser_process::permission_handler::{
 use crate::browser_process::renderer_handler::SharedDeviceScaleFactor;
 use crate::browser_process::request_handler::RequestHandlerBuilder;
 use crate::browser_process::request_handler::WebviewRendererTerminatedSenderInner;
-pub use keyboard::*;
 
 /// Default CEF [`BrowserSettings::background_color`] ARGB.
 /// Opaque white so normal web pages render correctly.
@@ -274,32 +272,6 @@ impl Default for Browsers {
         }
     }
 }
-
-#[cfg(target_os = "macos")]
-objc2::define_class!(
-    /// A borderless floating panel that is allowed to become the key window.
-    ///
-    /// `NSWindow` refuses key status to borderless windows, so `makeKeyWindow` is a silent no-op
-    /// and the hosted document never receives a keystroke — they go to whatever window is key
-    /// instead. Titling the window would restore key eligibility but brings back a titlebar, a
-    /// frame taller than its content, and standard buttons AppKit keeps re-showing.
-    #[unsafe(super(objc2_app_kit::NSPanel, objc2_app_kit::NSWindow, objc2_app_kit::NSResponder, objc2::runtime::NSObject))]
-    #[thread_kind = objc2::MainThreadOnly]
-    #[name = "VmuxFloatingSurfacePanel"]
-    pub struct FloatingSurfacePanel;
-
-    impl FloatingSurfacePanel {
-        #[unsafe(method(canBecomeKeyWindow))]
-        fn can_become_key_window(&self) -> bool {
-            true
-        }
-
-        #[unsafe(method(canBecomeMainWindow))]
-        fn can_become_main_window(&self) -> bool {
-            false
-        }
-    }
-);
 
 impl Browsers {
     #[allow(clippy::too_many_arguments)]
@@ -839,6 +811,17 @@ impl Browsers {
             && browser.windowless_frame_rate.replace(frame_rate) != frame_rate
         {
             browser.host.set_windowless_frame_rate(frame_rate);
+        }
+    }
+
+    pub fn effective_windowless_frame_rate(monitor_rate: i32, visible: bool, focused: bool) -> i32 {
+        let monitor_rate = normalize_windowless_frame_rate(monitor_rate);
+        if !visible {
+            HIDDEN_WINDOWLESS_FRAME_RATE
+        } else if !focused {
+            BACKGROUND_WINDOWLESS_FRAME_RATE.min(monitor_rate)
+        } else {
+            monitor_rate
         }
     }
 
@@ -1916,11 +1899,7 @@ impl Browsers {
         height: f64,
     ) -> bool {
         use objc2::MainThreadMarker;
-        use objc2::MainThreadOnly;
-        use objc2_app_kit::{
-            NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSPanel, NSView,
-            NSWindowCollectionBehavior, NSWindowOrderingMode, NSWindowStyleMask,
-        };
+        use objc2_app_kit::NSView;
         use objc2_foundation::{NSPoint, NSRect, NSSize};
 
         let Some(mtm) = MainThreadMarker::new() else {
@@ -1951,47 +1930,7 @@ impl Browsers {
         let child = match existing {
             Some(window) => window,
             None => {
-                // An `NSPanel` with `NonactivatingPanel`, not a window. A plain borderless window
-                // returns false from `canBecomeKeyWindow`, so `makeKeyWindow` silently does
-                // nothing and the document never takes focus; a titled one brings a titlebar —
-                // hence a frame taller than its content — and standard buttons AppKit keeps
-                // re-showing. `FloatingSurfacePanel` overrides the former and keeps the latter
-                // from ever existing.
-                let window: objc2::rc::Retained<NSPanel> = {
-                    let this = FloatingSurfacePanel::alloc(mtm);
-                    let panel: objc2::rc::Retained<FloatingSurfacePanel> = unsafe {
-                        objc2::msg_send![
-                            this,
-                            initWithContentRect: NSRect::new(
-                                NSPoint::new(0.0, 0.0),
-                                NSSize::new(width, height),
-                            ),
-                            styleMask: NSWindowStyleMask::Borderless
-                                | NSWindowStyleMask::NonactivatingPanel,
-                            backing: NSBackingStoreType::Buffered,
-                            defer: false,
-                        ]
-                    };
-                    objc2::rc::Retained::into_super(panel)
-                };
-                window.setFloatingPanel(false);
-                window.setBecomesKeyOnlyIfNeeded(false);
-                window.setMovableByWindowBackground(false);
-                window.setHidesOnDeactivate(true);
-                window.setOpaque(false);
-                window.setBackgroundColor(Some(&NSColor::clearColor()));
-                window.setHasShadow(true);
-                unsafe { window.setReleasedWhenClosed(false) };
-                window.setCollectionBehavior(
-                    NSWindowCollectionBehavior::FullScreenAuxiliary
-                        | NSWindowCollectionBehavior::Transient,
-                );
-                if let Some(content) = window.contentView() {
-                    content.setWantsLayer(true);
-                }
-                unsafe {
-                    parent_window.addChildWindow_ordered(&window, NSWindowOrderingMode::Above)
-                };
+                let window = Self::create_floating_panel(&parent_window, mtm, width, height);
                 *browser.child_window.borrow_mut() = Some(window.clone());
                 window
             }
@@ -2018,30 +1957,120 @@ impl Browsers {
             child.setFrame_display(target_frame, true);
         }
 
-        if let Some(content) = child.contentView() {
-            if !cef_view.isDescendantOf(&content) {
-                cef_view.removeFromSuperview();
-                content.addSubview(cef_view);
-            }
-            // Track the content view's real bounds rather than the requested size: a titled
-            // window's content is shorter than its frame, so computing this by hand leaves the web
-            // view smaller than the window and the background showing around it. Autoresizing keeps
-            // it correct through later resizes.
-            let bounds = content.bounds();
-            cef_view.setAutoresizingMask(
-                NSAutoresizingMaskOptions::ViewWidthSizable
-                    | NSAutoresizingMaskOptions::ViewHeightSizable,
-            );
-            let f = cef_view.frame();
-            if (f.origin.x - bounds.origin.x).abs() > 0.5
-                || (f.origin.y - bounds.origin.y).abs() > 0.5
-                || (f.size.width - bounds.size.width).abs() > 0.5
-                || (f.size.height - bounds.size.height).abs() > 0.5
-            {
-                cef_view.setFrame(bounds);
-            }
-        }
+        Self::attach_cef_view_to_child_window(&child, cef_view);
         true
+    }
+
+    #[cfg(target_os = "macos")]
+    fn floating_surface_panel_class() -> &'static objc2::runtime::AnyClass {
+        use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
+        use objc2::{ClassType, sel};
+        use objc2_app_kit::NSPanel;
+
+        static CLASS: std::sync::OnceLock<&'static AnyClass> = std::sync::OnceLock::new();
+        CLASS.get_or_init(|| {
+            if let Some(existing) = AnyClass::get(c"VmuxFloatingSurfacePanel") {
+                return existing;
+            }
+            let mut builder = ClassBuilder::new(c"VmuxFloatingSurfacePanel", NSPanel::class())
+                .expect("register VmuxFloatingSurfacePanel");
+            extern "C" fn can_become_key_window(_: *const AnyObject, _: Sel) -> Bool {
+                Bool::YES
+            }
+            extern "C" fn can_become_main_window(_: *const AnyObject, _: Sel) -> Bool {
+                Bool::NO
+            }
+            unsafe {
+                builder.add_method(
+                    sel!(canBecomeKeyWindow),
+                    can_become_key_window as extern "C" fn(*const AnyObject, Sel) -> Bool,
+                );
+                builder.add_method(
+                    sel!(canBecomeMainWindow),
+                    can_become_main_window as extern "C" fn(*const AnyObject, Sel) -> Bool,
+                );
+            }
+            builder.register()
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn create_floating_panel(
+        parent_window: &objc2_app_kit::NSWindow,
+        _mtm: objc2::MainThreadMarker,
+        width: f64,
+        height: f64,
+    ) -> objc2::rc::Retained<objc2_app_kit::NSPanel> {
+        use objc2_app_kit::{
+            NSBackingStoreType, NSColor, NSPanel, NSWindowCollectionBehavior, NSWindowOrderingMode,
+            NSWindowStyleMask,
+        };
+        use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+        let panel_class = Self::floating_surface_panel_class();
+        let window: objc2::rc::Retained<NSPanel> = unsafe {
+            let this: objc2::rc::Allocated<NSPanel> = objc2::msg_send![panel_class, alloc];
+            objc2::msg_send![
+                this,
+                initWithContentRect: NSRect::new(
+                    NSPoint::new(0.0, 0.0),
+                    NSSize::new(width, height),
+                ),
+                styleMask: NSWindowStyleMask::Borderless
+                    | NSWindowStyleMask::NonactivatingPanel,
+                backing: NSBackingStoreType::Buffered,
+                defer: false,
+            ]
+        };
+        window.setFloatingPanel(false);
+        window.setBecomesKeyOnlyIfNeeded(false);
+        window.setMovableByWindowBackground(false);
+        window.setHidesOnDeactivate(true);
+        window.setOpaque(false);
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
+        window.setHasShadow(true);
+        unsafe { window.setReleasedWhenClosed(false) };
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::FullScreenAuxiliary | NSWindowCollectionBehavior::Transient,
+        );
+        if let Some(content) = window.contentView() {
+            content.setWantsLayer(true);
+        }
+        unsafe { parent_window.addChildWindow_ordered(&window, NSWindowOrderingMode::Above) };
+        window
+    }
+
+    #[cfg(target_os = "macos")]
+    fn attach_cef_view_to_child_window(
+        child: &objc2_app_kit::NSPanel,
+        cef_view: &objc2_app_kit::NSView,
+    ) {
+        use objc2_app_kit::NSAutoresizingMaskOptions;
+
+        let Some(content) = child.contentView() else {
+            return;
+        };
+        if !cef_view.isDescendantOf(&content) {
+            cef_view.removeFromSuperview();
+            content.addSubview(cef_view);
+        }
+        // Track the content view's real bounds rather than the requested size: a titled
+        // window's content is shorter than its frame, so computing this by hand leaves the web
+        // view smaller than the window and the background showing around it. Autoresizing keeps
+        // it correct through later resizes.
+        let bounds = content.bounds();
+        cef_view.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable,
+        );
+        let f = cef_view.frame();
+        if (f.origin.x - bounds.origin.x).abs() > 0.5
+            || (f.origin.y - bounds.origin.y).abs() > 0.5
+            || (f.size.width - bounds.size.width).abs() > 0.5
+            || (f.size.height - bounds.size.height).abs() > 0.5
+        {
+            cef_view.setFrame(bounds);
+        }
     }
 
     /// Make the child panel the key window if it is not already.
@@ -2873,19 +2902,6 @@ pub fn windowless_frame_interval_from_frame_rate(frame_rate: i32) -> Duration {
     )
 }
 
-/// Scale a webview's windowless frame rate by host-window focus/visibility so unfocused or
-/// hidden windows stop driving the CEF paint → texture-upload → Bevy render loop at full rate.
-pub fn effective_windowless_frame_rate(monitor_rate: i32, visible: bool, focused: bool) -> i32 {
-    let monitor_rate = normalize_windowless_frame_rate(monitor_rate);
-    if !visible {
-        HIDDEN_WINDOWLESS_FRAME_RATE
-    } else if !focused {
-        BACKGROUND_WINDOWLESS_FRAME_RATE.min(monitor_rate)
-    } else {
-        monitor_rate
-    }
-}
-
 fn normalize_windowless_frame_rate(frame_rate: i32) -> i32 {
     frame_rate.max(1)
 }
@@ -2982,9 +2998,9 @@ impl Browsers {
 #[cfg(test)]
 mod tests {
     use super::{
-        BACKGROUND_WINDOWLESS_FRAME_RATE, DEFAULT_WINDOWLESS_FRAME_RATE,
+        BACKGROUND_WINDOWLESS_FRAME_RATE, Browsers, DEFAULT_WINDOWLESS_FRAME_RATE,
         HIDDEN_WINDOWLESS_FRAME_RATE, MAX_CEF_WHEEL_DELTA, cef_mouse_wheel_event,
-        effective_windowless_frame_rate, windowless_frame_interval_from_refresh_millihertz,
+        windowless_frame_interval_from_refresh_millihertz,
         windowless_frame_rate_from_refresh_millihertz,
     };
     use crate::prelude::{
@@ -3032,14 +3048,19 @@ mod tests {
 
     #[test]
     fn focused_window_keeps_monitor_frame_rate() {
-        assert_eq!(effective_windowless_frame_rate(120, true, true), 120);
-        assert_eq!(effective_windowless_frame_rate(60, true, true), 60);
+        assert_eq!(
+            Browsers::effective_windowless_frame_rate(120, true, true),
+            120
+        );
+        assert_eq!(
+            Browsers::effective_windowless_frame_rate(60, true, true),
+            60
+        );
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn windowed_frame_reapplies_when_live_view_drifts() {
-        use super::Browsers;
         let target = (0.0, 0.0, 1492.0, 992.0);
         assert!(Browsers::windowed_frame_should_apply(None, target, target));
         assert!(!Browsers::windowed_frame_should_apply(
@@ -3057,21 +3078,24 @@ mod tests {
     #[test]
     fn visible_unfocused_window_is_throttled_but_never_above_monitor() {
         assert_eq!(
-            effective_windowless_frame_rate(120, true, false),
+            Browsers::effective_windowless_frame_rate(120, true, false),
             BACKGROUND_WINDOWLESS_FRAME_RATE
         );
         // A slow monitor caps the background rate too.
-        assert_eq!(effective_windowless_frame_rate(24, true, false), 24);
+        assert_eq!(
+            Browsers::effective_windowless_frame_rate(24, true, false),
+            24
+        );
     }
 
     #[test]
     fn hidden_window_drops_to_minimum_frame_rate() {
         assert_eq!(
-            effective_windowless_frame_rate(120, false, true),
+            Browsers::effective_windowless_frame_rate(120, false, true),
             HIDDEN_WINDOWLESS_FRAME_RATE
         );
         assert_eq!(
-            effective_windowless_frame_rate(120, false, false),
+            Browsers::effective_windowless_frame_rate(120, false, false),
             HIDDEN_WINDOWLESS_FRAME_RATE
         );
     }

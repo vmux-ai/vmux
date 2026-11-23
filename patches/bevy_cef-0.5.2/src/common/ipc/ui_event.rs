@@ -37,6 +37,16 @@ struct UiEventDecoder {
 }
 
 impl UiEventDecoders {
+    fn register_on<E>(app: &mut App)
+    where
+        E: UiEvent + rkyv::Archive + Send + Sync + 'static,
+        E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+            + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    {
+        app.init_resource::<Self>();
+        app.world_mut().resource_mut::<Self>().register::<E>();
+    }
+
     fn register<E>(&mut self)
     where
         E: UiEvent + rkyv::Archive + Send + Sync + 'static,
@@ -129,53 +139,404 @@ where
     }
 }
 
-fn register_event<E>(app: &mut App)
+impl<T0> UiEventList for (T0,)
 where
-    E: UiEvent + rkyv::Archive + Send + Sync + 'static,
-    E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+    T0: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T0::Archived: rkyv::Deserialize<T0, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
-    app.init_resource::<UiEventDecoders>();
-    app.world_mut()
-        .resource_mut::<UiEventDecoders>()
-        .register::<E>();
+    fn register_events(app: &mut App) {
+        UiEventDecoders::register_on::<T0>(app);
+    }
 }
 
-macro_rules! impl_bin_event_list {
-    ($head:ident $(, $tail:ident)*) => {
-        impl<$head $(, $tail)*> UiEventList for ($head, $($tail,)*)
-        where
-            $head: UiEvent + rkyv::Archive + Send + Sync + 'static,
-            $head::Archived: rkyv::Deserialize<$head, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-                + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-            $(
-                $tail: UiEvent + rkyv::Archive + Send + Sync + 'static,
-                $tail::Archived: rkyv::Deserialize<$tail, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-                    + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-            )*
-        {
-            fn register_events(app: &mut App) {
-                register_event::<$head>(app);
-                $(
-                    register_event::<$tail>(app);
-                )*
-            }
-        }
-    };
+impl<T0, T1> UiEventList for (T0, T1)
+where
+    T0: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T0::Archived: rkyv::Deserialize<T0, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T1: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T1::Archived: rkyv::Deserialize<T1, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    fn register_events(app: &mut App) {
+        UiEventDecoders::register_on::<T0>(app);
+        UiEventDecoders::register_on::<T1>(app);
+    }
 }
 
-impl_bin_event_list!(T0);
-impl_bin_event_list!(T0, T1);
-impl_bin_event_list!(T0, T1, T2);
-impl_bin_event_list!(T0, T1, T2, T3);
-impl_bin_event_list!(T0, T1, T2, T3, T4);
-impl_bin_event_list!(T0, T1, T2, T3, T4, T5);
-impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6);
-impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7);
-impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8);
-impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9);
-impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
-impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11);
+impl<T0, T1, T2> UiEventList for (T0, T1, T2)
+where
+    T0: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T0::Archived: rkyv::Deserialize<T0, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T1: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T1::Archived: rkyv::Deserialize<T1, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T2: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T2::Archived: rkyv::Deserialize<T2, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    fn register_events(app: &mut App) {
+        UiEventDecoders::register_on::<T0>(app);
+        UiEventDecoders::register_on::<T1>(app);
+        UiEventDecoders::register_on::<T2>(app);
+    }
+}
+
+impl<T0, T1, T2, T3> UiEventList for (T0, T1, T2, T3)
+where
+    T0: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T0::Archived: rkyv::Deserialize<T0, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T1: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T1::Archived: rkyv::Deserialize<T1, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T2: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T2::Archived: rkyv::Deserialize<T2, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T3: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T3::Archived: rkyv::Deserialize<T3, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    fn register_events(app: &mut App) {
+        UiEventDecoders::register_on::<T0>(app);
+        UiEventDecoders::register_on::<T1>(app);
+        UiEventDecoders::register_on::<T2>(app);
+        UiEventDecoders::register_on::<T3>(app);
+    }
+}
+
+impl<T0, T1, T2, T3, T4> UiEventList for (T0, T1, T2, T3, T4)
+where
+    T0: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T0::Archived: rkyv::Deserialize<T0, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T1: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T1::Archived: rkyv::Deserialize<T1, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T2: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T2::Archived: rkyv::Deserialize<T2, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T3: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T3::Archived: rkyv::Deserialize<T3, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T4: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T4::Archived: rkyv::Deserialize<T4, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    fn register_events(app: &mut App) {
+        UiEventDecoders::register_on::<T0>(app);
+        UiEventDecoders::register_on::<T1>(app);
+        UiEventDecoders::register_on::<T2>(app);
+        UiEventDecoders::register_on::<T3>(app);
+        UiEventDecoders::register_on::<T4>(app);
+    }
+}
+
+impl<T0, T1, T2, T3, T4, T5> UiEventList for (T0, T1, T2, T3, T4, T5)
+where
+    T0: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T0::Archived: rkyv::Deserialize<T0, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T1: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T1::Archived: rkyv::Deserialize<T1, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T2: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T2::Archived: rkyv::Deserialize<T2, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T3: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T3::Archived: rkyv::Deserialize<T3, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T4: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T4::Archived: rkyv::Deserialize<T4, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T5: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T5::Archived: rkyv::Deserialize<T5, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    fn register_events(app: &mut App) {
+        UiEventDecoders::register_on::<T0>(app);
+        UiEventDecoders::register_on::<T1>(app);
+        UiEventDecoders::register_on::<T2>(app);
+        UiEventDecoders::register_on::<T3>(app);
+        UiEventDecoders::register_on::<T4>(app);
+        UiEventDecoders::register_on::<T5>(app);
+    }
+}
+
+impl<T0, T1, T2, T3, T4, T5, T6> UiEventList for (T0, T1, T2, T3, T4, T5, T6)
+where
+    T0: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T0::Archived: rkyv::Deserialize<T0, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T1: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T1::Archived: rkyv::Deserialize<T1, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T2: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T2::Archived: rkyv::Deserialize<T2, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T3: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T3::Archived: rkyv::Deserialize<T3, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T4: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T4::Archived: rkyv::Deserialize<T4, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T5: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T5::Archived: rkyv::Deserialize<T5, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T6: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T6::Archived: rkyv::Deserialize<T6, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    fn register_events(app: &mut App) {
+        UiEventDecoders::register_on::<T0>(app);
+        UiEventDecoders::register_on::<T1>(app);
+        UiEventDecoders::register_on::<T2>(app);
+        UiEventDecoders::register_on::<T3>(app);
+        UiEventDecoders::register_on::<T4>(app);
+        UiEventDecoders::register_on::<T5>(app);
+        UiEventDecoders::register_on::<T6>(app);
+    }
+}
+
+impl<T0, T1, T2, T3, T4, T5, T6, T7> UiEventList for (T0, T1, T2, T3, T4, T5, T6, T7)
+where
+    T0: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T0::Archived: rkyv::Deserialize<T0, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T1: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T1::Archived: rkyv::Deserialize<T1, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T2: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T2::Archived: rkyv::Deserialize<T2, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T3: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T3::Archived: rkyv::Deserialize<T3, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T4: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T4::Archived: rkyv::Deserialize<T4, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T5: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T5::Archived: rkyv::Deserialize<T5, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T6: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T6::Archived: rkyv::Deserialize<T6, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T7: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T7::Archived: rkyv::Deserialize<T7, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    fn register_events(app: &mut App) {
+        UiEventDecoders::register_on::<T0>(app);
+        UiEventDecoders::register_on::<T1>(app);
+        UiEventDecoders::register_on::<T2>(app);
+        UiEventDecoders::register_on::<T3>(app);
+        UiEventDecoders::register_on::<T4>(app);
+        UiEventDecoders::register_on::<T5>(app);
+        UiEventDecoders::register_on::<T6>(app);
+        UiEventDecoders::register_on::<T7>(app);
+    }
+}
+
+impl<T0, T1, T2, T3, T4, T5, T6, T7, T8> UiEventList for (T0, T1, T2, T3, T4, T5, T6, T7, T8)
+where
+    T0: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T0::Archived: rkyv::Deserialize<T0, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T1: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T1::Archived: rkyv::Deserialize<T1, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T2: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T2::Archived: rkyv::Deserialize<T2, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T3: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T3::Archived: rkyv::Deserialize<T3, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T4: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T4::Archived: rkyv::Deserialize<T4, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T5: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T5::Archived: rkyv::Deserialize<T5, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T6: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T6::Archived: rkyv::Deserialize<T6, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T7: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T7::Archived: rkyv::Deserialize<T7, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T8: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T8::Archived: rkyv::Deserialize<T8, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    fn register_events(app: &mut App) {
+        UiEventDecoders::register_on::<T0>(app);
+        UiEventDecoders::register_on::<T1>(app);
+        UiEventDecoders::register_on::<T2>(app);
+        UiEventDecoders::register_on::<T3>(app);
+        UiEventDecoders::register_on::<T4>(app);
+        UiEventDecoders::register_on::<T5>(app);
+        UiEventDecoders::register_on::<T6>(app);
+        UiEventDecoders::register_on::<T7>(app);
+        UiEventDecoders::register_on::<T8>(app);
+    }
+}
+
+impl<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9> UiEventList
+    for (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9)
+where
+    T0: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T0::Archived: rkyv::Deserialize<T0, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T1: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T1::Archived: rkyv::Deserialize<T1, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T2: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T2::Archived: rkyv::Deserialize<T2, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T3: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T3::Archived: rkyv::Deserialize<T3, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T4: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T4::Archived: rkyv::Deserialize<T4, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T5: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T5::Archived: rkyv::Deserialize<T5, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T6: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T6::Archived: rkyv::Deserialize<T6, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T7: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T7::Archived: rkyv::Deserialize<T7, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T8: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T8::Archived: rkyv::Deserialize<T8, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T9: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T9::Archived: rkyv::Deserialize<T9, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    fn register_events(app: &mut App) {
+        UiEventDecoders::register_on::<T0>(app);
+        UiEventDecoders::register_on::<T1>(app);
+        UiEventDecoders::register_on::<T2>(app);
+        UiEventDecoders::register_on::<T3>(app);
+        UiEventDecoders::register_on::<T4>(app);
+        UiEventDecoders::register_on::<T5>(app);
+        UiEventDecoders::register_on::<T6>(app);
+        UiEventDecoders::register_on::<T7>(app);
+        UiEventDecoders::register_on::<T8>(app);
+        UiEventDecoders::register_on::<T9>(app);
+    }
+}
+
+impl<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10> UiEventList
+    for (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)
+where
+    T0: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T0::Archived: rkyv::Deserialize<T0, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T1: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T1::Archived: rkyv::Deserialize<T1, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T2: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T2::Archived: rkyv::Deserialize<T2, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T3: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T3::Archived: rkyv::Deserialize<T3, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T4: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T4::Archived: rkyv::Deserialize<T4, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T5: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T5::Archived: rkyv::Deserialize<T5, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T6: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T6::Archived: rkyv::Deserialize<T6, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T7: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T7::Archived: rkyv::Deserialize<T7, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T8: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T8::Archived: rkyv::Deserialize<T8, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T9: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T9::Archived: rkyv::Deserialize<T9, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T10: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T10::Archived: rkyv::Deserialize<T10, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    fn register_events(app: &mut App) {
+        UiEventDecoders::register_on::<T0>(app);
+        UiEventDecoders::register_on::<T1>(app);
+        UiEventDecoders::register_on::<T2>(app);
+        UiEventDecoders::register_on::<T3>(app);
+        UiEventDecoders::register_on::<T4>(app);
+        UiEventDecoders::register_on::<T5>(app);
+        UiEventDecoders::register_on::<T6>(app);
+        UiEventDecoders::register_on::<T7>(app);
+        UiEventDecoders::register_on::<T8>(app);
+        UiEventDecoders::register_on::<T9>(app);
+        UiEventDecoders::register_on::<T10>(app);
+    }
+}
+
+impl<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11> UiEventList
+    for (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)
+where
+    T0: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T0::Archived: rkyv::Deserialize<T0, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T1: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T1::Archived: rkyv::Deserialize<T1, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T2: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T2::Archived: rkyv::Deserialize<T2, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T3: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T3::Archived: rkyv::Deserialize<T3, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T4: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T4::Archived: rkyv::Deserialize<T4, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T5: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T5::Archived: rkyv::Deserialize<T5, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T6: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T6::Archived: rkyv::Deserialize<T6, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T7: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T7::Archived: rkyv::Deserialize<T7, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T8: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T8::Archived: rkyv::Deserialize<T8, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T9: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T9::Archived: rkyv::Deserialize<T9, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T10: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T10::Archived: rkyv::Deserialize<T10, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T11: UiEvent + rkyv::Archive + Send + Sync + 'static,
+    T11::Archived: rkyv::Deserialize<T11, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    fn register_events(app: &mut App) {
+        UiEventDecoders::register_on::<T0>(app);
+        UiEventDecoders::register_on::<T1>(app);
+        UiEventDecoders::register_on::<T2>(app);
+        UiEventDecoders::register_on::<T3>(app);
+        UiEventDecoders::register_on::<T4>(app);
+        UiEventDecoders::register_on::<T5>(app);
+        UiEventDecoders::register_on::<T6>(app);
+        UiEventDecoders::register_on::<T7>(app);
+        UiEventDecoders::register_on::<T8>(app);
+        UiEventDecoders::register_on::<T9>(app);
+        UiEventDecoders::register_on::<T10>(app);
+        UiEventDecoders::register_on::<T11>(app);
+    }
+}
 
 fn page_has_permission<'a>(
     permissions: impl Iterator<Item = &'a UiEventPermissions>,

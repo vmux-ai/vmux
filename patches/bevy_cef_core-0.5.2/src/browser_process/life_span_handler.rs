@@ -12,10 +12,6 @@ use crate::browser_process::renderer_handler::TextureWake;
 
 static OPEN_BROWSER_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-pub fn open_browser_count() -> usize {
-    OPEN_BROWSER_COUNT.load(Ordering::Acquire)
-}
-
 #[derive(Clone, Debug)]
 pub struct WebviewPopupEvent {
     pub webview: Entity,
@@ -32,6 +28,10 @@ pub struct LifeSpanHandlerBuilder {
 }
 
 impl LifeSpanHandlerBuilder {
+    pub fn open_browser_count() -> usize {
+        OPEN_BROWSER_COUNT.load(Ordering::Acquire)
+    }
+
     pub fn build(
         webview: Entity,
         tx: WebviewPopupSenderInner,
@@ -143,12 +143,12 @@ mod tests {
             wake: Some(wake),
         };
 
-        let before = open_browser_count();
+        let before = LifeSpanHandlerBuilder::open_browser_count();
         handler.on_after_created(None);
-        assert_eq!(open_browser_count(), before + 1);
+        assert_eq!(LifeSpanHandlerBuilder::open_browser_count(), before + 1);
         handler.on_before_close(None);
 
         assert_eq!(wakes.load(Ordering::Relaxed), 1);
-        assert_eq!(open_browser_count(), before);
+        assert_eq!(LifeSpanHandlerBuilder::open_browser_count(), before);
     }
 }

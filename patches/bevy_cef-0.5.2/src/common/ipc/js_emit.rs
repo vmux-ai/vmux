@@ -46,7 +46,8 @@ pub struct JsEmitEventPlugin<E: DeserializeOwned>(PhantomData<E>);
 
 impl<E: DeserializeOwned + Send + Sync + 'static> Plugin for JsEmitEventPlugin<E> {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, receive_events::<E>.after(drain_ipc_events));
+        app.init_resource::<IpcEventRawBuffer>()
+            .add_systems(Update, receive_events::<E>.after(drain_ipc_events));
     }
 }
 

@@ -4,8 +4,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-const MAX_TIMER_DELAY_MS: u64 = 1000 / 30;
-const DEFAULT_WAKE_MIN_INTERVAL: Duration = Duration::from_nanos(8_333_333);
 const INTERACTION_WAKE_MIN_INTERVAL: Duration = Duration::from_millis(16);
 const INTERACTION_WAKE_DURATION: Duration = Duration::from_millis(250);
 
@@ -17,6 +15,8 @@ pub struct MessageLoopWorkingReceiver(pub Receiver<MessageLoopTimer>);
 pub struct MessageLoopTimer(Instant);
 
 impl MessageLoopTimer {
+    const MAX_DELAY_MS: i64 = 1000 / 30;
+
     pub fn new(delay_ms: i64) -> Self {
         let fire_time = if delay_ms <= 0 {
             Instant::now()
@@ -47,7 +47,7 @@ pub struct MessageLoopWorkingMaxDelayTimer(MessageLoopTimer);
 
 impl Default for MessageLoopWorkingMaxDelayTimer {
     fn default() -> Self {
-        Self(MessageLoopTimer::new(MAX_TIMER_DELAY_MS as i64))
+        Self(MessageLoopTimer::new(MessageLoopTimer::MAX_DELAY_MS))
     }
 }
 
@@ -65,7 +65,9 @@ impl Default for MessageLoopWakePolicy {
     fn default() -> Self {
         Self(Arc::new(MessageLoopWakeState {
             started_at: Instant::now(),
-            min_interval_nanos: AtomicU64::new(duration_nanos(DEFAULT_WAKE_MIN_INTERVAL)),
+            min_interval_nanos: AtomicU64::new(duration_nanos(
+                crate::browser_process::windowless_frame_interval_from_refresh_millihertz(None),
+            )),
             interaction_until_nanos: AtomicU64::new(0),
         }))
     }

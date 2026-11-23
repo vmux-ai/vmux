@@ -1,9 +1,9 @@
 use crate::prelude::{IntoString, PROCESS_MESSAGE_SNAPSHOT_RESULT};
-use cef::rc::Rc;
+use cef::rc::{Rc, RcImpl};
 use cef::{
     Domdocument, Domnode, Domvisitor, Frame, ImplDomdocument, ImplDomnode, ImplDomvisitor,
     ImplFrame, ImplListValue, ImplProcessMessage, ProcessId, WrapDomvisitor,
-    process_message_create, wrap_domvisitor,
+    process_message_create, sys,
 };
 use cef_dll_sys::cef_process_id_t;
 
@@ -31,7 +31,7 @@ const MAX_WALK_DEPTH: usize = 2048;
 const EMPTY_SNAPSHOT: &str = "{\"url\":\"\",\"title\":\"\",\"nodes\":[]}";
 
 pub fn request_dom_snapshot(frame: &Frame, request_id: &str) {
-    let mut visitor = SnapshotVisitor::new(frame.clone(), request_id.to_string());
+    let mut visitor = SnapshotVisitor::build(frame.clone(), request_id.to_string());
     frame.visit_dom(Some(&mut visitor));
 }
 
@@ -116,15 +116,59 @@ fn send_result(frame: &Frame, request_id: &str, json: &str) {
     }
 }
 
-wrap_domvisitor! {
-    struct SnapshotVisitor {
-        frame: Frame,
-        request_id: String,
+struct SnapshotVisitor {
+    object: *mut RcImpl<sys::_cef_domvisitor_t, Self>,
+    frame: Frame,
+    request_id: String,
+}
+
+impl SnapshotVisitor {
+    fn build(frame: Frame, request_id: String) -> Domvisitor {
+        Domvisitor::new(Self {
+            object: core::ptr::null_mut(),
+            frame,
+            request_id,
+        })
     }
-    impl Domvisitor {
-        fn visit(&self, document: Option<&mut Domdocument>) {
-            let json = build_json(document);
-            send_result(&self.frame, &self.request_id, &json);
+}
+
+impl Rc for SnapshotVisitor {
+    fn as_base(&self) -> &sys::cef_base_ref_counted_t {
+        unsafe {
+            let base = &*self.object;
+            core::mem::transmute(&base.cef_object)
         }
+    }
+}
+
+impl Clone for SnapshotVisitor {
+    fn clone(&self) -> Self {
+        let object = unsafe {
+            let rc_impl = &mut *self.object;
+            rc_impl.interface.add_ref();
+            rc_impl
+        };
+        Self {
+            object,
+            frame: self.frame.clone(),
+            request_id: self.request_id.clone(),
+        }
+    }
+}
+
+impl WrapDomvisitor for SnapshotVisitor {
+    fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_domvisitor_t, Self>) {
+        self.object = object;
+    }
+}
+
+impl ImplDomvisitor for SnapshotVisitor {
+    fn visit(&self, document: Option<&mut Domdocument>) {
+        let json = build_json(document);
+        send_result(&self.frame, &self.request_id, &json);
+    }
+
+    fn get_raw(&self) -> *mut sys::_cef_domvisitor_t {
+        self.object.cast()
     }
 }

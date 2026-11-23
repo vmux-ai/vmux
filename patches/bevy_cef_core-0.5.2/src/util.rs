@@ -98,9 +98,8 @@ impl CefSchemeRoute {
     }
 }
 
-#[derive(
-    bevy::prelude::Resource, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "browser-process", derive(bevy::prelude::Resource))]
 pub struct CefEmbeddedPageConfig {
     pub scheme: String,
     scheme_prefix: String,
@@ -237,10 +236,6 @@ pub fn is_trusted_embedded_page(url: &str) -> bool {
 pub fn is_bridge_allowed_origin(url: &str) -> bool {
     let config: Arc<CefEmbeddedPageConfig> = resolved_cef_embedded_page_config();
     config.is_bridge_allowed_origin(url)
-}
-
-pub fn ipc_allowed_render(url: &str) -> bool {
-    has_embedded_scheme(url) || is_bridge_allowed_origin(url)
 }
 
 pub fn ipc_allowed_browser(url: &str) -> bool {

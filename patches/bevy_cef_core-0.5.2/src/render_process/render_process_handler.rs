@@ -379,7 +379,11 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
             let config: crate::util::CefEmbeddedPageConfig = config;
             crate::util::try_set_cef_embedded_page_config(config);
         }
-        register_cef_api_extension();
+        register_extension(
+            Some(&CEF_API_EXTENSION_NAME.into()),
+            Some(&CEF_API_EXTENSION_CODE.into()),
+            Some(&mut V8Handler::new(CefApiHandler::default())),
+        );
         register_extensions_from_command_line();
     }
 
@@ -587,14 +591,6 @@ mod tests {
         assert!(registry.browsers.get(&1).unwrap().listeners.is_empty());
         assert!(registry.browsers.get(&1).unwrap().channel_order.is_empty());
     }
-}
-
-fn register_cef_api_extension() {
-    register_extension(
-        Some(&CEF_API_EXTENSION_NAME.into()),
-        Some(&CEF_API_EXTENSION_CODE.into()),
-        Some(&mut V8Handler::new(CefApiHandler::default())),
-    );
 }
 
 fn handle_listen_message(message: &ProcessMessage, browser_id: c_int, mut ctx: V8Context) {
