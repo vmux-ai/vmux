@@ -93,7 +93,6 @@ values: [
     (key: "crates/util/vmux_process/src/selection.rs||enum:CopyModeFindDirection", owner: "crates/util/vmux_process/src/selection.rs||struct:CopyModeFind", lifetime: "Unit scalar distinguishing forward vs backward find inside CopyModeFind."),
     (key: "crates/util/vmux_process/src/selection.rs||enum:CopyModeCharClass", owner: "crates/util/vmux_process/src/selection.rs||struct:ProcessCopyMode", lifetime: "Unit scalar classifying cell characters for vi word motions in ProcessCopyMode."),
     (key: "crates/util/vmux_process/src/shell_integration.rs||enum:Shell", owner: "crates/util/vmux_process/src/plugin.rs||struct:ProcessShell", lifetime: "Supported shell variant detected from ProcessShell command basename."),
-    (key: "crates/util/vmux_process/src/viewport.rs||struct:ProcessMode", owner: "crates/util/vmux_process/src/viewport.rs||struct:ProcessTerminalMode", lifetime: "Last broadcast terminal mode flags owned by ProcessTerminalMode."),
     (key: "crates/util/vmux_process/src/viewport.rs||struct:ViewportPace", owner: "crates/util/vmux_process/src/viewport.rs||struct:ProcessViewport", lifetime: "Heavy-output frame pacing timestamps owned by ProcessViewport."),
 ],
 shape: (

@@ -330,9 +330,26 @@ impl<'tcx> Ownership<'tcx> {
                     .then_some(*id)
             })
             .collect();
+        let dto_roles = self
+            .roles
+            .iter()
+            .filter_map(|(id, roles)| {
+                let is_ecs = roles.iter().any(|role| {
+                    matches!(
+                        *role,
+                        "component" | "resource" | "message" | "bundle" | "query" | "parameter"
+                    )
+                });
+                let is_dto = roles
+                    .iter()
+                    .any(|role| matches!(*role, "contract" | "serde" | "error"));
+                (!is_ecs && is_dto).then_some(*id)
+            })
+            .collect();
         let mut graph = ValueGraph {
             root: owner.did(),
             canonical,
+            dtos: dto_roles,
             values: HashSet::new(),
             visiting: HashSet::new(),
             issues: Vec::new(),
@@ -355,7 +372,11 @@ impl<'tcx> Ownership<'tcx> {
                 .as_str()
                 .to_owned()
         });
-        if cx.tcx.sess.opts.test || !package.starts_with("vmux_") || package == "vmux_macro" {
+        if cx.tcx.sess.opts.test
+            || !package.starts_with("vmux_")
+            || package == "vmux_macro"
+            || std::env::var("CARGO_CRATE_NAME").as_deref() == Ok("build_script_build")
+        {
             return;
         }
         for (function, arguments, site) in std::mem::take(&mut self.systems) {
@@ -391,6 +412,7 @@ impl<'tcx> Ownership<'tcx> {
                 || self.has_role(definition, "error")
                 || self.has_role(definition, "contract")
                 || self.stateless_unit_adapter(cx, definition)
+                || self.stack_local_or_copy_value(cx, definition)
                 || self.has_role(definition, "inventory")
                     && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
                 || self.has_role(definition, "props")
@@ -479,6 +501,24 @@ impl<'tcx> Ownership<'tcx> {
         true
     }
 
+    fn stack_local_or_copy_value(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
+        if self.roles.contains_key(&definition)
+            || !matches!(cx.tcx.def_kind(definition), DefKind::Struct)
+        {
+            return false;
+        }
+        let generics = cx.tcx.generics_of(definition);
+        if generics.own_counts().lifetimes > 0 {
+            return true;
+        }
+        let ty = cx
+            .tcx
+            .type_of(definition)
+            .instantiate_identity()
+            .skip_norm_wip();
+        cx.tcx.type_is_copy_modulo_regions(cx.typing_env(), ty)
+    }
+
     fn stateless_unit_adapter(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
         if self.roles.contains_key(&definition) {
             return false;
@@ -552,6 +592,7 @@ impl<'tcx> Ownership<'tcx> {
 struct ValueGraph<'tcx> {
     root: DefId,
     canonical: HashSet<DefId>,
+    dtos: HashSet<DefId>,
     values: HashSet<DefId>,
     visiting: HashSet<Ty<'tcx>>,
     issues: Vec<(DefId, &'static str)>,
@@ -603,13 +644,18 @@ impl<'tcx> ValueGraph<'tcx> {
             }
             TyKind::Adt(owner, arguments) => {
                 if owner.did().is_local() {
-                    if location != self.root && (retained || self.canonical.contains(&owner.did()))
+                    if location != self.root
+                        && (self.canonical.contains(&owner.did())
+                            || retained && !self.dtos.contains(&owner.did()))
                     {
                         self.issues.push((
                             location,
                             "canonical ECS state embeds an independently owned model",
                         ));
                         return false;
+                    }
+                    if self.dtos.contains(&owner.did()) {
+                        return true;
                     }
                     self.values.insert(owner.did());
                     let mut valid = true;
