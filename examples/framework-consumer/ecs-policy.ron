@@ -1,7 +1,6 @@
 (legacy: [
     (key: "examples/framework-consumer/src/lib.rs||impl:Plugin for DocumentStorePlugin", fingerprint: "7a667b3001a2c437", issue: "VMX-253"),
     (key: "examples/framework-consumer/src/lib.rs||impl:Plugin for DocumentsPlugin", fingerprint: "53a13adb04a01780", issue: "VMX-253"),
-    (key: "examples/framework-consumer/src/lib.rs||struct:DocumentStore", fingerprint: "cd9aaefa0caf739d", issue: "VMX-253"),
     (key: "examples/framework-consumer/src/lib.rs||struct:DocumentStorePlugin", fingerprint: "33d4f3e16b528359", issue: "VMX-253"),
     (key: "examples/framework-consumer/src/lib.rs||struct:DocumentsPlugin", fingerprint: "176bf829d4ffd739", issue: "VMX-253"),
     (key: "examples/framework-consumer/tests/jobs.rs||fn:commit", fingerprint: "9466d7fe502b2fd2", issue: "VMX-253"),

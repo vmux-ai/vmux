@@ -1,7 +1,5 @@
 (
 legacy: [
-    (key: "crates/util/vmux_flex/src/lib.rs|tests|impl:Harness", fingerprint: "e34b3358cb738bff", issue: "VMX-253"),
-    (key: "crates/util/vmux_flex/src/lib.rs|tests|struct:Harness", fingerprint: "bd2a10003ebbe8bf", issue: "VMX-253"),
     (key: "crates/util/vmux_flex/src/lib.rs||fn:sync_nodes_recursively", fingerprint: "ee7dbaf3767cc262", issue: "VMX-253"),
     (key: "crates/util/vmux_flex/tests/layout.rs|impl GeneratedPaneRng|const:GROWS", fingerprint: "b8de66b731b552c7", issue: "VMX-253"),
     (key: "crates/util/vmux_flex/tests/layout.rs||const:GOLDEN", fingerprint: "6814f0f3ee14dba5", issue: "VMX-253"),
@@ -42,8 +40,6 @@ values: [
 ],
 shape: (
   debt: [
-    (key: "crates/util/vmux_flex/src/lib.rs||enum:LayoutSystems", fingerprint: "8305f28ecbcbfdcf", issue: "VMX-253", finding: "AU-13"),
-    (key: "crates/util/vmux_flex/src/visibility.rs||enum:Visibility", fingerprint: "385d3aba82438964", issue: "VMX-253", finding: "AU-13"),
   ],
   enums: [
     (key: "crates/util/vmux_flex/src/node.rs||enum:Val", fingerprint: "bce4b0f24ba72bba", role: Boundary, owner: "crates/util/vmux_flex/src/tree.rs||impl:LayoutContext", reason: "bounded numeric Auto/Length/Percent vocabulary encoded to the actual Taffy dimension and spacing dialect"),

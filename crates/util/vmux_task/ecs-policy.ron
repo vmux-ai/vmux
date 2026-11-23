@@ -1,18 +1,8 @@
 (
 legacy: [
-    (key: "crates/util/vmux_task/src/lib.rs|tests|impl:Command for Append", fingerprint: "e20897988583217a", issue: "VMX-253"),
-    (key: "crates/util/vmux_task/src/lib.rs|tests|impl:Drop for DropNotice", fingerprint: "828eef88c0b2ea14", issue: "VMX-253"),
-    (key: "crates/util/vmux_task/src/lib.rs|tests|impl:Fixture", fingerprint: "394916f6260d323b", issue: "VMX-253"),
-    (key: "crates/util/vmux_task/src/lib.rs|tests|impl:std :: task :: Wake for Notify", fingerprint: "96564f8f270a4693", issue: "VMX-253"),
-    (key: "crates/util/vmux_task/src/lib.rs|tests|struct:Append", fingerprint: "93381e24ccc2b118", issue: "VMX-253"),
-    (key: "crates/util/vmux_task/src/lib.rs|tests|struct:Applied", fingerprint: "a944d88ec8c90371", issue: "VMX-253"),
-    (key: "crates/util/vmux_task/src/lib.rs|tests|struct:DropNotice", fingerprint: "8e3963804cb8d2fd", issue: "VMX-253"),
-    (key: "crates/util/vmux_task/src/lib.rs|tests|struct:Fixture", fingerprint: "fa50eea343a70dbe", issue: "VMX-253"),
-    (key: "crates/util/vmux_task/src/lib.rs|tests|struct:Notify", fingerprint: "89d647c6cac2f8dd", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||const:ACTIVE", fingerprint: "0315480f9e086acb", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||const:APPLIED", fingerprint: "dc24854450603e01", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||const:CANCELED", fingerprint: "28a76683f7d2b4f6", issue: "VMX-253"),
-    (key: "crates/util/vmux_task/src/lib.rs||enum:TaskFailure", fingerprint: "3bf97454b4bea01c", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||impl:Command for Completion < T >", fingerprint: "5900351a5350d083", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||impl:Command for Discard < T >", fingerprint: "600a29fc27eefb4f", issue: "VMX-253"),
     (key: "crates/util/vmux_task/src/lib.rs||impl:Command for TaskApply < T , C >", fingerprint: "eb63e641df8eb4b8", issue: "VMX-253"),
@@ -25,7 +15,6 @@ legacy: [
 ],
 shape: (
   debt: [
-    (key: "crates/util/vmux_task/src/lib.rs||enum:TaskFailure", fingerprint: "3bf97454b4bea01c", issue: "VMX-253", finding: "AU-13"),
   ],
 ),
 )

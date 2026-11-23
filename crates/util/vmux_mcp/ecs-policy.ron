@@ -20,7 +20,6 @@ shape: (
   debt: [
     (key: "crates/util/vmux_mcp/src/protocol.rs||enum:McpReply", fingerprint: "78c5c33c37fd1089", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/util/vmux_mcp/src/cli.rs||enum:McpStdin", fingerprint: "19d54ee6f989304e", issue: "VMX-253", finding: "AU-13"),
-    (key: "crates/util/vmux_mcp/src/protocol.rs||enum:McpSet", fingerprint: "e3e005e123cce0c5", issue: "VMX-253", finding: "AU-13"),
   ],
 ),
 boundaries: [

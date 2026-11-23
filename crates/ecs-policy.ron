@@ -1,12 +1,5 @@
 (
 legacy: [
-    (key: "crates/build_cfg.rs||fn:main", fingerprint: "cea062542e2704b1", issue: "VMX-253"),
-    (key: "crates/build_cfg_git.rs||fn:main", fingerprint: "804f4afcd38490a7", issue: "VMX-253"),
-    (key: "crates/build_git_env.rs||fn:git_path", fingerprint: "4b320f18803552d2", issue: "VMX-253"),
-    (key: "crates/build_git_env.rs||fn:git_stdout", fingerprint: "e5930dea4ac762bb", issue: "VMX-253"),
-    (key: "crates/build_git_env.rs||fn:stable_hash", fingerprint: "5e8b6239e7409d1b", issue: "VMX-253"),
-    (key: "crates/build_git_env.rs||fn:symbolic_head_ref", fingerprint: "114da00069aa661f", issue: "VMX-253"),
-    (key: "crates/build_platform_cfg.rs||fn:emit", fingerprint: "f9af0ae04719d835", issue: "VMX-253"),
 ],
 boundaries: [
 ],

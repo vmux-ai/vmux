@@ -161,8 +161,6 @@ shape: (
     (key: "crates/feature/vmux_dx/src/native/ios.rs||impl:Native::ios_release", fingerprint: "8a81872e1906dc85", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_dx/src/native/ios.rs||impl:Native::resources_ios", fingerprint: "2579f217cdbcee78", issue: "VMX-253", finding: "AU-14"),
     (key: "crates/feature/vmux_dx/src/native/release.rs||impl:Native::release_metadata", fingerprint: "2a9507cc81160107", issue: "VMX-253", finding: "AU-14"),
-    (key: "crates/feature/vmux_dx/src/repository_selection.rs||enum:Stage", fingerprint: "ea3758407a096146", issue: "VMX-253", finding: "AU-13"),
-    (key: "crates/feature/vmux_dx/src/updates.rs||enum:Channel", fingerprint: "5a80a2942821647e", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_dx/src/updates.rs||enum:Completion", fingerprint: "e8d1c7ec0ef070e6", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_dx/src/updates.rs||enum:Step", fingerprint: "6f17c16ab7906007", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_dx/src/updates.rs||fn:collect", fingerprint: "669024e6633c2889", issue: "VMX-253", finding: "AU-14"),

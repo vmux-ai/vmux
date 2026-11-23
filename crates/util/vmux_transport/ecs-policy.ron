@@ -36,7 +36,6 @@ values: [
     (key: "crates/util/vmux_transport/src/quic/endpoint.rs||enum:Trust", owner: "crates/feature/vmux_account/src/cloud/transport.rs||struct:Open", lifetime: "Immutable accepted native TLS trust configuration owned by the canonical Open request; endpoint mechanics cannot change the accepted request or perform account policy transitions."),
 ],
 legacy: [
-    (key: "crates/util/vmux_transport/src/framing.rs|tests|const:CODEC", fingerprint: "52b31ba6e9464908", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/src/framing.rs|tests|fn:a_frame_cut_short_is_not_a_stream_that_ended", fingerprint: "4403b943277453f5", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/src/framing.rs|tests|fn:a_frame_over_the_limit_is_refused_before_it_is_allocated", fingerprint: "6639b23023bc7a06", issue: "VMX-253"),
     (key: "crates/util/vmux_transport/src/framing.rs|tests|fn:a_frame_survives_the_round_trip", fingerprint: "ca767364922ea6d1", issue: "VMX-253"),

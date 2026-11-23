@@ -1,5 +1,4 @@
 (legacy: [
-    (key: "crates/feature/vmux_team/src/host.rs|tests|fn:command_app", fingerprint: "b0773393f0c87ee0", issue: "VMX-253"),
     (key: "crates/feature/vmux_team/src/host.rs|tests|fn:lookup", fingerprint: "bb845b71046d83f0", issue: "VMX-253"),
 ], boundaries: [
     (key: "crates/feature/vmux_team/src/tool.rs|tests|struct:TeamToolFixture", fingerprint: "c3085c14ba6bb0fd", interface: "isolated production-plugin regression and native worker fixture", input: "ECS: crates/feature/vmux_team/src/tool.rs||struct:RenameProfileTool", output: "external: observed task admission, ordered roster or typed tool results", lifetime: "one isolated headless test", bounds: "test-owned App, typed input, captured protocol output and blocked worker task/release handles only", teardown: "fixture drop releases Apps and blocked workers; owned tasks finish or cancel", architecture: "ECS ownership boundaries"),

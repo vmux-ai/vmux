@@ -1,7 +1,5 @@
 (
 legacy: [
-    (key: "crates/feature/vmux_input/src/capture.rs|tests|impl:CaptureFixture", fingerprint: "895e7a82bab9807e", issue: "VMX-253"),
-    (key: "crates/feature/vmux_input/src/capture.rs|tests|struct:CaptureFixture", fingerprint: "86160ce80628fdb2", issue: "VMX-253"),
 ],
 boundaries: [
     (owner: Some("crates/feature/vmux_input/src/wheel.rs||struct:WheelPlugin"), key: "crates/feature/vmux_input/src/wheel.rs||struct:WheelInputSet", fingerprint: "d29c1873e47e6caf", interface: "Bevy App plugin and private schedule registration for native wheel receive ordering", input: "external: Bevy App composition", output: "ECS: crates/feature/vmux_input/src/wheel.rs||struct:NativeWheelInput", lifetime: "one App plugin installation", bounds: "registration only; canonical entities and registered systems retain decisions and state", teardown: "registered schedules and observations retire with their App", architecture: "ECS ownership boundaries"),
@@ -40,7 +38,6 @@ shape: (
   enums: [
   ],
   debt: [
-    (key: "crates/feature/vmux_input/src/pointer.rs||enum:PointerSet", fingerprint: "d5917d088bf051f9", issue: "VMX-253", finding: "AU-13"),
   ],
 ),
 )

@@ -1,10 +1,5 @@
 (
 legacy: [
-    (key: "website/build.rs||const:FENCE", fingerprint: "1d19d3e0aaefb7a7", issue: "VMX-253"),
-    (key: "website/build.rs||impl:Diagram", fingerprint: "4478ec33c89ee6ee", issue: "VMX-253"),
-    (key: "website/build.rs||impl:Theme", fingerprint: "616121d0ce8af3fe", issue: "VMX-253"),
-    (key: "website/build.rs||struct:Diagram", fingerprint: "15a67b12c6e04c6c", issue: "VMX-253"),
-    (key: "website/build.rs||struct:Theme", fingerprint: "1f315cb58c62b20c", issue: "VMX-253"),
     (key: "website/src/app.rs|spy|fn:setup", fingerprint: "780c86b8a601d64c", issue: "VMX-253"),
     (key: "website/src/app.rs||const:DOCS_URL", fingerprint: "769ee15e65da0075", issue: "VMX-253"),
     (key: "website/src/app.rs||const:FRAMEWORK_DESCRIPTION", fingerprint: "1673c40857144d2c", issue: "VMX-253"),
@@ -62,7 +57,6 @@ legacy: [
     (key: "website/src/landing.rs||fn:Proof", fingerprint: "b497342a28767738", issue: "VMX-253"),
     (key: "website/src/landing.rs||fn:ProofPoint", fingerprint: "424eaf68b4166c79", issue: "VMX-253"),
     (key: "website/src/main.rs||fn:main", fingerprint: "f4235f64fe1cff38", issue: "VMX-253"),
-    (key: "website/src/markdown.rs|tests|fn:code_blocks", fingerprint: "4abc6c97088032df", issue: "VMX-253"),
     (key: "website/src/markdown.rs||enum:Node", fingerprint: "6bb04d05107e9791", issue: "VMX-253"),
     (key: "website/src/markdown.rs||fn:CopyLink", fingerprint: "ba91d46701575a54", issue: "VMX-253"),
     (key: "website/src/markdown.rs||fn:DiagramFigure", fingerprint: "b3225b6cdba38f08", issue: "VMX-253"),
