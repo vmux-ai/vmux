@@ -7,8 +7,6 @@ mod context_menu_handler;
 mod custom_scheme;
 mod display_handler;
 mod extensions;
-#[cfg(target_os = "macos")]
-mod keepalive;
 mod life_span_handler;
 mod load_handler;
 mod message_pump;
@@ -26,8 +24,6 @@ pub use context_menu_handler::*;
 pub use custom_scheme::*;
 pub use display_handler::*;
 pub use extensions::*;
-#[cfg(target_os = "macos")]
-pub use keepalive::*;
 pub use life_span_handler::*;
 pub use load_handler::*;
 pub use message_pump::*;

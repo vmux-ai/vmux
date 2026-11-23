@@ -86,7 +86,7 @@ impl Plugin for MessageLoopPlugin {
         }
 
         #[cfg(not(target_os = "macos"))]
-        cef_initialize(
+        cef_initialize_other(
             &args,
             &mut cef_app,
             self.root_cache_path.as_deref(),
@@ -95,7 +95,7 @@ impl Plugin for MessageLoopPlugin {
             render_process_binary.as_deref(),
         );
         #[cfg(target_os = "macos")]
-        cef_initialize(
+        cef_initialize_macos(
             &args,
             &mut cef_app,
             self.root_cache_path.as_deref(),
@@ -173,7 +173,7 @@ impl MainBundle<'_> {
 }
 
 #[cfg(target_os = "macos")]
-fn cef_initialize(
+fn cef_initialize_macos(
     args: &Args,
     cef_app: &mut cef::App,
     root_cache_path: Option<&str>,
@@ -261,7 +261,7 @@ Fix: make install-debug-render-process  (or: cargo build -p bevy_cef_debug_rende
 }
 
 #[cfg(not(target_os = "macos"))]
-fn cef_initialize(
+fn cef_initialize_other(
     args: &Args,
     cef_app: &mut cef::App,
     root_cache_path: Option<&str>,
@@ -333,7 +333,7 @@ fn close_all_browsers_then_cef_shutdown(
     webviews: Query<Entity, With<WebviewSource>>,
     mut commands: Commands,
     mut state: ResMut<CefShutdownState>,
-    mut pump_controller: Option<NonSendMut<CefPumpController>>,
+    mut pump_controller: Option<NonSendMut<cef_pump_timer::Controller>>,
     _: NonSend<RunOnMainThread>,
 ) {
     for _ in exits.read() {
@@ -347,34 +347,25 @@ fn close_all_browsers_then_cef_shutdown(
             commands.entity(e).despawn();
         }
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while open_browser_count() > 0 && std::time::Instant::now() < deadline {
+        while LifeSpanHandlerBuilder::open_browser_count() > 0
+            && std::time::Instant::now() < deadline
+        {
             cef::do_message_loop_work();
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         if let Some(controller) = pump_controller.as_mut() {
             controller.stop();
         }
-        if open_browser_count() == 0 {
+        if LifeSpanHandlerBuilder::open_browser_count() == 0 {
             cef::do_message_loop_work();
             shutdown();
         } else {
             error!(
                 "CEF shutdown skipped with {} browsers still closing",
-                open_browser_count()
+                LifeSpanHandlerBuilder::open_browser_count()
             );
         }
     }
-}
-
-#[cfg(target_os = "macos")]
-type CefPumpController = cef_pump_timer::Controller;
-
-#[cfg(not(target_os = "macos"))]
-struct CefPumpController;
-
-#[cfg(not(target_os = "macos"))]
-impl CefPumpController {
-    fn stop(&mut self) {}
 }
 
 #[allow(clippy::needless_doctest_main)]
@@ -435,28 +426,35 @@ mod tests {
     }
 }
 
-#[cfg(target_os = "macos")]
 mod cef_pump_timer {
+    #[cfg(target_os = "macos")]
     use std::os::raw::c_void;
+    #[cfg(target_os = "macos")]
     use std::sync::mpsc::Receiver;
+    #[cfg(target_os = "macos")]
     use std::sync::{Mutex, OnceLock};
+    #[cfg(target_os = "macos")]
     use std::time::{Duration, Instant};
 
+    #[cfg(target_os = "macos")]
     use bevy_cef_core::prelude::{MessageLoopTimer, MessageLoopWakePolicy};
 
+    #[cfg(target_os = "macos")]
     const IDLE_PUMP_INTERVAL: Duration = Duration::from_secs(1);
 
+    #[cfg(target_os = "macos")]
     type CFRunLoopRef = *mut c_void;
+    #[cfg(target_os = "macos")]
     type CFRunLoopTimerRef = *mut c_void;
-    type CFStringRef = *const c_void;
 
+    #[cfg(target_os = "macos")]
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
-        static kCFRunLoopCommonModes: CFStringRef;
+        static kCFRunLoopCommonModes: *const c_void;
         fn CFRunLoopGetMain() -> CFRunLoopRef;
         fn CFAbsoluteTimeGetCurrent() -> f64;
-        fn CFRunLoopAddTimer(rl: CFRunLoopRef, timer: CFRunLoopTimerRef, mode: CFStringRef);
-        fn CFRunLoopRemoveTimer(rl: CFRunLoopRef, timer: CFRunLoopTimerRef, mode: CFStringRef);
+        fn CFRunLoopAddTimer(rl: CFRunLoopRef, timer: CFRunLoopTimerRef, mode: *const c_void);
+        fn CFRunLoopRemoveTimer(rl: CFRunLoopRef, timer: CFRunLoopTimerRef, mode: *const c_void);
         fn CFRunLoopTimerCreate(
             allocator: *const c_void,
             fire_date: f64,
@@ -470,6 +468,7 @@ mod cef_pump_timer {
         fn CFRelease(cf: *const c_void);
     }
 
+    #[cfg(target_os = "macos")]
     struct PumpState {
         receiver: Receiver<MessageLoopTimer>,
         next: Option<MessageLoopTimer>,
@@ -477,6 +476,7 @@ mod cef_pump_timer {
         wake_policy: MessageLoopWakePolicy,
     }
 
+    #[cfg(target_os = "macos")]
     impl PumpState {
         fn should_pump(&mut self, now: Instant) -> bool {
             while let Ok(timer) = self.receiver.try_recv() {
@@ -500,12 +500,15 @@ mod cef_pump_timer {
         }
     }
 
+    #[cfg(target_os = "macos")]
     static PUMP_STATE: OnceLock<Mutex<Option<PumpState>>> = OnceLock::new();
 
+    #[cfg(target_os = "macos")]
     fn pump_state() -> &'static Mutex<Option<PumpState>> {
         PUMP_STATE.get_or_init(|| Mutex::new(None))
     }
 
+    #[cfg(target_os = "macos")]
     extern "C" fn pump(_timer: CFRunLoopTimerRef, _info: *mut c_void) {
         let now = Instant::now();
         let mut guard = pump_state().lock().unwrap();
@@ -520,23 +523,29 @@ mod cef_pump_timer {
     }
 
     pub struct Controller {
+        #[cfg(target_os = "macos")]
         run_loop: CFRunLoopRef,
+        #[cfg(target_os = "macos")]
         timer: CFRunLoopTimerRef,
+        #[cfg(target_os = "macos")]
         stopped: bool,
     }
 
     impl Controller {
         pub fn stop(&mut self) {
-            if self.stopped {
-                return;
+            #[cfg(target_os = "macos")]
+            {
+                if self.stopped {
+                    return;
+                }
+                self.stopped = true;
+                unsafe {
+                    CFRunLoopRemoveTimer(self.run_loop, self.timer, kCFRunLoopCommonModes);
+                    CFRunLoopTimerInvalidate(self.timer);
+                    CFRelease(self.timer.cast_const());
+                }
+                pump_state().lock().unwrap().take();
             }
-            self.stopped = true;
-            unsafe {
-                CFRunLoopRemoveTimer(self.run_loop, self.timer, kCFRunLoopCommonModes);
-                CFRunLoopTimerInvalidate(self.timer);
-                CFRelease(self.timer.cast_const());
-            }
-            pump_state().lock().unwrap().take();
         }
     }
 
@@ -546,6 +555,7 @@ mod cef_pump_timer {
         }
     }
 
+    #[cfg(target_os = "macos")]
     pub fn install(
         receiver: Receiver<MessageLoopTimer>,
         wake_policy: MessageLoopWakePolicy,
@@ -581,7 +591,7 @@ mod cef_pump_timer {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     mod tests {
         use super::*;
 

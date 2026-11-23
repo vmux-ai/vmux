@@ -8,7 +8,6 @@ impl Plugin for WebviewCoreComponentsPlugin {
         app.insert_resource(CefSuppressPointerInput::default())
             .register_type::<WebviewSize>()
             .register_type::<WebviewSource>()
-            .register_type::<CefIgnorePinchZoom>()
             .register_type::<WebviewWindowed>()
             .register_type::<WebviewNativeLiquidGlass>()
             .register_type::<WebviewOpaqueWindowedBackground>()
@@ -29,14 +28,6 @@ impl Plugin for WebviewCoreComponentsPlugin {
 /// while a key chord is in progress.
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct CefSuppressPointerInput(pub bool);
-
-/// Marker: this webview should ignore pinch-to-zoom gestures.
-///
-/// Useful for CEF / UI webviews where the host doesn't want the user to
-/// inadvertently zoom the layout.
-#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
-#[reflect(Component, Default)]
-pub struct CefIgnorePinchZoom;
 
 /// Marker: create this webview as a **windowed** native CEF child view (Chromium renders,
 /// composites, scrolls, and handles input itself) instead of off-screen rendering into a Bevy

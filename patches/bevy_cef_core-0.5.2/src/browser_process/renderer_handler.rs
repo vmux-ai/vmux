@@ -1,24 +1,11 @@
 use bevy::prelude::*;
 use cef::rc::{Rc, RcImpl};
 use cef::*;
-use smallvec::SmallVec;
 use std::cell::Cell;
 use std::os::raw::c_int;
 use std::sync::Arc;
 
-/// Inline dirty-rectangle storage for CEF paints.
-pub type WebviewDirtyRects = SmallVec<[WebviewDirtyRect; 8]>;
-
 pub type TextureWake = Arc<dyn Fn() + Send + Sync + 'static>;
-
-/// A changed sub-region of a webview paint, in pixels with an upper-left origin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WebviewDirtyRect {
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
-}
 
 pub type SharedViewSize = std::rc::Rc<Cell<Vec2>>;
 
