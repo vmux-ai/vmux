@@ -59,9 +59,6 @@ fn seed(_non_send: bevy::ecs::system::NonSendMarker, mut system: Single<&mut Sys
     });
 }
 
-const MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
-const MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
-
 #[derive(Default)]
 struct NativeInputHandles {
     pointers: Option<vmux_input::PointerInbox>,
@@ -165,7 +162,7 @@ fn grab_key_window_on_pane_hover(
     >,
     mut requests: MessageWriter<KeyWindowRequest>,
 ) {
-    if !app_is_frontmost() {
+    if !MacWindow::app_is_frontmost() {
         return;
     }
     for event in events.read() {
@@ -201,13 +198,6 @@ fn key(mut requests: MessageReader<KeyWindowRequest>) {
     }
 }
 
-fn app_is_frontmost() -> bool {
-    let Some(mtm) = objc2::MainThreadMarker::new() else {
-        return false;
-    };
-    NSApp(mtm).isActive()
-}
-
 fn activate_window(window_entity: Entity) {
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return;
@@ -236,6 +226,13 @@ fn activate_window(window_entity: Entity) {
 pub(crate) struct MacWindow;
 
 impl MacWindow {
+    fn app_is_frontmost() -> bool {
+        let Some(mtm) = objc2::MainThreadMarker::new() else {
+            return false;
+        };
+        NSApp(mtm).isActive()
+    }
+
     pub(crate) fn ensure_key(window_entity: Entity) -> bool {
         let Some(mtm) = objc2::MainThreadMarker::new() else {
             return false;
@@ -290,7 +287,7 @@ fn activate(
 }
 
 fn activate_app() -> bool {
-    if app_is_frontmost() {
+    if MacWindow::app_is_frontmost() {
         return true;
     }
     let Some(mtm) = objc2::MainThreadMarker::new() else {
@@ -299,55 +296,6 @@ fn activate_app() -> bool {
     #[allow(deprecated)]
     NSApp(mtm).activateIgnoringOtherApps(true);
     false
-}
-
-type WakeThrottle = Arc<dyn Fn(Duration) + Send + Sync>;
-
-fn wake_throttle(name: &'static str, callback: impl Fn() + Send + 'static) -> WakeThrottle {
-    let pending_interval_ns = Arc::new(AtomicU64::new(u64::MAX));
-    let thread_pending_interval_ns = Arc::clone(&pending_interval_ns);
-    let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
-    std::thread::Builder::new()
-        .name(name.into())
-        .spawn(move || {
-            let mut last_fire: Option<Instant> = None;
-            while rx.recv().is_ok() {
-                let mut interval_ns = thread_pending_interval_ns.swap(u64::MAX, Ordering::AcqRel);
-                if interval_ns == u64::MAX {
-                    continue;
-                }
-                loop {
-                    let interval = Duration::from_nanos(interval_ns);
-                    if let Some(last) = last_fire {
-                        let elapsed = Instant::now().saturating_duration_since(last);
-                        if elapsed < interval {
-                            match rx.recv_timeout(interval - elapsed) {
-                                Ok(()) => {
-                                    interval_ns = interval_ns.min(
-                                        thread_pending_interval_ns.swap(u64::MAX, Ordering::AcqRel),
-                                    );
-                                    continue;
-                                }
-                                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
-                            }
-                        }
-                    }
-                    callback();
-                    last_fire = Some(Instant::now());
-                    interval_ns = thread_pending_interval_ns.swap(u64::MAX, Ordering::AcqRel);
-                    if interval_ns == u64::MAX {
-                        break;
-                    }
-                }
-            }
-        })
-        .unwrap_or_else(|error| panic!("failed to spawn {name}: {error}"));
-    Arc::new(move |min_interval: Duration| {
-        let min_interval = min_interval.as_nanos().min(u64::MAX as u128) as u64;
-        pending_interval_ns.fetch_min(min_interval, Ordering::Relaxed);
-        let _ = tx.try_send(());
-    })
 }
 
 impl From<NSRect> for WindowFrame {
@@ -361,11 +309,11 @@ impl From<NSRect> for WindowFrame {
     }
 }
 
-impl From<WindowFrame> for NSRect {
-    fn from(frame: WindowFrame) -> Self {
+impl WindowFrame {
+    pub(super) fn to_ns_rect(self) -> NSRect {
         NSRect::new(
-            NSPoint::new(frame.x, frame.y),
-            NSSize::new(frame.width, frame.height),
+            NSPoint::new(self.x, self.y),
+            NSSize::new(self.width, self.height),
         )
     }
 }
@@ -382,7 +330,7 @@ fn install_input_wake_monitor(
         return;
     };
     let proxy = (**proxy).clone();
-    let wake = wake_throttle("mouse-wake-throttle", move || {
+    let wake = InputMonitor::wake_throttle("mouse-wake-throttle", move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     });
     let local = InputMonitor {
@@ -402,8 +350,8 @@ fn install_input_wake_monitor(
         if event_type == NSEventType::LeftMouseUp {
             global_window_inputs.cancel_captured();
         }
-        global_pointer.release_outside(mouse_buttons());
-        global_wake(MOUSE_MOVE_WAKE_INTERVAL);
+        global_pointer.release_outside(InputMonitor::mouse_buttons());
+        global_wake(InputMonitor::MOUSE_MOVE_WAKE_INTERVAL);
     });
     let mouse_mask = NSEventMask::MouseMoved
         | NSEventMask::LeftMouseDown
@@ -448,14 +396,85 @@ struct InputMonitor {
     wheel: vmux_input::WheelInbox,
     windows: crate::window_input::WindowInputInbox,
     cef_wake_policy: MessageLoopWakePolicy,
-    wake: WakeThrottle,
+    wake: Arc<dyn Fn(Duration) + Send + Sync>,
 }
 
 impl InputMonitor {
+    const MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
+    const MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
+
+    fn wake_throttle(
+        name: &'static str,
+        callback: impl Fn() + Send + 'static,
+    ) -> Arc<dyn Fn(Duration) + Send + Sync> {
+        let pending_interval_ns = Arc::new(AtomicU64::new(u64::MAX));
+        let thread_pending_interval_ns = Arc::clone(&pending_interval_ns);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
+        std::thread::Builder::new()
+            .name(name.into())
+            .spawn(move || {
+                let mut last_fire: Option<Instant> = None;
+                while rx.recv().is_ok() {
+                    let mut interval_ns =
+                        thread_pending_interval_ns.swap(u64::MAX, Ordering::AcqRel);
+                    if interval_ns == u64::MAX {
+                        continue;
+                    }
+                    loop {
+                        let interval = Duration::from_nanos(interval_ns);
+                        if let Some(last) = last_fire {
+                            let elapsed = Instant::now().saturating_duration_since(last);
+                            if elapsed < interval {
+                                match rx.recv_timeout(interval - elapsed) {
+                                    Ok(()) => {
+                                        interval_ns = interval_ns.min(
+                                            thread_pending_interval_ns
+                                                .swap(u64::MAX, Ordering::AcqRel),
+                                        );
+                                        continue;
+                                    }
+                                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                                }
+                            }
+                        }
+                        callback();
+                        last_fire = Some(Instant::now());
+                        interval_ns = thread_pending_interval_ns.swap(u64::MAX, Ordering::AcqRel);
+                        if interval_ns == u64::MAX {
+                            break;
+                        }
+                    }
+                }
+            })
+            .unwrap_or_else(|error| panic!("failed to spawn {name}: {error}"));
+        Arc::new(move |min_interval: Duration| {
+            let min_interval = min_interval.as_nanos().min(u64::MAX as u128) as u64;
+            pending_interval_ns.fetch_min(min_interval, Ordering::Relaxed);
+            let _ = tx.try_send(());
+        })
+    }
+
+    fn event_window_is_key(event: &NSEvent) -> bool {
+        let Some(mtm) = objc2::MainThreadMarker::new() else {
+            return false;
+        };
+        event.window(mtm).is_some_and(|window| window.isKeyWindow())
+    }
+
+    fn mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
+        let pressed = NSEvent::pressedMouseButtons();
+        bevy_cef_core::prelude::NativeMouseButtons {
+            left: pressed & 1 != 0,
+            right: pressed & (1 << 1) != 0,
+            middle: pressed & (1 << 2) != 0,
+        }
+    }
+
     fn local(&self, event: NonNull<NSEvent>) -> *mut NSEvent {
         let input = WindowInput(unsafe { event.as_ref() });
         let Some((source, direct)) = input.origin(&self.pointer) else {
-            (self.wake)(MOUSE_DRAG_WAKE_INTERVAL);
+            (self.wake)(Self::MOUSE_DRAG_WAKE_INTERVAL);
             return event.as_ptr();
         };
         let event_type = input.0.r#type();
@@ -516,7 +535,7 @@ impl InputMonitor {
                 | NSEventType::OtherMouseDown
                 | NSEventType::OtherMouseUp
         );
-        let buttons = mouse_buttons();
+        let buttons = Self::mouse_buttons();
         if motion || button_event || event_type == NSEventType::FlagsChanged {
             let mut sample = match position {
                 Some(position) => {
@@ -568,15 +587,15 @@ impl InputMonitor {
         });
         if motion {
             let interval = if event_type == NSEventType::MouseMoved {
-                MOUSE_MOVE_WAKE_INTERVAL
+                Self::MOUSE_MOVE_WAKE_INTERVAL
             } else {
-                MOUSE_DRAG_WAKE_INTERVAL
+                Self::MOUSE_DRAG_WAKE_INTERVAL
             };
             if WindowResizeDrag::motion_should_wake(
                 event_type != NSEventType::MouseMoved,
                 sampled,
                 self.windows.was_windowed(source),
-                event_window_is_key(input.0),
+                Self::event_window_is_key(input.0),
                 page_changed,
             ) || near_edge
                 || over_grip
@@ -589,10 +608,10 @@ impl InputMonitor {
                 sampled,
                 native_webview,
             ) {
-                (self.wake)(MOUSE_DRAG_WAKE_INTERVAL);
+                (self.wake)(Self::MOUSE_DRAG_WAKE_INTERVAL);
             }
         } else {
-            (self.wake)(MOUSE_DRAG_WAKE_INTERVAL);
+            (self.wake)(Self::MOUSE_DRAG_WAKE_INTERVAL);
         }
     }
 }
@@ -789,21 +808,5 @@ impl HistoryScroll {
             precise: false,
             modifiers: KeyModifiers::default(),
         });
-    }
-}
-
-fn event_window_is_key(event: &NSEvent) -> bool {
-    let Some(mtm) = objc2::MainThreadMarker::new() else {
-        return false;
-    };
-    event.window(mtm).is_some_and(|window| window.isKeyWindow())
-}
-
-fn mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
-    let pressed = NSEvent::pressedMouseButtons();
-    bevy_cef_core::prelude::NativeMouseButtons {
-        left: pressed & 1 != 0,
-        right: pressed & (1 << 1) != 0,
-        middle: pressed & (1 << 2) != 0,
     }
 }

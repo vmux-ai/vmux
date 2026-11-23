@@ -61,6 +61,30 @@ impl WindowResizeDrag {
     #[cfg(target_os = "macos")]
     pub(super) const GRIP_PX: f64 = 8.0;
 
+    #[cfg(target_os = "macos")]
+    pub(super) fn begin(
+        &mut self,
+        frame: WindowFrame,
+        cursor: bevy::prelude::Vec2,
+        minimum: bevy::prelude::Vec2,
+        fullscreen: bool,
+    ) -> bool {
+        let edges = frame.resize_edges(cursor.x as f64, cursor.y as f64, Self::GRIP_PX);
+        if fullscreen || !edges.any() {
+            return false;
+        }
+        *self = Self {
+            active: true,
+            frame,
+            cursor_x: cursor.x as f64,
+            cursor_y: cursor.y as f64,
+            min_width: minimum.x as f64,
+            min_height: minimum.y as f64,
+            edges,
+        };
+        true
+    }
+
     pub(super) fn motion_should_wake(
         dragging: bool,
         over_windowed_page: bool,

@@ -15,7 +15,7 @@ pub(crate) struct TrayPlugin;
 
 impl Plugin for TrayPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_non_send(TrayRuntime(None))
+        app.init_non_send::<TrayRuntime>()
             .add_systems(Startup, setup.after(vmux_setting::SettingsLoadSet))
             .add_systems(
                 Update,
@@ -59,12 +59,13 @@ struct TrayHandle {
     last_status: Option<RecordingStatus>,
 }
 
+#[derive(Default)]
 struct TrayRuntime(Option<TrayHandle>);
 
 fn setup(settings: Res<AppSettings>, mut runtime: NonSendMut<TrayRuntime>, mut commands: Commands) {
-    let locale = tray_locale(&settings);
+    let locale = TrayHandle::locale(&settings);
     let menu = Menu::new();
-    let toggle = MenuItem::new(toggle_label(true, &locale), true, None);
+    let toggle = MenuItem::new(TrayHandle::toggle_label(true, &locale), true, None);
     #[cfg(feature = "recording")]
     let pause = MenuItem::new(locale.translate("tray-pause-recording"), false, None);
     #[cfg(feature = "recording")]
@@ -234,13 +235,15 @@ fn sync_menu_state(
     if handle.last_any_visible == Some(any_visible) && !settings.is_changed() {
         return;
     }
-    let locale = tray_locale(&settings);
+    let locale = TrayHandle::locale(&settings);
     if handle.last_any_visible == Some(any_visible) && handle.last_locale == locale {
         return;
     }
     handle.last_any_visible = Some(any_visible);
     handle.last_locale.clone_from(&locale);
-    handle.toggle.set_text(toggle_label(any_visible, &locale));
+    handle
+        .toggle
+        .set_text(TrayHandle::toggle_label(any_visible, &locale));
     handle.quit.set_text(locale.translate("tray-quit"));
     #[cfg(feature = "recording")]
     {
@@ -299,30 +302,30 @@ fn sync_recording(
     }
 }
 
-fn toggle_label(any_visible: bool, locale: &Locale) -> String {
-    if any_visible {
-        locale.translate("tray-close-window")
-    } else {
-        locale.translate("tray-open-window")
-    }
-}
-
-fn tray_locale(settings: &AppSettings) -> Locale {
-    let locale = Locale::requested(Some(&settings.appearance.locale));
-    let directory = vmux_ecs::profile::ProfilePaths::current()
-        .config()
-        .join("locales");
-    let tag = locale.as_str();
-    if let Some(source) = [tag, tag.split('-').next().unwrap_or(tag)]
-        .into_iter()
-        .find_map(|tag| std::fs::read_to_string(directory.join(format!("{tag}.ftl"))).ok())
-    {
-        let _ = locale.register_catalog(&source);
-    }
-    locale
-}
-
 impl TrayHandle {
+    fn toggle_label(any_visible: bool, locale: &Locale) -> String {
+        if any_visible {
+            locale.translate("tray-close-window")
+        } else {
+            locale.translate("tray-open-window")
+        }
+    }
+
+    fn locale(settings: &AppSettings) -> Locale {
+        let locale = Locale::requested(Some(&settings.appearance.locale));
+        let directory = vmux_ecs::profile::ProfilePaths::current()
+            .config()
+            .join("locales");
+        let tag = locale.as_str();
+        if let Some(source) = [tag, tag.split('-').next().unwrap_or(tag)]
+            .into_iter()
+            .find_map(|tag| std::fs::read_to_string(directory.join(format!("{tag}.ftl"))).ok())
+        {
+            let _ = locale.register_catalog(&source);
+        }
+        locale
+    }
+
     fn icon() -> Result<tray_icon::Icon, String> {
         let image = image::load_from_memory_with_format(
             vmux_profile::Product::tray_icon(),
@@ -356,20 +359,21 @@ impl TrayHandle {
 
 #[cfg(test)]
 mod tests {
+    use super::TrayHandle;
     use vmux_ui::i18n::Locale;
 
     #[test]
     fn toggle_label_reflects_visibility() {
         assert_eq!(
-            super::toggle_label(true, &Locale::from("en-US")),
+            TrayHandle::toggle_label(true, &Locale::from("en-US")),
             "Close Window"
         );
         assert_eq!(
-            super::toggle_label(false, &Locale::from("en-US")),
+            TrayHandle::toggle_label(false, &Locale::from("en-US")),
             "Open Window"
         );
         assert_eq!(
-            super::toggle_label(false, &Locale::from("ja")),
+            TrayHandle::toggle_label(false, &Locale::from("ja")),
             "ウインドウを開く"
         );
     }

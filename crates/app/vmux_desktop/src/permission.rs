@@ -51,35 +51,35 @@ pub struct MediaPermissionStore {
 struct MediaPermissionDirty;
 
 fn spawn_media_store(mut commands: Commands) {
-    let store: MediaPermissionStore = std::fs::read_to_string(store_path())
+    let store: MediaPermissionStore = std::fs::read_to_string(MediaPermissionStore::path())
         .ok()
         .and_then(|text| ron::from_str(&text).ok())
         .unwrap_or_default();
     commands.spawn((Name::new("Media permissions"), store));
 }
 
-fn store_path() -> PathBuf {
-    vmux_ecs::profile::ProfilePaths::current()
-        .profile()
-        .join("media_permissions.ron")
-}
-
 impl MediaPermissionStore {
+    fn path() -> PathBuf {
+        vmux_ecs::profile::ProfilePaths::current()
+            .profile()
+            .join("media_permissions.ron")
+    }
+
     fn decision_for(&self, origin: &str, categories: RequestCategories) -> Resolution {
         let entry = self.origins.get(origin);
-        let states = [
-            categories.state(categories.camera, entry.and_then(|e| e.camera)),
-            categories.state(categories.microphone, entry.and_then(|e| e.microphone)),
-            categories.state(categories.screen, entry.and_then(|e| e.screen)),
+        let checks = [
+            (categories.camera, entry.and_then(|e| e.camera)),
+            (categories.microphone, entry.and_then(|e| e.microphone)),
+            (categories.screen, entry.and_then(|e| e.screen)),
         ];
-        if states
+        if checks
             .iter()
-            .any(|state| matches!(state, CategoryState::Undecided))
+            .any(|(requested, stored)| *requested && stored.is_none())
         {
             Resolution::Prompt
-        } else if states
+        } else if checks
             .iter()
-            .any(|state| matches!(state, CategoryState::Block))
+            .any(|(requested, stored)| *requested && *stored == Some(PermissionDecision::Block))
         {
             Resolution::Deny
         } else {
@@ -120,16 +120,13 @@ impl RequestCategories {
             && (!self.screen || vmux_profile::Product::screen())
     }
 
-    fn state(&self, requested: bool, stored: Option<PermissionDecision>) -> CategoryState {
-        if !requested {
-            CategoryState::NotRequested
-        } else {
-            match stored {
-                Some(PermissionDecision::Allow) => CategoryState::Allow,
-                Some(PermissionDecision::Block) => CategoryState::Block,
-                None => CategoryState::Undecided,
-            }
-        }
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn host(origin: &str) -> &str {
+        let without_scheme = origin
+            .split_once("://")
+            .map(|(_, rest)| rest)
+            .unwrap_or(origin);
+        without_scheme.split('/').next().unwrap_or(without_scheme)
     }
 
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -152,13 +149,6 @@ impl RequestCategories {
             "rectangle.on.rectangle"
         }
     }
-}
-
-enum CategoryState {
-    NotRequested,
-    Undecided,
-    Allow,
-    Block,
 }
 
 enum Resolution {
@@ -207,7 +197,7 @@ fn persist_media_permissions(
     mut commands: Commands,
 ) {
     for (entity, store) in &stores {
-        let path = store_path();
+        let path = MediaPermissionStore::path();
         let Some(parent) = path.parent() else {
             continue;
         };
@@ -221,15 +211,6 @@ fn persist_media_permissions(
             commands.entity(entity).remove::<MediaPermissionDirty>();
         }
     }
-}
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn permission_host(origin: &str) -> &str {
-    let without_scheme = origin
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(origin);
-    without_scheme.split('/').next().unwrap_or(without_scheme)
 }
 
 #[cfg(target_os = "macos")]
@@ -246,7 +227,10 @@ fn prompt_native(
     alert.setMessageText(&NSString::from_str(&locale.translate_with(
         "media-permission-title",
         &[
-            ("host", TranslationValue::String(permission_host(origin))),
+            (
+                "host",
+                TranslationValue::String(RequestCategories::host(origin)),
+            ),
             ("devices", TranslationValue::String(&devices)),
         ],
     )));
@@ -285,32 +269,39 @@ fn prompt_native(
 mod tests {
     use super::*;
 
-    fn cats(camera: bool, microphone: bool, screen: bool) -> RequestCategories {
-        RequestCategories {
-            camera,
-            microphone,
-            screen,
+    impl RequestCategories {
+        fn new(camera: bool, microphone: bool, screen: bool) -> Self {
+            Self {
+                camera,
+                microphone,
+                screen,
+            }
         }
     }
 
-    fn store_with(origin: &str, perms: OriginPermissions) -> MediaPermissionStore {
-        let mut store = MediaPermissionStore::default();
-        store.origins.insert(origin.to_string(), perms);
-        store
+    impl MediaPermissionStore {
+        fn with_origin(origin: &str, perms: OriginPermissions) -> Self {
+            let mut store = Self::default();
+            store.origins.insert(origin.to_string(), perms);
+            store
+        }
     }
 
     #[test]
     fn unknown_origin_prompts() {
         let store = MediaPermissionStore::default();
         assert!(matches!(
-            store.decision_for("https://meet.google.com", cats(false, true, false)),
+            store.decision_for(
+                "https://meet.google.com",
+                RequestCategories::new(false, true, false)
+            ),
             Resolution::Prompt
         ));
     }
 
     #[test]
     fn all_requested_categories_allowed_grants() {
-        let store = store_with(
+        let store = MediaPermissionStore::with_origin(
             "https://meet.google.com",
             OriginPermissions {
                 camera: Some(PermissionDecision::Allow),
@@ -319,14 +310,17 @@ mod tests {
             },
         );
         assert!(matches!(
-            store.decision_for("https://meet.google.com", cats(true, true, false)),
+            store.decision_for(
+                "https://meet.google.com",
+                RequestCategories::new(true, true, false)
+            ),
             Resolution::Grant
         ));
     }
 
     #[test]
     fn any_blocked_requested_category_denies() {
-        let store = store_with(
+        let store = MediaPermissionStore::with_origin(
             "https://meet.google.com",
             OriginPermissions {
                 camera: Some(PermissionDecision::Allow),
@@ -335,14 +329,17 @@ mod tests {
             },
         );
         assert!(matches!(
-            store.decision_for("https://meet.google.com", cats(true, true, false)),
+            store.decision_for(
+                "https://meet.google.com",
+                RequestCategories::new(true, true, false)
+            ),
             Resolution::Deny
         ));
     }
 
     #[test]
     fn stored_decision_for_other_category_still_prompts() {
-        let store = store_with(
+        let store = MediaPermissionStore::with_origin(
             "https://meet.google.com",
             OriginPermissions {
                 camera: Some(PermissionDecision::Allow),
@@ -351,7 +348,10 @@ mod tests {
             },
         );
         assert!(matches!(
-            store.decision_for("https://meet.google.com", cats(true, true, false)),
+            store.decision_for(
+                "https://meet.google.com",
+                RequestCategories::new(true, true, false)
+            ),
             Resolution::Prompt
         ));
     }
@@ -359,7 +359,11 @@ mod tests {
     #[test]
     fn record_sets_only_requested_categories() {
         let mut store = MediaPermissionStore::default();
-        store.record("https://meet.google.com", cats(true, true, false), true);
+        store.record(
+            "https://meet.google.com",
+            RequestCategories::new(true, true, false),
+            true,
+        );
         let entry = store.origins.get("https://meet.google.com").unwrap();
         assert_eq!(entry.camera, Some(PermissionDecision::Allow));
         assert_eq!(entry.microphone, Some(PermissionDecision::Allow));
@@ -369,9 +373,12 @@ mod tests {
     #[test]
     fn permission_host_strips_scheme_and_path() {
         assert_eq!(
-            permission_host("https://meet.google.com/abc"),
+            RequestCategories::host("https://meet.google.com/abc"),
             "meet.google.com"
         );
-        assert_eq!(permission_host("meet.google.com"), "meet.google.com");
+        assert_eq!(
+            RequestCategories::host("meet.google.com"),
+            "meet.google.com"
+        );
     }
 }

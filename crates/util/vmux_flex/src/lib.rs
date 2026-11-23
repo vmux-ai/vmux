@@ -97,10 +97,62 @@ impl Viewports<'_, '_> {
     }
 }
 
+#[derive(SystemParam)]
+struct NodeSync<'w, 's> {
+    nodes: NodeQuery<'w, 's>,
+}
+
+impl NodeSync<'_, '_> {
+    fn sync_subtree(
+        &self,
+        tree: &mut FlexTree,
+        entity: Entity,
+        context: &LayoutContext,
+        context_changed: bool,
+        children_q: &Query<Ref<Children>>,
+    ) {
+        let Ok((node, parent)) = self.nodes.get(entity) else {
+            return;
+        };
+        let context_changed =
+            context_changed || node.is_added() || parent.is_some_and(|parent| parent.is_changed());
+        if context_changed || node.is_changed() {
+            tree.upsert(context, entity, &node);
+        }
+        let Ok(children) = children_q.get(entity) else {
+            return;
+        };
+        for child in children.iter() {
+            self.sync_subtree(tree, child, context, context_changed, children_q);
+        }
+        if !tree.contains(entity) {
+            return;
+        }
+        let mut gained_a_child = false;
+        for child in children.iter() {
+            if let Ok((node, _)) = self.nodes.get(child)
+                && node.is_added()
+            {
+                gained_a_child = true;
+                break;
+            }
+        }
+        if context_changed || node.is_added() || children.is_changed() || gained_a_child {
+            let owned: Vec<Entity> = children.iter().collect();
+            tree.set_children(entity, &owned);
+            for child in &owned {
+                if tree.has_viewport(*child) {
+                    tree.detach_viewport(*child);
+                }
+            }
+        }
+    }
+}
+
 fn compute(
     mut tree: ResMut<FlexTree>,
     viewports: Viewports,
-    nodes: NodeQuery,
+    sync: NodeSync,
     roots: RootQuery,
     mut removed_nodes: RemovedComponents<Node>,
     mut removed_children: RemovedComponents<Children>,
@@ -110,13 +162,13 @@ fn compute(
         tree.set_children(entity, &[]);
     }
     for entity in removed_nodes.read() {
-        if !nodes.contains(entity) {
+        if !sync.nodes.contains(entity) {
             tree.remove(entity);
         }
     }
     for (root, viewport, parent) in &roots {
         if let Some(parent) = parent {
-            if nodes.contains(parent.parent()) {
+            if sync.nodes.contains(parent.parent()) {
                 tree.detach_viewport(root);
                 continue;
             }
@@ -135,12 +187,11 @@ fn compute(
         }
         let context_changed = tree.context(root) != Some(context);
         tree.set_context(root, context);
-        sync_nodes_recursively(
+        sync.sync_subtree(
             &mut tree,
             root,
             &context,
             context_changed,
-            &nodes,
             &geometry.children,
         );
         tree.compute(&context, root);
@@ -151,51 +202,6 @@ fn compute(
             Vec2::ZERO,
             Vec2::ZERO,
         );
-    }
-}
-
-fn sync_nodes_recursively(
-    tree: &mut FlexTree,
-    entity: Entity,
-    context: &LayoutContext,
-    context_changed: bool,
-    nodes: &NodeQuery,
-    children_q: &Query<Ref<Children>>,
-) {
-    let Ok((node, parent)) = nodes.get(entity) else {
-        return;
-    };
-    let context_changed =
-        context_changed || node.is_added() || parent.is_some_and(|parent| parent.is_changed());
-    if context_changed || node.is_changed() {
-        tree.upsert(context, entity, &node);
-    }
-    let Ok(children) = children_q.get(entity) else {
-        return;
-    };
-    for child in children.iter() {
-        sync_nodes_recursively(tree, child, context, context_changed, nodes, children_q);
-    }
-    if !tree.contains(entity) {
-        return;
-    }
-    let mut gained_a_child = false;
-    for child in children.iter() {
-        if let Ok((node, _)) = nodes.get(child)
-            && node.is_added()
-        {
-            gained_a_child = true;
-            break;
-        }
-    }
-    if context_changed || node.is_added() || children.is_changed() || gained_a_child {
-        let owned: Vec<Entity> = children.iter().collect();
-        tree.set_children(entity, &owned);
-        for child in &owned {
-            if tree.has_viewport(*child) {
-                tree.detach_viewport(*child);
-            }
-        }
     }
 }
 

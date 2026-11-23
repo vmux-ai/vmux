@@ -65,8 +65,6 @@ pub(crate) struct PendingFullscreenRestore(pub bool);
 #[derive(Component, Default, Debug)]
 pub(crate) struct WindowRestoreComplete;
 
-const MIN_WINDOW_SIZE: f32 = 100.0;
-
 fn monitor_rect(monitor: &Monitor) -> IRect {
     let min = monitor.physical_position;
     let size = IVec2::new(
@@ -243,7 +241,7 @@ fn capture_geometry(
             next.position = Some(p);
         }
         let size = window.resolution.size();
-        if size.x >= MIN_WINDOW_SIZE && size.y >= MIN_WINDOW_SIZE {
+        if size.x >= 100.0 && size.y >= 100.0 {
             next.size = Some(size);
         }
     }
