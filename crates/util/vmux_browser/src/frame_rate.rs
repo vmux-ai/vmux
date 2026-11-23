@@ -14,13 +14,12 @@ use vmux_ecs::overlay::WindowOverlay;
 use vmux_layout::Browser;
 use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, state::LayoutUiState};
 
-use crate::host::{
-    CefPointerRegions, LAYOUT_INPUT_BURST, LayoutFrameRateState, LayoutPointerCapture,
-};
-use crate::input::{CefHoverPosition, PointerEffect, WindowPointerRegions};
+use crate::host::{CefPointerRegions, LayoutFrameRateState, LayoutPointerCapture};
+use crate::input::{CefHoverPosition, PointerDispatch, PointerEffect, WindowPointerRegions};
 use vmux_ecs::KeyboardOwner;
 use vmux_flex::prelude::*;
 use vmux_input::{PointerCapture, PointerSet, PointerState, PointerUpdated};
+
 pub(crate) struct FrameRatePlugin;
 
 impl Plugin for FrameRatePlugin {
@@ -55,7 +54,7 @@ fn keep_asset_replies_moving(
 }
 
 fn refresh_layout_hover(
-    mut effects: MessageWriter<PointerEffect>,
+    mut effects: MessageWriter<PointerDispatch>,
     pointers: Query<(&Window, &PointerState, &PointerCapture)>,
     mut layouts: Query<(Entity, &HostWindow, &mut CefHoverPosition), With<LayoutCef>>,
     regions: CefPointerRegions,
@@ -84,12 +83,12 @@ fn refresh_layout_hover(
         if (inside || hover.inside)
             && let Some(position) = position.or(hover.position)
         {
-            effects.write(PointerEffect::Move {
+            effects.write(PointerDispatch(PointerEffect::Move {
                 target: layout,
                 buttons: pointer.buttons,
                 position,
                 leave: !inside,
-            });
+            }));
         }
         hover.inside = inside;
         hover.position = position;
@@ -97,7 +96,7 @@ fn refresh_layout_hover(
 }
 
 fn refresh_active_windowed_hover(
-    mut effects: MessageWriter<PointerEffect>,
+    mut effects: MessageWriter<PointerDispatch>,
     pointers: Query<(&PointerState, &PointerCapture)>,
     focused_window: vmux_layout::window::FocusedWindow,
     overlay: Overlay,
@@ -148,19 +147,15 @@ fn refresh_active_windowed_hover(
         if hover.position == Some(position) {
             continue;
         }
-        effects.write(PointerEffect::Move {
+        effects.write(PointerDispatch(PointerEffect::Move {
             target: entity,
             buttons: pointer.buttons,
             position,
             leave: false,
-        });
+        }));
         hover.position = Some(position);
     }
 }
-
-const LAYOUT_IDLE_FRAME_RATE: i32 = 4;
-const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
-const PAGE_MAX_FRAME_RATE: i32 = 60;
 
 fn cap_uncapped_webview(
     uncapped: Query<Entity, (With<WebviewSource>, Without<WebviewMaxFrameRate>)>,
@@ -174,7 +169,7 @@ fn cap_uncapped_webview(
     for entity in &uncapped {
         commands
             .entity(entity)
-            .insert(WebviewMaxFrameRate(PAGE_MAX_FRAME_RATE));
+            .insert(WebviewMaxFrameRate(LayoutFrameRateState::PAGE_MAX));
     }
     for entity in &layouts {
         commands
@@ -201,8 +196,8 @@ fn request_layout_frame_burst(
         return;
     };
     let now = std::time::Instant::now();
-    cap.0 = LAYOUT_ACTIVE_FRAME_RATE;
-    browsers.set_windowless_frame_rate(&trigger.webview(), LAYOUT_ACTIVE_FRAME_RATE);
+    cap.0 = LayoutFrameRateState::LAYOUT_ACTIVE;
+    browsers.set_windowless_frame_rate(&trigger.webview(), LayoutFrameRateState::LAYOUT_ACTIVE);
     match state {
         Some(mut state) => state.last_emit = Some(now),
         None => {
@@ -228,11 +223,13 @@ fn layout_frame_rate(
     dragging: bool,
 ) -> i32 {
     if dragging
-        || last_input.is_some_and(|last| now.saturating_duration_since(last) < LAYOUT_INPUT_BURST)
+        || last_input.is_some_and(|last| {
+            now.saturating_duration_since(last) < LayoutFrameRateState::INPUT_BURST
+        })
     {
-        LAYOUT_ACTIVE_FRAME_RATE
+        LayoutFrameRateState::LAYOUT_ACTIVE
     } else {
-        LAYOUT_IDLE_FRAME_RATE
+        LayoutFrameRateState::LAYOUT_IDLE
     }
 }
 
@@ -309,7 +306,7 @@ fn sync_layout_cef(
                 state.dragging_layout,
             )
         } else {
-            LAYOUT_IDLE_FRAME_RATE
+            LayoutFrameRateState::LAYOUT_IDLE
         };
         if cap.0 != target {
             cap.0 = target;
@@ -328,15 +325,21 @@ mod tests {
     #[test]
     fn layout_frame_rate_bursts_after_input() {
         let now = std::time::Instant::now();
-        assert_eq!(layout_frame_rate(now, None, false), LAYOUT_IDLE_FRAME_RATE);
+        assert_eq!(
+            layout_frame_rate(now, None, false),
+            LayoutFrameRateState::LAYOUT_IDLE
+        );
         assert_eq!(
             layout_frame_rate(now, Some(now), false),
-            LAYOUT_ACTIVE_FRAME_RATE
+            LayoutFrameRateState::LAYOUT_ACTIVE
         );
-        assert_eq!(layout_frame_rate(now, None, true), LAYOUT_ACTIVE_FRAME_RATE);
         assert_eq!(
-            layout_frame_rate(now, Some(now - LAYOUT_INPUT_BURST), false),
-            LAYOUT_IDLE_FRAME_RATE
+            layout_frame_rate(now, None, true),
+            LayoutFrameRateState::LAYOUT_ACTIVE
+        );
+        assert_eq!(
+            layout_frame_rate(now, Some(now - LayoutFrameRateState::INPUT_BURST), false),
+            LayoutFrameRateState::LAYOUT_IDLE
         );
     }
 
@@ -356,7 +359,10 @@ mod tests {
 
         let layout = app
             .world_mut()
-            .spawn((LayoutCef, WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE)))
+            .spawn((
+                LayoutCef,
+                WebviewMaxFrameRate(LayoutFrameRateState::LAYOUT_IDLE),
+            ))
             .id();
         app.world_mut().trigger(BinHostEmitEvent::from_event(
             layout,
@@ -371,7 +377,7 @@ mod tests {
         );
         assert_eq!(
             app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,
-            LAYOUT_ACTIVE_FRAME_RATE
+            LayoutFrameRateState::LAYOUT_ACTIVE
         );
         assert_eq!(
             wake_policy.min_wake_interval(),
@@ -380,7 +386,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(layout)
-            .insert(WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE));
+            .insert(WebviewMaxFrameRate(LayoutFrameRateState::LAYOUT_IDLE));
         app.world_mut().trigger(BinHostEmitEvent::from_event(
             layout,
             &CommandBarUiState {
@@ -390,7 +396,7 @@ mod tests {
         ));
         assert_eq!(
             app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,
-            LAYOUT_ACTIVE_FRAME_RATE
+            LayoutFrameRateState::LAYOUT_ACTIVE
         );
     }
 }

@@ -11,9 +11,9 @@ use bevy::ecs::system::SystemParam;
 use bevy::ecs::world::EntityRef;
 use bevy::prelude::*;
 use bevy::prelude::{
-    App, ChildOf, Commands, Component, Entity, EntityEvent, Has, MessageReader, MessageWriter,
-    NonSend, NonSendMut, On, Plugin, Query, Ref, Remove, Res, ResMut, Resource, Single, Window,
-    With, Without,
+    App, Changed, ChildOf, Commands, Component, Entity, EntityEvent, Has, MessageReader,
+    MessageWriter, NonSend, NonSendMut, On, Plugin, Query, Ref, Remove, Res, ResMut, Resource,
+    Single, Window, With, Without,
 };
 use bevy::window::PrimaryWindow;
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
@@ -81,6 +81,7 @@ impl Plugin for MacosBrowserPlugin {
         ))
         .init_non_send::<PageRenderer>()
         .init_resource::<OpenPageDropdown>()
+        .init_resource::<OpenScratch>()
         .add_systems(Startup, move |mut commands: Commands| {
             let (metadata, lifecycle) = startup
                 .lock()
@@ -99,7 +100,9 @@ impl Plugin for MacosBrowserPlugin {
         .add_systems(
             Update,
             (
-                open.after(PageOpenSet::HandleKnownPages),
+                discover_page_claims.after(PageOpenSet::HandleKnownPages),
+                retire_released_surfaces,
+                open_wanted_surfaces,
                 bevy::ecs::schedule::ApplyDeferred,
                 sync_surface_interaction,
                 apply_metadata.after(PageLifecycleSet),
@@ -208,9 +211,10 @@ struct PageDiscovery {
     retry: bevy::ecs::entity::EntityHashSet,
 }
 
-#[derive(Default)]
+#[derive(Resource, Default)]
 struct OpenScratch {
     initialized: bool,
+    reported_waiting: bool,
     generations: u64,
     discovery: PageDiscovery,
     page_candidates: Vec<Entity>,
@@ -221,13 +225,22 @@ struct OpenScratch {
     active_waiting: bevy::ecs::entity::EntityHashSet,
 }
 
+impl OpenScratch {
+    fn report_waiting(&mut self, reason: &str) {
+        if !self.reported_waiting {
+            self.reported_waiting = true;
+            info!("browser_platform: waiting, {reason}");
+        }
+    }
+}
+
 #[derive(bevy::ecs::system::SystemParam)]
 struct PageClaims<'w, 's> {
-    entities: Query<'w, 's, EntityRef<'static>>,
+    entities: Query<'w, 's, EntityRef<'static>, Without<bevy::ecs::resource::IsResource>>,
 }
 
 impl<'w, 's> std::ops::Deref for PageClaims<'w, 's> {
-    type Target = Query<'w, 's, EntityRef<'static>>;
+    type Target = Query<'w, 's, EntityRef<'static>, Without<bevy::ecs::resource::IsResource>>;
     fn deref(&self) -> &Self::Target {
         &self.entities
     }
@@ -261,7 +274,7 @@ impl PageClaims<'_, '_> {
         let previous = discovery.claims.get(&entity).copied();
         let mut selected = None;
         for registration in &discovery.registrations {
-            let Some(priority) = registration_claim_priority(candidate, *registration) else {
+            let Some(priority) = Self::registration_claim_priority(candidate, *registration) else {
                 continue;
             };
             if selected
@@ -306,6 +319,42 @@ impl PageClaims<'_, '_> {
             }
             current = entity.get::<ChildOf>().map(Relationship::get)?;
         }
+    }
+
+    fn registration_claim_priority(
+        entity: EntityRef<'_>,
+        registration: PageRegistration,
+    ) -> Option<(u8, usize)> {
+        let page = registration.page();
+        match registration.placement() {
+            PagePlacement::Layout => {
+                if !entity.contains::<LayoutCef>() {
+                    return None;
+                }
+            }
+            PagePlacement::Pane | PagePlacement::Modal => {
+                if !entity.contains::<HostsPage>() || entity.contains::<LayoutCef>() {
+                    return None;
+                }
+                let metadata = entity.get::<PageMetadata>()?;
+                if !registration.answers_for(entity, &metadata.url) {
+                    return None;
+                }
+            }
+        }
+        let Some(url) = entity
+            .get::<PageMetadata>()
+            .map(|metadata| metadata.url.as_str())
+        else {
+            return Some((3, page.url.len()));
+        };
+        if url == page.url {
+            return Some((2, page.url.len()));
+        }
+        if page.answers_for(url) {
+            return Some((1, page.url.len()));
+        }
+        Some((3, page.url.len()))
     }
 }
 
@@ -411,6 +460,13 @@ impl RetiredPage {
 }
 
 impl PageRenderer {
+    fn appearance(scheme: ResolvedScheme) -> Appearance {
+        match scheme {
+            ResolvedScheme::Light => Appearance::Light,
+            ResolvedScheme::Dark => Appearance::Dark,
+        }
+    }
+
     fn retire(
         &mut self,
         entity: Entity,
@@ -1106,7 +1162,6 @@ const CLOSE_PAGE_DROPDOWNS: &str = "for (const popup of document.querySelectorAl
 
 fn apply_metadata(
     receiver: Single<&PageMetadataReceiver>,
-    mut updates: Local<Vec<PageMetadataUpdate>>,
     mut pages: Query<(
         &HostedSurfaceGeneration,
         &BinIpcNavigationRevision,
@@ -1114,6 +1169,7 @@ fn apply_metadata(
         &mut PageMetadata,
     )>,
 ) {
+    let mut updates = Vec::new();
     receiver.0.drain_into(&mut updates);
     for update in updates.drain(..) {
         let Ok((generation, navigation, epoch, mut metadata)) = pages.get_mut(update.webview)
@@ -1516,13 +1572,17 @@ fn sync_surface_interaction(
     }
 }
 
-fn open(
+fn discover_page_claims(
     mut state: ParamSet<(
         PageClaims,
-        NonSendMut<PageRenderer>,
-        NonSendMut<Browsers>,
         Query<&mut vmux_layout::hosted_page::SurfaceHandoff>,
-        Query<EntityRef, Or<(With<HostsPage>, With<LayoutCef>)>>,
+        Query<
+            EntityRef,
+            (
+                Or<(With<HostsPage>, With<LayoutCef>)>,
+                Without<bevy::ecs::resource::IsResource>,
+            ),
+        >,
         Query<
             Entity,
             Or<(
@@ -1531,91 +1591,25 @@ fn open(
             )>,
         >,
     )>,
-    requester: Option<Res<Requester>>,
-    bin_ipc: Option<Res<BinIpcEventRawSender>>,
     mut changes: OpenChanges,
     frame_queries: WindowFrameQueries,
-    primary_windows: Query<Entity, With<PrimaryWindow>>,
-    metadata_sender: Query<&PageMetadataSender>,
-    lifecycle_sender: Query<&PageLifecycleSender>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-    appearance: Single<&ResolvedColorScheme>,
     time: Res<Time>,
-    mut scratch: Local<OpenScratch>,
+    mut scratch: ResMut<OpenScratch>,
     mut commands: Commands,
 ) {
+    let full_scan = collect_page_candidates(&mut state, &mut changes, &mut scratch, &mut commands);
+    if scratch.page_candidates.is_empty() {
+        return;
+    }
     let OpenScratch {
-        initialized,
-        generations,
         discovery,
         page_candidates,
-        tree,
         seen,
         forced,
         current_active,
         active_waiting,
+        ..
     } = &mut *scratch;
-    let registration_removed = changes.removed_registrations.read().count() > 0;
-    let registrations_changed = !*initialized
-        || changes
-            .registrations
-            .iter()
-            .any(|registration| registration.is_changed())
-        || registration_removed;
-    if registrations_changed {
-        discovery.refresh_registrations(changes.registrations.iter().map(|value| *value));
-    }
-    let presentation_changed = changes.presentations.iter().next().is_some();
-    let host_tree_removed = changes.removed_host_windows.read().count() > 0
-        || changes.removed_parents.read().count() > 0;
-    let full_scan =
-        !*initialized || registrations_changed || presentation_changed || host_tree_removed;
-    *initialized = true;
-    discovery.wanted.clear();
-    discovery.released.clear();
-    page_candidates.clear();
-    tree.clear();
-    seen.clear();
-    forced.clear();
-    current_active.clear();
-    tree.extend(changes.host_tree.iter());
-    if !tree.is_empty() {
-        let entities = state.p0();
-        while let Some(entity) = tree.pop() {
-            if discovery.candidates.contains(&entity) {
-                page_candidates.push(entity);
-                forced.insert(entity);
-            }
-            let Ok(entity) = entities.get(entity) else {
-                continue;
-            };
-            if let Some(children) = entity.get::<Children>() {
-                tree.extend(children.iter());
-            }
-        }
-    }
-    if full_scan {
-        let candidates = state.p4();
-        page_candidates.extend(candidates.iter().map(|candidate| candidate.id()));
-        if presentation_changed || host_tree_removed {
-            forced.extend(page_candidates.iter().copied());
-        }
-    } else {
-        page_candidates.extend(discovery.retry.drain());
-        let changed = state.p5();
-        page_candidates.extend(changed.iter());
-        page_candidates.extend(changes.dirty.iter());
-    }
-    page_candidates.extend(changes.removed_hosted.read());
-    page_candidates.extend(changes.removed_layout.read());
-    for entity in changes.dirty.iter() {
-        if let Ok(mut entity) = commands.get_entity(entity) {
-            entity.try_remove::<PageClaimDirty>();
-        }
-    }
-    if page_candidates.is_empty() {
-        return;
-    }
     {
         let entities = state.p0();
         for &entity in page_candidates.iter() {
@@ -1658,7 +1652,7 @@ fn open(
     }
     let now = time.elapsed();
     {
-        let mut handoffs = state.p3();
+        let mut handoffs = state.p1();
         for (entity, _, _, _) in &discovery.wanted {
             let active = current_active.contains(entity);
             let newly_active = active && !active_waiting.contains(entity);
@@ -1672,7 +1666,7 @@ fn open(
         }
     }
     if full_scan {
-        std::mem::swap(&mut *active_waiting, &mut *current_active);
+        std::mem::swap(active_waiting, current_active);
     } else {
         for entity in seen.iter().copied() {
             if current_active.contains(&entity) {
@@ -1682,41 +1676,156 @@ fn open(
             }
         }
     }
-    let released = std::mem::take(&mut discovery.released);
-    if !released.is_empty() {
-        let now = std::time::Instant::now();
-        {
-            let mut renderer = state.p1();
-            for entity in &released {
-                renderer.retire(*entity, now, proxy.as_deref());
+}
+
+fn collect_page_candidates(
+    state: &mut ParamSet<(
+        PageClaims,
+        Query<&mut vmux_layout::hosted_page::SurfaceHandoff>,
+        Query<
+            EntityRef,
+            (
+                Or<(With<HostsPage>, With<LayoutCef>)>,
+                Without<bevy::ecs::resource::IsResource>,
+            ),
+        >,
+        Query<
+            Entity,
+            Or<(
+                Changed<PageMetadata>,
+                Changed<vmux_layout::hosted_page::SurfaceHandoff>,
+            )>,
+        >,
+    )>,
+    changes: &mut OpenChanges,
+    scratch: &mut OpenScratch,
+    commands: &mut Commands,
+) -> bool {
+    let OpenScratch {
+        initialized,
+        discovery,
+        page_candidates,
+        tree,
+        seen,
+        forced,
+        current_active,
+        ..
+    } = scratch;
+    let registration_removed = changes.removed_registrations.read().count() > 0;
+    let registrations_changed = !*initialized
+        || changes
+            .registrations
+            .iter()
+            .any(|registration| registration.is_changed())
+        || registration_removed;
+    if registrations_changed {
+        discovery.refresh_registrations(changes.registrations.iter().map(|value| *value));
+    }
+    let presentation_changed = changes.presentations.iter().next().is_some();
+    let host_tree_removed = changes.removed_host_windows.read().count() > 0
+        || changes.removed_parents.read().count() > 0;
+    let full_scan =
+        !*initialized || registrations_changed || presentation_changed || host_tree_removed;
+    *initialized = true;
+    discovery.wanted.clear();
+    discovery.released.clear();
+    page_candidates.clear();
+    tree.clear();
+    seen.clear();
+    forced.clear();
+    current_active.clear();
+    tree.extend(changes.host_tree.iter());
+    if !tree.is_empty() {
+        let entities = state.p0();
+        while let Some(entity) = tree.pop() {
+            if discovery.candidates.contains(&entity) {
+                page_candidates.push(entity);
+                forced.insert(entity);
             }
-        }
-        {
-            let mut browsers = state.p2();
-            for entity in &released {
-                browsers.unset_externally_hosted(*entity);
+            let Ok(entity) = entities.get(entity) else {
+                continue;
+            };
+            if let Some(children) = entity.get::<Children>() {
+                tree.extend(children.iter());
             }
-        }
-        for entity in released {
-            active_waiting.remove(&entity);
-            commands.entity(entity).try_remove::<(
-                HostedSurface,
-                HostedSurfaceGeneration,
-                crate::HostedPageLifecycle,
-                BinIpcEpoch,
-                BinIpcSurfaceGeneration,
-                BinIpcNavigationRevision,
-                PageReady,
-                vmux_layout::hosted_page::SurfacePaintReady,
-                vmux_layout::hosted_page::SurfacePresentationReady,
-                vmux_layout::hosted_page::SurfaceTransitionReady,
-            )>();
         }
     }
-    if discovery.wanted.is_empty() {
+    if full_scan {
+        let candidates = state.p2();
+        page_candidates.extend(candidates.iter().map(|candidate| candidate.id()));
+        if presentation_changed || host_tree_removed {
+            forced.extend(page_candidates.iter().copied());
+        }
+    } else {
+        page_candidates.extend(discovery.retry.drain());
+        page_candidates.extend(state.p3().iter());
+        page_candidates.extend(changes.dirty.iter());
+    }
+    page_candidates.extend(changes.removed_hosted.read());
+    page_candidates.extend(changes.removed_layout.read());
+    for entity in changes.dirty.iter() {
+        if let Ok(mut entity) = commands.get_entity(entity) {
+            entity.try_remove::<PageClaimDirty>();
+        }
+    }
+    full_scan
+}
+
+fn retire_released_surfaces(
+    mut renderer: NonSendMut<PageRenderer>,
+    mut browsers: NonSendMut<Browsers>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut scratch: ResMut<OpenScratch>,
+    mut commands: Commands,
+) {
+    let released = std::mem::take(&mut scratch.discovery.released);
+    if released.is_empty() {
         return;
     }
+    let now = std::time::Instant::now();
+    for entity in &released {
+        renderer.retire(*entity, now, proxy.as_deref());
+        browsers.unset_externally_hosted(*entity);
+    }
+    for entity in released {
+        scratch.active_waiting.remove(&entity);
+        commands.entity(entity).try_remove::<(
+            HostedSurface,
+            HostedSurfaceGeneration,
+            crate::HostedPageLifecycle,
+            BinIpcEpoch,
+            BinIpcSurfaceGeneration,
+            BinIpcNavigationRevision,
+            PageReady,
+            vmux_layout::hosted_page::SurfacePaintReady,
+            vmux_layout::hosted_page::SurfacePresentationReady,
+            vmux_layout::hosted_page::SurfaceTransitionReady,
+        )>();
+    }
+}
 
+fn open_wanted_surfaces(
+    mut state: ParamSet<(
+        PageClaims,
+        NonSendMut<PageRenderer>,
+        NonSendMut<Browsers>,
+        Query<&mut vmux_layout::hosted_page::SurfaceHandoff>,
+    )>,
+    requester: Option<Res<Requester>>,
+    bin_ipc: Option<Res<BinIpcEventRawSender>>,
+    frame_queries: WindowFrameQueries,
+    primary_windows: Query<Entity, With<PrimaryWindow>>,
+    metadata_sender: Query<&PageMetadataSender>,
+    lifecycle_sender: Query<&PageLifecycleSender>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    appearance: Single<&ResolvedColorScheme>,
+    time: Res<Time>,
+    mut scratch: ResMut<OpenScratch>,
+    mut commands: Commands,
+) {
+    if scratch.discovery.wanted.is_empty() {
+        return;
+    }
     let primary_window = primary_windows.iter().next();
     let embedder = match load_page_embedder(
         requester.as_deref(),
@@ -1727,298 +1836,337 @@ fn open(
     ) {
         Ok(embedder) => embedder,
         Err(reason) => {
-            discovery.retry_wanted();
-            report_waiting(reason);
+            scratch.discovery.retry_wanted();
+            scratch.report_waiting(reason);
             return;
         }
     };
-    let appearance = appearance_of(appearance.0);
-
-    let mut wanted = std::mem::take(&mut discovery.wanted);
+    let appearance = PageRenderer::appearance(appearance.0);
+    let mut wanted = std::mem::take(&mut scratch.discovery.wanted);
     for (entity, registration, _, claim_changed) in wanted.drain(..) {
-        let page = registration.page();
         let placement = registration.placement();
-        let candidate = {
-            let entities = state.p0();
-            let Some(window_entity) = entities.host_window(entity).or(primary_window) else {
-                discovery.retry(entity);
-                report_waiting("page has no host window entity");
-                continue;
-            };
-            let Ok(candidate) = entities.get(entity) else {
-                continue;
-            };
-            (
-                window_entity,
-                candidate.get::<HostedSurface>().cloned(),
-                candidate
-                    .get::<vmux_layout::hosted_page::SurfaceHandoff>()
-                    .map(|handoff| (handoff.navigation_started(), handoff.retain_visible())),
-                candidate
-                    .get::<crate::HostedPageLifecycle>()
-                    .map(|lifecycle| lifecycle.navigation_revision)
-                    .unwrap_or_default(),
-                claim_changed || registration.instance_changed(candidate),
-                candidate
-                    .get::<PageMetadata>()
-                    .map(|metadata| metadata.url.clone())
-                    .unwrap_or_else(|| page.url.to_string()),
-                candidate.contains::<vmux_layout::hosted_page::SurfaceBlocked>()
-                    || candidate.contains::<vmux_ecs::PageTransition>(),
-            )
-        };
-        let (
+        let Some((
             window_entity,
             current,
-            handoff,
+            reactivating,
             baseline_navigation_revision,
             instance_changed,
             url,
             blocked,
-        ) = candidate;
-        let reactivating = handoff.is_some_and(|(started, _)| !started);
+            is_warm_spare,
+        )) = inspect_wanted_surface(
+            &state.p0(),
+            entity,
+            registration,
+            primary_window,
+            claim_changed,
+            &mut scratch,
+        )
+        else {
+            continue;
+        };
         let has_surface = state.p1().active.contains_key(&entity);
         if !has_surface
             && placement == PagePlacement::Pane
             && !frame_queries.page_is_active(entity)
-            && !state.p0().get(entity).is_ok_and(|candidate| {
-                candidate.contains::<vmux_layout::warm_page::WarmPageSpare>()
-            })
+            && !is_warm_spare
         {
             continue;
         }
-        if let Some(current) = current.as_ref().filter(|current| {
-            std::ptr::eq(current.page, page) && current.window == window_entity && has_surface
-        }) {
-            let route_changed = current.url != url;
-            let placement_changed = current.placement != placement;
-            let fragment_only =
-                route_changed && current.url.split('#').next() == url.split('#').next();
-            if fragment_only && !reactivating && !instance_changed {
-                let renderer = state.p1();
-                renderer
-                    .active
-                    .get(&entity)
-                    .expect("the page was just found")
-                    .set_url(&url);
-            } else if route_changed || reactivating || instance_changed {
-                let instance = {
-                    let entities = state.p0();
-                    let Ok(candidate) = entities.get(entity) else {
-                        continue;
-                    };
-                    registration.instance(candidate)
-                };
-                let renderer = state.p1();
-                let surface = renderer
-                    .active
-                    .get(&entity)
-                    .expect("the page was just found");
-                let ipc_epoch = if blocked {
-                    surface.set_interactive(false)
-                } else {
-                    surface.ipc_epoch()
-                };
-                let remounted = surface.navigate(page, &url, instance);
-                let navigation_revision = surface.navigation_revision();
-                if remounted {
-                    commands.entity(entity).remove::<PageReady>();
-                }
-                commands.entity(entity).insert((
-                    BinIpcNavigationRevision(navigation_revision),
-                    BinIpcEpoch(ipc_epoch),
-                ));
-                info!("browser_platform: updated {entity:?} within {}", page.url);
-                if reactivating && let Ok(mut handoff) = state.p3().get_mut(entity) {
-                    handoff.begin_navigation(baseline_navigation_revision, time.elapsed());
-                }
+        if reuse_hosted_surface(
+            &mut state,
+            entity,
+            registration,
+            window_entity,
+            current.as_ref(),
+            has_surface,
+            reactivating,
+            instance_changed,
+            baseline_navigation_revision,
+            &url,
+            blocked,
+            time.elapsed(),
+            &mut commands,
+        ) {
+            continue;
+        }
+        build_hosted_surface(
+            &mut state,
+            &mut scratch,
+            &embedder,
+            entity,
+            registration,
+            window_entity,
+            current.is_some(),
+            url,
+            blocked,
+            appearance,
+            proxy.as_deref(),
+            time.elapsed(),
+            &mut commands,
+        );
+    }
+    scratch.discovery.wanted = wanted;
+}
+
+fn inspect_wanted_surface(
+    entities: &PageClaims,
+    entity: Entity,
+    registration: PageRegistration,
+    primary_window: Option<Entity>,
+    claim_changed: bool,
+    scratch: &mut OpenScratch,
+) -> Option<(
+    Entity,
+    Option<HostedSurface>,
+    bool,
+    u64,
+    bool,
+    String,
+    bool,
+    bool,
+)> {
+    let page = registration.page();
+    let Some(window_entity) = entities.host_window(entity).or(primary_window) else {
+        scratch.discovery.retry(entity);
+        scratch.report_waiting("page has no host window entity");
+        return None;
+    };
+    let candidate = entities.get(entity).ok()?;
+    let reactivating = candidate
+        .get::<vmux_layout::hosted_page::SurfaceHandoff>()
+        .is_some_and(|handoff| !handoff.navigation_started());
+    let baseline_navigation_revision = candidate
+        .get::<crate::HostedPageLifecycle>()
+        .map(|lifecycle| lifecycle.navigation_revision)
+        .unwrap_or_default();
+    let instance_changed = claim_changed || registration.instance_changed(candidate);
+    let url = candidate
+        .get::<PageMetadata>()
+        .map(|metadata| metadata.url.clone())
+        .unwrap_or_else(|| page.url.to_string());
+    let blocked = candidate.contains::<vmux_layout::hosted_page::SurfaceBlocked>()
+        || candidate.contains::<vmux_ecs::PageTransition>();
+    let is_warm_spare = candidate.contains::<vmux_layout::warm_page::WarmPageSpare>();
+    Some((
+        window_entity,
+        candidate.get::<HostedSurface>().cloned(),
+        reactivating,
+        baseline_navigation_revision,
+        instance_changed,
+        url,
+        blocked,
+        is_warm_spare,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reuse_hosted_surface(
+    state: &mut ParamSet<(
+        PageClaims,
+        NonSendMut<PageRenderer>,
+        NonSendMut<Browsers>,
+        Query<&mut vmux_layout::hosted_page::SurfaceHandoff>,
+    )>,
+    entity: Entity,
+    registration: PageRegistration,
+    window_entity: Entity,
+    current: Option<&HostedSurface>,
+    has_surface: bool,
+    reactivating: bool,
+    instance_changed: bool,
+    baseline_navigation_revision: u64,
+    url: &str,
+    blocked: bool,
+    now: std::time::Duration,
+    commands: &mut Commands,
+) -> bool {
+    let page = registration.page();
+    let placement = registration.placement();
+    let Some(current) = current.filter(|current| current.window == window_entity && has_surface)
+    else {
+        return false;
+    };
+    let same_page = std::ptr::eq(current.page, page);
+    let same_document = !same_page
+        && current.page.transparent == page.transparent
+        && current.page.document_url() == page.document_url();
+    if !same_page && !same_document {
+        return false;
+    }
+    let route_changed = current.url != url;
+    let placement_changed = current.placement != placement;
+    let fragment_only =
+        same_page && route_changed && current.url.split('#').next() == url.split('#').next();
+    if fragment_only && !reactivating && !instance_changed {
+        state
+            .p1()
+            .active
+            .get(&entity)
+            .expect("the page was just found")
+            .set_url(url);
+    } else if same_document || route_changed || reactivating || instance_changed {
+        let instance = {
+            let entities = state.p0();
+            let Ok(candidate) = entities.get(entity) else {
+                return true;
+            };
+            registration.instance(candidate)
+        };
+        let remounted = {
+            let renderer = state.p1();
+            let surface = renderer
+                .active
+                .get(&entity)
+                .expect("the page was just found");
+            let ipc_epoch = if blocked {
+                surface.set_interactive(false)
+            } else {
+                surface.ipc_epoch()
+            };
+            let remounted = surface.navigate(page, url, instance);
+            commands.entity(entity).insert((
+                BinIpcNavigationRevision(surface.navigation_revision()),
+                BinIpcEpoch(ipc_epoch),
+            ));
+            remounted
+        };
+        if remounted {
+            commands.entity(entity).remove::<PageReady>();
+        }
+        if same_page {
+            info!("browser_platform: updated {entity:?} within {}", page.url);
+        } else {
+            info!("browser_platform: navigated {entity:?} to {}", page.url);
+        }
+        if reactivating && let Ok(mut handoff) = state.p3().get_mut(entity) {
+            handoff.begin_navigation(baseline_navigation_revision, now);
+        }
+    }
+    if same_document || route_changed || placement_changed || instance_changed {
+        commands.entity(entity).insert(HostedSurface {
+            placement,
+            page,
+            window: window_entity,
+            url: url.to_string(),
+        });
+    }
+    true
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_hosted_surface(
+    state: &mut ParamSet<(
+        PageClaims,
+        NonSendMut<PageRenderer>,
+        NonSendMut<Browsers>,
+        Query<&mut vmux_layout::hosted_page::SurfaceHandoff>,
+    )>,
+    scratch: &mut OpenScratch,
+    embedder: &PageEmbedder,
+    entity: Entity,
+    registration: PageRegistration,
+    window_entity: Entity,
+    replacing: bool,
+    url: String,
+    blocked: bool,
+    appearance: Appearance,
+    proxy: Option<&EventLoopProxyWrapper>,
+    now: std::time::Duration,
+    commands: &mut Commands,
+) {
+    let page = registration.page();
+    let placement = registration.placement();
+    let bounds = wry::Rect {
+        position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
+        size: wry::dpi::LogicalSize::new(1.0, 1.0).into(),
+    };
+    let instance = {
+        let entities = state.p0();
+        let Ok(candidate) = entities.get(entity) else {
+            return;
+        };
+        registration.instance(candidate)
+    };
+    scratch.generations = scratch.generations.wrapping_add(1).max(1);
+    let generation = scratch.generations;
+    let built = WINIT_WINDOWS.with(|winit_windows| {
+        let winit_windows = winit_windows.borrow();
+        let window = winit_windows.get_window(window_entity)?;
+        Some(WebView::build(
+            page,
+            &**window,
+            bounds,
+            embedder.embed(entity, &url, generation),
+            instance,
+            appearance,
+            !blocked,
+        ))
+    });
+    match built {
+        None => {
+            scratch.discovery.retry(entity);
+            scratch.report_waiting("primary window has no winit window yet");
+        }
+        Some(Ok(surface)) => {
+            if replacing {
+                commands.entity(entity).remove::<(
+                    HostedSurface,
+                    HostedSurfaceGeneration,
+                    crate::HostedPageLifecycle,
+                    BinIpcEpoch,
+                    BinIpcSurfaceGeneration,
+                    BinIpcNavigationRevision,
+                    PageReady,
+                    vmux_layout::hosted_page::SurfacePaintReady,
+                    vmux_layout::hosted_page::SurfacePresentationReady,
+                    vmux_layout::hosted_page::SurfaceTransitionReady,
+                )>();
             }
-            if route_changed || placement_changed || instance_changed {
-                commands.entity(entity).insert(HostedSurface {
+            let ipc_epoch = if blocked {
+                surface.set_interactive(false)
+            } else {
+                surface.ipc_epoch()
+            };
+            let navigation_revision = surface.navigation_revision();
+            if Placement::paints_in_front(placement) {
+                surface.raise_above_layers();
+            }
+            state.p2().set_externally_hosted(entity);
+            info!(
+                "browser_platform: hosting {} for {entity:?} as {placement:?}, {appearance:?}",
+                page.url
+            );
+            state
+                .p1()
+                .install(entity, surface, std::time::Instant::now(), proxy);
+            commands.entity(entity).insert((
+                HostedSurface {
                     placement,
                     page,
                     window: window_entity,
                     url,
-                });
+                },
+                HostedSurfaceGeneration(generation),
+                crate::HostedPageLifecycle::default(),
+                BinIpcEpoch(ipc_epoch),
+                BinIpcSurfaceGeneration(generation),
+                BinIpcNavigationRevision(navigation_revision),
+            ));
+            if let Ok(mut handoff) = state.p3().get_mut(entity) {
+                handoff.begin_navigation(0, now);
             }
-            continue;
         }
-        if current.as_ref().is_some_and(|current| {
-            current.page.transparent == page.transparent
-                && current.page.document_url() == page.document_url()
-                && current.window == window_entity
-                && has_surface
-        }) {
-            let instance = {
-                let entities = state.p0();
-                let Ok(candidate) = entities.get(entity) else {
-                    continue;
-                };
-                registration.instance(candidate)
-            };
-            let remounted = {
-                let renderer = state.p1();
-                let surface = renderer
-                    .active
-                    .get(&entity)
-                    .expect("the page was just found");
-                let ipc_epoch = if blocked {
-                    surface.set_interactive(false)
-                } else {
-                    surface.ipc_epoch()
-                };
-                let remounted = surface.navigate(page, &url, instance);
-                commands.entity(entity).insert((
-                    BinIpcNavigationRevision(surface.navigation_revision()),
-                    BinIpcEpoch(ipc_epoch),
-                ));
-                remounted
-            };
-            if reactivating && let Ok(mut handoff) = state.p3().get_mut(entity) {
-                handoff.begin_navigation(baseline_navigation_revision, time.elapsed());
-            }
-            commands.entity(entity).insert(HostedSurface {
-                placement,
-                page,
-                window: window_entity,
-                url,
-            });
-            if remounted {
-                commands.entity(entity).remove::<PageReady>();
-            }
-            info!("browser_platform: navigated {entity:?} to {}", page.url);
-            continue;
-        }
-        let replacing = current.is_some();
-        let bounds = wry::Rect {
-            position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
-            size: wry::dpi::LogicalSize::new(1.0, 1.0).into(),
-        };
-        let instance = {
-            let entities = state.p0();
-            let Ok(candidate) = entities.get(entity) else {
-                continue;
-            };
-            registration.instance(candidate)
-        };
-        *generations = generations.wrapping_add(1).max(1);
-        let generation = *generations;
-        let built = WINIT_WINDOWS.with(|winit_windows| {
-            let winit_windows = winit_windows.borrow();
-            let window = winit_windows.get_window(window_entity)?;
-            Some(WebView::build(
-                page,
-                &**window,
-                bounds,
-                embedder.embed(entity, &url, generation),
-                instance,
-                appearance,
-                !blocked,
-            ))
-        });
-        match built {
-            None => {
-                discovery.retry(entity);
-                report_waiting("primary window has no winit window yet");
-                continue;
-            }
-            Some(Ok(surface)) => {
-                if replacing {
-                    commands.entity(entity).remove::<(
-                        HostedSurface,
-                        HostedSurfaceGeneration,
-                        crate::HostedPageLifecycle,
-                        BinIpcEpoch,
-                        BinIpcSurfaceGeneration,
-                        BinIpcNavigationRevision,
-                        PageReady,
-                        vmux_layout::hosted_page::SurfacePaintReady,
-                        vmux_layout::hosted_page::SurfacePresentationReady,
-                        vmux_layout::hosted_page::SurfaceTransitionReady,
-                    )>();
-                }
-                let ipc_epoch = if blocked {
-                    surface.set_interactive(false)
-                } else {
-                    surface.ipc_epoch()
-                };
-                let navigation_revision = surface.navigation_revision();
-                if placement.paints_in_front() {
-                    surface.raise_above_layers();
-                }
-                state.p2().set_externally_hosted(entity);
-                info!(
-                    "browser_platform: hosting {} for {entity:?} as {placement:?}, {appearance:?}",
-                    page.url
-                );
-                state
-                    .p1()
-                    .install(entity, surface, std::time::Instant::now(), proxy.as_deref());
-                commands.entity(entity).insert((
-                    HostedSurface {
-                        placement,
-                        page,
-                        window: window_entity,
-                        url,
-                    },
-                    HostedSurfaceGeneration(generation),
-                    crate::HostedPageLifecycle::default(),
-                    BinIpcEpoch(ipc_epoch),
-                    BinIpcSurfaceGeneration(generation),
-                    BinIpcNavigationRevision(navigation_revision),
-                ));
-                if let Ok(mut handoff) = state.p3().get_mut(entity) {
-                    handoff.begin_navigation(0, time.elapsed());
-                }
-            }
-            Some(Err(error)) => {
-                error!(
-                    "browser_platform: build_as_child failed for {}: {error}",
-                    page.url
-                );
-                commands
-                    .entity(entity)
-                    .insert(vmux_layout::hosted_page::SurfaceHandoffFailed);
-            }
+        Some(Err(error)) => {
+            error!(
+                "browser_platform: build_as_child failed for {}: {error}",
+                page.url
+            );
+            commands
+                .entity(entity)
+                .insert(vmux_layout::hosted_page::SurfaceHandoffFailed);
         }
     }
-    discovery.wanted = wanted;
-}
-
-fn registration_claim_priority(
-    entity: EntityRef<'_>,
-    registration: PageRegistration,
-) -> Option<(u8, usize)> {
-    let page = registration.page();
-    match registration.placement() {
-        PagePlacement::Layout => {
-            if !entity.contains::<LayoutCef>() {
-                return None;
-            }
-        }
-        PagePlacement::Pane | PagePlacement::Modal => {
-            if !entity.contains::<HostsPage>() || entity.contains::<LayoutCef>() {
-                return None;
-            }
-            let metadata = entity.get::<PageMetadata>()?;
-            if !registration.answers_for(entity, &metadata.url) {
-                return None;
-            }
-        }
-    }
-    let Some(url) = entity
-        .get::<PageMetadata>()
-        .map(|metadata| metadata.url.as_str())
-    else {
-        return Some((3, page.url.len()));
-    };
-    if url == page.url {
-        return Some((2, page.url.len()));
-    }
-    if page.answers_for(url) {
-        return Some((1, page.url.len()));
-    }
-    Some((3, page.url.len()))
 }
 
 #[derive(EntityEvent)]
@@ -2077,7 +2225,7 @@ impl Placement<'_, '_> {
             return SurfacePresentation::Hidden;
         }
         let window = self.windows.get(page.window).ok();
-        let Some(frame) = page.placement.frame(entity, window, &self.frames) else {
+        let Some(frame) = self.frame(page.placement, entity, window) else {
             return SurfacePresentation::Hidden;
         };
         let all_corners = self.corners.get(entity).is_ok_and(|corners| corners.0);
@@ -2099,11 +2247,60 @@ impl Placement<'_, '_> {
             opacity,
             all_corners,
             ring,
-            order: page.placement.pointer_order(
+            order: Self::pointer_order(
+                page.placement,
                 capturing,
                 pending,
                 self.frame_queries.presentation(entity),
             ),
+        }
+    }
+
+    fn paints_in_front(placement: PagePlacement) -> bool {
+        matches!(placement, PagePlacement::Layout | PagePlacement::Modal)
+    }
+
+    fn pointer_order(
+        placement: PagePlacement,
+        capturing: bool,
+        pending: bool,
+        presentation: PresentationLayer,
+    ) -> Option<SiblingOrder> {
+        if capturing && placement == PagePlacement::Pane {
+            return Some(SiblingOrder::Back);
+        }
+        match presentation {
+            PresentationLayer::Retained => return Some(SiblingOrder::Front),
+            PresentationLayer::Incoming => return Some(SiblingOrder::Back),
+            PresentationLayer::Current | PresentationLayer::Hidden => {}
+        }
+        if pending {
+            return Some(SiblingOrder::Front);
+        }
+        match placement {
+            PagePlacement::Layout if !capturing => Some(SiblingOrder::Back),
+            PagePlacement::Layout | PagePlacement::Modal => Some(SiblingOrder::Front),
+            PagePlacement::Pane => Some(SiblingOrder::Front),
+        }
+    }
+
+    fn frame(
+        &self,
+        placement: PagePlacement,
+        entity: Entity,
+        window: Option<&Window>,
+    ) -> Option<PaneFrame> {
+        match placement {
+            PagePlacement::Layout => {
+                let window = window?;
+                Some(PaneFrame {
+                    left: 0.0,
+                    top: 0.0,
+                    width: window.width(),
+                    height: window.height(),
+                })
+            }
+            PagePlacement::Pane | PagePlacement::Modal => self.frames.get(entity).ok().copied(),
         }
     }
 }
@@ -2370,12 +2567,11 @@ fn sync_presentation_readiness(
 fn render(
     renderer: Option<NonSend<PageRenderer>>,
     ready_spares: Query<(), (With<vmux_layout::warm_page::WarmPageSpare>, With<PageReady>)>,
-    mut dirty: Local<Vec<Entity>>,
 ) {
     let Some(renderer) = renderer else {
         return;
     };
-    dirty.clear();
+    let mut dirty = Vec::new();
     {
         let mut pending = PAGE_RENDER_DIRTY
             .lock()
@@ -2470,7 +2666,7 @@ fn sync_appearance(
     let Some(renderer) = renderer else {
         return;
     };
-    let appearance = appearance_of(appearance.0);
+    let appearance = PageRenderer::appearance(appearance.0);
     info!("browser_platform: colour scheme set to {appearance:?}");
     for surface in renderer.active.values() {
         surface.set_appearance(appearance);
@@ -2500,79 +2696,6 @@ fn sync_scale(
 
 fn page_scale_of(level: f64) -> f64 {
     1.2f64.powf(level)
-}
-
-fn appearance_of(scheme: ResolvedScheme) -> Appearance {
-    match scheme {
-        ResolvedScheme::Light => Appearance::Light,
-        ResolvedScheme::Dark => Appearance::Dark,
-    }
-}
-
-trait PagePlacementExt {
-    fn paints_in_front(self) -> bool;
-    fn pointer_order(
-        self,
-        capturing: bool,
-        pending: bool,
-        presentation: PresentationLayer,
-    ) -> Option<SiblingOrder>;
-    fn frame(
-        self,
-        entity: Entity,
-        window: Option<&Window>,
-        frames: &Query<&PaneFrame>,
-    ) -> Option<PaneFrame>;
-}
-
-impl PagePlacementExt for PagePlacement {
-    fn paints_in_front(self) -> bool {
-        matches!(self, PagePlacement::Layout | PagePlacement::Modal)
-    }
-
-    fn pointer_order(
-        self,
-        capturing: bool,
-        pending: bool,
-        presentation: PresentationLayer,
-    ) -> Option<SiblingOrder> {
-        if capturing && self == PagePlacement::Pane {
-            return Some(SiblingOrder::Back);
-        }
-        match presentation {
-            PresentationLayer::Retained => return Some(SiblingOrder::Front),
-            PresentationLayer::Incoming => return Some(SiblingOrder::Back),
-            PresentationLayer::Current | PresentationLayer::Hidden => {}
-        }
-        if pending {
-            return Some(SiblingOrder::Front);
-        }
-        match self {
-            PagePlacement::Layout if !capturing => Some(SiblingOrder::Back),
-            PagePlacement::Layout | PagePlacement::Modal => Some(SiblingOrder::Front),
-            PagePlacement::Pane => Some(SiblingOrder::Front),
-        }
-    }
-
-    fn frame(
-        self,
-        entity: Entity,
-        window: Option<&Window>,
-        frames: &Query<&PaneFrame>,
-    ) -> Option<PaneFrame> {
-        match self {
-            PagePlacement::Layout => {
-                let window = window?;
-                Some(PaneFrame {
-                    left: 0.0,
-                    top: 0.0,
-                    width: window.width(),
-                    height: window.height(),
-                })
-            }
-            PagePlacement::Pane | PagePlacement::Modal => frames.get(entity).ok().copied(),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -3085,21 +3208,14 @@ impl SimulatorFrame {
     }
 }
 
-fn report_waiting(reason: &str) {
-    static REPORTED: AtomicBool = AtomicBool::new(false);
-    if !REPORTED.swap(true, Ordering::Relaxed) {
-        info!("browser_platform: waiting, {reason}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         AppliedSurfacePresentation, CachedNativeFrame, HostedSurfaceGeneration, MacosBrowserPlugin,
         OpenPageDropdown, PageLifecycleEnvelope, PageLifecycleMailbox, PageLifecycleReceiver,
-        PageMetadataMailbox, PageMetadataReceiver, PageMetadataSender, PageOutbox,
-        PagePlacementExt, SURFACE_SETTLE_TIMEOUT, SimulatorFrame, SimulatorFrameRequest,
-        SurfaceHistory, SurfacePresentation, SurfaceSettleWake,
+        PageMetadataMailbox, PageMetadataReceiver, PageMetadataSender, PageOutbox, Placement,
+        SURFACE_SETTLE_TIMEOUT, SimulatorFrame, SimulatorFrameRequest, SurfaceHistory,
+        SurfacePresentation, SurfaceSettleWake,
     };
     use bevy::ecs::schedule::Schedules;
     use bevy::prelude::{
@@ -3993,40 +4109,70 @@ mod tests {
     #[test]
     fn the_layout_is_asked_for_the_pointer_only_while_a_surface_of_its_own_is_up() {
         assert_eq!(
-            PagePlacement::Layout.pointer_order(false, false, PresentationLayer::Current),
+            Placement::pointer_order(
+                PagePlacement::Layout,
+                false,
+                false,
+                PresentationLayer::Current
+            ),
             Some(SiblingOrder::Back)
         );
         assert_eq!(
-            PagePlacement::Layout.pointer_order(true, false, PresentationLayer::Current),
+            Placement::pointer_order(
+                PagePlacement::Layout,
+                true,
+                false,
+                PresentationLayer::Current
+            ),
             Some(SiblingOrder::Front)
         );
         assert_eq!(
-            PagePlacement::Modal.pointer_order(false, false, PresentationLayer::Current),
+            Placement::pointer_order(
+                PagePlacement::Modal,
+                false,
+                false,
+                PresentationLayer::Current
+            ),
             Some(SiblingOrder::Front)
         );
         assert_eq!(
-            PagePlacement::Pane.pointer_order(false, false, PresentationLayer::Current),
+            Placement::pointer_order(
+                PagePlacement::Pane,
+                false,
+                false,
+                PresentationLayer::Current
+            ),
             Some(SiblingOrder::Front)
         );
         assert_eq!(
-            PagePlacement::Pane.pointer_order(false, true, PresentationLayer::Current),
+            Placement::pointer_order(PagePlacement::Pane, false, true, PresentationLayer::Current),
             Some(SiblingOrder::Front)
         );
         assert_eq!(
-            PagePlacement::Pane.pointer_order(true, false, PresentationLayer::Current),
+            Placement::pointer_order(PagePlacement::Pane, true, false, PresentationLayer::Current),
             Some(SiblingOrder::Back)
         );
-        assert!(PagePlacement::Layout.paints_in_front());
+        assert!(Placement::paints_in_front(PagePlacement::Layout));
     }
 
     #[test]
     fn tab_transition_keeps_the_retained_surface_in_front() {
         assert_eq!(
-            PagePlacement::Pane.pointer_order(false, true, PresentationLayer::Retained),
+            Placement::pointer_order(
+                PagePlacement::Pane,
+                false,
+                true,
+                PresentationLayer::Retained
+            ),
             Some(SiblingOrder::Front)
         );
         assert_eq!(
-            PagePlacement::Pane.pointer_order(false, true, PresentationLayer::Incoming),
+            Placement::pointer_order(
+                PagePlacement::Pane,
+                false,
+                true,
+                PresentationLayer::Incoming
+            ),
             Some(SiblingOrder::Back)
         );
     }

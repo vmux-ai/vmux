@@ -31,7 +31,7 @@ fn apply_winit(
     mut windows: Query<(Entity, &mut KeyWindowHandoff), With<bevy::prelude::Window>>,
 ) {
     for (window, mut handoff) in &mut windows {
-        if **intent != HostFocusIntent::WinitHost || Some(window) != focused_window.entity() {
+        if !intent.is_winit_host() || Some(window) != focused_window.entity() {
             handoff.0 = false;
             continue;
         }

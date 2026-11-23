@@ -104,7 +104,9 @@ impl From<&CefPageAttachRequest> for CefPageAttachment {
 #[derive(Component)]
 struct ErrorPageAttachment {
     stack: Entity,
-    failure: ErrorPageData,
+    title_message_id: String,
+    message: String,
+    url: String,
 }
 
 #[derive(Component)]
@@ -240,22 +242,26 @@ impl ErrorPageAttachment {
     fn failed(stack: Entity, url: &str, message: &str) -> Self {
         Self {
             stack,
-            failure: ErrorPageData {
-                title_message_id: FAILED_TO_LOAD.to_string(),
-                message: message.to_string(),
-                url: url.to_string(),
-            },
+            title_message_id: FAILED_TO_LOAD.to_string(),
+            message: message.to_string(),
+            url: url.to_string(),
         }
     }
 
     fn not_found(stack: Entity, url: &str) -> Self {
         Self {
             stack,
-            failure: ErrorPageData {
-                title_message_id: NOT_FOUND.to_string(),
-                message: String::new(),
-                url: url.to_string(),
-            },
+            title_message_id: NOT_FOUND.to_string(),
+            message: String::new(),
+            url: url.to_string(),
+        }
+    }
+
+    fn data(&self) -> ErrorPageData {
+        ErrorPageData {
+            title_message_id: self.title_message_id.clone(),
+            message: self.message.clone(),
+            url: self.url.clone(),
         }
     }
 }
@@ -275,16 +281,19 @@ fn handle_open_requests(
         let url =
             VmuxRoute::canonical(&request.url).unwrap_or_else(|| request.url.trim().to_string());
         let stack = match target.resolve(&request.target) {
-            Ok(PageOpenTargetResolution::Existing(stack)) => stack,
-            Ok(PageOpenTargetResolution::CreateIn { pane, previous }) => {
-                let mut stack =
-                    commands.spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)));
-                stack.insert(metadata.metadata_for(&url, &url));
-                if let Some(previous) = previous {
-                    stack.insert(vmux_layout::presentation::Transition::retain(previous));
+            Ok(resolved) => match (resolved.existing, resolved.create_in) {
+                (Some(stack), _) => stack,
+                (None, Some(pane)) => {
+                    let mut stack =
+                        commands.spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)));
+                    stack.insert(metadata.metadata_for(&url, &url));
+                    if let Some(previous) = resolved.previous {
+                        stack.insert(vmux_layout::presentation::Transition::retain(previous));
+                    }
+                    stack.id()
                 }
-                stack.id()
-            }
+                (None, None) => continue,
+            },
             Err(message) => {
                 if let Some(response) =
                     PageOpenResponse::from_result(request.request_id, Err(message))
@@ -350,12 +359,28 @@ fn discard_superseded_opens(
     }
 }
 
-enum PageOpenTargetResolution {
-    Existing(Entity),
-    CreateIn {
-        pane: Entity,
-        previous: Option<Entity>,
-    },
+struct ResolvedOpenTarget {
+    existing: Option<Entity>,
+    create_in: Option<Entity>,
+    previous: Option<Entity>,
+}
+
+impl ResolvedOpenTarget {
+    fn existing(stack: Entity) -> Self {
+        Self {
+            existing: Some(stack),
+            create_in: None,
+            previous: None,
+        }
+    }
+
+    fn create_in(pane: Entity, previous: Option<Entity>) -> Self {
+        Self {
+            existing: None,
+            create_in: Some(pane),
+            previous,
+        }
+    }
 }
 
 #[derive(SystemParam)]
@@ -369,19 +394,19 @@ struct PageOpenTargetResolver<'w, 's> {
 }
 
 impl PageOpenTargetResolver<'_, '_> {
-    fn create_in(&self, pane: Entity) -> PageOpenTargetResolution {
+    fn create_in(&self, pane: Entity) -> ResolvedOpenTarget {
         let previous = self
             .layout
             .stack(pane)
             .map(|stack| self.reveal_previous(stack));
-        PageOpenTargetResolution::CreateIn { pane, previous }
+        ResolvedOpenTarget::create_in(pane, previous)
     }
 
     fn reveal_previous(&self, stack: Entity) -> Entity {
         self.presentation.retained(stack).unwrap_or(stack)
     }
 
-    fn resolve(&self, target: &PageOpenTarget) -> Result<PageOpenTargetResolution, String> {
+    fn resolve(&self, target: &PageOpenTarget) -> Result<ResolvedOpenTarget, String> {
         match *target {
             PageOpenTarget::ActiveStack => {
                 if let Some(stack) = self
@@ -389,7 +414,7 @@ impl PageOpenTargetResolver<'_, '_> {
                     .stack
                     .filter(|stack| self.stacks.contains(*stack))
                 {
-                    return Ok(PageOpenTargetResolution::Existing(stack));
+                    return Ok(ResolvedOpenTarget::existing(stack));
                 }
                 let Some(pane) = self.focus.pane.filter(|pane| self.panes.contains(*pane)) else {
                     return Err("page_open: no focused stack or pane".to_string());
@@ -405,17 +430,17 @@ impl PageOpenTargetResolver<'_, '_> {
             PageOpenTarget::Stack(stack) => self
                 .stacks
                 .contains(stack)
-                .then_some(PageOpenTargetResolution::Existing(stack))
+                .then_some(ResolvedOpenTarget::existing(stack))
                 .ok_or_else(|| "page_open: target stack does not exist".to_string()),
             PageOpenTarget::ContainingStack(entity) => self
                 .containing_stack(entity)
-                .map(PageOpenTargetResolution::Existing),
+                .map(ResolvedOpenTarget::existing),
             PageOpenTarget::ActiveStackInPane(pane) => {
                 if !self.panes.contains(pane) {
                     return Err("page_open: target pane does not exist".to_string());
                 }
                 Ok(match self.layout.stack(pane) {
-                    Some(stack) => PageOpenTargetResolution::Existing(stack),
+                    Some(stack) => ResolvedOpenTarget::existing(stack),
                     None => self.create_in(pane),
                 })
             }
@@ -569,10 +594,10 @@ fn attach_error_pages(
     mut commands: Commands,
 ) {
     for (entity, attachment, task) in &attachments {
-        let title = if attachment.failure.title_message_id.is_empty() {
+        let title = if attachment.title_message_id.is_empty() {
             translate("error-title")
         } else {
-            translate(&attachment.failure.title_message_id)
+            translate(&attachment.title_message_id)
         };
         let navigation = task.map(|task| task.id).unwrap_or_default();
         let previous = children
@@ -583,7 +608,7 @@ fn attach_error_pages(
             commands.entity(*surface).try_insert(SurfaceBlocked);
         }
         let metadata = PageMetadata {
-            url: attachment.failure.url.clone(),
+            url: attachment.url.clone(),
             title: title.clone(),
             ..default()
         };
@@ -601,7 +626,7 @@ fn attach_error_pages(
         let browser = commands
             .spawn((
                 Browser::hosted_page(vmux_layout::ErrorPage::url(), &title),
-                attachment.failure.clone(),
+                attachment.data(),
                 ChildOf(attachment.stack),
             ))
             .id();
@@ -736,8 +761,9 @@ mod tests {
 
         assert!(matches!(
             result,
-            Ok(PageOpenTargetResolution::CreateIn {
-                pane: target,
+            Ok(ResolvedOpenTarget {
+                existing: None,
+                create_in: Some(target),
                 previous: None,
             }) if target == pane
         ));

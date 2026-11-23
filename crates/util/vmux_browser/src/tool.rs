@@ -1,3 +1,4 @@
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
@@ -95,52 +96,30 @@ enum ScrollTarget {
     Bottom,
 }
 
-impl From<ScrollTarget> for String {
-    fn from(target: ScrollTarget) -> Self {
-        match target {
-            ScrollTarget::Top => "top".to_string(),
-            ScrollTarget::Bottom => "bottom".to_string(),
+impl ScrollTarget {
+    fn as_str(self) -> &'static str {
+        match self {
+            ScrollTarget::Top => "top",
+            ScrollTarget::Bottom => "bottom",
         }
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ScrollPosition {
-    to: ScrollTarget,
-    target: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ScrollDelta {
-    delta: i32,
-    target: Option<String>,
-}
-
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
-#[serde(untagged)]
-enum ScrollTool {
-    Position(ScrollPosition),
-    Delta(ScrollDelta),
+#[serde(deny_unknown_fields)]
+struct ScrollTool {
+    to: Option<ScrollTarget>,
+    delta: Option<i32>,
+    target: Option<String>,
 }
 
-struct BrowserPane(Option<String>);
-
-impl From<Option<String>> for BrowserPane {
-    fn from(value: Option<String>) -> Self {
-        let value = value.and_then(|value| {
+impl SnapshotTool {
+    fn normalize_pane(value: Option<String>) -> Option<String> {
+        value.and_then(|value| {
             let value = value.trim();
             (!value.is_empty()).then(|| value.to_string())
-        });
-        Self(value)
-    }
-}
-
-impl From<BrowserPane> for Option<String> {
-    fn from(pane: BrowserPane) -> Self {
-        pane.0
+        })
     }
 }
 
@@ -209,7 +188,7 @@ fn snapshot(
         commands
             .entity(entity)
             .insert(ToolQuery(AgentRequest::encode(&AgentBrowserSnapshot {
-                pane: BrowserPane::from(args.target.clone()).into(),
+                pane: SnapshotTool::normalize_pane(args.target.clone()),
                 anchor: anchor.map(|anchor| anchor.0),
             })));
     }
@@ -220,18 +199,17 @@ fn scroll(
     requests: Query<(Entity, Option<&ProcessAnchor>, &ScrollTool), Added<ScrollTool>>,
 ) {
     for (entity, anchor, args) in &requests {
-        let (to, delta, target) = match args {
-            ScrollTool::Position(args) => (Some(args.to.into()), None, args.target.clone()),
-            ScrollTool::Delta(args) => (None, Some(args.delta), args.target.clone()),
-        };
-        commands
-            .entity(entity)
-            .insert(ToolQuery(AgentRequest::encode(&AgentBrowserScroll {
-                pane: BrowserPane::from(target).into(),
-                to,
-                delta,
+        let query = if args.to.is_some() == args.delta.is_some() {
+            Err("browser_scroll requires exactly one of `to` or `delta`".to_string())
+        } else {
+            AgentRequest::encode(&AgentBrowserScroll {
+                pane: SnapshotTool::normalize_pane(args.target.clone()),
+                to: args.to.map(|target| target.as_str().to_string()),
+                delta: args.delta,
                 anchor: anchor.map(|anchor| anchor.0),
-            })));
+            })
+        };
+        commands.entity(entity).insert(ToolQuery(query));
     }
 }
 

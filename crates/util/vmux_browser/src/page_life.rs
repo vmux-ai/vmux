@@ -1,6 +1,6 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::{
-    App, Commands, MessageReader, MessageWriter, NonSend, Plugin, Query, Res, Time, With,
+    App, Changed, Commands, MessageReader, MessageWriter, NonSend, Plugin, Query, Res, Time, With,
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
@@ -224,10 +224,8 @@ mod apply_fallback_page_icons_tests {
 
     #[test]
     fn file_url_gets_files_icon() {
-        assert_eq!(
-            resolve("file:///a/b.rs", PageIcon::None, None),
-            PageIcon::Builtin(BuiltinIcon::Code)
-        );
+        let icon = resolve("file:///a/b.rs", PageIcon::None, None);
+        assert_eq!(icon, PageIcon::Builtin(BuiltinIcon::Code));
     }
 
     #[test]

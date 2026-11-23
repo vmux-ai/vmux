@@ -53,13 +53,13 @@ pub(super) struct HostedSurface {
 
 impl HostedSurface {
     fn requested(&self, entity: Entity, intent: HostFocusIntent, window: Option<Entity>) -> bool {
-        match intent {
-            HostFocusIntent::LayoutView => {
-                self.placement == PagePlacement::Layout
-                    && window.is_none_or(|window| self.window == window)
-            }
-            HostFocusIntent::HostedPane(target) => entity == target,
-            _ => false,
+        if intent.is_layout_view() {
+            self.placement == PagePlacement::Layout
+                && window.is_none_or(|window| self.window == window)
+        } else if let Some(target) = intent.hosted_pane_entity() {
+            entity == target
+        } else {
+            false
         }
     }
 }
@@ -112,22 +112,22 @@ fn select(
     }
     let intent = intent.single().copied().unwrap_or_default();
     let active_window = focused_window.entity();
-    let wanted = match intent {
-        HostFocusIntent::HostedPane(entity) => match hosted.get(entity) {
+    let wanted = if let Some(entity) = intent.hosted_pane_entity() {
+        match hosted.get(entity) {
             Ok((entity, surface, generation)) => Some((surface.window, entity, generation.0)),
             Err(_) => None,
-        },
-        HostFocusIntent::LayoutView => {
-            let mut wanted = None;
-            for (entity, surface, generation) in &hosted {
-                if surface.requested(entity, intent, active_window) {
-                    wanted = Some((surface.window, entity, generation.0));
-                    break;
-                }
-            }
-            wanted
         }
-        _ => None,
+    } else if intent.is_layout_view() {
+        let mut wanted = None;
+        for (entity, surface, generation) in &hosted {
+            if surface.requested(entity, intent, active_window) {
+                wanted = Some((surface.window, entity, generation.0));
+                break;
+            }
+        }
+        wanted
+    } else {
+        None
     };
     for (window, mut focus) in &mut windows {
         let Some((owner, surface, generation)) = wanted else {
@@ -339,7 +339,7 @@ mod tests {
         let mut fixture = FocusFixture::new();
         let window = fixture.window();
         let surface = fixture.surface(window, PagePlacement::Pane);
-        fixture.intent(HostFocusIntent::HostedPane(surface));
+        fixture.intent(HostFocusIntent::hosted_pane(surface));
         fixture.app.update();
         fixture.accept();
         fixture.app.update();
@@ -354,7 +354,7 @@ mod tests {
         let mut fixture = FocusFixture::new();
         let window = fixture.window();
         let surface = fixture.surface(window, PagePlacement::Pane);
-        fixture.intent(HostFocusIntent::HostedPane(surface));
+        fixture.intent(HostFocusIntent::hosted_pane(surface));
         fixture.accept();
         fixture.app.update();
         fixture
@@ -374,7 +374,7 @@ mod tests {
         let second = fixture.window();
         let first_surface = fixture.surface(first, PagePlacement::Layout);
         let second_surface = fixture.surface(second, PagePlacement::Layout);
-        fixture.intent(HostFocusIntent::LayoutView);
+        fixture.intent(HostFocusIntent::layout_view());
         fixture.accept();
         fixture.app.world_mut().entity_mut(first).insert(Active);
         fixture.app.update();
@@ -403,7 +403,7 @@ mod tests {
         let first = fixture.window();
         let second = fixture.window();
         let surface = fixture.surface(first, PagePlacement::Pane);
-        fixture.intent(HostFocusIntent::HostedPane(surface));
+        fixture.intent(HostFocusIntent::hosted_pane(surface));
         fixture.accept();
         fixture.app.update();
         fixture
@@ -422,12 +422,12 @@ mod tests {
         let mut fixture = FocusFixture::new();
         let window = fixture.window();
         let surface = fixture.surface(window, PagePlacement::Pane);
-        fixture.intent(HostFocusIntent::HostedPane(surface));
+        fixture.intent(HostFocusIntent::hosted_pane(surface));
         fixture.accept();
         fixture.app.update();
-        fixture.intent(HostFocusIntent::WinitHost);
+        fixture.intent(HostFocusIntent::winit_host());
         fixture.app.update();
-        fixture.intent(HostFocusIntent::HostedPane(surface));
+        fixture.intent(HostFocusIntent::hosted_pane(surface));
         fixture.app.update();
         assert_eq!(fixture.calls(), [surface, surface]);
     }
@@ -437,7 +437,7 @@ mod tests {
         let mut fixture = FocusFixture::new();
         let window = fixture.window();
         let surface = fixture.surface(window, PagePlacement::Pane);
-        fixture.intent(HostFocusIntent::HostedPane(surface));
+        fixture.intent(HostFocusIntent::hosted_pane(surface));
         fixture.accept();
         fixture.app.update();
         fixture
@@ -460,7 +460,7 @@ mod tests {
         let mut fixture = FocusFixture::new();
         let window = fixture.window();
         let surface = fixture.surface(window, PagePlacement::Pane);
-        fixture.intent(HostFocusIntent::HostedPane(surface));
+        fixture.intent(HostFocusIntent::hosted_pane(surface));
         fixture.accept();
         fixture.app.update();
         let generation = fixture
@@ -484,7 +484,7 @@ mod tests {
         let mut fixture = FocusFixture::new();
         let window = fixture.window();
         let surface = fixture.surface(window, PagePlacement::Pane);
-        fixture.intent(HostFocusIntent::HostedPane(surface));
+        fixture.intent(HostFocusIntent::hosted_pane(surface));
         fixture.hold();
         fixture.app.update();
         let attempt = fixture.attempt();
@@ -512,7 +512,7 @@ mod tests {
         let mut fixture = FocusFixture::new();
         let window = fixture.window();
         let surface = fixture.surface(window, PagePlacement::Pane);
-        fixture.intent(HostFocusIntent::HostedPane(surface));
+        fixture.intent(HostFocusIntent::hosted_pane(surface));
         fixture.hold();
         fixture.app.update();
         let attempt = fixture.attempt();

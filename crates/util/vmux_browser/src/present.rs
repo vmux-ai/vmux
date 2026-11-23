@@ -1,4 +1,8 @@
-use bevy::{ecs::relationship::Relationship, prelude::*};
+use bevy::{
+    ecs::relationship::Relationship,
+    ecs::system::Commands,
+    prelude::{Changed, *},
+};
 use bevy_cef::prelude::*;
 use vmux_command::CommandBar;
 use vmux_command::CommandBarPanelActive;
@@ -136,6 +140,40 @@ impl WindowFrameQueries<'_, '_> {
             PresentationLayer::Current | PresentationLayer::Incoming
         )
     }
+
+    fn pane_and_computed<'a>(
+        &'a self,
+        parent: Entity,
+        fallback: &'a ComputedNode,
+    ) -> (Entity, &'a ComputedNode) {
+        let pane_entity = self
+            .child_of
+            .get(parent)
+            .map(|co| co.get())
+            .unwrap_or(parent);
+        let computed = self.pane_rect.get(pane_entity).unwrap_or(fallback);
+        let computed = self
+            .stack_rect
+            .get(parent)
+            .map(|rect| &rect.0)
+            .unwrap_or(computed);
+        (pane_entity, computed)
+    }
+
+    fn header_frame(&self, host_window: Option<Entity>) -> Option<WindowedFrameRect> {
+        let host_window = host_window?;
+        self.header_rect.iter().find_map(|(header, rect)| {
+            (self.hierarchy.get(header) == Some(host_window))
+                .then(|| WindowedFrameRect::from_node(rect))
+                .flatten()
+        })
+    }
+
+    fn visible_pane_count(&self, tab: Option<Entity>) -> usize {
+        tab.map(|tab| self.focus.leaves(tab).len())
+            .filter(|count| *count > 0)
+            .unwrap_or_else(|| self.focus.leaf_count().max(1))
+    }
 }
 
 fn sync_keyboard_target(
@@ -263,191 +301,156 @@ fn sync_children_to_ui(
         presented,
     ) in browser_q.iter_mut()
     {
-        let (ready, hosted, presentation_ready) =
-            readiness.get(browser).unwrap_or((false, false, false));
-        let Some(host_window) = queries.hierarchy.get(browser) else {
-            if presented {
-                commands.entity(browser).remove::<PagePresented>();
-            }
-            continue;
-        };
-        let Some((glass_entity, _, glass_node)) =
-            roots.iter().find(|(_, host, _)| host.0 == host_window)
+        let glass = queries.hierarchy.get(browser).and_then(|host_window| {
+            roots
+                .iter()
+                .find(|(_, host, _)| host.0 == host_window)
+                .map(|(entity, _, node)| (entity, *node, node.padding_box()))
+        });
+        let Some((glass_entity, glass_rect, glass_size_px)) =
+            glass.filter(|(_, _, size)| size.x > 0.0 && size.y > 0.0)
         else {
             if presented {
                 commands.entity(browser).remove::<PagePresented>();
             }
             continue;
         };
-        let glass_rect = *glass_node;
-        let glass_size_px = glass_rect.padding_box();
         let parent = child_of.get();
-        let pane_entity = queries
-            .child_of
-            .get(parent)
-            .map(|co| co.get())
-            .unwrap_or(parent);
-        let computed = match queries.pane_rect.get(pane_entity) {
-            Ok(cn) => cn,
-            Err(_) => self_computed,
-        };
-        let computed = queries
-            .stack_rect
-            .get(parent)
-            .map(|rect| &rect.0)
-            .unwrap_or(computed);
-
-        if glass_size_px.x <= 0.0 || glass_size_px.y <= 0.0 {
+        let (_, computed) = queries.pane_and_computed(parent, self_computed);
+        let is_cef_ui = status.is_some() || side_sheet.is_some() || modal.is_some();
+        let branch_presentation = queries.presentation(parent);
+        let under_inactive_tab = parent != glass_entity
+            && !is_cef_ui
+            && branch_presentation == PresentationLayer::Hidden;
+        let pending_reveal = pending_webview_reveal || pending_command_bar_reveal;
+        let renderable =
+            HiddenWebviewSizing::is_renderable(computed.size, visibility, pending_reveal);
+        let sizing = FrameSyncMemory::hidden_webview_sizing(renderable, under_inactive_tab);
+        if sizing != HiddenWebviewSizing::Render {
+            let hidden = Vec3::splat(1.0e-6);
+            if tf.scale != hidden {
+                tf.scale = hidden;
+            }
+            if sizing == HiddenWebviewSizing::Collapse && webview_size.0 != Vec2::ONE {
+                webview_size.0 = Vec2::ONE;
+            }
             if presented {
                 commands.entity(browser).remove::<PagePresented>();
             }
             continue;
         }
-
-        let is_cef_ui = status.is_some() || side_sheet.is_some() || modal.is_some();
-
-        let under_inactive_tab = parent != glass_entity
-            && !is_cef_ui
-            && queries.presentation(parent) == PresentationLayer::Hidden;
-
-        let size_px = computed.size;
-        let renderable = webview_layout_is_renderable(
-            size_px,
-            visibility,
-            pending_webview_reveal || pending_command_bar_reveal,
-        );
-        match hidden_webview_sizing(renderable, under_inactive_tab) {
-            HiddenWebviewSizing::Render => {}
-            HiddenWebviewSizing::HideKeepSize => {
-                let hidden = Vec3::splat(1.0e-6);
-                if tf.scale != hidden {
-                    tf.scale = hidden;
-                }
-                if presented {
-                    commands.entity(browser).remove::<PagePresented>();
-                }
-                continue;
-            }
-            HiddenWebviewSizing::Collapse => {
-                let hidden = Vec3::splat(1.0e-6);
-                if tf.scale != hidden {
-                    tf.scale = hidden;
-                }
-                if webview_size.0 != Vec2::ONE {
-                    webview_size.0 = Vec2::ONE;
-                }
-                if presented {
-                    commands.entity(browser).remove::<PagePresented>();
-                }
-                continue;
-            }
-        }
-
-        let branch_presentation = queries.presentation(parent);
-        let is_active_stack = matches!(
+        let readiness = readiness.get(browser).unwrap_or((false, false, false));
+        sync_child_transform(
+            browser,
+            parent,
+            glass_entity,
+            glass_rect,
+            glass_size_px,
+            computed,
+            &mut tf,
+            &mut webview_size,
             branch_presentation,
-            PresentationLayer::Current | PresentationLayer::Incoming
+            under_inactive_tab,
+            is_cef_ui,
+            (status.is_some(), side_sheet.is_some(), modal.is_some()),
+            history_swipe_visual,
+            pending_reveal,
+            (is_layout_cef, is_windowed, presented),
+            readiness,
+            &mut commands,
         );
-        let is_inactive_stack = parent != glass_entity
-            && !is_cef_ui
-            && branch_presentation == PresentationLayer::Hidden;
-
-        let is_inactive_tab = under_inactive_tab;
-
-        let pending_reveal = pending_webview_reveal || pending_command_bar_reveal;
-        let should_present = !pending_reveal && !is_inactive_stack && !is_inactive_tab;
-        if should_present {
-            if !presented {
-                commands.entity(browser).insert(PagePresented);
-            }
-            if ready && !hosted && !is_windowed && !presentation_ready {
-                commands
-                    .entity(browser)
-                    .insert(vmux_layout::hosted_page::SurfacePresentationReady);
-            }
-        } else if presented {
-            commands.entity(browser).remove::<PagePresented>();
-        }
-
-        let sx = size_px.x / glass_size_px.x;
-        let sy = size_px.y / glass_size_px.y;
-        let new_scale = if pending_reveal || is_inactive_stack || is_inactive_tab {
-            Vec3::splat(1e-6)
-        } else {
-            Vec3::new(sx, sy, 1.0)
-        };
-        if tf.scale != new_scale {
-            tf.scale = new_scale;
-        }
-
-        let delta_px = computed.center - glass_rect.center;
-
-        let tx = delta_px.x / glass_size_px.x;
-        let ty = -delta_px.y / glass_size_px.y;
-        let z = if modal.is_some() {
-            WEBVIEW_Z_MODAL
-        } else if is_layout_cef || status.is_some() {
-            WEBVIEW_Z_HEADER
-        } else if side_sheet.is_some() {
-            WEBVIEW_Z_SIDE_SHEET
-        } else if parent != glass_entity {
-            if is_active_stack {
-                WEBVIEW_Z_MAIN
-            } else {
-                WEBVIEW_Z_MAIN - 0.01
-            }
-        } else {
-            WEBVIEW_Z_BASE
-        };
-        let history_swipe_tx = if parent != glass_entity && !is_cef_ui {
-            history_swipe_visual
-                .map(|visual| visual.offset_px / glass_size_px.x)
-                .unwrap_or(0.0)
-        } else {
-            0.0
-        };
-        let translation = Vec3::new(tx + history_swipe_tx, ty, z);
-        if tf.translation != translation {
-            tf.translation = translation;
-        }
-
-        if modal.is_some() && is_windowed {
-            continue;
-        }
-
-        let dip = (size_px * computed.inverse_scale_factor).max(Vec2::splat(1.0));
-        if webview_size.0 != dip {
-            webview_size.0 = dip;
-        }
     }
 }
 
-struct AgentRingColor;
-
-impl AgentRingColor {
-    fn for_key(key: &str) -> [f32; 3] {
-        let mut hue = 1469598103934665603_u64;
-        for byte in key.bytes() {
-            hue ^= byte as u64;
-            hue = hue.wrapping_mul(1099511628211);
+#[allow(clippy::too_many_arguments)]
+fn sync_child_transform(
+    browser: Entity,
+    parent: Entity,
+    glass_entity: Entity,
+    glass_rect: ComputedNode,
+    glass_size_px: Vec2,
+    computed: &ComputedNode,
+    tf: &mut Transform,
+    webview_size: &mut WebviewSize,
+    branch_presentation: PresentationLayer,
+    under_inactive_tab: bool,
+    is_cef_ui: bool,
+    surface_roles: (bool, bool, bool),
+    history_swipe_visual: Option<&HistorySwipeVisualOffset>,
+    pending_reveal: bool,
+    flags: (bool, bool, bool),
+    readiness: (bool, bool, bool),
+    commands: &mut Commands,
+) {
+    let (is_status, is_side_sheet, is_modal) = surface_roles;
+    let (is_layout_cef, is_windowed, presented) = flags;
+    let (ready, hosted, presentation_ready) = readiness;
+    let size_px = computed.size;
+    let is_active_stack = matches!(
+        branch_presentation,
+        PresentationLayer::Current | PresentationLayer::Incoming
+    );
+    let is_inactive_stack =
+        parent != glass_entity && !is_cef_ui && branch_presentation == PresentationLayer::Hidden;
+    let is_inactive_tab = under_inactive_tab;
+    let should_present = !pending_reveal && !is_inactive_stack && !is_inactive_tab;
+    if should_present {
+        if !presented {
+            commands.entity(browser).insert(PagePresented);
         }
-        Self::from_hsl((hue % 360) as f32, 0.85, 0.62)
+        if ready && !hosted && !is_windowed && !presentation_ready {
+            commands
+                .entity(browser)
+                .insert(vmux_layout::hosted_page::SurfacePresentationReady);
+        }
+    } else if presented {
+        commands.entity(browser).remove::<PagePresented>();
     }
-
-    fn from_hsl(hue: f32, saturation: f32, lightness: f32) -> [f32; 3] {
-        let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
-        let section = hue / 60.0;
-        let second = chroma * (1.0 - (section % 2.0 - 1.0).abs());
-        let (red, green, blue) = match section as i32 {
-            0 => (chroma, second, 0.0),
-            1 => (second, chroma, 0.0),
-            2 => (0.0, chroma, second),
-            3 => (0.0, second, chroma),
-            4 => (second, 0.0, chroma),
-            _ => (chroma, 0.0, second),
-        };
-        let offset = lightness - chroma / 2.0;
-        [red + offset, green + offset, blue + offset]
+    let sx = size_px.x / glass_size_px.x;
+    let sy = size_px.y / glass_size_px.y;
+    let new_scale = if pending_reveal || is_inactive_stack || is_inactive_tab {
+        Vec3::splat(1e-6)
+    } else {
+        Vec3::new(sx, sy, 1.0)
+    };
+    if tf.scale != new_scale {
+        tf.scale = new_scale;
+    }
+    let delta_px = computed.center - glass_rect.center;
+    let tx = delta_px.x / glass_size_px.x;
+    let ty = -delta_px.y / glass_size_px.y;
+    let z = if is_modal {
+        WEBVIEW_Z_MODAL
+    } else if is_layout_cef || is_status {
+        WEBVIEW_Z_HEADER
+    } else if is_side_sheet {
+        WEBVIEW_Z_SIDE_SHEET
+    } else if parent != glass_entity {
+        if is_active_stack {
+            WEBVIEW_Z_MAIN
+        } else {
+            WEBVIEW_Z_MAIN - 0.01
+        }
+    } else {
+        WEBVIEW_Z_BASE
+    };
+    let history_swipe_tx = if parent != glass_entity && !is_cef_ui {
+        history_swipe_visual
+            .map(|visual| visual.offset_px / glass_size_px.x)
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    let translation = Vec3::new(tx + history_swipe_tx, ty, z);
+    if tf.translation != translation {
+        tf.translation = translation;
+    }
+    if is_modal && is_windowed {
+        return;
+    }
+    let dip = (size_px * computed.inverse_scale_factor).max(Vec2::splat(1.0));
+    if webview_size.0 != dip {
+        webview_size.0 = dip;
     }
 }
 
@@ -465,7 +468,7 @@ fn windowed_ring_for(
         return (width, [user.r, user.g, user.b]);
     }
     if let Some((profile, _)) = agent {
-        return (width, AgentRingColor::for_key(profile));
+        return (width, FocusRing::agent_color_for_key(profile));
     }
     (0.0, [user.r, user.g, user.b])
 }
@@ -527,31 +530,24 @@ fn sync_windowed_frames(
     ) in &browser_q
     {
         let parent = child_of.get();
-        let pane_entity = queries
-            .child_of
-            .get(parent)
-            .map(|co| co.get())
-            .unwrap_or(parent);
-        let computed = queries.pane_rect.get(pane_entity).unwrap_or(self_computed);
-        let computed = queries
-            .stack_rect
-            .get(parent)
-            .map(|rect| &rect.0)
-            .unwrap_or(computed);
+        let (pane_entity, computed) = queries.pane_and_computed(parent, self_computed);
         let tab = queries.tab_ancestor(parent);
         let presentation = queries.presentation(parent);
-        let tab_active = presentation.visible();
-        let previous = presentation == PresentationLayer::Retained;
         let stack_active = matches!(
             presentation,
             PresentationLayer::Current | PresentationLayer::Incoming
         );
-        let renderable = webview_layout_is_renderable(
+        let renderable = HiddenWebviewSizing::is_renderable(
             computed.size,
             visibility,
             pending_reveal || transitioning,
         );
-        if !windowed_page_is_visible(renderable, tab_active, stack_active, previous) {
+        if !windowed_page_is_visible(
+            renderable,
+            presentation.visible(),
+            stack_active,
+            presentation == PresentationLayer::Retained,
+        ) {
             memory.sync_interactivity(&browsers, entity, generation, false);
             commands
                 .entity(entity)
@@ -567,154 +563,152 @@ fn sync_windowed_frames(
             hidden.push(entity);
         }
         let host_window = queries.hierarchy.get(entity);
-        let header_frame = host_window.and_then(|host_window| {
-            queries.header_rect.iter().find_map(|(header, rect)| {
-                if queries.hierarchy.get(header) == Some(host_window) {
-                    WindowedFrameRect::from_node(rect)
-                } else {
-                    None
-                }
-            })
-        });
-        let visible_pane_count = tab
-            .map(|tab| queries.focus.leaves(tab).len())
-            .filter(|count| *count > 0)
-            .unwrap_or_else(|| queries.focus.leaf_count().max(1));
-        let Some(pane_frame) = WindowedFrameRect::from_node(computed) else {
-            commands
-                .entity(entity)
-                .remove::<(PaneFrame, FocusRing, AllCorners)>();
-            continue;
-        };
+        let header_frame = queries.header_frame(host_window);
+        let visible_pane_count = queries.visible_pane_count(tab);
         let scale = computed.scale();
-        let frame = windowed_page_frame_rect(pane_frame, header_frame, visible_pane_count);
-        let Some(logical) = PaneFrame::from_windowed(frame, scale) else {
+        let Some((frame, logical)) =
+            WindowedFrameRect::from_node(computed).and_then(|pane_frame| {
+                let frame = windowed_page_frame_rect(pane_frame, header_frame, visible_pane_count);
+                PaneFrame::from_windowed(frame, scale).map(|logical| (frame, logical))
+            })
+        else {
             commands
                 .entity(entity)
                 .remove::<(PaneFrame, FocusRing, AllCorners)>();
             continue;
         };
-        let became_visible = !memory.visible_pages.contains(&entity);
-        let browser_ready = browsers.windowed_view_ready(&entity);
-        let was_raised = memory.raised_frame.contains_key(&entity);
-        let first_native_frame = browser_ready && !was_raised;
-        let reveal = windowed_page_needs_reveal(became_visible, browser_ready, was_raised);
-        let key = (
-            frame.left.round() as i32,
-            frame.top.round() as i32,
-            frame.width.round() as i32,
-            frame.height.round() as i32,
-            scale.to_bits(),
-        );
-        if !browser_ready || memory.raised_frame.get(&entity) != Some(&key) {
-            browsers.set_windowed_frame(
-                &entity,
-                frame.left,
-                frame.top,
-                frame.width,
-                frame.height,
-                scale,
-            );
-        }
-        if reveal && shown {
-            browsers.set_windowed_hidden(&entity, false);
-        }
-        memory.sync_interactivity(&browsers, entity, generation, !blocked);
-        browsers.set_windowed_z_position(
-            &entity,
-            windowed_page_z_position(!capturing.is_empty() || transitioning, presentation),
-        );
-        let all_corners = windowed_page_all_corners(header_frame.is_none(), visible_pane_count);
-        browsers.set_windowed_corner_radius(
-            &entity,
-            settings.layout.radius * scale,
-            scale,
-            all_corners,
-        );
-        let (focus_ring_width, focus_ring_rgb) = windowed_ring_for(
-            parent,
-            &focus,
-            visible_pane_count,
-            active_panes.agent_in_pane(pane_entity),
+        apply_visible_windowed_frame(
+            &browsers,
             &settings,
-            scale,
+            &clear_color,
+            &mut memory,
+            (entity, parent),
+            (frame, logical, scale),
+            (header_frame.is_none(), visible_pane_count),
+            (&focus, active_panes.agent_in_pane(pane_entity)),
+            (!capturing.is_empty() || transitioning, presentation),
+            generation,
+            (shown, blocked, force_raise),
+            (ready, paint_ready, presentation_ready, hosted),
+            host_window == focused_window.entity(),
+            &mut commands,
         );
-        browsers.set_windowed_focus_ring(&entity, focus_ring_width, scale, focus_ring_rgb);
-        commands.entity(entity).insert((
-            logical,
-            FocusRing {
-                width: focus_ring_width / scale,
-                rgb: focus_ring_rgb,
-            },
-            AllCorners(all_corners),
-        ));
-        browsers.set_agent_badge(&entity, scale, None);
-        let cover_rgb = clear_color.0.to_srgba();
-        browsers.set_windowed_corner_cover(
-            &entity,
-            settings.layout.radius * scale,
-            scale,
-            all_corners,
-            [cover_rgb.red, cover_rgb.green, cover_rgb.blue],
-        );
-        if browser_ready {
-            if shown && ready && !paint_ready {
-                commands
-                    .entity(entity)
-                    .insert(vmux_layout::hosted_page::SurfacePaintReady);
-            }
-            if shown && ready && !presentation_ready {
-                commands
-                    .entity(entity)
-                    .insert(vmux_layout::hosted_page::SurfacePresentationReady);
-            }
-            memory.raised_frame.insert(entity, key);
-            if shown && (force_raise || became_visible || first_native_frame) {
-                browsers.raise_windowed_to_front(&entity);
-            }
-            if reveal && shown {
-                browsers.nudge_windowed_repaint(&entity);
-            }
-        }
-        if (browser_ready || (hosted && ready && presentation_ready))
-            && shown
-            && host_window == focused_window.entity()
-            && !blocked
-        {
-            memory.visible_frames.push(frame);
-        }
     }
-    let current_windowed: Vec<Entity> = visible.iter().chain(&hidden).copied().collect();
-    memory
-        .raised_frame
-        .retain(|entity, _| current_windowed.contains(entity));
-    memory
-        .interactivity
-        .retain(|entity, _| current_windowed.contains(entity));
-    for entity in memory
-        .last_windowed_pages
-        .iter()
-        .filter(|entity| !current_windowed.contains(entity))
-    {
+    let removed = memory.finalize_windowed_pass(&browsers, visible, hidden);
+    for entity in removed {
         commands
-            .entity(*entity)
+            .entity(entity)
             .try_remove::<(PaneFrame, FocusRing, AllCorners)>();
     }
-    let newly_windowed: Vec<Entity> = current_windowed
-        .iter()
-        .copied()
-        .filter(|entity| !memory.last_windowed_pages.contains(entity))
-        .collect();
-    let ever_shown: Vec<Entity> = memory.raised_frame.keys().copied().collect();
-    for entity in
-        windowed_pages_to_hide(&hidden, &memory.visible_pages, &ever_shown, &newly_windowed)
-    {
-        browsers.set_windowed_hidden(&entity, true);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_visible_windowed_frame(
+    browsers: &Browsers,
+    settings: &AppSettings,
+    clear_color: &vmux_layout::window::WindowBackground,
+    memory: &mut FrameSyncMemory,
+    entities: (Entity, Entity),
+    geometry: (WindowedFrameRect, PaneFrame, f32),
+    layout_info: (bool, usize),
+    focus_info: (&ActiveStack, Option<(&str, ActiveStack)>),
+    z_info: (bool, PresentationLayer),
+    generation: Option<&BinIpcSurfaceGeneration>,
+    visibility: (bool, bool, bool),
+    readiness: (bool, bool, bool, bool),
+    in_focused_window: bool,
+    commands: &mut Commands,
+) {
+    let (entity, parent) = entities;
+    let (frame, logical, scale) = geometry;
+    let (layout_hidden, visible_pane_count) = layout_info;
+    let (focus, agent) = focus_info;
+    let (capture_or_transition, presentation) = z_info;
+    let (shown, blocked, force_raise) = visibility;
+    let (ready, paint_ready, presentation_ready, hosted) = readiness;
+    let became_visible = !memory.visible_pages.contains(&entity);
+    let browser_ready = browsers.windowed_view_ready(&entity);
+    let was_raised = memory.raised_frame.contains_key(&entity);
+    let first_native_frame = browser_ready && !was_raised;
+    let reveal = windowed_page_needs_reveal(became_visible, browser_ready, was_raised);
+    let key = (
+        frame.left.round() as i32,
+        frame.top.round() as i32,
+        frame.width.round() as i32,
+        frame.height.round() as i32,
+        scale.to_bits(),
+    );
+    if !browser_ready || memory.raised_frame.get(&entity) != Some(&key) {
+        browsers.set_windowed_frame(
+            &entity,
+            frame.left,
+            frame.top,
+            frame.width,
+            frame.height,
+            scale,
+        );
     }
-    memory.visible_pages = visible;
-    memory.last_windowed_pages = current_windowed;
-    memory.visible_frames =
-        NativeBridge::set_windowed_page_frames(std::mem::take(&mut memory.visible_frames));
+    if reveal && shown {
+        browsers.set_windowed_hidden(&entity, false);
+    }
+    memory.sync_interactivity(browsers, entity, generation, !blocked);
+    browsers.set_windowed_z_position(
+        &entity,
+        windowed_page_z_position(capture_or_transition, presentation),
+    );
+    let all_corners = windowed_page_all_corners(layout_hidden, visible_pane_count);
+    browsers.set_windowed_corner_radius(
+        &entity,
+        settings.layout.radius * scale,
+        scale,
+        all_corners,
+    );
+    let (focus_ring_width, focus_ring_rgb) =
+        windowed_ring_for(parent, focus, visible_pane_count, agent, settings, scale);
+    browsers.set_windowed_focus_ring(&entity, focus_ring_width, scale, focus_ring_rgb);
+    commands.entity(entity).insert((
+        logical,
+        FocusRing {
+            width: focus_ring_width / scale,
+            rgb: focus_ring_rgb,
+        },
+        AllCorners(all_corners),
+    ));
+    browsers.set_agent_badge(&entity, scale, None);
+    let cover_rgb = clear_color.0.to_srgba();
+    browsers.set_windowed_corner_cover(
+        &entity,
+        settings.layout.radius * scale,
+        scale,
+        all_corners,
+        [cover_rgb.red, cover_rgb.green, cover_rgb.blue],
+    );
+    if browser_ready {
+        if shown && ready && !paint_ready {
+            commands
+                .entity(entity)
+                .insert(vmux_layout::hosted_page::SurfacePaintReady);
+        }
+        if shown && ready && !presentation_ready {
+            commands
+                .entity(entity)
+                .insert(vmux_layout::hosted_page::SurfacePresentationReady);
+        }
+        memory.raised_frame.insert(entity, key);
+        if shown && (force_raise || became_visible || first_native_frame) {
+            browsers.raise_windowed_to_front(&entity);
+        }
+        if reveal && shown {
+            browsers.nudge_windowed_repaint(&entity);
+        }
+    }
+    if (browser_ready || (hosted && ready && presentation_ready))
+        && shown
+        && in_focused_window
+        && !blocked
+    {
+        memory.visible_frames.push(frame);
+    }
 }
 
 fn windowed_page_needs_reveal(became_visible: bool, browser_ready: bool, was_raised: bool) -> bool {
@@ -757,9 +751,45 @@ struct FrameSyncMemory {
     visible_pages: Vec<Entity>,
     visible_frames: Vec<WindowedFrameRect>,
     last_windowed_pages: Vec<Entity>,
+    command_bar_open: bool,
 }
 
 impl FrameSyncMemory {
+    fn finalize_windowed_pass(
+        &mut self,
+        browsers: &Browsers,
+        visible: Vec<Entity>,
+        hidden: Vec<Entity>,
+    ) -> Vec<Entity> {
+        let current_windowed: Vec<Entity> = visible.iter().chain(&hidden).copied().collect();
+        self.raised_frame
+            .retain(|entity, _| current_windowed.contains(entity));
+        self.interactivity
+            .retain(|entity, _| current_windowed.contains(entity));
+        let removed: Vec<Entity> = self
+            .last_windowed_pages
+            .iter()
+            .copied()
+            .filter(|entity| !current_windowed.contains(entity))
+            .collect();
+        let newly_windowed: Vec<Entity> = current_windowed
+            .iter()
+            .copied()
+            .filter(|entity| !self.last_windowed_pages.contains(entity))
+            .collect();
+        let ever_shown: Vec<Entity> = self.raised_frame.keys().copied().collect();
+        for entity in
+            Self::pages_to_hide(&hidden, &self.visible_pages, &ever_shown, &newly_windowed)
+        {
+            browsers.set_windowed_hidden(&entity, true);
+        }
+        self.visible_pages = visible;
+        self.last_windowed_pages = current_windowed;
+        self.visible_frames =
+            NativeBridge::set_windowed_page_frames(std::mem::take(&mut self.visible_frames));
+        removed
+    }
+
     fn sync_interactivity(
         &mut self,
         browsers: &Browsers,
@@ -775,12 +805,66 @@ impl FrameSyncMemory {
         browsers.set_windowed_interactive(&entity, interactive);
         self.interactivity.insert(entity, next);
     }
+
+    fn pages_to_hide(
+        hidden: &[Entity],
+        prev_visible: &[Entity],
+        ever_shown: &[Entity],
+        newly_windowed: &[Entity],
+    ) -> Vec<Entity> {
+        hidden
+            .iter()
+            .copied()
+            .filter(|entity| {
+                prev_visible.contains(entity)
+                    || !ever_shown.contains(entity)
+                    || newly_windowed.contains(entity)
+            })
+            .collect()
+    }
+
+    fn hidden_webview_sizing(renderable: bool, under_inactive_tab: bool) -> HiddenWebviewSizing {
+        if renderable {
+            HiddenWebviewSizing::Render
+        } else if under_inactive_tab {
+            HiddenWebviewSizing::HideKeepSize
+        } else {
+            HiddenWebviewSizing::Collapse
+        }
+    }
 }
 
 #[derive(Component, Clone, Copy, PartialEq, Debug, Default)]
 pub(crate) struct FocusRing {
     pub(crate) width: f32,
     pub(crate) rgb: [f32; 3],
+}
+
+impl FocusRing {
+    fn agent_color_for_key(key: &str) -> [f32; 3] {
+        let mut hue = 1469598103934665603_u64;
+        for byte in key.bytes() {
+            hue ^= byte as u64;
+            hue = hue.wrapping_mul(1099511628211);
+        }
+        Self::from_hsl((hue % 360) as f32, 0.85, 0.62)
+    }
+
+    fn from_hsl(hue: f32, saturation: f32, lightness: f32) -> [f32; 3] {
+        let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+        let section = hue / 60.0;
+        let second = chroma * (1.0 - (section % 2.0 - 1.0).abs());
+        let (red, green, blue) = match section as i32 {
+            0 => (chroma, second, 0.0),
+            1 => (second, chroma, 0.0),
+            2 => (0.0, chroma, second),
+            3 => (0.0, second, chroma),
+            4 => (second, 0.0, chroma),
+            _ => (chroma, 0.0, second),
+        };
+        let offset = lightness - chroma / 2.0;
+        [red + offset, green + offset, blue + offset]
+    }
 }
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
@@ -858,23 +942,6 @@ fn windowed_page_frame_rect(
     }
 }
 
-fn windowed_pages_to_hide(
-    hidden: &[Entity],
-    prev_visible: &[Entity],
-    ever_shown: &[Entity],
-    newly_windowed: &[Entity],
-) -> Vec<Entity> {
-    hidden
-        .iter()
-        .copied()
-        .filter(|entity| {
-            prev_visible.contains(entity)
-                || !ever_shown.contains(entity)
-                || newly_windowed.contains(entity)
-        })
-        .collect()
-}
-
 fn windowed_page_all_corners(layout_hidden: bool, visible_pane_count: usize) -> bool {
     layout_hidden || visible_pane_count > 1
 }
@@ -887,77 +954,74 @@ pub(crate) struct CommandBarWindowedFrame {
     pub(crate) height_px: f32,
 }
 
-const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
-fn publish_command_bar_route(owns_input: bool, frame: Option<CommandBarWindowedFrame>, scale: f32) {
-    let mut stored = NATIVE_COMMAND_BAR_ROUTE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let generation = stored.generation.wrapping_add(1);
-    *stored = CommandBarRoute {
-        generation,
-        owns_input,
-        frame,
-        scale,
-    };
-}
-
-fn command_bar_windowed_frame(
-    window_width_px: f32,
-    window_height_px: f32,
-    scale: f32,
-    measured_size: Option<Vec2>,
-    bounds: Option<WindowedFrameRect>,
-) -> Option<CommandBarWindowedFrame> {
-    if !window_width_px.is_finite()
-        || !window_height_px.is_finite()
-        || !scale.is_finite()
-        || window_width_px <= 0.0
-        || window_height_px <= 0.0
-        || scale <= 0.0
-    {
-        return None;
-    }
-
+impl CommandBarWindowedFrame {
+    const NATIVE_RADIUS_PX: f32 = 16.0;
     const MARGIN: f32 = 16.0;
     const MAX_W: f32 = 576.0;
     const MIN_W: f32 = 240.0;
     const MIN_H: f32 = 56.0;
     const FALLBACK_H: f32 = 360.0;
 
-    let window_bounds = WindowedFrameRect {
-        left: 0.0,
-        top: 0.0,
-        width: window_width_px,
-        height: window_height_px,
-    };
-    let bounds = bounds.unwrap_or(window_bounds);
-    let area_left = bounds.left / scale;
-    let area_top = bounds.top / scale;
-    let area_w = bounds.width / scale;
-    let area_h = bounds.height / scale;
-    let top = area_top + area_h * 0.15;
-    let available_w = (area_w - MARGIN * 2.0).max(1.0);
-    let min_w = MIN_W.min(available_w);
-    let box_w = available_w.min(MAX_W).max(min_w);
-    let available_h = (area_top + area_h - top - MARGIN).max(1.0);
-    let min_h = MIN_H.min(available_h);
-    let measured_h = measured_size
-        .map(|size| size.y)
-        .filter(|height| height.is_finite() && *height > 0.0)
-        .unwrap_or(FALLBACK_H);
-    let box_h = measured_h.min(available_h).max(min_h);
-    let box_x = area_left + ((area_w - box_w) * 0.5).max(0.0);
+    fn publish_route(owns_input: bool, frame: Option<Self>, scale: f32) {
+        let mut stored = NATIVE_COMMAND_BAR_ROUTE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let generation = stored.generation.wrapping_add(1);
+        *stored = CommandBarRoute {
+            generation,
+            owns_input,
+            frame,
+            scale,
+        };
+    }
 
-    Some(CommandBarWindowedFrame {
-        left_px: box_x * scale,
-        top_px: top * scale,
-        width_px: box_w * scale,
-        height_px: box_h * scale,
-    })
-}
+    fn compute(
+        window_width_px: f32,
+        window_height_px: f32,
+        scale: f32,
+        measured_size: Option<Vec2>,
+        bounds: Option<WindowedFrameRect>,
+    ) -> Option<Self> {
+        if !window_width_px.is_finite()
+            || !window_height_px.is_finite()
+            || !scale.is_finite()
+            || window_width_px <= 0.0
+            || window_height_px <= 0.0
+            || scale <= 0.0
+        {
+            return None;
+        }
+        let window_bounds = WindowedFrameRect {
+            left: 0.0,
+            top: 0.0,
+            width: window_width_px,
+            height: window_height_px,
+        };
+        let bounds = bounds.unwrap_or(window_bounds);
+        let area_left = bounds.left / scale;
+        let area_top = bounds.top / scale;
+        let area_w = bounds.width / scale;
+        let area_h = bounds.height / scale;
+        let top = area_top + area_h * 0.15;
+        let available_w = (area_w - Self::MARGIN * 2.0).max(1.0);
+        let min_w = Self::MIN_W.min(available_w);
+        let box_w = available_w.min(Self::MAX_W).max(min_w);
+        let available_h = (area_top + area_h - top - Self::MARGIN).max(1.0);
+        let min_h = Self::MIN_H.min(available_h);
+        let measured_h = measured_size
+            .map(|size| size.y)
+            .filter(|height| height.is_finite() && *height > 0.0)
+            .unwrap_or(Self::FALLBACK_H);
+        let box_h = measured_h.min(available_h).max(min_h);
+        let box_x = area_left + ((area_w - box_w) * 0.5).max(0.0);
 
-fn hide_windowed_command_bar(browsers: &Browsers, entity: Entity) {
-    browsers.set_windowed_hidden(&entity, true);
+        Some(Self {
+            left_px: box_x * scale,
+            top_px: top * scale,
+            width_px: box_w * scale,
+            height_px: box_h * scale,
+        })
+    }
 }
 
 fn command_bar_windowed_view_should_render_hidden(
@@ -985,9 +1049,8 @@ fn sync_windowed_command_bar(
     native_size_changed: Query<(), Changed<CommandBarNativeSize>>,
     windows: Query<&Window>,
     focused_window: vmux_layout::window::FocusedWindow,
-    mut was_open: Local<bool>,
+    mut memory: ResMut<FrameSyncMemory>,
 ) {
-    let matched = modal_q.single();
     let Ok((
         entity,
         node,
@@ -997,19 +1060,19 @@ fn sync_windowed_command_bar(
         shown_inline,
         host_window,
         native_size,
-    )) = matched
+    )) = modal_q.single()
     else {
-        publish_command_bar_route(false, None, 1.0);
-        *was_open = false;
+        CommandBarWindowedFrame::publish_route(false, None, 1.0);
+        memory.command_bar_open = false;
         return;
     };
     if shown_inline {
-        publish_command_bar_route(false, None, 1.0);
+        CommandBarWindowedFrame::publish_route(false, None, 1.0);
         if is_windowed {
             browsers.set_windowed_focus(&entity, false);
-            hide_windowed_command_bar(&browsers, entity);
+            browsers.set_windowed_hidden(&entity, true);
         }
-        *was_open = false;
+        memory.command_bar_open = false;
         return;
     }
     let state = OverlayState::resolve(node.display, *visibility, has_keyboard_target, shown_inline);
@@ -1017,61 +1080,80 @@ fn sync_windowed_command_bar(
     let owns_input = state.owns_input();
     let render_hidden = command_bar_windowed_view_should_render_hidden(node.display, *visibility);
     if !open && !render_hidden {
-        publish_command_bar_route(owns_input, None, 1.0);
+        CommandBarWindowedFrame::publish_route(owns_input, None, 1.0);
         if is_windowed {
             browsers.set_windowed_focus(&entity, false);
-            hide_windowed_command_bar(&browsers, entity);
+            browsers.set_windowed_hidden(&entity, true);
         }
-        *was_open = false;
+        memory.command_bar_open = false;
         return;
     }
     if !browsers.has_browser(entity) {
-        publish_command_bar_route(owns_input, None, 1.0);
+        CommandBarWindowedFrame::publish_route(owns_input, None, 1.0);
         return;
     }
     let window_entity = host_window.map(|h| h.0).or(focused_window.entity());
-    let Some(window_entity) = window_entity else {
-        publish_command_bar_route(owns_input, None, 1.0);
+    let Some(window) = window_entity.and_then(|entity| windows.get(entity).ok()) else {
+        CommandBarWindowedFrame::publish_route(owns_input, None, 1.0);
         if is_windowed {
-            hide_windowed_command_bar(&browsers, entity);
-        }
-        return;
-    };
-    let Ok(window) = windows.get(window_entity) else {
-        publish_command_bar_route(owns_input, None, 1.0);
-        if is_windowed {
-            hide_windowed_command_bar(&browsers, entity);
+            browsers.set_windowed_hidden(&entity, true);
         }
         return;
     };
     let scale = window.resolution.scale_factor();
     if !is_windowed {
-        let frame = if open {
-            native_size.map(|size| CommandBarWindowedFrame {
+        let frame = open
+            .then_some(native_size)
+            .flatten()
+            .map(|size| CommandBarWindowedFrame {
                 left_px: size.shell_left * scale,
                 top_px: size.shell_top * scale,
                 width_px: size.shell_width * scale,
                 height_px: size.shell_height * scale,
-            })
-        } else {
-            None
-        };
-        publish_command_bar_route(owns_input, frame, scale);
-        *was_open = open;
+            });
+        CommandBarWindowedFrame::publish_route(owns_input, frame, scale);
+        memory.command_bar_open = open;
         return;
     }
+    sync_windowed_command_bar_view(
+        &browsers,
+        entity,
+        window,
+        scale,
+        owns_input,
+        render_hidden,
+        native_size,
+        native_size_changed.contains(entity),
+        &mut memory.command_bar_open,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sync_windowed_command_bar_view(
+    browsers: &Browsers,
+    entity: Entity,
+    window: &Window,
+    scale: f32,
+    owns_input: bool,
+    render_hidden: bool,
+    native_size: Option<&CommandBarNativeSize>,
+    size_changed: bool,
+    was_open: &mut bool,
+) {
+    let measured = native_size.map(|size| Vec2::new(size.shell_width, size.shell_height));
+    let Some(frame) = CommandBarWindowedFrame::compute(
+        window.resolution.physical_width() as f32,
+        window.resolution.physical_height() as f32,
+        scale,
+        measured,
+        NativeBridge::windowed_page_bounds(),
+    ) else {
+        CommandBarWindowedFrame::publish_route(owns_input, None, scale);
+        browsers.set_windowed_hidden(&entity, true);
+        return;
+    };
     if render_hidden {
-        publish_command_bar_route(owns_input, None, scale);
-        let Some(frame) = command_bar_windowed_frame(
-            window.resolution.physical_width() as f32,
-            window.resolution.physical_height() as f32,
-            scale,
-            native_size.map(|size| Vec2::new(size.shell_width, size.shell_height)),
-            NativeBridge::windowed_page_bounds(),
-        ) else {
-            hide_windowed_command_bar(&browsers, entity);
-            return;
-        };
+        CommandBarWindowedFrame::publish_route(owns_input, None, scale);
         if !owns_input {
             browsers.set_windowed_focus(&entity, false);
         }
@@ -1092,20 +1174,7 @@ fn sync_windowed_command_bar(
         *was_open = false;
         return;
     }
-    let measured = native_size.map(|size| Vec2::new(size.shell_width, size.shell_height));
-    let Some(frame) = command_bar_windowed_frame(
-        window.resolution.physical_width() as f32,
-        window.resolution.physical_height() as f32,
-        scale,
-        measured,
-        NativeBridge::windowed_page_bounds(),
-    ) else {
-        publish_command_bar_route(owns_input, None, scale);
-        hide_windowed_command_bar(&browsers, entity);
-        return;
-    };
-    publish_command_bar_route(owns_input, Some(frame), scale);
-
+    CommandBarWindowedFrame::publish_route(owns_input, Some(frame), scale);
     browsers.set_windowed_frame(
         &entity,
         frame.left_px,
@@ -1119,49 +1188,57 @@ fn sync_windowed_command_bar(
         Vec2::new(frame.width_px / scale, frame.height_px / scale),
         scale,
     );
-    browsers.set_windowed_corner_radius(&entity, COMMAND_BAR_NATIVE_RADIUS_PX * scale, scale, true);
+    browsers.set_windowed_corner_radius(
+        &entity,
+        CommandBarWindowedFrame::NATIVE_RADIUS_PX * scale,
+        scale,
+        true,
+    );
     browsers.set_windowed_hidden(&entity, false);
     browsers.raise_windowed_to_front(&entity);
     browsers.set_windowed_focus(&entity, true);
-    if !*was_open || native_size_changed.contains(entity) {
+    if !*was_open || size_changed {
         browsers.nudge_windowed_repaint(&entity);
         *was_open = true;
     }
 }
 
-#[cfg(target_os = "macos")]
 fn flush_command_bar_pointer(
-    browsers: NonSend<Browsers>,
-    modal_q: Query<Entity, (With<WindowOverlay>, With<WebviewWindowed>, With<CommandBar>)>,
+    #[cfg(target_os = "macos")] browsers: NonSend<Browsers>,
+    #[cfg(target_os = "macos")] modal_q: Query<
+        Entity,
+        (With<WindowOverlay>, With<WebviewWindowed>, With<CommandBar>),
+    >,
 ) {
-    let Ok(entity) = modal_q.single() else {
-        return;
-    };
-    for event in NativeBridge::drain_command_bar_pointer_events() {
-        match event {
-            CommandBarPointerEvent::Move { position, buttons } => {
-                browsers.send_native_mouse_move(&entity, buttons, position, false);
-            }
-            CommandBarPointerEvent::Button {
-                position,
-                button,
-                released,
-            } => {
-                bevy::log::info!(
-                    ?entity,
-                    ?position,
-                    ?button,
+    #[cfg(target_os = "macos")]
+    {
+        let Ok(entity) = modal_q.single() else {
+            return;
+        };
+        for event in NativeBridge::drain_command_bar_pointer_events() {
+            match event {
+                CommandBarPointerEvent::Move { position, buttons } => {
+                    browsers.send_native_mouse_move(&entity, buttons, position, false);
+                }
+                CommandBarPointerEvent::Button {
+                    position,
+                    button,
                     released,
-                    "command bar native pointer forwarded"
-                );
-                browsers.send_mouse_click(&entity, position, button, released);
+                } => {
+                    bevy::log::info!(
+                        ?entity,
+                        ?position,
+                        ?button,
+                        released,
+                        "command bar native pointer forwarded"
+                    );
+                    browsers.send_mouse_click(&entity, position, button, released);
+                }
             }
         }
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn flush_command_bar_pointer() {}
 fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Changed<PageReady>>) {
     for entity in &ready {
         browsers.nudge_windowed_repaint(&entity);
@@ -1198,24 +1275,12 @@ enum HiddenWebviewSizing {
     Collapse,
 }
 
-fn hidden_webview_sizing(renderable: bool, under_inactive_tab: bool) -> HiddenWebviewSizing {
-    if renderable {
-        HiddenWebviewSizing::Render
-    } else if under_inactive_tab {
-        HiddenWebviewSizing::HideKeepSize
-    } else {
-        HiddenWebviewSizing::Collapse
+impl HiddenWebviewSizing {
+    fn is_renderable(size_px: Vec2, visibility: Option<&Visibility>, pending_reveal: bool) -> bool {
+        (pending_reveal || !matches!(visibility, Some(Visibility::Hidden)))
+            && size_px.x > 0.0
+            && size_px.y > 0.0
     }
-}
-
-fn webview_layout_is_renderable(
-    size_px: Vec2,
-    visibility: Option<&Visibility>,
-    pending_reveal: bool,
-) -> bool {
-    (pending_reveal || !matches!(visibility, Some(Visibility::Hidden)))
-        && size_px.x > 0.0
-        && size_px.y > 0.0
 }
 
 #[cfg(test)]
@@ -1341,22 +1406,22 @@ mod tests {
 
     #[test]
     fn hidden_or_collapsed_webviews_do_not_render() {
-        assert!(!webview_layout_is_renderable(
+        assert!(!HiddenWebviewSizing::is_renderable(
             Vec2::ZERO,
             Some(&Visibility::Visible),
             false
         ));
-        assert!(!webview_layout_is_renderable(
+        assert!(!HiddenWebviewSizing::is_renderable(
             Vec2::new(100.0, 0.0),
             Some(&Visibility::Visible),
             false
         ));
-        assert!(!webview_layout_is_renderable(
+        assert!(!HiddenWebviewSizing::is_renderable(
             Vec2::new(100.0, 20.0),
             Some(&Visibility::Hidden),
             false
         ));
-        assert!(webview_layout_is_renderable(
+        assert!(HiddenWebviewSizing::is_renderable(
             Vec2::new(100.0, 20.0),
             Some(&Visibility::Visible),
             false
@@ -1365,7 +1430,7 @@ mod tests {
 
     #[test]
     fn hidden_pending_reveal_webviews_resize_before_reveal() {
-        assert!(webview_layout_is_renderable(
+        assert!(HiddenWebviewSizing::is_renderable(
             Vec2::new(100.0, 20.0),
             Some(&Visibility::Hidden),
             true
@@ -1375,19 +1440,19 @@ mod tests {
     #[test]
     fn inactive_tab_pages_keep_size_other_hidden_pages_collapse() {
         assert_eq!(
-            hidden_webview_sizing(true, false),
+            FrameSyncMemory::hidden_webview_sizing(true, false),
             HiddenWebviewSizing::Render
         );
         assert_eq!(
-            hidden_webview_sizing(true, true),
+            FrameSyncMemory::hidden_webview_sizing(true, true),
             HiddenWebviewSizing::Render
         );
         assert_eq!(
-            hidden_webview_sizing(false, true),
+            FrameSyncMemory::hidden_webview_sizing(false, true),
             HiddenWebviewSizing::HideKeepSize
         );
         assert_eq!(
-            hidden_webview_sizing(false, false),
+            FrameSyncMemory::hidden_webview_sizing(false, false),
             HiddenWebviewSizing::Collapse
         );
     }
@@ -1689,7 +1754,7 @@ mod tests {
         let ever_shown = [just_deactivated, still_inactive];
 
         assert_eq!(
-            windowed_pages_to_hide(&hidden, &prev_visible, &ever_shown, &[]),
+            FrameSyncMemory::pages_to_hide(&hidden, &prev_visible, &ever_shown, &[]),
             vec![just_deactivated, never_shown]
         );
     }
@@ -1699,7 +1764,7 @@ mod tests {
         let page = Entity::from_bits(1);
 
         assert_eq!(
-            windowed_pages_to_hide(&[page], &[], &[page], &[page]),
+            FrameSyncMemory::pages_to_hide(&[page], &[], &[page], &[page]),
             vec![page]
         );
     }
@@ -1791,9 +1856,14 @@ mod tests {
 
     #[test]
     fn command_bar_windowed_frame_uses_measured_height() {
-        let frame =
-            command_bar_windowed_frame(1600.0, 1000.0, 2.0, Some(Vec2::new(500.0, 220.0)), None)
-                .unwrap();
+        let frame = CommandBarWindowedFrame::compute(
+            1600.0,
+            1000.0,
+            2.0,
+            Some(Vec2::new(500.0, 220.0)),
+            None,
+        )
+        .unwrap();
 
         assert!((frame.left_px - 224.0).abs() < 0.01);
         assert!((frame.top_px - 150.0).abs() < 0.01);
@@ -1803,9 +1873,14 @@ mod tests {
 
     #[test]
     fn command_bar_windowed_frame_clamps_height_to_window() {
-        let frame =
-            command_bar_windowed_frame(800.0, 500.0, 1.0, Some(Vec2::new(500.0, 1000.0)), None)
-                .unwrap();
+        let frame = CommandBarWindowedFrame::compute(
+            800.0,
+            500.0,
+            1.0,
+            Some(Vec2::new(500.0, 1000.0)),
+            None,
+        )
+        .unwrap();
 
         assert!((frame.top_px - 75.0).abs() < 0.01);
         assert!((frame.height_px - 409.0).abs() < 0.01);
@@ -1813,7 +1888,7 @@ mod tests {
 
     #[test]
     fn command_bar_windowed_frame_centers_in_page_workspace() {
-        let frame = command_bar_windowed_frame(
+        let frame = CommandBarWindowedFrame::compute(
             1600.0,
             1000.0,
             2.0,
@@ -1843,12 +1918,12 @@ mod tests {
         };
 
         let before = CommandBarRoute::current().generation;
-        publish_command_bar_route(true, Some(frame), 2.0);
+        CommandBarWindowedFrame::publish_route(true, Some(frame), 2.0);
         let published = CommandBarRoute::current();
         assert_eq!(published.generation, before.wrapping_add(1));
         assert_eq!(published.scale, 2.0);
 
-        publish_command_bar_route(false, Some(frame), 1.0);
+        CommandBarWindowedFrame::publish_route(false, Some(frame), 1.0);
         assert!(!CommandBarRoute::current().owns_input);
     }
 
