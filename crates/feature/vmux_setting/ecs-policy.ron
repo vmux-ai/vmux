@@ -2,11 +2,8 @@
 legacy: [
 ],
 boundaries: [
-    (key: "crates/feature/vmux_setting/src/host/runtime.rs||fn:project_bookmark_defaults", fingerprint: "fd49732ade9e44c4", interface: "settings-file ingress into canonical global bookmark defaults", input: "external: loaded settings configuration", output: "ECS: crates/feature/vmux_setting/src/host/runtime.rs||struct:BookmarkDefaults", lifetime: "one settings load or changed settings generation", bounds: "only bookmark URLs and folder defaults are materialized; project registries remain outside this consumer", teardown: "the next settings generation replaces the projection; watchers retain their existing teardown", architecture: "ECS ownership boundaries"),
-    (key: "crates/feature/vmux_setting/src/host/runtime.rs||fn:load_settings", fingerprint: "7bf629b664558537", interface: "settings-file ingress into canonical global bookmark defaults", input: "external: loaded settings configuration", output: "ECS: crates/feature/vmux_setting/src/host/runtime.rs||struct:BookmarkDefaults", lifetime: "one settings load or changed settings generation", bounds: "only bookmark URLs and folder defaults are materialized; project registries remain outside this consumer", teardown: "the next settings generation replaces the projection; watchers retain their existing teardown", architecture: "ECS ownership boundaries"),
 ],
 values: [
-    (key: "crates/feature/vmux_setting/src/host/runtime.rs||struct:AppearanceSettings", owner: "crates/feature/vmux_setting/src/host/runtime.rs||struct:AppSettings", lifetime: "Nested declared configuration value of the owning Settings resource or feature manifest; loaded, normalized and replaced by the registered settings systems, distinct from canonical Project/Space entities"),
     (key: "crates/feature/vmux_setting/src/host/runtime.rs||struct:StartupDir", owner: "crates/feature/vmux_setting/src/host/runtime.rs||struct:AppSettings", lifetime: "Resolved working directory value returned by AppSettings startup_dir and workspace_dir queries"),
     (key: "crates/feature/vmux_setting/src/schema.rs||struct:SettingsPath", owner: "crates/feature/vmux_setting/src/schema.rs||struct:SettingsSchema", lifetime: "Normalized pattern-matching wrapper used by SettingsSchema::field lookups."),
 ],
