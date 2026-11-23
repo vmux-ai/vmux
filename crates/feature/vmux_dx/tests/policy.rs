@@ -8940,7 +8940,7 @@ impl BodyShape {
             production: !Usage::test_only(attributes)
                 && !Declarations::metadata(attributes, false)
                     .iter()
-                    .any(|meta| meta.path().is_ident("test")),
+                    .any(Declarations::is_test_attribute),
         }
     }
 
@@ -9150,6 +9150,38 @@ impl Footprint {
         self.test_spans
             .push(((start.line, start.column), (end.line, end.column)));
     }
+
+    fn is_builder_chain(mut expr: &syn::Expr) -> bool {
+        loop {
+            match expr {
+                syn::Expr::MethodCall(call) => {
+                    let valid_args = call.args.is_empty()
+                        || (call.args.len() == 1
+                            && matches!(
+                                &call.args[0],
+                                syn::Expr::Lit(syn::ExprLit {
+                                    lit: syn::Lit::Bool(_),
+                                    ..
+                                })
+                            ));
+                    if !valid_args {
+                        return false;
+                    }
+                    expr = &call.receiver;
+                }
+                syn::Expr::Call(call) => {
+                    let syn::Expr::Path(value) = call.func.as_ref() else {
+                        return false;
+                    };
+                    return value.qself.is_none()
+                        && call.args.is_empty()
+                        && value.path.segments.len() >= 2
+                        && value.path.segments.last().unwrap().ident == "builder";
+                }
+                _ => return false,
+            }
+        }
+    }
 }
 
 impl<'ast> Visit<'ast> for Footprint {
@@ -9209,6 +9241,10 @@ impl<'ast> Visit<'ast> for Footprint {
 
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
         let method = call.method.to_string();
+        if method == "build" && call.args.is_empty() && Self::is_builder_chain(&call.receiver) {
+            self.factories.insert(call.to_token_stream().to_string());
+            return;
+        }
         if matches!(method.as_str(), "plugin" | "hosted") {
             self.factories.insert(call.to_token_stream().to_string());
         } else if !matches!(
@@ -9939,6 +9975,8 @@ struct Inventory {
     compiler_helpers: RefCell<Option<BTreeSet<String>>>,
     ecs_commands: RefCell<Option<BTreeSet<String>>>,
     serde_dtos: RefCell<Option<BTreeSet<String>>>,
+    error_types: RefCell<Option<BTreeSet<String>>>,
+    stateless_adapters: RefCell<Option<BTreeSet<String>>>,
     enum_owner_candidates: RefCell<Option<BTreeMap<String, Vec<String>>>>,
     owned_values: RefCell<Option<BTreeSet<String>>>,
     test_fixtures: RefCell<Option<BTreeSet<String>>>,
@@ -11114,6 +11152,8 @@ impl Inventory {
         *self.compiler_helpers.get_mut() = None;
         *self.ecs_commands.get_mut() = None;
         *self.serde_dtos.get_mut() = None;
+        *self.error_types.get_mut() = None;
+        *self.stateless_adapters.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -11857,6 +11897,8 @@ impl Inventory {
         *self.compiler_helpers.get_mut() = None;
         *self.ecs_commands.get_mut() = None;
         *self.serde_dtos.get_mut() = None;
+        *self.error_types.get_mut() = None;
+        *self.stateless_adapters.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -11928,6 +11970,8 @@ impl Inventory {
         *self.compiler_helpers.get_mut() = None;
         *self.ecs_commands.get_mut() = None;
         *self.serde_dtos.get_mut() = None;
+        *self.error_types.get_mut() = None;
+        *self.stateless_adapters.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -12407,6 +12451,401 @@ impl Inventory {
             || self.automatic_contract_conversion(entry)
             || self.automatic_inventory_macro(entry)
             || self.automatic_pre_world_boundary(entry)
+            || self.automatic_binary_entrypoint(entry)
+            || self.automatic_error_type(entry)
+            || self.automatic_stateless_adapter(entry)
+    }
+
+    fn automatic_binary_entrypoint(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || !matches!(entry.kind, Kind::Function)
+            || entry.name != "main"
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.ecs
+            || entry.projection
+        {
+            return false;
+        }
+        let path = entry.path.as_str();
+        (path.starts_with("crates/app/") && path.ends_with("/src/main.rs"))
+            || path.starts_with("crates/util/vmux_app/src/bin/")
+            || matches!(
+                path,
+                "crates/util/vmux_vm/src/main.rs" | "crates/feature/vmux_dx/src/ci_main.rs"
+            )
+    }
+
+    fn automatic_error_type(&self, entry: &Declaration) -> bool {
+        if !entry.production {
+            return false;
+        }
+        self.ensure_error_types();
+        self.error_types
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn is_error_candidate(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || !matches!(entry.kind, Kind::Struct | Kind::Enum)
+            || entry.ecs
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.projection
+            || entry.bundle_derive.is_some()
+            || entry.query_derive.is_some()
+            || self.has_bevy_runtime_access(entry)
+            || self.renderer_helper_forbidden_field(entry)
+        {
+            return false;
+        }
+        if matches!(entry.kind, Kind::Enum)
+            && (entry
+                .enum_shape
+                .as_ref()
+                .is_some_and(|shape| shape.component || shape.signal)
+                || self.enum_job(entry))
+        {
+            return false;
+        }
+        let derives_thiserror = entry.derive_paths.iter().any(|path| {
+            self.external_path(&entry.namespace, path, &mut BTreeSet::new())
+                .as_deref()
+                == Some("thiserror::Error")
+        });
+        let impls_std_error = self
+            .implementations(entry)
+            .into_iter()
+            .any(|implementation| {
+                implementation.production
+                    && implementation
+                        .implemented_trait
+                        .as_deref()
+                        .is_some_and(|tr| {
+                            matches!(
+                                self.external_path(
+                                    &implementation.namespace,
+                                    tr,
+                                    &mut BTreeSet::new()
+                                )
+                                .as_deref(),
+                                Some("std::error::Error" | "core::error::Error")
+                            )
+                        })
+            });
+        (derives_thiserror || impls_std_error) && self.renderer_impls_clean(entry)
+    }
+
+    #[inline(never)]
+    fn ensure_error_types(&self) {
+        if self.error_types.borrow().is_some() {
+            return;
+        }
+        let mut candidates = BTreeSet::new();
+        let mut candidate_names = BTreeSet::new();
+        for entry in self.entries.values() {
+            if self.is_error_candidate(entry) {
+                candidates.insert(entry.key.clone());
+                candidate_names.insert(entry.name.as_str());
+            }
+        }
+        let mut proved = BTreeSet::new();
+        let mut queue = Vec::new();
+        if !candidates.is_empty() {
+            self.ensure_job_adapters();
+            self.ensure_serde_dtos();
+            self.ensure_ecs_commands();
+            self.ensure_renderer_graph();
+            self.ensure_stateless_adapters();
+            let jobs = self.job_adapters.borrow();
+            let dtos = self.serde_dtos.borrow();
+            let cmds = self.ecs_commands.borrow();
+            let renderers = self.renderer_graph.borrow();
+            let adapters = self.stateless_adapters.borrow();
+            for owner in self.entries.values() {
+                if !owner.production || owner.local || owner.dynamic || owner.opaque {
+                    continue;
+                }
+                let valid_root =
+                    (owner.ecs || owner.bundle_derive.is_some() || owner.query_derive.is_some())
+                        && self.used(owner)
+                        || matches!(owner.kind, Kind::Function) && self.registered(owner)
+                        || jobs.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || dtos.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || cmds.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || renderers.as_ref().is_some_and(|(roots, helpers)| {
+                            roots.contains(&owner.key) || helpers.contains(&owner.key)
+                        })
+                        || adapters
+                            .as_ref()
+                            .is_some_and(|keys| keys.contains(&owner.key));
+                if !valid_root {
+                    continue;
+                }
+                let mut sources = vec![owner];
+                if matches!(owner.kind, Kind::Struct | Kind::Enum) {
+                    for implementation in self.implementations(owner) {
+                        if implementation.production {
+                            sources.push(implementation);
+                        }
+                    }
+                }
+                for source in sources {
+                    for path in source
+                        .field_paths
+                        .iter()
+                        .chain(source.reference_paths.iter())
+                    {
+                        if !path
+                            .split("::")
+                            .any(|segment| candidate_names.contains(segment))
+                        {
+                            continue;
+                        }
+                        let Some(target) = self.resolve_path_or_prefix(&source.namespace, path)
+                        else {
+                            continue;
+                        };
+                        if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
+                            queue.push(target.key.clone());
+                        }
+                    }
+                }
+            }
+            drop(jobs);
+            drop(dtos);
+            drop(cmds);
+            drop(renderers);
+            drop(adapters);
+            while let Some(owner_key) = queue.pop() {
+                let owner = &self.entries[&owner_key];
+                let mut sources = vec![owner];
+                for implementation in self.implementations(owner) {
+                    if implementation.production {
+                        sources.push(implementation);
+                    }
+                }
+                for source in sources {
+                    for path in source
+                        .field_paths
+                        .iter()
+                        .chain(source.reference_paths.iter())
+                    {
+                        if !path
+                            .split("::")
+                            .any(|segment| candidate_names.contains(segment))
+                        {
+                            continue;
+                        }
+                        let Some(target) = self.resolve_path_or_prefix(&source.namespace, path)
+                        else {
+                            continue;
+                        };
+                        if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
+                            queue.push(target.key.clone());
+                        }
+                    }
+                }
+            }
+            let mut finalized = proved.clone();
+            for key in &proved {
+                let entry = &self.entries[key];
+                for implementation in self.implementations(entry) {
+                    if implementation.production
+                        && !implementation.local
+                        && !implementation.dynamic
+                        && !implementation.opaque
+                        && !self.has_bevy_runtime_access(implementation)
+                    {
+                        finalized.insert(implementation.key.clone());
+                    }
+                }
+            }
+            proved = finalized;
+        }
+        *self.error_types.borrow_mut() = Some(proved);
+    }
+
+    fn automatic_stateless_adapter(&self, entry: &Declaration) -> bool {
+        if !entry.production {
+            return false;
+        }
+        self.ensure_stateless_adapters();
+        self.stateless_adapters
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn stateless_adapter_candidate(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || !matches!(entry.kind, Kind::Struct)
+            || entry.has_fields
+            || !entry.field_types.is_empty()
+            || entry.ecs
+            || entry.plugin
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.projection
+            || entry.bundle_derive.is_some()
+            || entry.query_derive.is_some()
+            || self.has_bevy_runtime_access(entry)
+            || self.manifest_source(entry)
+            || self.typed_page(entry)
+            || self.host_page_marker(entry)
+            || self.store_schema(entry)
+        {
+            return false;
+        }
+        let impls = self.implementations(entry);
+        let mut has_inherent = false;
+        for implementation in impls {
+            if !implementation.production {
+                continue;
+            }
+            if implementation.plugin
+                || implementation.local
+                || implementation.dynamic
+                || implementation.opaque
+                || self.has_bevy_runtime_access(implementation)
+            {
+                return false;
+            }
+            if let Some(tr) = implementation.implemented_trait.as_deref() {
+                let tail = tr.rsplit("::").next().unwrap_or(tr);
+                if matches!(
+                    tail,
+                    "Plugin" | "FeatureManifestSource" | "LateLintPass" | "Job" | "Command"
+                ) {
+                    return false;
+                }
+            } else {
+                has_inherent = true;
+            }
+        }
+        has_inherent
+    }
+
+    #[inline(never)]
+    fn ensure_stateless_adapters(&self) {
+        if self.stateless_adapters.borrow().is_some() {
+            return;
+        }
+        let mut candidates = BTreeSet::new();
+        let mut candidate_names = BTreeSet::new();
+        for entry in self.entries.values() {
+            if self.stateless_adapter_candidate(entry) {
+                candidates.insert(entry.key.clone());
+                candidate_names.insert(entry.name.as_str());
+            }
+        }
+        let mut proved = BTreeSet::new();
+        let mut queue = Vec::new();
+        if !candidates.is_empty() {
+            self.ensure_job_adapters();
+            self.ensure_renderer_graph();
+            self.ensure_ecs_commands();
+            self.ensure_serde_dtos();
+            let jobs = self.job_adapters.borrow();
+            let renderers = self.renderer_graph.borrow();
+            let cmds = self.ecs_commands.borrow();
+            let dtos = self.serde_dtos.borrow();
+            for owner in self.entries.values() {
+                if !owner.production || owner.local || owner.dynamic || owner.opaque {
+                    continue;
+                }
+                let valid_root =
+                    (owner.ecs || owner.bundle_derive.is_some() || owner.query_derive.is_some())
+                        && self.used(owner)
+                        || matches!(owner.kind, Kind::Function) && self.registered(owner)
+                        || jobs.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || renderers.as_ref().is_some_and(|(roots, helpers)| {
+                            roots.contains(&owner.key) || helpers.contains(&owner.key)
+                        })
+                        || cmds.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || dtos.as_ref().is_some_and(|keys| keys.contains(&owner.key));
+                if !valid_root {
+                    continue;
+                }
+                let mut sources = vec![owner];
+                if matches!(owner.kind, Kind::Struct | Kind::Enum) {
+                    for implementation in self.implementations(owner) {
+                        if implementation.production {
+                            sources.push(implementation);
+                        }
+                    }
+                }
+                for source in sources {
+                    for path in source
+                        .field_paths
+                        .iter()
+                        .chain(source.reference_paths.iter())
+                    {
+                        if !path
+                            .split("::")
+                            .any(|segment| candidate_names.contains(segment))
+                        {
+                            continue;
+                        }
+                        let Some(target) = self.resolve_path_or_prefix(&source.namespace, path)
+                        else {
+                            continue;
+                        };
+                        if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
+                            queue.push(target.key.clone());
+                        }
+                    }
+                }
+            }
+            drop(jobs);
+            drop(renderers);
+            drop(cmds);
+            drop(dtos);
+            while let Some(owner_key) = queue.pop() {
+                let owner = &self.entries[&owner_key];
+                for implementation in self.implementations(owner) {
+                    if !implementation.production {
+                        continue;
+                    }
+                    for path in implementation
+                        .field_paths
+                        .iter()
+                        .chain(implementation.reference_paths.iter())
+                    {
+                        if !path
+                            .split("::")
+                            .any(|segment| candidate_names.contains(segment))
+                        {
+                            continue;
+                        }
+                        let Some(target) =
+                            self.resolve_path_or_prefix(&implementation.namespace, path)
+                        else {
+                            continue;
+                        };
+                        if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
+                            queue.push(target.key.clone());
+                        }
+                    }
+                }
+            }
+            let mut finalized = proved.clone();
+            for key in &proved {
+                let entry = &self.entries[key];
+                for implementation in self.implementations(entry) {
+                    if implementation.production {
+                        finalized.insert(implementation.key.clone());
+                    }
+                }
+            }
+            proved = finalized;
+        }
+        *self.stateless_adapters.borrow_mut() = Some(proved);
     }
 
     #[inline(never)]
@@ -13041,6 +13480,7 @@ impl Inventory {
             path,
             "crates/feature/vmux_dx/tests/policy.rs"
                 | "crates/feature/vmux_dx/tests/conventions.rs"
+                | "crates/feature/vmux_dx/src/compiler_inputs.rs"
         ) {
             return true;
         }
@@ -13133,7 +13573,8 @@ impl Inventory {
                 let valid_owner =
                     (entry.ecs || entry.bundle_derive.is_some() || entry.query_derive.is_some())
                         && self.used(entry)
-                        || matches!(entry.kind, Kind::Function) && self.registered(entry);
+                        || matches!(entry.kind, Kind::Function) && self.registered(entry)
+                        || self.automatic_boundary(entry);
                 if !valid_owner {
                     continue;
                 }
@@ -13794,6 +14235,9 @@ impl Inventory {
             }
         }
         if self.automatic_serde_dto(entry) && !shape.component && !self.enum_job(entry) {
+            return true;
+        }
+        if self.automatic_error_type(entry) && !shape.component && !self.enum_job(entry) {
             return true;
         }
         if self.real_routable_enum(entry) {
@@ -17667,6 +18111,8 @@ impl Inventory {
         *self.compiler_helpers.get_mut() = None;
         *self.ecs_commands.get_mut() = None;
         *self.serde_dtos.get_mut() = None;
+        *self.error_types.get_mut() = None;
+        *self.stateless_adapters.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -19214,6 +19660,19 @@ impl Imports {
 }
 
 impl Declarations<'_> {
+    fn is_test_attribute(meta: &syn::Meta) -> bool {
+        let path = meta.path();
+        if path.is_ident("test") {
+            return true;
+        }
+        let segments: Vec<_> = path
+            .segments
+            .iter()
+            .map(|segment| segment.ident.unraw().to_string())
+            .collect();
+        matches!(segments.as_slice(), [first, second] if first == "tokio" && second == "test")
+    }
+
     fn metadata(attributes: &[Attribute], possible: bool) -> Vec<syn::Meta> {
         let mut pending = Vec::new();
         for attribute in attributes {
@@ -19369,7 +19828,7 @@ impl Declarations<'_> {
         let mut contract_paths = BTreeSet::new();
         let test = Self::metadata(attrs, false)
             .iter()
-            .any(|attr| attr.path().is_ident("test"));
+            .any(Self::is_test_attribute);
         for attr in Self::metadata(attrs, true) {
             let mut attribute = Vec::new();
             for segment in &attr.path().segments {
@@ -23026,6 +23485,49 @@ fn patch_pre_world_and_required_relationship_targets_prove_safely() {
         assert!(
             !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
             "expected rejected entry: {key}"
+        );
+    }
+}
+
+#[test]
+fn wave4_error_types_stateless_adapters_tokio_tests_and_entrypoints_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/app/vmux_cli/src/main.rs",
+        "fn main() {} fn unowned_helper() {}",
+    );
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use thiserror::Error; #[derive(Debug, Error)] enum ParseError { #[error(\"bad\")] Bad(String) } #[derive(Debug, Error)] enum DeadError { #[error(\"dead\")] Dead } struct UrlCodec; impl UrlCodec { fn parse(_: &str) -> Result<u32, ParseError> { Ok(1) } } struct DeadCodec; impl DeadCodec { fn parse() {} } const MAX_LEN: usize = 64; struct StatePlugin; #[derive(Component)] struct State(u32); fn run(states: Query<&State>) { let _ = (states, UrlCodec::parse(\"x\"), MAX_LEN); } impl Plugin for StatePlugin { fn build(&self, app: &mut App) { app.add_systems(Update, run); } } #[cfg(test)] mod tests { struct AsyncHarness(u32); #[tokio::test] async fn checks_async() { let _ = AsyncHarness(1); } }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/app/vmux_cli/src/main.rs||fn:main",
+        "crates/feature/demo/src/lib.rs||enum:ParseError",
+        "crates/feature/demo/src/lib.rs||struct:UrlCodec",
+        "crates/feature/demo/src/lib.rs||impl:UrlCodec",
+        "crates/feature/demo/src/lib.rs||const:MAX_LEN",
+        "crates/feature/demo/src/lib.rs|tests|fn:checks_async",
+        "crates/feature/demo/src/lib.rs|tests|struct:AsyncHarness",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved Wave 4 entry: {key}"
+        );
+    }
+    assert!(inventory.automatic_enum_purpose(
+        &inventory.entries["crates/feature/demo/src/lib.rs||enum:ParseError"],
+        &policy
+    ));
+    for key in [
+        "crates/app/vmux_cli/src/main.rs||fn:unowned_helper",
+        "crates/feature/demo/src/lib.rs||enum:DeadError",
+        "crates/feature/demo/src/lib.rs||struct:DeadCodec",
+    ] {
+        assert!(
+            !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected rejected Wave 4 entry: {key}"
         );
     }
 }
