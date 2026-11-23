@@ -21,7 +21,7 @@ use crate::execution::Failure;
 use crate::product::ProductMetadata;
 use crate::repository::Checkout;
 use crate::signals::Signals;
-use crate::work::Outcome;
+use crate::steps::{ProducedArtifacts, ResolvedExecutable, ResolvedIdentity};
 use crate::{Completion, Settings};
 
 pub struct DebugPlugin;
@@ -549,7 +549,7 @@ impl IoWriter<'_, '_> {
 struct Submitted;
 
 #[derive(Component)]
-pub(crate) struct Complete(pub Outcome);
+pub(crate) struct Complete;
 
 #[derive(Component)]
 struct Sent;
@@ -1137,7 +1137,7 @@ fn acquire(
         match *phase {
             AcquirePhase::Start => {
                 if request.inherit && inheritance.matches(checkout) {
-                    io.commands.entity(entity).insert(Complete(Outcome::Done));
+                    io.commands.entity(entity).insert(Complete);
                     continue;
                 }
                 io.request(
@@ -1170,7 +1170,7 @@ fn acquire(
                 }
             }
             AcquirePhase::Done => {
-                io.commands.entity(entity).insert(Complete(Outcome::Done));
+                io.commands.entity(entity).insert(Complete);
             }
         }
         if *phase != previous {
@@ -1229,7 +1229,7 @@ fn tool(mut requests: Tools, facts: Facts, mut io: IoWriter, wake: Res<JobWake>)
             }
             ToolPhase::Done => {
                 if !facts.pending(entity) {
-                    io.commands.entity(entity).insert(Complete(Outcome::Done));
+                    io.commands.entity(entity).insert(Complete);
                 }
             }
         }
@@ -1371,7 +1371,7 @@ fn identity_start(mut requests: IdentityRequests, facts: Facts, mut io: IoWriter
             }
             io.commands
                 .entity(entity)
-                .insert(Complete(Outcome::Identity(identity)));
+                .insert((Complete, ResolvedIdentity(identity)));
             continue;
         }
         let identity = environment
@@ -1495,7 +1495,7 @@ fn identity_lookup(
             }
             io.commands
                 .entity(entity)
-                .insert(Complete(Outcome::Identity(identity.0.clone())));
+                .insert((Complete, ResolvedIdentity(identity.0.clone())));
             continue;
         }
         io.request(
@@ -1771,7 +1771,7 @@ fn identity_confirm(
         }
         io.commands
             .entity(entity)
-            .insert(Complete(Outcome::Identity(identity.0.clone())));
+            .insert((Complete, ResolvedIdentity(identity.0.clone())));
     }
 }
 
@@ -1857,7 +1857,7 @@ fn capacity(
                 };
                 match free {
                     Some(free) if free >= *minimum => {
-                        io.commands.entity(entity).insert(Complete(Outcome::Done));
+                        io.commands.entity(entity).insert(Complete);
                     }
                     Some(_) => {
                         io.commands.entity(entity).insert(Failed(Failure::message(format!(
@@ -1962,7 +1962,7 @@ fn clear(mut requests: ClearRequests, facts: Facts, mut io: IoWriter) {
                 *phase = ClearPhase::Finish;
             }
             ClearPhase::Finish => {
-                io.commands.entity(entity).insert(Complete(Outcome::Done));
+                io.commands.entity(entity).insert(Complete);
             }
         }
     }
@@ -2062,7 +2062,7 @@ fn sign(
                 pending |= complete.is_none();
             }
             if !pending {
-                commands.entity(entity).insert(Complete(Outcome::Done));
+                commands.entity(entity).insert(Complete);
             }
         }
     }
@@ -2683,7 +2683,7 @@ fn bundle_wait(
             continue;
         }
         if *phase == BundlePhase::Wait {
-            io.commands.entity(entity).insert(Complete(Outcome::Done));
+            io.commands.entity(entity).insert(Complete);
             continue;
         }
         io.request(
@@ -3003,7 +3003,7 @@ fn publish_done(mut requests: PublishRequests, facts: Facts, wake: Res<JobWake>,
         };
         io.commands
             .entity(entity)
-            .insert(Complete(Outcome::Artifacts(vec![path])));
+            .insert((Complete, ProducedArtifacts(vec![path])));
 
         if *phase != previous_phase {
             wake.0.wake_by_ref();
@@ -3098,7 +3098,7 @@ fn finish_run(mut requests: RunRequests, facts: Facts, mut io: IoWriter) {
         if *phase != RunPhase::Done || facts.pending(entity) {
             continue;
         }
-        io.commands.entity(entity).insert(Complete(Outcome::Done));
+        io.commands.entity(entity).insert(Complete);
     }
 }
 
@@ -3763,7 +3763,7 @@ fn stop(mut requests: StopRequests, facts: Facts, wake: Res<JobWake>, mut io: Io
                 *phase = StopPhase::Done;
             }
             StopPhase::Done => {
-                io.commands.entity(entity).insert(Complete(Outcome::Done));
+                io.commands.entity(entity).insert(Complete);
             }
         }
 
@@ -4159,7 +4159,7 @@ fn signature_cache(
         if actual == format!("{}\n{checksum}\n", spec.expected.get(entity).unwrap().0)
             && output.status.success()
         {
-            io.commands.entity(entity).insert(Complete(Outcome::Done));
+            io.commands.entity(entity).insert(Complete);
             continue;
         }
         *phase = SignaturePhase::Prepare;
@@ -4551,7 +4551,7 @@ fn signature_done(
             }
         };
 
-        io.commands.entity(entity).insert(Complete(Outcome::Done));
+        io.commands.entity(entity).insert(Complete);
 
         if *phase != previous_phase {
             wake.0.wake_by_ref();
@@ -4838,7 +4838,7 @@ fn compile(mut requests: CompileRequests, facts: Facts, wake: Res<JobWake>, mut 
             );
             *phase = CompilePhase::Done;
         } else {
-            io.commands.entity(entity).insert(Complete(Outcome::Done));
+            io.commands.entity(entity).insert(Complete);
         }
 
         if *phase != previous_phase {
@@ -4927,7 +4927,7 @@ fn snapshot(mut requests: SnapshotRequests, facts: Facts, wake: Res<JobWake>, mu
                 );
                 io.commands
                     .entity(entity)
-                    .insert(Complete(Outcome::Executable(executable)));
+                    .insert((Complete, ResolvedExecutable(executable)));
             }
         }
 
@@ -4970,7 +4970,7 @@ fn invoke(mut requests: InvokeRequests, facts: Facts, wake: Res<JobWake>, mut io
             );
             *phase = InvokePhase::Done;
         } else {
-            io.commands.entity(entity).insert(Complete(Outcome::Done));
+            io.commands.entity(entity).insert(Complete);
         }
 
         if *phase != previous_phase {
@@ -5246,7 +5246,7 @@ fn finish(
             .is_ok_and(|parent| parent.parent() == captured.root);
         let result = match failed {
             Some(failed) => Err(failed.0.clone()),
-            None if current => Ok(complete.unwrap().0.clone()),
+            None if current => Ok(()),
             None => Err(Failure::message("Development step ownership changed")),
         };
         completions.write(Completion {

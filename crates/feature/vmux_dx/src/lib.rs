@@ -25,11 +25,18 @@ use execution::Failure;
 #[cfg(feature = "development")]
 use repository::Checkout;
 #[cfg(feature = "development")]
+use steps::{
+    BinaryenStep, CliCompileStep, CliPackageStep, ConfiguredToolPath, ConsumerStep, CssStep,
+    DesktopPackageStep, DioxusStep, DoctorStep, FlattenWebStep, HelperStep, InternalStep,
+    NativeInputsStep, NativeToolsStep, PackageToolsStep, ProducedArtifacts, ReleaseIosStep,
+    ResetLayoutStep, ResolvedExecutable, ResolvedIdentity, ResourcesIosStep, ScopeStep, SeedStep,
+    SimulatorStep, StorageCheckStep, StorageCleanStep, StorageFinishStep, StoragePreflightStep,
+    StorageStatusStep, TailwindStep, VerifyIosStep,
+};
+#[cfg(feature = "development")]
 use storage::Storage;
 #[cfg(feature = "development")]
 use target_lock::TargetLock;
-#[cfg(feature = "development")]
-use work::{Outcome, Work};
 
 #[cfg(feature = "development")]
 mod cargo;
@@ -91,6 +98,8 @@ mod signals;
 #[cfg(feature = "development")]
 mod source;
 #[cfg(feature = "development")]
+mod steps;
+#[cfg(feature = "development")]
 mod storage;
 #[cfg(feature = "development")]
 mod storage_io;
@@ -109,12 +118,6 @@ mod tooling_io;
 mod update_io;
 #[cfg(feature = "development")]
 pub mod updates;
-#[expect(
-    dead_code,
-    reason = "VMX-253 retains the exact legacy schema until follow-up removal"
-)]
-#[cfg(feature = "development")]
-mod work;
 #[cfg(feature = "development")]
 mod workspace;
 #[cfg(feature = "development")]
@@ -132,11 +135,81 @@ enum Stage {
     Execute,
 }
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg(feature = "development")]
+enum ExecutionSet {
+    Dispatch,
+    RunNative,
+    Finish,
+}
+
+#[cfg(feature = "development")]
+struct NativeStepsPlugin;
+
+#[cfg(feature = "development")]
+impl bevy_app::Plugin for NativeStepsPlugin {
+    fn build(&self, app: &mut App) {
+        app.configure_sets(
+            Update,
+            (
+                ExecutionSet::Dispatch,
+                ExecutionSet::RunNative,
+                ExecutionSet::Finish,
+            )
+                .chain()
+                .in_set(Stage::Execute),
+        )
+        .add_systems(
+            Update,
+            (
+                (
+                    dispatch_storage_check,
+                    dispatch_storage_preflight,
+                    dispatch_storage_finish,
+                    dispatch_storage_status,
+                    dispatch_storage_clean,
+                    dispatch_desktop_package,
+                    dispatch_cli_compile,
+                    dispatch_cli_package,
+                    dispatch_reset_layout,
+                    dispatch_internal_package,
+                )
+                    .chain()
+                    .in_set(ExecutionSet::Dispatch),
+                (
+                    (
+                        run_seed,
+                        run_native_tools,
+                        run_helper,
+                        run_package_tools,
+                        run_dioxus,
+                        run_binaryen,
+                        run_tailwind,
+                        run_resources_ios,
+                        run_release_ios,
+                    ),
+                    (
+                        run_verify_ios,
+                        run_css,
+                        run_flatten_web,
+                        run_simulator,
+                        run_doctor,
+                        run_ci_scope,
+                        run_ci_native,
+                        run_sdk_consumer,
+                        run_internal,
+                    ),
+                )
+                    .in_set(ExecutionSet::RunNative),
+            ),
+        );
+    }
+}
+
 #[cfg(feature = "development")]
 impl bevy_app::Plugin for DxPlugin {
     fn build(&self, app: &mut App) {
         Self::runtime(app);
-        app.register_required_components::<Work, Step>();
         app.add_plugins((
             FeaturePlugin::<Feature>::default(),
             CiPlugin,
@@ -151,6 +224,7 @@ impl bevy_app::Plugin for DxPlugin {
             package::PackagePlugin,
             reset::ResetPlugin,
             tooling::ToolingPlugin,
+            NativeStepsPlugin,
         ))
         .configure_sets(
             Update,
@@ -207,6 +281,7 @@ impl bevy_app::Plugin for DxPlugin {
                         plan_ci_native,
                         plan_checks,
                         plan_sdk,
+                        plan_cli_release,
                         plan_internal,
                     )
                         .chain(),
@@ -218,13 +293,12 @@ impl bevy_app::Plugin for DxPlugin {
                 (collect, apply).chain(),
                 retire,
                 start,
-                (dispatch_storage, dispatch).chain(),
-                native,
-                finish,
             )
                 .chain()
+                .before(ExecutionSet::Dispatch)
                 .in_set(Stage::Execute),
-        );
+        )
+        .add_systems(Update, finish.in_set(ExecutionSet::Finish));
     }
 }
 
@@ -328,6 +402,10 @@ struct Attempt(u64);
 struct Mailbox {
     sender: mpsc::SyncSender<Completion>,
     receiver: Mutex<mpsc::Receiver<Completion>>,
+    tool_path_tx: mpsc::SyncSender<(Entity, ConfiguredToolPath)>,
+    tool_path_rx: Mutex<mpsc::Receiver<(Entity, ConfiguredToolPath)>>,
+    artifacts_tx: mpsc::SyncSender<(Entity, ProducedArtifacts)>,
+    artifacts_rx: Mutex<mpsc::Receiver<(Entity, ProducedArtifacts)>>,
     wake: thread::Thread,
 }
 
@@ -335,9 +413,15 @@ struct Mailbox {
 impl Mailbox {
     fn new() -> Self {
         let (sender, receiver) = mpsc::sync_channel(1);
+        let (tool_path_tx, tool_path_rx) = mpsc::sync_channel(1);
+        let (artifacts_tx, artifacts_rx) = mpsc::sync_channel(1);
         Self {
             sender,
             receiver: Mutex::new(receiver),
+            tool_path_tx,
+            tool_path_rx: Mutex::new(tool_path_rx),
+            artifacts_tx,
+            artifacts_rx: Mutex::new(artifacts_rx),
             wake: thread::current(),
         }
     }
@@ -349,7 +433,7 @@ struct Completion {
     entity: Entity,
     context: Entity,
     attempt: u64,
-    result: std::result::Result<Outcome, Failure>,
+    result: std::result::Result<(), Failure>,
 }
 
 #[cfg(feature = "development")]
@@ -845,8 +929,7 @@ impl Plans<'_, '_> {
         entity
     }
 
-    fn native(&mut self, owner: Entity, tail: &mut Tail, work: Work) {
-        let name = work.name();
+    fn step<W: Component>(&mut self, owner: Entity, tail: &mut Tail, name: &'static str, work: W) {
         self.push(owner, tail, (Name::new(name), work));
     }
 
@@ -953,15 +1036,20 @@ fn prepare_build(mut operations: Planning, mut plans: Plans) {
         if !(dispatch.is_none() && invocation.is("dx.build") && tail.0.is_none()) {
             continue;
         }
-        plans.native(entity, &mut tail, Work::Check);
+        plans.step(entity, &mut tail, "Check build storage", StorageCheckStep);
         plans.request(
             entity,
             &mut tail,
             "Acquire target lock",
             debug::Acquire { inherit: true },
         );
-        plans.native(entity, &mut tail, Work::Seed);
-        plans.native(entity, &mut tail, Work::Preflight);
+        plans.step(entity, &mut tail, "Seed target cache", SeedStep);
+        plans.step(
+            entity,
+            &mut tail,
+            "Check build storage",
+            StoragePreflightStep,
+        );
     }
 }
 
@@ -982,15 +1070,20 @@ fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
             continue;
         }
 
-        plans.native(entity, &mut tail, Work::Native);
-        plans.native(entity, &mut tail, Work::Tailwind);
+        plans.step(entity, &mut tail, "Prepare native tools", NativeToolsStep);
+        plans.step(
+            entity,
+            &mut tail,
+            "Prepare stylesheet compiler",
+            TailwindStep,
+        );
         plans.request(
             entity,
             &mut tail,
             "Prepare signing identity",
             debug::IdentityRequest { print: false },
         );
-        plans.native(entity, &mut tail, Work::Helper);
+        plans.step(entity, &mut tail, "Prepare CEF helper", HelperStep);
         plans.request(entity, &mut tail, "Invalidate old artifact", debug::Clear);
         plans.request(
             entity,
@@ -1062,16 +1155,31 @@ fn plan_desktop_package(mut operations: Planning, mut plans: Plans) {
             continue;
         }
 
-        plans.native(entity, &mut tail, Work::Native);
-        plans.native(entity, &mut tail, Work::Tailwind);
-        plans.native(entity, &mut tail, Work::PackageTools);
+        plans.step(entity, &mut tail, "Prepare native tools", NativeToolsStep);
+        plans.step(
+            entity,
+            &mut tail,
+            "Prepare stylesheet compiler",
+            TailwindStep,
+        );
+        plans.step(
+            entity,
+            &mut tail,
+            "Prepare packaging tools",
+            PackageToolsStep,
+        );
         plans.request(
             entity,
             &mut tail,
             "Prepare signing identity",
             debug::IdentityRequest { print: false },
         );
-        plans.native(entity, &mut tail, Work::Package(profile.into()));
+        plans.step(
+            entity,
+            &mut tail,
+            "Package app",
+            DesktopPackageStep(profile.into()),
+        );
     }
 }
 
@@ -1087,8 +1195,13 @@ fn plan_mobile_release(mut operations: Planning, mut plans: Plans) {
             continue;
         }
 
-        plans.native(entity, &mut tail, Work::Dioxus("ios".into()));
-        plans.native(entity, &mut tail, Work::ReleaseIos);
+        plans.step(
+            entity,
+            &mut tail,
+            "Prepare Dioxus tools",
+            DioxusStep("ios".into()),
+        );
+        plans.step(entity, &mut tail, "Sign and package iOS", ReleaseIosStep);
     }
 }
 
@@ -1109,7 +1222,12 @@ fn plan_mobile(mut operations: Planning, mut plans: Plans) {
             continue;
         }
 
-        plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
+        plans.step(
+            entity,
+            &mut tail,
+            "Prepare Dioxus tools",
+            DioxusStep(platform.into()),
+        );
         let mut args = vec![
             "build".into(),
             format!("--{platform}").into(),
@@ -1130,8 +1248,8 @@ fn plan_mobile(mut operations: Planning, mut plans: Plans) {
             },
         );
         if platform == "ios" {
-            plans.native(entity, &mut tail, Work::ResourcesIos);
-            plans.native(entity, &mut tail, Work::VerifyIos(false));
+            plans.step(entity, &mut tail, "Inject iOS resources", ResourcesIosStep);
+            plans.step(entity, &mut tail, "Verify iOS bundle", VerifyIosStep(false));
         }
     }
 }
@@ -1150,10 +1268,20 @@ fn plan_web(mut operations: Planning, mut plans: Plans) {
             continue;
         }
 
-        plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
-        plans.native(entity, &mut tail, Work::Binaryen);
-        plans.native(entity, &mut tail, Work::Tailwind);
-        plans.native(entity, &mut tail, Work::Css);
+        plans.step(
+            entity,
+            &mut tail,
+            "Prepare Dioxus tools",
+            DioxusStep(platform.into()),
+        );
+        plans.step(entity, &mut tail, "Prepare wasm optimizer", BinaryenStep);
+        plans.step(
+            entity,
+            &mut tail,
+            "Prepare stylesheet compiler",
+            TailwindStep,
+        );
+        plans.step(entity, &mut tail, "Build stylesheet", CssStep);
         let mut args = vec!["build".into(), "--platform".into(), "web".into()];
         if profile != "dev" {
             args.extend(["--ssg".into(), "--release".into()]);
@@ -1169,7 +1297,7 @@ fn plan_web(mut operations: Planning, mut plans: Plans) {
             },
         );
         if profile != "dev" {
-            plans.native(entity, &mut tail, Work::FlattenWeb);
+            plans.step(entity, &mut tail, "Publish web artifact", FlattenWebStep);
         }
     }
 }
@@ -1200,7 +1328,12 @@ fn finish_build_plan(mut operations: Planning, mut plans: Plans) {
         if !(dispatch.is_none() && invocation.is("dx.build")) {
             continue;
         }
-        plans.native(entity, &mut tail, Work::Finish(profile.into()));
+        plans.step(
+            entity,
+            &mut tail,
+            "Finish build storage",
+            StorageFinishStep(profile.into()),
+        );
         plans.commands.entity(entity).insert(Planned);
     }
 }
@@ -1229,14 +1362,24 @@ fn plan_run(mut operations: Planning, mut plans: Plans) {
             debug::Acquire { inherit: true },
         );
         if platform != "desktop" {
-            plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
+            plans.step(
+                entity,
+                &mut tail,
+                "Prepare Dioxus tools",
+                DioxusStep(platform.into()),
+            );
             if platform == "web" {
-                plans.native(entity, &mut tail, Work::Binaryen);
-                plans.native(entity, &mut tail, Work::Tailwind);
-                plans.native(entity, &mut tail, Work::Css);
+                plans.step(entity, &mut tail, "Prepare wasm optimizer", BinaryenStep);
+                plans.step(
+                    entity,
+                    &mut tail,
+                    "Prepare stylesheet compiler",
+                    TailwindStep,
+                );
+                plans.step(entity, &mut tail, "Build stylesheet", CssStep);
             }
             if platform == "ios" {
-                plans.native(entity, &mut tail, Work::Simulator);
+                plans.step(entity, &mut tail, "Prepare simulator", SimulatorStep);
             }
         }
         plans.request(
@@ -1270,7 +1413,7 @@ fn plan_reset_layout(mut operations: Planning, mut plans: Plans) {
         if !(dispatch.is_none() && invocation.is("dx.reset-layout")) {
             continue;
         }
-        plans.native(entity, &mut tail, Work::Reset);
+        plans.step(entity, &mut tail, "Reset layout files", ResetLayoutStep);
         plans.commands.entity(entity).insert(Planned);
     }
 }
@@ -1294,7 +1437,7 @@ fn plan_test(mut operations: Planning, mut plans: Plans) {
             "Acquire target lock",
             debug::Acquire { inherit: true },
         );
-        plans.native(entity, &mut tail, Work::Seed);
+        plans.step(entity, &mut tail, "Seed target cache", SeedStep);
         let mut args = vec![
             "test".into(),
             "--workspace".into(),
@@ -1338,7 +1481,7 @@ fn plan_lint(mut operations: Planning, mut plans: Plans) {
             "Acquire target lock",
             debug::Acquire { inherit: true },
         );
-        plans.native(entity, &mut tail, Work::Seed);
+        plans.step(entity, &mut tail, "Seed target cache", SeedStep);
         plans.request(
             entity,
             &mut tail,
@@ -1386,7 +1529,7 @@ fn plan_doctor(mut operations: Planning, mut plans: Plans) {
         if !(dispatch.is_none() && invocation.is("dx.doctor")) {
             continue;
         }
-        plans.native(entity, &mut tail, Work::Doctor);
+        plans.step(entity, &mut tail, "Inspect tools", DoctorStep);
         plans.commands.entity(entity).insert(Planned);
     }
 }
@@ -1400,28 +1543,48 @@ fn plan_setup(mut operations: Planning, mut plans: Plans) {
         }
 
         if platform == "desktop" {
-            plans.native(entity, &mut tail, Work::Check);
+            plans.step(entity, &mut tail, "Check build storage", StorageCheckStep);
             plans.request(
                 entity,
                 &mut tail,
                 "Acquire target lock",
                 debug::Acquire { inherit: true },
             );
-            plans.native(entity, &mut tail, Work::Native);
-            plans.native(entity, &mut tail, Work::Tailwind);
-            plans.native(entity, &mut tail, Work::PackageTools);
+            plans.step(entity, &mut tail, "Prepare native tools", NativeToolsStep);
+            plans.step(
+                entity,
+                &mut tail,
+                "Prepare stylesheet compiler",
+                TailwindStep,
+            );
+            plans.step(
+                entity,
+                &mut tail,
+                "Prepare packaging tools",
+                PackageToolsStep,
+            );
             plans.request(
                 entity,
                 &mut tail,
                 "Prepare signing identity",
                 debug::IdentityRequest { print: false },
             );
-            plans.native(entity, &mut tail, Work::Helper);
+            plans.step(entity, &mut tail, "Prepare CEF helper", HelperStep);
         } else {
-            plans.native(entity, &mut tail, Work::Dioxus(platform.into()));
+            plans.step(
+                entity,
+                &mut tail,
+                "Prepare Dioxus tools",
+                DioxusStep(platform.into()),
+            );
             if platform == "web" {
-                plans.native(entity, &mut tail, Work::Binaryen);
-                plans.native(entity, &mut tail, Work::Tailwind);
+                plans.step(entity, &mut tail, "Prepare wasm optimizer", BinaryenStep);
+                plans.step(
+                    entity,
+                    &mut tail,
+                    "Prepare stylesheet compiler",
+                    TailwindStep,
+                );
             }
         }
 
@@ -1435,7 +1598,7 @@ fn plan_cache_status(mut operations: Planning, mut plans: Plans) {
         if !(dispatch.is_none() && invocation.is("dx.cache.status")) {
             continue;
         }
-        plans.native(entity, &mut tail, Work::Status);
+        plans.step(entity, &mut tail, "Report build storage", StorageStatusStep);
         plans.commands.entity(entity).insert(Planned);
     }
 }
@@ -1453,7 +1616,12 @@ fn plan_cache_clean(mut operations: Planning, mut plans: Plans) {
             "Acquire target lock",
             debug::Acquire { inherit: true },
         );
-        plans.native(entity, &mut tail, Work::Clean(invocation.flag("apply")));
+        plans.step(
+            entity,
+            &mut tail,
+            "Clean build cache",
+            StorageCleanStep(invocation.flag("apply")),
+        );
 
         plans.commands.entity(entity).insert(Planned);
     }
@@ -1470,7 +1638,7 @@ fn plan_ci_scope(mut operations: Planning, mut plans: Plans) {
         if !(dispatch.is_none() && invocation.is("dx.ci-scope")) {
             continue;
         }
-        plans.native(entity, &mut tail, Work::Scope(forwarded));
+        plans.step(entity, &mut tail, "Select CI scope", ScopeStep(forwarded));
         plans.commands.entity(entity).insert(Planned);
     }
 }
@@ -1486,7 +1654,12 @@ fn plan_ci_native(mut operations: Planning, mut plans: Plans) {
         if !(dispatch.is_none() && invocation.is("dx.ci-native")) {
             continue;
         }
-        plans.native(entity, &mut tail, Work::NativeInputs(forwarded));
+        plans.step(
+            entity,
+            &mut tail,
+            "Classify native CI inputs",
+            NativeInputsStep(forwarded),
+        );
         plans.commands.entity(entity).insert(Planned);
     }
 }
@@ -1497,10 +1670,14 @@ fn plan_checks(mut operations: Planning, mut plans: Plans) {
         if !(dispatch.is_none() && invocation.is("dx.checks.test")) {
             continue;
         }
-        plans.native(
+        plans.step(
             entity,
             &mut tail,
-            Work::Internal("pre-push".into(), Vec::new()),
+            "Run external integration",
+            InternalStep {
+                task: "pre-push".into(),
+                arguments: Vec::new(),
+            },
         );
         plans.request(
             entity,
@@ -1534,7 +1711,74 @@ fn plan_sdk(mut operations: Planning, mut plans: Plans) {
             "Acquire target lock",
             debug::Acquire { inherit: true },
         );
-        plans.native(entity, &mut tail, Work::Consumer(arguments));
+        plans.step(
+            entity,
+            &mut tail,
+            "Validate public SDK",
+            ConsumerStep(arguments),
+        );
+        plans.commands.entity(entity).insert(Planned);
+    }
+}
+
+#[cfg(feature = "development")]
+fn plan_cli_release(mut operations: Planning, mut plans: Plans) {
+    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+        if !(dispatch.is_none()
+            && invocation.is("dx.internal")
+            && invocation.value("task") == Some("cli-release"))
+        {
+            continue;
+        }
+        let forwarded = invocation
+            .arguments
+            .get("forward")
+            .cloned()
+            .unwrap_or_default();
+        let preview = match forwarded.as_slice() {
+            [] => false,
+            [value] if value == "preview" => true,
+            _ => {
+                plans.commands.entity(entity).insert((
+                    OperationState::Failed,
+                    CliResult(Err(
+                        "cli-release accepts only an optional preview channel".into()
+                    )),
+                ));
+                continue;
+            }
+        };
+        plans.step(entity, &mut tail, "Check build storage", StorageCheckStep);
+        plans.request(
+            entity,
+            &mut tail,
+            "Acquire target lock",
+            debug::Acquire { inherit: true },
+        );
+        plans.step(
+            entity,
+            &mut tail,
+            "Check build storage",
+            StoragePreflightStep,
+        );
+        plans.step(
+            entity,
+            &mut tail,
+            "Build standalone release CLI",
+            CliCompileStep,
+        );
+        plans.step(
+            entity,
+            &mut tail,
+            "Verify and package standalone release CLI",
+            CliPackageStep(preview),
+        );
+        plans.step(
+            entity,
+            &mut tail,
+            "Finish build storage",
+            StorageFinishStep("release".into()),
+        );
         plans.commands.entity(entity).insert(Planned);
     }
 }
@@ -1550,7 +1794,6 @@ fn plan_internal(mut operations: Planning, mut plans: Plans) {
         if !(dispatch.is_none() && invocation.is("dx.internal")) {
             continue;
         }
-
         let Some(task) = invocation.value("task") else {
             plans.commands.entity(entity).insert((
                 OperationState::Failed,
@@ -1559,83 +1802,66 @@ fn plan_internal(mut operations: Planning, mut plans: Plans) {
             continue;
         };
         if task == "cli-release" {
-            let preview = match forwarded.as_slice() {
-                [] => false,
-                [value] if value == "preview" => true,
-                _ => {
-                    plans.commands.entity(entity).insert((
-                        OperationState::Failed,
-                        CliResult(Err(
-                            "cli-release accepts only an optional preview channel".into()
-                        )),
-                    ));
-                    continue;
-                }
-            };
-            plans.native(entity, &mut tail, Work::Check);
+            continue;
+        }
+        if task == "cargo" {
             plans.request(
                 entity,
                 &mut tail,
                 "Acquire target lock",
                 debug::Acquire { inherit: true },
             );
-            plans.native(entity, &mut tail, Work::Preflight);
-            plans.native(entity, &mut tail, Work::CliCompile);
-            plans.native(entity, &mut tail, Work::CliPackage(preview));
-            plans.native(entity, &mut tail, Work::Finish("release".into()));
-        } else {
-            if task == "cargo" {
+            plans.step(entity, &mut tail, "Seed target cache", SeedStep);
+        }
+        match task {
+            "ecs-lint" => {
+                let test = forwarded.as_slice() == [OsString::from("--test")];
                 plans.request(
                     entity,
                     &mut tail,
-                    "Acquire target lock",
-                    debug::Acquire { inherit: true },
+                    "Run compiler ownership lints",
+                    compiler_lint::Run {
+                        fixtures: test,
+                        arguments: if test { None } else { Some(forwarded) },
+                    },
                 );
-                plans.native(entity, &mut tail, Work::Seed);
             }
-            match task {
-                "ecs-lint" => {
-                    let test = forwarded.as_slice() == [OsString::from("--test")];
-                    plans.request(
-                        entity,
-                        &mut tail,
-                        "Run compiler ownership lints",
-                        compiler_lint::Run {
-                            fixtures: test,
-                            arguments: if test { None } else { Some(forwarded) },
-                        },
-                    );
-                }
-                "cargo" => {
-                    plans.request(
-                        entity,
-                        &mut tail,
-                        "Run Cargo",
-                        cargo::Run {
-                            arguments: forwarded,
-                        },
-                    );
-                }
-                "ensure-signing" => {
-                    plans.request(
-                        entity,
-                        &mut tail,
-                        "Prepare signing identity",
-                        debug::IdentityRequest { print: true },
-                    );
-                }
-                "debug-sign" => {
-                    plans.request(entity, &mut tail, "Sign debug binaries", debug::Sign);
-                }
-                "debug-bundle" => {
-                    plans.request(entity, &mut tail, "Bundle debug app", debug::Bundle);
-                }
-                _ => {
-                    plans.native(entity, &mut tail, Work::Internal(task.into(), forwarded));
-                }
+            "cargo" => {
+                plans.request(
+                    entity,
+                    &mut tail,
+                    "Run Cargo",
+                    cargo::Run {
+                        arguments: forwarded,
+                    },
+                );
+            }
+            "ensure-signing" => {
+                plans.request(
+                    entity,
+                    &mut tail,
+                    "Prepare signing identity",
+                    debug::IdentityRequest { print: true },
+                );
+            }
+            "debug-sign" => {
+                plans.request(entity, &mut tail, "Sign debug binaries", debug::Sign);
+            }
+            "debug-bundle" => {
+                plans.request(entity, &mut tail, "Bundle debug app", debug::Bundle);
+            }
+            _ => {
+                plans.step(
+                    entity,
+                    &mut tail,
+                    "Run external integration",
+                    InternalStep {
+                        task: task.into(),
+                        arguments: forwarded,
+                    },
+                );
             }
         }
-
         plans.commands.entity(entity).insert(Planned);
     }
 }
@@ -1712,13 +1938,122 @@ fn start(
     }
 }
 
+#[derive(SystemParam)]
 #[cfg(feature = "development")]
-type Dispatches<'w, 's> = Query<
+struct StorageDispatcher<'w, 's> {
+    loans: Query<'w, 's, &'static Lease>,
+    commands: Commands<'w, 's>,
+}
+
+#[cfg(feature = "development")]
+impl StorageDispatcher<'_, '_> {
+    fn assign(&mut self, entity: Entity, started: &Started, request: storage_runtime::Request) {
+        self.commands.entity(entity).insert((
+            Assigned,
+            request,
+            storage_runtime::Captured {
+                root: started.context,
+                attempt: started.attempt,
+            },
+            storage_runtime::Loan(
+                self.loans
+                    .get(started.context)
+                    .ok()
+                    .map(|lease| lease.0.clone()),
+            ),
+        ));
+    }
+}
+
+#[cfg(feature = "development")]
+type StorageStepQuery<'w, 's, W> = Query<
+    'w,
+    's,
+    (Entity, &'static W, &'static Started, &'static Settings),
+    (With<Running>, Without<Assigned>, Without<NativeSubmitted>),
+>;
+
+#[cfg(feature = "development")]
+fn dispatch_storage_check(
+    requests: StorageStepQuery<StorageCheckStep>,
+    mut dispatcher: StorageDispatcher,
+) {
+    for (entity, _, started, _) in &requests {
+        dispatcher.assign(
+            entity,
+            started,
+            storage_runtime::Request::new(storage_runtime::RequestKind::Check),
+        );
+    }
+}
+
+#[cfg(feature = "development")]
+fn dispatch_storage_preflight(
+    requests: StorageStepQuery<StoragePreflightStep>,
+    mut dispatcher: StorageDispatcher,
+) {
+    for (entity, _, started, _) in &requests {
+        dispatcher.assign(
+            entity,
+            started,
+            storage_runtime::Request::new(storage_runtime::RequestKind::Preflight),
+        );
+    }
+}
+
+#[cfg(feature = "development")]
+fn dispatch_storage_finish(
+    requests: StorageStepQuery<StorageFinishStep>,
+    mut dispatcher: StorageDispatcher,
+) {
+    for (entity, step, started, _) in &requests {
+        dispatcher.assign(
+            entity,
+            started,
+            storage_runtime::Request::finish(step.0.clone()),
+        );
+    }
+}
+
+#[cfg(feature = "development")]
+fn dispatch_storage_status(
+    requests: StorageStepQuery<StorageStatusStep>,
+    mut dispatcher: StorageDispatcher,
+) {
+    for (entity, _, started, _) in &requests {
+        dispatcher.assign(
+            entity,
+            started,
+            storage_runtime::Request::new(storage_runtime::RequestKind::Report),
+        );
+    }
+}
+
+#[cfg(feature = "development")]
+fn dispatch_storage_clean(
+    requests: StorageStepQuery<StorageCleanStep>,
+    mut dispatcher: StorageDispatcher,
+) {
+    for (entity, step, started, settings) in &requests {
+        dispatcher.assign(
+            entity,
+            started,
+            storage_runtime::Request::clean(
+                step.0
+                    || settings.0.get("VMUX_BUILD_STORAGE_APPLY")
+                        == Some(std::ffi::OsStr::new("1")),
+            ),
+        );
+    }
+}
+
+#[cfg(feature = "development")]
+type WorkflowStepQuery<'w, 's, W> = Query<
     'w,
     's,
     (
         Entity,
-        &'static Work,
+        &'static W,
         &'static Started,
         &'static Checkout,
         &'static Settings,
@@ -1727,120 +2062,114 @@ type Dispatches<'w, 's> = Query<
 >;
 
 #[cfg(feature = "development")]
-fn dispatch_storage(requests: Dispatches, loans: Query<&Lease>, mut commands: Commands) {
-    for (entity, work, started, _checkout, settings) in &requests {
-        let storage = match work {
-            Work::Check => Some(storage_runtime::Request::new(
-                storage_runtime::RequestKind::Check,
-            )),
-            Work::Preflight => Some(storage_runtime::Request::new(
-                storage_runtime::RequestKind::Preflight,
-            )),
-            Work::Finish(profile) => Some(storage_runtime::Request::finish(profile.clone())),
-            Work::Status => Some(storage_runtime::Request::new(
-                storage_runtime::RequestKind::Report,
-            )),
-            Work::Clean(apply) => Some(storage_runtime::Request::clean(
-                *apply
-                    || settings.0.get("VMUX_BUILD_STORAGE_APPLY")
-                        == Some(std::ffi::OsStr::new("1")),
-            )),
-            _ => None,
-        };
-        if let Some(request) = storage {
-            commands.entity(entity).insert((
-                Assigned,
-                request,
-                storage_runtime::Captured {
-                    root: started.context,
-                    attempt: started.attempt,
-                },
-                storage_runtime::Loan(loans.get(started.context).ok().map(|lease| lease.0.clone())),
-            ));
-            continue;
-        }
+fn dispatch_desktop_package(
+    requests: WorkflowStepQuery<DesktopPackageStep>,
+    mut commands: Commands,
+) {
+    for (entity, step, started, _, _) in &requests {
+        commands.trigger(package::Requested {
+            entity,
+            context: started.context,
+            attempt: started.attempt,
+            input: package::Desktop {
+                profile: step.0.clone(),
+            },
+        });
+        commands.entity(entity).insert(Assigned);
     }
 }
 
 #[cfg(feature = "development")]
-fn dispatch(requests: Dispatches, mut commands: Commands) {
-    for (entity, work, started, checkout, settings) in &requests {
-        match work {
-            Work::Package(profile) => commands.trigger(package::Requested {
+fn dispatch_cli_compile(requests: WorkflowStepQuery<CliCompileStep>, mut commands: Commands) {
+    for (entity, _, started, _, _) in &requests {
+        commands.trigger(cli_package::Requested {
+            entity,
+            context: started.context,
+            attempt: started.attempt,
+            input: cli_package::Compile,
+        });
+        commands.entity(entity).insert(Assigned);
+    }
+}
+
+#[cfg(feature = "development")]
+fn dispatch_cli_package(requests: WorkflowStepQuery<CliPackageStep>, mut commands: Commands) {
+    for (entity, step, started, _, _) in &requests {
+        commands.trigger(cli_package::Requested {
+            entity,
+            context: started.context,
+            attempt: started.attempt,
+            input: cli_package::Package { preview: step.0 },
+        });
+        commands.entity(entity).insert(Assigned);
+    }
+}
+
+#[cfg(feature = "development")]
+fn dispatch_reset_layout(requests: WorkflowStepQuery<ResetLayoutStep>, mut commands: Commands) {
+    for (entity, _, started, _, _) in &requests {
+        commands.trigger(reset::Requested {
+            entity,
+            context: started.context,
+            attempt: started.attempt,
+        });
+        commands.entity(entity).insert(Assigned);
+    }
+}
+
+#[cfg(feature = "development")]
+fn dispatch_internal_package(requests: WorkflowStepQuery<InternalStep>, mut commands: Commands) {
+    for (entity, step, started, checkout, settings) in &requests {
+        match step.task.as_str() {
+            "package-binaries" => commands.trigger(package::Requested {
                 entity,
                 context: started.context,
                 attempt: started.attempt,
-                input: package::Desktop {
-                    profile: profile.clone(),
+                input: package::Binaries,
+            }),
+            "before-package" | "finalize-package" => commands.trigger(package::Requested {
+                entity,
+                context: started.context,
+                attempt: started.attempt,
+                input: package::Before {
+                    app: std::path::PathBuf::from(
+                        settings
+                            .0
+                            .get("VMUX_APP_BUNDLE")
+                            .unwrap_or(std::ffi::OsStr::new("")),
+                    ),
+                    format: settings
+                        .0
+                        .get("CARGO_PACKAGER_FORMAT")
+                        .unwrap_or(std::ffi::OsStr::new(""))
+                        .to_owned(),
+                    force: step.task == "finalize-package",
                 },
             }),
-            Work::CliCompile => commands.trigger(cli_package::Requested {
+            "verify-bundle" => commands.trigger(package::Requested {
                 entity,
                 context: started.context,
                 attempt: started.attempt,
-                input: cli_package::Compile,
+                input: package::Verify {
+                    app: step
+                        .arguments
+                        .first()
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_default(),
+                },
             }),
-            Work::CliPackage(preview) => commands.trigger(cli_package::Requested {
+            "verify-web-bundle" => commands.trigger(package::Requested {
                 entity,
                 context: started.context,
                 attempt: started.attempt,
-                input: cli_package::Package { preview: *preview },
+                input: package::Web {
+                    directory: step
+                        .arguments
+                        .first()
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_else(|| checkout.root.join("crates/util/vmux_ui/dist")),
+                },
             }),
-            Work::Reset => commands.trigger(reset::Requested {
-                entity,
-                context: started.context,
-                attempt: started.attempt,
-            }),
-            Work::Internal(task, forwarded) => match task.as_str() {
-                "package-binaries" => commands.trigger(package::Requested {
-                    entity,
-                    context: started.context,
-                    attempt: started.attempt,
-                    input: package::Binaries,
-                }),
-                "before-package" | "finalize-package" => commands.trigger(package::Requested {
-                    entity,
-                    context: started.context,
-                    attempt: started.attempt,
-                    input: package::Before {
-                        app: std::path::PathBuf::from(
-                            settings
-                                .0
-                                .get("VMUX_APP_BUNDLE")
-                                .unwrap_or(std::ffi::OsStr::new("")),
-                        ),
-                        format: settings
-                            .0
-                            .get("CARGO_PACKAGER_FORMAT")
-                            .unwrap_or(std::ffi::OsStr::new(""))
-                            .to_owned(),
-                        force: task == "finalize-package",
-                    },
-                }),
-                "verify-bundle" => commands.trigger(package::Requested {
-                    entity,
-                    context: started.context,
-                    attempt: started.attempt,
-                    input: package::Verify {
-                        app: forwarded
-                            .first()
-                            .map(std::path::PathBuf::from)
-                            .unwrap_or_default(),
-                    },
-                }),
-                "verify-web-bundle" => commands.trigger(package::Requested {
-                    entity,
-                    context: started.context,
-                    attempt: started.attempt,
-                    input: package::Web {
-                        directory: forwarded
-                            .first()
-                            .map(std::path::PathBuf::from)
-                            .unwrap_or_else(|| checkout.root.join("crates/util/vmux_ui/dist")),
-                    },
-                }),
-                _ => continue,
-            },
             _ => continue,
         }
         commands.entity(entity).insert(Assigned);
@@ -1848,12 +2177,12 @@ fn dispatch(requests: Dispatches, mut commands: Commands) {
 }
 
 #[cfg(feature = "development")]
-type NativeReady<'w, 's> = Query<
+type NativeReady<'w, 's, W> = Query<
     'w,
     's,
     (
         Entity,
-        &'static Work,
+        &'static W,
         Option<&'static ChildOf>,
         &'static Attempt,
         &'static debug::Captured,
@@ -1863,26 +2192,60 @@ type NativeReady<'w, 's> = Query<
     (With<Running>, Without<NativeSubmitted>, Without<Assigned>),
 >;
 
+#[derive(SystemParam)]
 #[cfg(feature = "development")]
-fn native(steps: NativeReady, operations: Inputs, mailbox: Res<Mailbox>, mut commands: Commands) {
-    for (entity, work, parent, attempt, captured, checkout, settings) in &steps {
+struct NativeRunner<'w, 's> {
+    operations: Inputs<'w, 's>,
+    mailbox: Res<'w, Mailbox>,
+    commands: Commands<'w, 's>,
+}
+
+#[cfg(feature = "development")]
+impl NativeRunner<'_, '_> {
+    #[allow(clippy::too_many_arguments)]
+    fn spawn<F>(
+        &mut self,
+        entity: Entity,
+        parent: Option<&ChildOf>,
+        attempt: &Attempt,
+        captured: &debug::Captured,
+        checkout: &Checkout,
+        settings: &Settings,
+        name: &'static str,
+        execute: F,
+    ) -> bool
+    where
+        F: FnOnce(
+                &Checkout,
+                Environment,
+                &mpsc::SyncSender<(Entity, ConfiguredToolPath)>,
+                &mpsc::SyncSender<(Entity, ProducedArtifacts)>,
+                Entity,
+            ) -> Result<()>
+            + Send
+            + 'static,
+    {
         if parent.is_none_or(|parent| parent.parent() != captured.root)
             || attempt.0 != captured.attempt
         {
-            commands.entity(entity).despawn();
-            if operations
+            self.commands.entity(entity).despawn();
+            if self
+                .operations
                 .get(captured.root)
                 .is_ok_and(|(_, _, _, _, _, state)| *state == OperationState::Running)
             {
-                commands.entity(captured.root).remove::<Lease>().insert((
-                    OperationState::Failed,
-                    CliResult(Err("Development step ownership changed".into())),
-                ));
+                self.commands
+                    .entity(captured.root)
+                    .remove::<Lease>()
+                    .insert((
+                        OperationState::Failed,
+                        CliResult(Err("Development step ownership changed".into())),
+                    ));
             }
-            continue;
+            return false;
         }
-        let Ok((_, _, _storage, lease, executable, _)) = operations.get(captured.root) else {
-            continue;
+        let Ok((_, _, _storage, lease, executable, _)) = self.operations.get(captured.root) else {
+            return false;
         };
         let checkout = checkout.clone();
         let mut environment = settings.0.clone();
@@ -1890,18 +2253,20 @@ fn native(steps: NativeReady, operations: Inputs, mailbox: Res<Mailbox>, mut com
             environment.set("VMUX_DX_PROVIDER_EXECUTABLE", executable.path().as_os_str());
         }
         let lease = lease.map(|lease| lease.0.clone());
-        let work = work.clone();
-        let sender = mailbox.sender.clone();
-        let wake = mailbox.wake.clone();
+        let sender = self.mailbox.sender.clone();
+        let tool_path_tx = self.mailbox.tool_path_tx.clone();
+        let artifacts_tx = self.mailbox.artifacts_tx.clone();
+        let wake = self.mailbox.wake.clone();
         let root = captured.root;
         let attempt = attempt.0;
-        commands.entity(entity).insert(NativeSubmitted);
+        self.commands.entity(entity).insert(NativeSubmitted);
         thread::spawn(move || {
-            let name = work.name();
+            let _lease = lease;
             let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                work.execute(&checkout, environment, lease)
+                signals::Signals::check()?;
+                execute(&checkout, environment, &tool_path_tx, &artifacts_tx, entity)
             })) {
-                Ok(Ok(value)) => Ok(value),
+                Ok(Ok(())) => Ok(()),
                 Ok(Err(error)) => Err(Failure::from_error(error).context(name)),
                 Err(_) => Err(Failure::message("Development step panicked")),
             };
@@ -1913,12 +2278,386 @@ fn native(steps: NativeReady, operations: Inputs, mailbox: Res<Mailbox>, mut com
             });
             wake.unpark();
         });
-        break;
+        true
     }
 }
 
 #[cfg(feature = "development")]
-fn receive(mailbox: Res<Mailbox>, mut messages: MessageWriter<Completion>) {
+fn run_seed(steps: NativeReady<SeedStep>, mut runner: NativeRunner) {
+    for (entity, _, parent, attempt, captured, checkout, settings) in &steps {
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Seed target cache",
+            |checkout, env, _, _, _| native::Native::new(checkout, env).seed(),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_native_tools(steps: NativeReady<NativeToolsStep>, mut runner: NativeRunner) {
+    for (entity, _, parent, attempt, captured, checkout, settings) in &steps {
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Prepare native tools",
+            |checkout, env, _, _, _| native::Native::new(checkout, env).ensure_native(),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_helper(steps: NativeReady<HelperStep>, mut runner: NativeRunner) {
+    for (entity, _, parent, attempt, captured, checkout, settings) in &steps {
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Prepare CEF helper",
+            |checkout, env, _, _, _| native::Native::new(checkout, env).helper(),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_package_tools(steps: NativeReady<PackageToolsStep>, mut runner: NativeRunner) {
+    for (entity, _, parent, attempt, captured, checkout, settings) in &steps {
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Prepare packaging tools",
+            |checkout, env, _, _, _| native::Native::new(checkout, env).package_tools(),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_dioxus(steps: NativeReady<DioxusStep>, mut runner: NativeRunner) {
+    for (entity, step, parent, attempt, captured, checkout, settings) in &steps {
+        let platform = step.0.clone();
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Prepare Dioxus tools",
+            move |checkout, env, tool_paths, _, entity| {
+                let mut native = native::Native::new(checkout, env);
+                native.dioxus(&platform)?;
+                let _ = tool_paths.send((
+                    entity,
+                    ConfiguredToolPath {
+                        key: "DX_BIN",
+                        path: native.tool_path("DX_BIN", "dx"),
+                    },
+                ));
+                Ok(())
+            },
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_binaryen(steps: NativeReady<BinaryenStep>, mut runner: NativeRunner) {
+    for (entity, _, parent, attempt, captured, checkout, settings) in &steps {
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Prepare wasm optimizer",
+            |checkout, env, _, _, _| native::Native::new(checkout, env).binaryen(),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_tailwind(steps: NativeReady<TailwindStep>, mut runner: NativeRunner) {
+    for (entity, _, parent, attempt, captured, checkout, settings) in &steps {
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Prepare stylesheet compiler",
+            |checkout, env, tool_paths, _, entity| {
+                let mut native = native::Native::new(checkout, env);
+                native.tailwind()?;
+                let _ = tool_paths.send((
+                    entity,
+                    ConfiguredToolPath {
+                        key: "TAILWINDCSS_BIN",
+                        path: native.tool_path("TAILWINDCSS_BIN", "tailwindcss"),
+                    },
+                ));
+                Ok(())
+            },
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_resources_ios(steps: NativeReady<ResourcesIosStep>, mut runner: NativeRunner) {
+    for (entity, _, parent, attempt, captured, checkout, settings) in &steps {
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Inject iOS resources",
+            |checkout, env, _, _, _| native::Native::new(checkout, env).resources_ios(),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_release_ios(steps: NativeReady<ReleaseIosStep>, mut runner: NativeRunner) {
+    for (entity, _, parent, attempt, captured, checkout, settings) in &steps {
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Sign and package iOS",
+            |checkout, env, _, artifacts, entity| {
+                native::Native::new(checkout, env).ios_release()?;
+                let _ = artifacts.send((
+                    entity,
+                    ProducedArtifacts(vec![
+                        checkout
+                            .target
+                            .join("dx/vmux_mobile/release/ios/VmuxMobile.app"),
+                    ]),
+                ));
+                Ok(())
+            },
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_verify_ios(steps: NativeReady<VerifyIosStep>, mut runner: NativeRunner) {
+    for (entity, step, parent, attempt, captured, checkout, settings) in &steps {
+        let signed = step.0;
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Verify iOS bundle",
+            move |checkout, env, _, _, _| native::Native::new(checkout, env).verify_ios(signed),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_css(steps: NativeReady<CssStep>, mut runner: NativeRunner) {
+    for (entity, _, parent, attempt, captured, checkout, settings) in &steps {
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Build stylesheet",
+            |checkout, env, _, _, _| native::Native::new(checkout, env).css(),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_flatten_web(steps: NativeReady<FlattenWebStep>, mut runner: NativeRunner) {
+    for (entity, _, parent, attempt, captured, checkout, settings) in &steps {
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Publish web artifact",
+            |checkout, env, _, _, _| native::Native::new(checkout, env).flatten_web(),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_simulator(steps: NativeReady<SimulatorStep>, mut runner: NativeRunner) {
+    for (entity, _, parent, attempt, captured, checkout, settings) in &steps {
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Prepare simulator",
+            |checkout, env, _, _, _| native::Native::new(checkout, env).simulator(),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_doctor(steps: NativeReady<DoctorStep>, mut runner: NativeRunner) {
+    for (entity, _, parent, attempt, captured, checkout, settings) in &steps {
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Inspect tools",
+            |checkout, env, _, _, _| native::Native::new(checkout, env).doctor(),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_ci_scope(steps: NativeReady<ScopeStep>, mut runner: NativeRunner) {
+    for (entity, step, parent, attempt, captured, checkout, settings) in &steps {
+        let step = step.clone();
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Select CI scope",
+            move |checkout, _, _, _, _| step.run(checkout),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_ci_native(steps: NativeReady<NativeInputsStep>, mut runner: NativeRunner) {
+    for (entity, step, parent, attempt, captured, checkout, settings) in &steps {
+        let step = step.clone();
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Classify native CI inputs",
+            move |checkout, _, _, _, _| step.run(checkout),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_sdk_consumer(steps: NativeReady<ConsumerStep>, mut runner: NativeRunner) {
+    for (entity, step, parent, attempt, captured, checkout, settings) in &steps {
+        let step = step.clone();
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Validate public SDK",
+            move |checkout, env, _, _, _| step.run(checkout, env),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn run_internal(steps: NativeReady<InternalStep>, mut runner: NativeRunner) {
+    for (entity, step, parent, attempt, captured, checkout, settings) in &steps {
+        let task = step.task.clone();
+        let args = step.arguments.clone();
+        if runner.spawn(
+            entity,
+            parent,
+            attempt,
+            captured,
+            checkout,
+            settings,
+            "Run external integration",
+            move |checkout, env, _, _, _| native::Native::new(checkout, env).internal(&task, &args),
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "development")]
+fn receive(mailbox: Res<Mailbox>, mut messages: MessageWriter<Completion>, mut commands: Commands) {
+    let tool_paths = mailbox.tool_path_rx.lock().unwrap();
+    while let Ok((entity, tool_path)) = tool_paths.try_recv() {
+        commands.entity(entity).try_insert(tool_path);
+    }
+    drop(tool_paths);
+    let artifacts = mailbox.artifacts_rx.lock().unwrap();
+    while let Ok((entity, produced)) = artifacts.try_recv() {
+        commands.entity(entity).try_insert(produced);
+    }
+    drop(artifacts);
     let receiver = mailbox.receiver.lock().unwrap();
     while let Ok(completion) = receiver.try_recv() {
         messages.write(completion);
@@ -2049,7 +2788,7 @@ fn collect(
 #[derive(Component)]
 #[component(immutable)]
 #[cfg(feature = "development")]
-struct Receipt(std::result::Result<Outcome, Failure>);
+struct Receipt(std::result::Result<(), Failure>);
 
 #[cfg(feature = "development")]
 type Applying<'w, 's> = Query<
@@ -2065,8 +2804,21 @@ type Applying<'w, 's> = Query<
 >;
 
 #[cfg(feature = "development")]
+type StepOutputs<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Option<&'static ResolvedExecutable>,
+        Option<&'static ResolvedIdentity>,
+        Option<&'static ProducedArtifacts>,
+        Option<&'static ConfiguredToolPath>,
+    ),
+>;
+
+#[cfg(feature = "development")]
 fn apply(
     receipts: Applying,
+    outputs: StepOutputs,
     mut operations: Query<(&mut Settings, &mut OperationState), With<Accepted>>,
     leases: Query<&Lease>,
     mut replies: Replies,
@@ -2096,37 +2848,27 @@ fn apply(
         }
         let parent = parent.unwrap();
         match &receipt.0 {
-            Ok(outcome) => {
-                match outcome {
-                    Outcome::LocalEntries(_) | Outcome::Lease(_) => {
-                        replies.send(
-                            started.context,
-                            CliResult(Err(
-                                "Retired DX receipt requires its concrete typed request".into(),
-                            )),
-                        );
-                    }
-                    Outcome::Executable(executable) => {
+            Ok(()) => {
+                if let Ok(lease) = leases.get(entity) {
+                    replies
+                        .commands
+                        .entity(started.context)
+                        .insert(Lease(lease.0.clone()));
+                    replies.commands.entity(entity).remove::<Lease>();
+                }
+                if let Ok((executable, identity, artifacts, tool_path)) = outputs.get(entity) {
+                    if let Some(executable) = executable {
                         replies
                             .commands
                             .entity(parent.parent())
-                            .insert(executable.clone())
+                            .insert(executable.0.clone())
                             .remove::<Lease>();
                     }
-                    Outcome::Done => {
-                        if let Ok(lease) = leases.get(entity) {
-                            replies
-                                .commands
-                                .entity(started.context)
-                                .insert(Lease(lease.0.clone()));
-                            replies.commands.entity(entity).remove::<Lease>();
-                        }
+                    if let Some(identity) = identity {
+                        settings.0.set("APPLE_SIGNING_IDENTITY", &identity.0);
                     }
-                    Outcome::Identity(identity) => {
-                        settings.0.set("APPLE_SIGNING_IDENTITY", identity);
-                    }
-                    Outcome::Artifacts(paths) => {
-                        for path in paths {
+                    if let Some(artifacts) = artifacts {
+                        for path in &artifacts.0 {
                             replies.commands.spawn((
                                 Name::new(path.display().to_string()),
                                 Artifact(path.clone()),
@@ -2137,9 +2879,8 @@ fn apply(
                             ));
                         }
                     }
-                    Outcome::ToolPath(key, path) => {
-                        let key = key.to_str().expect("tool configuration key");
-                        settings.0.set(key, path);
+                    if let Some(tool_path) = tool_path {
+                        settings.0.set(tool_path.key, &tool_path.path);
                     }
                 }
                 replies
@@ -2740,7 +3481,7 @@ exit "${VMUX_CARGO_FIXTURE_EXIT:-0}"
             entity: step,
             context: fixture.operation,
             attempt: 0,
-            result: Ok(Outcome::Done),
+            result: Ok(()),
         });
         fixture.app.update();
         assert!(fixture.app.world().get::<Completed>(step).is_none());
@@ -2755,7 +3496,7 @@ exit "${VMUX_CARGO_FIXTURE_EXIT:-0}"
             entity: step,
             context: fixture.operation,
             attempt: 1,
-            result: Ok(Outcome::Done),
+            result: Ok(()),
         });
         assert_eq!(fixture.result(), 0);
     }
@@ -2815,14 +3556,19 @@ exit "${VMUX_CARGO_FIXTURE_EXIT:-0}"
                     .get::<CliResult>(fixture.operation)
                     .is_none()
             );
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(step)
+                .insert(ConfiguredToolPath {
+                    key: "VMUX_DX_OWNER_ORACLE",
+                    path: "wrong-owner".into(),
+                });
             fixture.app.world_mut().write_message(Completion {
                 entity: step,
                 context: fixture.operation,
                 attempt: 1,
-                result: Ok(Outcome::ToolPath(
-                    "VMUX_DX_OWNER_ORACLE".into(),
-                    "wrong-owner".into(),
-                )),
+                result: Ok(()),
             });
             fixture.app.update();
             assert!(
@@ -3195,11 +3941,16 @@ exit "${VMUX_CARGO_FIXTURE_EXIT:-0}"
             },
             ChildOf(unrelated),
         ));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(step)
+            .insert(ResolvedIdentity("foreign identity".into()));
         fixture.app.world_mut().write_message(Completion {
             entity: step,
             context: fixture.operation,
             attempt: 1,
-            result: Ok(Outcome::Identity("foreign identity".into())),
+            result: Ok(()),
         });
         fixture.app.update();
         assert!(
@@ -3248,7 +3999,7 @@ exit "${VMUX_CARGO_FIXTURE_EXIT:-0}"
             entity: guard,
             context,
             attempt: 1,
-            result: Ok(Outcome::Done),
+            result: Ok(()),
         });
         fixture.app.update();
         assert!(matches!(

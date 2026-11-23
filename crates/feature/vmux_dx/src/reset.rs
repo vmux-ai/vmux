@@ -16,7 +16,6 @@ use crate::storage_io::{
     CanonicalPath, Canonicalize, Capture, DirectoryEntries, Done, Inspect, PathMetadata,
     ReadDirectory, Remove, StorageJob, ToolOutput,
 };
-use crate::work::Outcome;
 use crate::{Attempt, Completion, Lease, Settings};
 
 pub(crate) struct ResetPlugin;
@@ -890,7 +889,7 @@ fn finish(
             if let Ok(path) = paths.get(entity) {
                 println!("Layout reset: {}", path.0.display());
             }
-            Ok(Outcome::Done)
+            Ok(())
         };
         completions.write(Completion {
             entity,
@@ -970,7 +969,7 @@ mod tests {
                     ChildOf(operation),
                     Attempt(1),
                     OperationState::Pending,
-                    crate::work::Work::Reset,
+                    crate::steps::ResetLayoutStep,
                 ))
                 .id();
             Self {

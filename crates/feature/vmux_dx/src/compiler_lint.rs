@@ -16,7 +16,6 @@ use crate::execution::Failure;
 use crate::policy::Policy;
 use crate::repository::Checkout;
 use crate::storage::Storage;
-use crate::work::Outcome;
 
 pub(crate) struct CompilerLintPlugin;
 
@@ -718,7 +717,7 @@ fn check(
 fn finish(mut requests: Requests, facts: Facts, mut io: IoWriter) {
     for (entity, _, _, _, phase, _) in &mut requests {
         if *phase == Phase::Done && !facts.pending(entity) {
-            io.commands.entity(entity).insert(Complete(Outcome::Done));
+            io.commands.entity(entity).insert(Complete);
         }
     }
 }

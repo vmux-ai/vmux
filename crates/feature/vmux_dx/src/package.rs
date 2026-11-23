@@ -17,12 +17,12 @@ use crate::package_io::{CleanupCapture, Copy, Fingerprint, Hash, Scoped, Write};
 use crate::publication;
 use crate::repository::Checkout;
 use crate::signals::Signals;
+use crate::steps::ProducedArtifacts;
 use crate::storage_io::{
     Capture, DirectoryEntries, FileBytes, Inspect, PathMetadata, ReadDirectory, ReadFile,
     StorageJob, ToolOutput,
 };
 use crate::tooling_io::CreateDirectory;
-use crate::work::Outcome;
 use crate::{Attempt, Completion, Lease, Settings};
 
 pub(crate) struct PackagePlugin;
@@ -738,12 +738,7 @@ struct Outcomes<'w, 's> {
 }
 
 impl Outcomes<'_, '_> {
-    fn result(
-        &self,
-        entity: Entity,
-        error: Option<&Failed>,
-        artifacts: Vec<PathBuf>,
-    ) -> Result<Outcome, Failure> {
+    fn result(&self, entity: Entity, error: Option<&Failed>) -> Result<(), Failure> {
         if let Some(error) = error {
             let Ok(recovery) = self.recovery.get(entity) else {
                 return Err(error.0.clone());
@@ -763,10 +758,7 @@ impl Outcomes<'_, '_> {
                 recovery.0, path
             )));
         }
-        if self.desktops.contains(entity) {
-            return Ok(Outcome::Artifacts(artifacts));
-        }
-        Ok(Outcome::Done)
+        Ok(())
     }
 }
 
@@ -4837,11 +4829,15 @@ fn finish(
         if let Ok(publication) = published.get(entity) {
             commands.entity(publication.0).despawn();
         }
+        let result = outcomes.result(entity, error);
+        if result.is_ok() && outcomes.desktops.contains(entity) {
+            commands.entity(entity).insert(ProducedArtifacts(artifacts));
+        }
         completions.write(Completion {
             entity,
             context: scope.context,
             attempt: scope.attempt,
-            result: outcomes.result(entity, error, artifacts),
+            result,
         });
         if let Some(guard) = outcomes.keys.entity(entity) {
             commands.entity(guard).despawn();

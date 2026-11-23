@@ -15,7 +15,6 @@ use crate::debug_io::{
 };
 use crate::execution::Failure;
 use crate::repository::Checkout;
-use crate::work::Outcome;
 
 pub struct CargoPlugin;
 
@@ -792,7 +791,7 @@ fn record(
 fn finish(mut requests: Requests, facts: Facts, mut io: IoWriter) {
     for (entity, _, _, _, phase, _) in &mut requests {
         if *phase == Phase::Done && !facts.pending(entity) {
-            io.commands.entity(entity).insert(Complete(Outcome::Done));
+            io.commands.entity(entity).insert(Complete);
         }
     }
 }
