@@ -12472,6 +12472,87 @@ impl Inventory {
             || self.automatic_value_handle(entry)
             || self.automatic_drop_guard(entry)
             || self.automatic_cef_ffi(entry)
+            || self.automatic_ui_state_projection(entry)
+            || self.automatic_tuple_event_list(entry)
+    }
+
+    fn automatic_ui_state_projection(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || !matches!(entry.kind, Kind::Impl)
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || self.has_bevy_runtime_access(entry)
+        {
+            return false;
+        }
+        let Some(interface) = entry.implemented_trait.as_deref() else {
+            return false;
+        };
+        let is_projection_trait = self
+            .resolve(&entry.namespace, interface, &mut BTreeSet::new())
+            .is_some_and(|resolved| {
+                resolved.key == "crates/util/vmux_api/src/ui_state.rs||trait:UiStateProjection"
+            });
+        if !is_projection_trait {
+            return false;
+        }
+        let Some(owner) = entry
+            .owner
+            .as_deref()
+            .and_then(|owner| self.resolve(&entry.namespace, owner, &mut BTreeSet::new()))
+        else {
+            return false;
+        };
+        if !owner.contract {
+            return false;
+        }
+        let Some(Item::Impl(implementation)) = &entry.syntax else {
+            return false;
+        };
+        let Some((_, trait_path, _)) = &implementation.trait_ else {
+            return false;
+        };
+        let mut arg_paths = BTreeSet::new();
+        for segment in &trait_path.segments {
+            if let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments {
+                for argument in &arguments.args {
+                    if let syn::GenericArgument::Type(ty) = argument {
+                        Self::collect_non_collection_types(ty, &mut arg_paths);
+                    }
+                }
+            }
+        }
+        let mut has_patch = false;
+        for reference in &arg_paths {
+            let Some(patch) = self.resolve(&entry.namespace, reference, &mut BTreeSet::new())
+            else {
+                return false;
+            };
+            if patch.contract {
+                has_patch = true;
+            } else {
+                return false;
+            }
+        }
+        has_patch
+    }
+
+    fn automatic_tuple_event_list(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || !matches!(entry.kind, Kind::Impl)
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.path != "patches/bevy_cef-0.5.2/src/common/ipc/ui_event.rs"
+        {
+            return false;
+        }
+        let Some(interface) = entry.implemented_trait.as_deref() else {
+            return false;
+        };
+        interface.rsplit("::").next() == Some("UiEventList")
+            && matches!(entry.implemented_type, Some(Type::Tuple(_)))
     }
 
     fn automatic_drop_guard(&self, entry: &Declaration) -> bool {
@@ -13171,11 +13252,13 @@ impl Inventory {
             self.ensure_ecs_commands();
             self.ensure_renderer_graph();
             self.ensure_stateless_adapters();
+            self.ensure_drop_guards();
             let jobs = self.job_adapters.borrow();
             let dtos = self.serde_dtos.borrow();
             let cmds = self.ecs_commands.borrow();
             let renderers = self.renderer_graph.borrow();
             let adapters = self.stateless_adapters.borrow();
+            let guards = self.drop_guards.borrow();
             for owner in self.entries.values() {
                 if !owner.production || owner.local || owner.dynamic || owner.opaque {
                     continue;
@@ -13191,6 +13274,9 @@ impl Inventory {
                             roots.contains(&owner.key) || helpers.contains(&owner.key)
                         })
                         || adapters
+                            .as_ref()
+                            .is_some_and(|keys| keys.contains(&owner.key))
+                        || guards
                             .as_ref()
                             .is_some_and(|keys| keys.contains(&owner.key));
                 if !valid_root {
@@ -13231,6 +13317,7 @@ impl Inventory {
             drop(cmds);
             drop(renderers);
             drop(adapters);
+            drop(guards);
             while let Some(owner_key) = queue.pop() {
                 let owner = &self.entries[&owner_key];
                 let mut sources = vec![owner];
@@ -14413,6 +14500,20 @@ impl Inventory {
                         continue;
                     }
                     if !self.valid_test_fixture_target(target) {
+                        if matches!(target.kind, Kind::Struct | Kind::Enum)
+                            && target.production
+                            && !target.path.starts_with("crates/feature/vmux_dx/lints/")
+                        {
+                            for implementation in self.implementations(target) {
+                                if !implementation.production
+                                    && !implementation.plugin
+                                    && !self.has_cargo_command(implementation)
+                                    && fixtures.insert(implementation.key.clone())
+                                {
+                                    queue.push(implementation.key.clone());
+                                }
+                            }
+                        }
                         continue;
                     }
                     if fixtures.insert(target.key.clone()) {
@@ -24304,4 +24405,50 @@ fn wave6_drop_guards_cef_ffi_and_contract_enums_prove_safely() {
             "expected rejected Wave 6 entry: {key}"
         );
     }
+}
+
+#[test]
+fn wave7_ui_state_projections_tuple_event_lists_and_test_impls_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_macro/src/lib.rs",
+        "#[proc_macro_attribute] pub fn ui_state() {} #[proc_macro_attribute] pub fn ui_state_patch() {}",
+    );
+    inventory.source(
+        "crates/util/vmux_api/src/ui_state.rs",
+        "pub trait UiStateProjection<P> { fn apply(&mut self, patch: P); }",
+    );
+    inventory.source(
+        "crates/util/vmux_api/src/lib.rs",
+        "pub mod ui_state; pub use ui_state::UiStateProjection; pub use vmux_macro::{ui_state, ui_state_patch};",
+    );
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use vmux_api::UiStateProjection; #[vmux_api::ui_state] struct DemoState { count: u32 } #[vmux_api::ui_state_patch] struct DemoPatch { count: u32 } struct PlainPatch { count: u32 } impl UiStateProjection<DemoPatch> for DemoState { fn apply(&mut self, patch: DemoPatch) { self.count = patch.count; } } impl UiStateProjection<PlainPatch> for DemoState { fn apply(&mut self, patch: PlainPatch) { self.count = patch.count; } } #[cfg(test)] mod tests { use super::*; impl DemoState { fn sample() -> Self { Self { count: 1 } } } #[test] fn checks_sample() { let _ = DemoState::sample(); } }",
+    );
+    inventory.source(
+        "patches/bevy_cef-0.5.2/src/common/ipc/ui_event.rs",
+        "pub trait UiEventList {} impl<T0> UiEventList for (T0,) {}",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/feature/demo/src/lib.rs||impl:UiStateProjection < DemoPatch > for DemoState",
+        "crates/feature/demo/src/lib.rs|tests|impl:DemoState",
+        "patches/bevy_cef-0.5.2/src/common/ipc/ui_event.rs||impl:UiEventList for (T0 ,)",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved Wave 7 entry: {key}"
+        );
+    }
+    assert!(
+        !inventory.canonical(
+            &inventory.entries
+                ["crates/feature/demo/src/lib.rs||impl:UiStateProjection < PlainPatch > for DemoState"],
+            &policy,
+            &mut BTreeSet::new()
+        ),
+        "expected rejected plain patch projection"
+    );
 }

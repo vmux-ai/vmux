@@ -10,10 +10,6 @@ boundaries: [
 ],
 values: [
     (key: "crates/util/vmux_flex/src/node.rs||enum:Val", owner: "crates/util/vmux_flex/src/node.rs||struct:Node", lifetime: "immutable unit/numeric values stored directly in one canonical layout Node and converted through the bounded Taffy style codec"),
-    (key: "crates/util/vmux_flex/src/node.rs||struct:UiRect", owner: "crates/util/vmux_flex/src/node.rs||struct:Node", lifetime: "padding values stored directly on one canonical layout Node"),
-    (key: "crates/util/vmux_flex/src/tree.rs||struct:FlexNode", owner: "crates/util/vmux_flex/src/tree.rs||struct:FlexTree", lifetime: "native node/viewport handle association derived from canonical entities; removed with native calculation retirement"),
-
-    (key: "crates/util/vmux_flex/src/computed.rs||struct:Insets", owner: "crates/util/vmux_flex/src/computed.rs||struct:ComputedNode", lifetime: "immutable padding vectors of one canonical computed geometry component"),
 ],
 shape: (
   debt: [
