@@ -586,11 +586,12 @@ mod tests {
         server.abort();
         let _ = std::fs::remove_dir_all(&dir);
 
-        assert!(
-            reaped.is_ok(),
-            "child pid {pid} still alive after client disconnect — service did not reap it (state: {})",
-            proc_state_label(pid)
-        );
+        if reaped.is_err() {
+            let state = proc_state_label(pid);
+            panic!(
+                "child pid {pid} still alive after client disconnect — service did not reap it (state: {state})"
+            );
+        }
     }
 
     #[tokio::test]

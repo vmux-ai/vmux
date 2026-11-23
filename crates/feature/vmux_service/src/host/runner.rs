@@ -4,8 +4,6 @@ use bevy_app::prelude::*;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 
-const HOUSEKEEPING_FLOOR: Duration = Duration::from_secs(1);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParkOutcome {
     Woken,
@@ -20,6 +18,8 @@ pub struct WakeDrivenRunner {
 }
 
 impl WakeDrivenRunner {
+    const HOUSEKEEPING_FLOOR: Duration = Duration::from_secs(1);
+
     pub fn new(
         runtime: Handle,
         wake_rx: mpsc::UnboundedReceiver<()>,
@@ -51,7 +51,7 @@ impl WakeDrivenRunner {
             if let Some(exit) = app.should_exit() {
                 return self.finish(app, exit);
             }
-            if self.park(HOUSEKEEPING_FLOOR) == ParkOutcome::Shutdown {
+            if self.park(Self::HOUSEKEEPING_FLOOR) == ParkOutcome::Shutdown {
                 return self.finish(app, AppExit::Success);
             }
         }
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn shutdown_keeps_processing_ecs_requests_until_the_closing_task_finishes() {
-        let rt = runtime();
+        let rt = WakeDrivenRunner::test_runtime();
         let (wake_tx, wake_rx) = mpsc::unbounded_channel();
         let (signal_tx, signal_rx) = mpsc::channel(1);
         signal_tx.try_send(()).unwrap();
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn shutdown_signal_runs_registered_cleanup_before_dropping_the_application() {
-        let rt = runtime();
+        let rt = WakeDrivenRunner::test_runtime();
         let (_wake_tx, wake_rx) = mpsc::unbounded_channel();
         let (signal_tx, signal_rx) = mpsc::channel(1);
         signal_tx.try_send(()).unwrap();
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn feature_registry_is_frozen_before_the_first_runner_update() {
-        let rt = runtime();
+        let rt = WakeDrivenRunner::test_runtime();
         let (_wake_tx, wake_rx) = mpsc::unbounded_channel();
         let (_signal_tx, signal_rx) = mpsc::channel(1);
         let frozen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -214,17 +214,19 @@ mod tests {
         assert!(frozen.load(std::sync::atomic::Ordering::SeqCst));
     }
 
-    fn runtime() -> tokio::runtime::Runtime {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()
-            .unwrap()
+    impl WakeDrivenRunner {
+        fn test_runtime() -> tokio::runtime::Runtime {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .unwrap()
+        }
     }
 
     #[test]
     fn a_burst_of_wakes_costs_one_update() {
-        let rt = runtime();
+        let rt = WakeDrivenRunner::test_runtime();
         let (wake_tx, wake_rx) = mpsc::unbounded_channel();
         let (_signal_tx, signal_rx) = mpsc::channel(1);
         for _ in 0..5 {
@@ -243,7 +245,7 @@ mod tests {
 
     #[test]
     fn an_idle_daemon_wakes_only_on_the_housekeeping_floor() {
-        let rt = runtime();
+        let rt = WakeDrivenRunner::test_runtime();
         let (_wake_tx, wake_rx) = mpsc::unbounded_channel();
         let (_signal_tx, signal_rx) = mpsc::channel(1);
 
@@ -255,7 +257,7 @@ mod tests {
 
     #[test]
     fn a_signal_stops_the_runner() {
-        let rt = runtime();
+        let rt = WakeDrivenRunner::test_runtime();
         let (_wake_tx, wake_rx) = mpsc::unbounded_channel();
         let (signal_tx, signal_rx) = mpsc::channel(1);
         signal_tx.try_send(()).unwrap();
@@ -268,7 +270,7 @@ mod tests {
 
     #[test]
     fn the_server_dropping_its_wake_sender_stops_the_runner() {
-        let rt = runtime();
+        let rt = WakeDrivenRunner::test_runtime();
         let (wake_tx, wake_rx) = mpsc::unbounded_channel::<()>();
         let (_signal_tx, signal_rx) = mpsc::channel(1);
         drop(wake_tx);
@@ -281,7 +283,7 @@ mod tests {
 
     #[test]
     fn the_app_exits_when_a_signal_arrives() {
-        let rt = runtime();
+        let rt = WakeDrivenRunner::test_runtime();
         let (wake_tx, wake_rx) = mpsc::unbounded_channel();
         let (signal_tx, signal_rx) = mpsc::channel(1);
         signal_tx.try_send(()).unwrap();
