@@ -12687,9 +12687,9 @@ impl Inventory {
                 if tr.rsplit("::").next() != Some(entry.name.as_str()) {
                     continue;
                 }
-                if !self
+                if self
                     .resolve(&implementation.namespace, tr, &mut BTreeSet::new())
-                    .is_some_and(|resolved| resolved.key == entry.key)
+                    .is_none_or(|resolved| resolved.key != entry.key)
                 {
                     continue;
                 }
