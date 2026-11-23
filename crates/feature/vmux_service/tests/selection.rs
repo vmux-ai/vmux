@@ -43,15 +43,14 @@ impl ProcessHarness {
                 .run_schedule(vmux_ecs::service::ShutdownComplete);
             app.update();
         });
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
         let id = ProcessId::new();
         let created = rt
             .block_on(runtime.create(ProcessLaunch {
                 id,
-                command: shell,
-                args: Vec::new(),
+                command: "/bin/sh".into(),
+                args: vec!["-c".into(), "exec sleep 60".into()],
                 cwd: String::new(),
-                env: Vec::new(),
+                env: vec![("LC_ALL".into(), "C".into())],
                 cols,
                 rows,
                 keep_after_exit: false,
