@@ -140,7 +140,10 @@ fn seed(requests: Seeding, mut commands: Commands) {
                 Cwd(path.clone()),
                 Directory {
                     client: path.join("crates/app/vmux_cli/Cargo.toml").is_file(),
-                    cloud: path.join(".gitmodules").is_file() && path.join("Cargo.toml").is_file(),
+                    cloud: path.join("Cargo.toml").is_file()
+                        && (path.join("dx/feature.ron").is_file()
+                            || path.join("docker-compose.yml").is_file()
+                            || path.join(".gitmodules").is_file()),
                 },
                 Order(order),
                 ChildOf(entity),
@@ -621,21 +624,29 @@ fn discover(
                 if origin.0 != entity {
                     continue;
                 }
-                let client = cwd.0.join("client");
-                if !client.join(".git").exists() || !paths.insert(client.clone()) {
-                    continue;
+                let mut candidates = vec![cwd.0.join("client")];
+                if let Some(parent) = cwd.0.parent() {
+                    candidates.push(parent.join("vmux"));
                 }
-                commands.spawn((
-                    Operation::bundle("dx.repository.scan").unwrap().running(),
-                    Cwd(client),
-                    Scan {
-                        cloud: false,
-                        nested: true,
-                        owner: scan.owner,
-                    },
-                    ChildOf(scan.owner),
-                ));
-                wake.0.wake_by_ref();
+                for client in candidates {
+                    if !client.join("crates/app/vmux_cli/Cargo.toml").is_file()
+                        || !client.join(".git").exists()
+                        || !paths.insert(client.clone())
+                    {
+                        continue;
+                    }
+                    commands.spawn((
+                        Operation::bundle("dx.repository.scan").unwrap().running(),
+                        Cwd(client),
+                        Scan {
+                            cloud: false,
+                            nested: true,
+                            owner: scan.owner,
+                        },
+                        ChildOf(scan.owner),
+                    ));
+                    wake.0.wake_by_ref();
+                }
             }
         }
         commands
@@ -750,7 +761,14 @@ fn finish(requests: Finishing, folders: Query<&Cwd>, mut commands: Commands) {
     for (entity, choice) in &requests {
         let mut root = folders.get(choice.0).unwrap().0.clone();
         if !root.join("crates/app/vmux_cli/Cargo.toml").is_file() {
-            root.push("client");
+            let nested = root.join("client");
+            if nested.join("crates/app/vmux_cli/Cargo.toml").is_file() {
+                root = nested;
+            } else if let Some(sibling) = root.parent().map(|parent| parent.join("vmux"))
+                && sibling.join("crates/app/vmux_cli/Cargo.toml").is_file()
+            {
+                root = sibling;
+            }
         }
         if !root.join("crates/app/vmux_cli/Cargo.toml").is_file() {
             commands.entity(entity).insert(CliResult(Err(

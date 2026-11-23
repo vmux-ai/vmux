@@ -498,6 +498,84 @@ mod tests {
     }
 
     #[test]
+    fn standalone_cloud_discovers_sibling_client_and_its_external_worktrees() {
+        let fixture = Fixture::new();
+        fs::remove_dir_all(fixture.root.join("crates")).unwrap();
+        fs::create_dir_all(fixture.root.join("dx")).unwrap();
+        fs::write(fixture.root.join("dx/feature.ron"), "(cli: None)\n").unwrap();
+        fs::write(
+            fixture.root.join("Cargo.toml"),
+            "[workspace]\nmembers = []\n",
+        )
+        .unwrap();
+        fixture.git(&["add", "-A"]);
+        fixture.git(&[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "Standalone cloud fixture",
+        ]);
+        let sibling = fixture.root.parent().unwrap().join("vmux");
+        fs::create_dir_all(sibling.join("crates/app/vmux_cli")).unwrap();
+        fs::write(
+            sibling.join("crates/app/vmux_cli/Cargo.toml"),
+            "[package]\nname = \"vmux_cli\"\n",
+        )
+        .unwrap();
+        for arguments in [
+            vec!["init", "-b", "main"],
+            vec!["add", "."],
+            vec![
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "Standalone vmux fixture",
+            ],
+        ] {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&sibling)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+        }
+        let external = fixture
+            .directory
+            .path()
+            .join("managed-worktrees/vmux-ai/vmux/feature-topic");
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&sibling)
+            .args(["worktree", "add", "-b", "feature-topic"])
+            .arg(&external)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            fixture.resolve(&fixture.root, None).unwrap().root,
+            sibling.canonicalize().unwrap()
+        );
+        assert_eq!(
+            fixture
+                .resolve(&fixture.root, Some(OsStr::new("feature-topic")))
+                .unwrap()
+                .root,
+            external.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
     fn ambiguous_client_branches_across_cloud_worktrees_are_refused() {
         let fixture = Fixture::cloud();
         fixture.client(&fixture.root, "client-main");

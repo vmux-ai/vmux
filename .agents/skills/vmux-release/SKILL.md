@@ -30,8 +30,8 @@ description: Use when releasing a new vmux version, cutting a vmux release, vali
 3. **Create release worktree and bump version.**
    ```bash
    git worktree list
-   git worktree add .worktrees/vmux-release-vX.Y.Z -b release/vX.Y.Z main
-   cd .worktrees/vmux-release-vX.Y.Z
+   git worktree add ~/.vmux/worktrees/vmux-ai/vmux/vmux-release-vX.Y.Z -b release/vX.Y.Z origin/main
+   cd ~/.vmux/worktrees/vmux-ai/vmux/vmux-release-vX.Y.Z
    git pull --rebase origin main
    # Edit Cargo.toml: workspace.package.version = "X.Y.Z"
    make lint
