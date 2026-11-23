@@ -19,7 +19,6 @@ values: [
     (key: "crates/feature/vmux_account/src/profile.rs||struct:Failure", owner: "crates/feature/vmux_account/src/catalog.rs||struct:Error", lifetime: "Typed immutable failure on one canonical account root or mutation completion"),
     (key: "crates/feature/vmux_account/src/mutations.rs||struct:Commit", owner: "crates/feature/vmux_account/src/mutations.rs||struct:Accepted", lifetime: "Immutable durable generation and receipt retained by one accepted operation until confirmation and response"),
     (key: "crates/feature/vmux_account/src/mutations.rs||enum:WriteFailure", owner: "crates/feature/vmux_account/src/mutations.rs||struct:WriteCompleted", lifetime: "Immutable SQLite generation conflict or IO refusal owned by one write completion"),
-    (key: "crates/feature/vmux_account/src/profile.rs||enum:FailureKind", owner: "crates/feature/vmux_account/src/connection.rs||struct:ConnectionError", lifetime: "Canonical scalar classification of the owned Account error, projected without its native diagnostic text"),
 ],
 shape: (
   enums: [

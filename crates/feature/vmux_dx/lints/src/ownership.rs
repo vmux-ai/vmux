@@ -49,7 +49,8 @@ impl<'tcx> Ownership<'tcx> {
                 ("inventory", "Collect") => "inventory",
                 ("dioxus_core", "Properties") => "props",
                 ("dioxus_router" | "dioxus_router_core", "Routable") => "routable",
-                ("serde" | "serde_core", "Serialize" | "Deserialize") => "serde",
+                ("serde" | "serde_core", "Serialize" | "Deserialize")
+                | ("rkyv", "Archive" | "Serialize" | "Deserialize") => "serde",
                 ("core" | "std", "Error") => "error",
                 ("core" | "std", "Drop") => "drop",
                 ("syn", "Visit" | "VisitMut")
