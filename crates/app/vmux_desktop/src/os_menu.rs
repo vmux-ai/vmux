@@ -12,9 +12,9 @@ use objc2::{runtime::Sel, sel};
 use objc2_app_kit::{NSApplication, NSMenuItem};
 #[cfg(target_os = "macos")]
 use objc2_foundation::MainThreadMarker;
-#[cfg(target_os = "macos")]
-use vmux_browser::HostFocusIntent;
 use vmux_browser::OpenRequest;
+#[cfg(target_os = "macos")]
+use vmux_browser::{HostFocusIntent, HostFocusTarget};
 #[cfg(target_os = "macos")]
 use vmux_command::ReadCommandRequests;
 use vmux_command::{
@@ -452,10 +452,10 @@ fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
 
 #[cfg(target_os = "macos")]
 fn edit_menu_items_enabled(intent: HostFocusIntent, binds_chords: bool) -> bool {
-    match intent {
-        HostFocusIntent::WinitHost => false,
-        HostFocusIntent::HostedPane(_) => !binds_chords,
-        HostFocusIntent::Windowed(_) | HostFocusIntent::LayoutView => true,
+    match intent.kind() {
+        HostFocusTarget::WinitHost => false,
+        HostFocusTarget::HostedPane => !binds_chords,
+        HostFocusTarget::Windowed | HostFocusTarget::LayoutView => true,
     }
 }
 
@@ -474,10 +474,9 @@ fn sync_edit_menu_items(
     let Some(menu) = menu else {
         return;
     };
-    let binds_chords = match *intent {
-        HostFocusIntent::HostedPane(pane) => chord_panes.contains(pane),
-        _ => false,
-    };
+    let binds_chords = intent
+        .hosted_pane_entity()
+        .is_some_and(|pane| chord_panes.contains(pane));
     let enabled = edit_menu_items_enabled(*intent, binds_chords);
     for item in &menu.edit_items {
         item.setEnabled(enabled);
@@ -646,13 +645,13 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn only_a_pane_that_binds_the_chords_takes_the_menu_away_from_the_platform() {
-        let pane = HostFocusIntent::HostedPane(Entity::PLACEHOLDER);
+        let pane = HostFocusIntent::hosted_pane(Entity::PLACEHOLDER);
         let cases = [
             (pane, true, false),
             (pane, false, true),
-            (HostFocusIntent::Windowed(Entity::PLACEHOLDER), false, true),
-            (HostFocusIntent::LayoutView, false, true),
-            (HostFocusIntent::WinitHost, false, false),
+            (HostFocusIntent::windowed(Entity::PLACEHOLDER), false, true),
+            (HostFocusIntent::layout_view(), false, true),
+            (HostFocusIntent::winit_host(), false, false),
         ];
 
         for (intent, binds_chords, want) in cases {

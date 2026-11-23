@@ -56,15 +56,6 @@ impl CefStartup {
     }
 }
 
-type CefPointerRegionRow<'a> = (
-    Option<&'a Header>,
-    Option<&'a SideSheet>,
-    &'a Node,
-    &'a ComputedNode,
-    Option<&'a Visibility>,
-    bool,
-);
-
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct CefPointerRegions<'w, 's> {
     rows: Query<
@@ -90,7 +81,7 @@ impl CefPointerRegions<'_, '_> {
             if self.windows.get(entity) != Some(window) {
                 continue;
             }
-            if CefPointerHitRect::from_row((header, side_sheet, node, rect, visibility, open))
+            if CefPointerHitRect::from_row(header, side_sheet, node, rect, visibility, open)
                 .contains(cursor)
             {
                 return true;
@@ -107,14 +98,23 @@ pub(crate) struct CefPointerHitRect {
 }
 
 impl CefPointerHitRect {
-    fn from_row(row: CefPointerRegionRow<'_>) -> Self {
-        let (header, side_sheet, node, &rect, visibility, open) = row;
+    fn from_row(
+        header: Option<&Header>,
+        side_sheet: Option<&SideSheet>,
+        node: &Node,
+        rect: &ComputedNode,
+        visibility: Option<&Visibility>,
+        open: bool,
+    ) -> Self {
         let interactive = (header.is_some() || side_sheet.is_some())
             && open
             && node.display != Display::None
             && !matches!(visibility, Some(Visibility::Hidden))
             && !rect.is_empty();
-        Self { rect, interactive }
+        Self {
+            rect: *rect,
+            interactive,
+        }
     }
 
     pub(crate) fn contains(self, point: Vec2) -> bool {
@@ -128,14 +128,19 @@ pub(crate) type LayoutPointerCapture = Or<(
     With<LayoutOverlayActive>,
 )>;
 
-pub(crate) const LAYOUT_INPUT_BURST: std::time::Duration = std::time::Duration::from_millis(250);
-
 #[derive(Component, Default)]
 pub(crate) struct LayoutFrameRateState {
     pub(crate) native_sequence: u64,
     pub(crate) last_input: Option<std::time::Instant>,
     pub(crate) last_emit: Option<std::time::Instant>,
     pub(crate) dragging_layout: bool,
+}
+
+impl LayoutFrameRateState {
+    pub(crate) const INPUT_BURST: std::time::Duration = std::time::Duration::from_millis(250);
+    pub(crate) const LAYOUT_IDLE: i32 = 4;
+    pub(crate) const LAYOUT_ACTIVE: i32 = 60;
+    pub(crate) const PAGE_MAX: i32 = 60;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

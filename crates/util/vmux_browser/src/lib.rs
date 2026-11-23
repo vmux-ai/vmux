@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-use bevy::{ecs::relationship::Relationship, prelude::*};
+use bevy::{ecs::relationship::Relationship, ecs::system::Commands, prelude::*};
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{CefEmbeddedHosts, CefSchemeRoute};
 pub use command::{
@@ -9,12 +9,10 @@ pub use command::{
 };
 pub use host::AgentBrowserResolve;
 pub use host::WebviewLoadCompleted;
-pub use host_focus::HostFocusIntent;
+pub use host_focus::{HostFocusIntent, HostFocusTarget};
 pub use infrastructure::{InfrastructureWebview, PopupWebview, RetiredInfrastructureWebview};
 pub use input::WindowPointerRegions;
 pub use native_bridge::NativeBridge;
-#[cfg(target_os = "macos")]
-pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
 pub use navigation::OpenHistoryRequest;
 pub use tool::BrowserToolPlugin;
 use vmux_command::{PendingCommandBarReveal, ReadCommandRequests};

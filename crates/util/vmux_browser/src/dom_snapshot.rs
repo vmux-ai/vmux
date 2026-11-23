@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-pub const SNAPSHOT_NODE_CAP: usize = 600;
-pub const SNAPSHOT_NAME_CAP: usize = 200;
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RawDomNode {
     pub tag: String,
@@ -58,7 +55,7 @@ pub struct SnapNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     pub bbox: [i32; 4],
-    #[serde(rename = "inViewport", skip_serializing_if = "is_false")]
+    #[serde(rename = "inViewport", skip_serializing_if = "Snapshot::is_false")]
     pub in_viewport: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub state: Vec<String>,
@@ -71,20 +68,17 @@ pub struct Snapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub viewport: Option<Viewport>,
     pub nodes: Vec<SnapNode>,
-    #[serde(skip_serializing_if = "is_false")]
+    #[serde(skip_serializing_if = "Snapshot::is_false")]
     pub truncated: bool,
 }
 
-fn is_false(value: &bool) -> bool {
-    !*value
-}
+impl Snapshot {
+    pub const NODE_CAP: usize = 600;
 
-const INTERACTIVE_TAGS: &[&str] = &[
-    "a", "button", "input", "select", "textarea", "option", "summary", "label",
-];
-const LANDMARK_TAGS: &[&str] = &[
-    "nav", "main", "header", "footer", "aside", "h1", "h2", "h3", "h4", "h5", "h6",
-];
+    fn is_false(value: &bool) -> bool {
+        !*value
+    }
+}
 
 impl From<RawSnapshot> for Snapshot {
     fn from(raw: RawSnapshot) -> Self {
@@ -94,7 +88,7 @@ impl From<RawSnapshot> for Snapshot {
             if !raw_node.is_interesting() {
                 continue;
             }
-            if nodes.len() >= SNAPSHOT_NODE_CAP {
+            if nodes.len() >= Self::NODE_CAP {
                 truncated = true;
                 break;
             }
@@ -137,6 +131,14 @@ impl RawViewport {
 }
 
 impl RawDomNode {
+    pub const NAME_CAP: usize = 200;
+    const INTERACTIVE_TAGS: &[&str] = &[
+        "a", "button", "input", "select", "textarea", "option", "summary", "label",
+    ];
+    const LANDMARK_TAGS: &[&str] = &[
+        "nav", "main", "header", "footer", "aside", "h1", "h2", "h3", "h4", "h5", "h6",
+    ];
+
     fn attr(&self, key: &str) -> Option<&str> {
         self.attrs
             .iter()
@@ -153,13 +155,13 @@ impl RawDomNode {
             return false;
         }
         let tag = self.tag.as_str();
-        if INTERACTIVE_TAGS.contains(&tag) {
+        if Self::INTERACTIVE_TAGS.contains(&tag) {
             return true;
         }
         if self.has_attr("role") || self.has_attr("tabindex") || self.has_attr("aria-label") {
             return true;
         }
-        LANDMARK_TAGS.contains(&tag) && !self.text.trim().is_empty()
+        Self::LANDMARK_TAGS.contains(&tag) && !self.text.trim().is_empty()
     }
 
     fn role(&self) -> String {
@@ -205,8 +207,8 @@ impl RawDomNode {
             .map(str::to_string)
             .unwrap_or_else(|| self.text.trim().to_string());
         let mut name = candidate.split_whitespace().collect::<Vec<_>>().join(" ");
-        if name.chars().count() > SNAPSHOT_NAME_CAP {
-            name = name.chars().take(SNAPSHOT_NAME_CAP).collect();
+        if name.chars().count() > Self::NAME_CAP {
+            name = name.chars().take(Self::NAME_CAP).collect();
         }
         name
     }
@@ -370,11 +372,11 @@ mod tests {
     #[test]
     fn refs_are_sequential_and_truncation_sets_flag() {
         let mut nodes = Vec::new();
-        for i in 0..(SNAPSHOT_NODE_CAP + 5) {
+        for i in 0..(Snapshot::NODE_CAP + 5) {
             nodes.push(node("button", &format!("b{i}"), &[], [0, 0, 10, 10]));
         }
         let snap = Snapshot::from(raw(nodes));
-        assert_eq!(snap.nodes.len(), SNAPSHOT_NODE_CAP);
+        assert_eq!(snap.nodes.len(), Snapshot::NODE_CAP);
         assert!(snap.truncated);
         assert_eq!(snap.nodes[0].reference, 0);
         assert_eq!(snap.nodes[1].reference, 1);

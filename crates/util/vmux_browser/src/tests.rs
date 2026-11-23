@@ -8,9 +8,11 @@ use vmux_setting::AppSettings;
 
 use vmux_ecs::PageIdentity;
 
+#[cfg(test)]
 #[derive(Resource, Default)]
 struct SeenPageOpens(Vec<String>);
 
+#[cfg(test)]
 fn record_page_opens(
     tasks: Query<(Entity, &PageOpenTask), Without<PageOpenHandled>>,
     mut seen: ResMut<SeenPageOpens>,
@@ -329,12 +331,14 @@ fn layout_state_padding_reads_effective_window_node_padding() {
     );
 }
 
+#[cfg(test)]
 mod browser_navigate_flow {
     use crate::Browser;
     use crate::host::AgentBrowserNavigate;
     use crate::host::PendingNavigationSnapshot;
     use crate::input::RecentBrowserInteraction;
     use bevy::ecs::relationship::Relationship;
+    use bevy::ecs::system::Commands;
     use bevy::prelude::*;
     use vmux_api::protocol::{AgentRequest, AgentRequestId};
     use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
@@ -1117,6 +1121,7 @@ mod browser_navigate_flow {
     }
 }
 
+#[cfg(test)]
 mod open_in_place_flow {
     use crate::{OpenRequest, ZoomChange, ZoomRequest};
     use bevy::ecs::message::Messages;

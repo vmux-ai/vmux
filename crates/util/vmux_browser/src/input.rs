@@ -22,7 +22,7 @@ pub(crate) struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PointerUpdated>()
-            .add_message::<PointerEffect>()
+            .add_message::<PointerDispatch>()
             .add_systems(
                 Update,
                 (initialize, ApplyDeferred, forward, project)
@@ -48,7 +48,6 @@ pub(crate) struct CefHoverPosition {
     pub(crate) inside: bool,
 }
 
-#[derive(Message)]
 pub(crate) enum PointerEffect {
     Move {
         target: Entity,
@@ -56,13 +55,16 @@ pub(crate) enum PointerEffect {
         position: Vec2,
         leave: bool,
     },
-    Click {
+    Button {
         target: Entity,
         position: Vec2,
         button: PointerButton,
         released: bool,
     },
 }
+
+#[derive(Message)]
+pub(crate) struct PointerDispatch(pub(crate) PointerEffect);
 
 fn initialize(
     windows: Query<Entity, (With<Window>, Without<WindowPointerRegions>)>,
@@ -83,7 +85,7 @@ fn forward(
     mut events: MessageReader<PointerUpdated>,
     mut windows: Query<(&Window, &mut PointerCapture)>,
     suppress: Res<CefSuppressPointerInput>,
-    mut effects: MessageWriter<PointerEffect>,
+    mut effects: MessageWriter<PointerDispatch>,
     mut layouts: Query<
         (
             Entity,
@@ -124,104 +126,126 @@ fn forward(
             && !event.cancelled
             && (capture.owner() == Some(layout) || captures.contains(layout) || in_region);
         if (event.motion || (event.cancelled && hover.inside)) && (inside || hover.inside) {
-            effects.write(PointerEffect::Move {
+            effects.write(PointerDispatch(PointerEffect::Move {
                 target: layout,
                 buttons: event.buttons,
                 position,
                 leave: !inside,
-            });
+            }));
             hover.position = Some(position);
         }
         hover.inside = inside;
         if inside || capture.owner() == Some(layout) {
             capture.route(event.sequence);
         }
-        for (button, native, before, after) in [
-            (
-                MouseButton::Left,
-                PointerButton::Primary,
-                event.previous_buttons.left,
-                event.buttons.left,
-            ),
-            (
-                MouseButton::Right,
-                PointerButton::Secondary,
-                event.previous_buttons.right,
-                event.buttons.right,
-            ),
-            (
-                MouseButton::Middle,
-                PointerButton::Middle,
-                event.previous_buttons.middle,
-                event.buttons.middle,
-            ),
-        ] {
-            if before == after {
-                continue;
-            }
-            if after
-                && !suppress.0
-                && overlays
-                    .get(layout)
-                    .is_ok_and(LayoutOverlayActive::dismisses_background_click)
-                && !in_region
-            {
-                commands.trigger(
-                    vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
-                        layout,
-                        &revision.next_effect(),
-                    ),
-                );
-            }
-            if after && inside {
-                capture.claim(layout, button);
-            }
-            if inside
-                || capture.owner() == Some(layout)
-                || (event.cancelled && event.capture_owner == Some(layout))
-            {
-                effects.write(PointerEffect::Move {
-                    target: layout,
-                    buttons: event.buttons,
-                    position,
-                    leave: !inside,
-                });
-                effects.write(PointerEffect::Click {
-                    target: layout,
-                    position,
-                    button: native,
-                    released: !after,
-                });
-            }
-            if !after {
-                capture.release(button);
-            }
-        }
+        let dismisses = overlays
+            .get(layout)
+            .is_ok_and(LayoutOverlayActive::dismisses_background_click);
+        forward_buttons(
+            event,
+            layout,
+            position,
+            in_region,
+            inside,
+            suppress.0,
+            dismisses,
+            &mut capture,
+            &mut revision,
+            &mut effects,
+            &mut commands,
+        );
         if suppress.0 || event.cancelled {
             capture.clear();
         }
     }
 }
 
-fn send(mut effects: MessageReader<PointerEffect>, browsers: NonSend<Browsers>) {
+#[allow(clippy::too_many_arguments)]
+fn forward_buttons(
+    event: &PointerUpdated,
+    layout: Entity,
+    position: Vec2,
+    in_region: bool,
+    inside: bool,
+    suppressed: bool,
+    dismisses: bool,
+    capture: &mut PointerCapture,
+    revision: &mut LayoutOverlayDismissRevision,
+    effects: &mut MessageWriter<PointerDispatch>,
+    commands: &mut Commands,
+) {
+    for (button, native, before, after) in [
+        (
+            MouseButton::Left,
+            PointerButton::Primary,
+            event.previous_buttons.left,
+            event.buttons.left,
+        ),
+        (
+            MouseButton::Right,
+            PointerButton::Secondary,
+            event.previous_buttons.right,
+            event.buttons.right,
+        ),
+        (
+            MouseButton::Middle,
+            PointerButton::Middle,
+            event.previous_buttons.middle,
+            event.buttons.middle,
+        ),
+    ] {
+        if before == after {
+            continue;
+        }
+        if after && !suppressed && dismisses && !in_region {
+            commands.trigger(
+                vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+                    layout,
+                    &revision.next_effect(),
+                ),
+            );
+        }
+        if after && inside {
+            capture.claim(layout, button);
+        }
+        if inside
+            || capture.owner() == Some(layout)
+            || (event.cancelled && event.capture_owner == Some(layout))
+        {
+            effects.write(PointerDispatch(PointerEffect::Move {
+                target: layout,
+                buttons: event.buttons,
+                position,
+                leave: !inside,
+            }));
+            effects.write(PointerDispatch(PointerEffect::Button {
+                target: layout,
+                position,
+                button: native,
+                released: !after,
+            }));
+        }
+        if !after {
+            capture.release(button);
+        }
+    }
+}
+
+fn send(mut effects: MessageReader<PointerDispatch>, browsers: NonSend<Browsers>) {
     for effect in effects.read() {
-        match effect {
+        match effect.0 {
             PointerEffect::Move {
                 target,
                 buttons,
                 position,
                 leave,
-            } => {
-                browsers.send_native_mouse_move(target, *buttons, *position, *leave);
-            }
-            PointerEffect::Click {
+            } => browsers.send_native_mouse_move(&target, buttons, position, leave),
+            PointerEffect::Button {
                 target,
                 position,
                 button,
                 released,
-            } => {
-                browsers.send_mouse_click(target, *position, *button, *released);
-            }
+            } => browsers.send_mouse_click(&target, position, button, released),
         }
     }
 }
@@ -383,9 +407,9 @@ mod tests {
             app.update();
             let clicks = app
                 .world_mut()
-                .resource_mut::<Messages<PointerEffect>>()
+                .resource_mut::<Messages<PointerDispatch>>()
                 .drain()
-                .filter(|effect| matches!(effect, PointerEffect::Click { .. }))
+                .filter(|effect| matches!(effect.0, PointerEffect::Button { .. }))
                 .count();
             assert_eq!(clicks, expected_clicks);
         }
@@ -434,13 +458,17 @@ mod tests {
             app.update();
             let effects = app
                 .world_mut()
-                .resource_mut::<Messages<PointerEffect>>()
+                .resource_mut::<Messages<PointerDispatch>>()
                 .drain()
                 .collect::<Vec<_>>();
             assert!(effects.iter().any(|effect| matches!(
-                effect,
-                PointerEffect::Move { target, position: actual, leave: false, .. }
-                    if *target == layout && *actual == position
+                effect.0,
+                PointerEffect::Move {
+                    target,
+                    position: actual,
+                    leave: false,
+                    ..
+                } if target == layout && actual == position
             )));
             assert!(app.world().get::<CefHoverPosition>(layout).unwrap().inside);
         }
@@ -464,7 +492,7 @@ mod tests {
         app.world_mut().write_message(event);
         app.update();
         app.world_mut()
-            .resource_mut::<Messages<PointerEffect>>()
+            .resource_mut::<Messages<PointerDispatch>>()
             .clear();
         let event = app
             .world_mut()
@@ -478,12 +506,12 @@ mod tests {
         app.update();
         let effects = app
             .world_mut()
-            .resource_mut::<Messages<PointerEffect>>()
+            .resource_mut::<Messages<PointerDispatch>>()
             .drain()
             .collect::<Vec<_>>();
         assert!(matches!(
             effects.as_slice(),
-            [PointerEffect::Move { target, leave: true, .. }] if *target == layout
+            [PointerDispatch(PointerEffect::Move { target, leave: true, .. })] if *target == layout
         ));
         assert!(!app.world().get::<CefHoverPosition>(layout).unwrap().inside);
     }

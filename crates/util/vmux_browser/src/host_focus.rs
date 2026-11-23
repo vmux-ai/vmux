@@ -1,4 +1,5 @@
 use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, HostWindow, WebviewWindowed};
 use vmux_ecs::KeyboardOwner;
@@ -13,11 +14,9 @@ use crate::Browser;
 use vmux_flex::prelude::*;
 
 #[cfg(target_os = "macos")]
-#[path = "host_focus/macos.rs"]
-mod platform;
+mod macos;
 #[cfg(not(target_os = "macos"))]
-#[path = "host_focus/other.rs"]
-mod platform;
+mod other;
 
 pub(crate) struct HostFocusPlugin;
 
@@ -33,8 +32,11 @@ impl bevy::prelude::Plugin for HostFocusPlugin {
                     .after(crate::BrowserSystemSet::SyncWindowedFrames)
                     .after(crate::BrowserSystemSet::SyncWindowedCommandBar)
                     .after(crate::BrowserOverlaySet),
-            )
-            .add_plugins(platform::HostFocusPlatformPlugin);
+            );
+        #[cfg(target_os = "macos")]
+        app.add_plugins(macos::HostFocusPlatformPlugin);
+        #[cfg(not(target_os = "macos"))]
+        app.add_plugins(other::HostFocusPlatformPlugin);
     }
 }
 
@@ -62,20 +64,80 @@ fn sync_keyboard_context(
     };
 }
 
-#[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HostFocusIntent {
-    Windowed(Entity),
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostFocusTarget {
+    Windowed,
     LayoutView,
-    HostedPane(Entity),
+    HostedPane,
     #[default]
     WinitHost,
 }
 
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostFocusIntent {
+    kind: HostFocusTarget,
+    entity: Option<Entity>,
+}
+
+impl HostFocusIntent {
+    pub fn windowed(entity: Entity) -> Self {
+        Self {
+            kind: HostFocusTarget::Windowed,
+            entity: Some(entity),
+        }
+    }
+
+    pub fn hosted_pane(entity: Entity) -> Self {
+        Self {
+            kind: HostFocusTarget::HostedPane,
+            entity: Some(entity),
+        }
+    }
+
+    pub fn layout_view() -> Self {
+        Self {
+            kind: HostFocusTarget::LayoutView,
+            entity: None,
+        }
+    }
+
+    pub fn winit_host() -> Self {
+        Self {
+            kind: HostFocusTarget::WinitHost,
+            entity: None,
+        }
+    }
+
+    pub fn kind(self) -> HostFocusTarget {
+        self.kind
+    }
+
+    pub fn windowed_entity(self) -> Option<Entity> {
+        (self.kind == HostFocusTarget::Windowed)
+            .then_some(self.entity)
+            .flatten()
+    }
+
+    pub fn hosted_pane_entity(self) -> Option<Entity> {
+        (self.kind == HostFocusTarget::HostedPane)
+            .then_some(self.entity)
+            .flatten()
+    }
+
+    pub fn is_winit_host(self) -> bool {
+        self.kind == HostFocusTarget::WinitHost
+    }
+
+    pub fn is_layout_view(self) -> bool {
+        self.kind == HostFocusTarget::LayoutView
+    }
+}
+
 fn host_focus_intent(active_webview: Option<Entity>, is_hosted: bool) -> HostFocusIntent {
     match active_webview {
-        Some(webview) if is_hosted => HostFocusIntent::HostedPane(webview),
-        Some(webview) => HostFocusIntent::Windowed(webview),
-        None => HostFocusIntent::WinitHost,
+        Some(webview) if is_hosted => HostFocusIntent::hosted_pane(webview),
+        Some(webview) => HostFocusIntent::windowed(webview),
+        None => HostFocusIntent::winit_host(),
     }
 }
 
@@ -121,11 +183,11 @@ fn compute_intent(
         },
     ) {
         if shown_inline {
-            HostFocusIntent::LayoutView
+            HostFocusIntent::layout_view()
         } else if windowed {
-            HostFocusIntent::Windowed(modal)
+            HostFocusIntent::windowed(modal)
         } else {
-            HostFocusIntent::WinitHost
+            HostFocusIntent::winit_host()
         }
     } else if layout_keyboard_q.iter().any(|(_, host)| match host {
         Some(host) => focused_window
@@ -133,7 +195,7 @@ fn compute_intent(
             .is_none_or(|focused| focused == host.0),
         None => true,
     }) {
-        HostFocusIntent::LayoutView
+        HostFocusIntent::layout_view()
     } else {
         let active = focus.stack.and_then(|stack| {
             content_q.iter().find(|&webview| {
@@ -184,10 +246,10 @@ impl WindowedFocus {
         has_browser: bool,
         has_native_focus: Option<bool>,
     ) -> Option<Entity> {
-        let reclaiming = self.layout_view && intent != HostFocusIntent::LayoutView;
-        self.layout_view = intent == HostFocusIntent::LayoutView;
-        match intent {
-            HostFocusIntent::Windowed(webview) if has_browser => {
+        let reclaiming = self.layout_view && !intent.is_layout_view();
+        self.layout_view = intent.is_layout_view();
+        match intent.windowed_entity() {
+            Some(webview) if has_browser => {
                 let should_focus = reclaiming
                     || has_native_focus
                         .map(|has_focus| !has_focus)
@@ -210,18 +272,16 @@ fn apply_windowed(
     mut windows: Query<(Entity, &mut WindowedFocus), With<bevy::prelude::Window>>,
 ) {
     let intent = **intent;
-    let (has_browser, has_native_focus) = match intent {
-        HostFocusIntent::Windowed(webview) => (
+    let (has_browser, has_native_focus) = match intent.windowed_entity() {
+        Some(webview) => (
             browsers.has_browser(webview),
             browsers.windowed_has_native_focus(&webview),
         ),
-        _ => (false, None),
+        None => (false, None),
     };
     let active_window = focused_window.entity();
-    let selected = match intent {
-        HostFocusIntent::Windowed(surface) if active_window.is_some() && has_browser => {
-            Some(surface)
-        }
+    let selected = match intent.windowed_entity() {
+        Some(surface) if active_window.is_some() && has_browser => Some(surface),
         _ => None,
     };
     let mut focus_target = None;
@@ -230,7 +290,7 @@ fn apply_windowed(
         let target = if Some(window) == active_window {
             focus.target(intent, has_browser, has_native_focus)
         } else {
-            focus.target(HostFocusIntent::WinitHost, false, None)
+            focus.target(HostFocusIntent::winit_host(), false, None)
         };
         if let Some(previous) = focus.release(previous, selected) {
             browsers.set_windowed_focus(&previous, false);
@@ -298,9 +358,9 @@ mod tests {
             .world_mut()
             .get_mut::<WindowedFocus>(previous_window)
             .unwrap();
-        previous.target(HostFocusIntent::Windowed(surface), true, None);
+        previous.target(HostFocusIntent::windowed(surface), true, None);
         let old_surface = previous.surface;
-        previous.target(HostFocusIntent::WinitHost, false, None);
+        previous.target(HostFocusIntent::winit_host(), false, None);
         if previous.release(old_surface, Some(surface)) == native_focus {
             native_focus = None;
         }
@@ -309,7 +369,7 @@ mod tests {
             .get_mut::<WindowedFocus>(selected_window)
             .unwrap();
         if let Some(surface) = selected.target(
-            HostFocusIntent::Windowed(surface),
+            HostFocusIntent::windowed(surface),
             true,
             Some(observed_focus),
         ) {
@@ -333,26 +393,26 @@ mod tests {
         app.world_mut()
             .get_mut::<WindowedFocus>(first)
             .unwrap()
-            .target(HostFocusIntent::LayoutView, false, None);
+            .target(HostFocusIntent::layout_view(), false, None);
         assert_eq!(
             app.world_mut()
                 .get_mut::<WindowedFocus>(second)
                 .unwrap()
-                .target(HostFocusIntent::Windowed(second_page), true, None,),
+                .target(HostFocusIntent::windowed(second_page), true, None,),
             Some(second_page)
         );
         assert_eq!(
             app.world_mut()
                 .get_mut::<WindowedFocus>(first)
                 .unwrap()
-                .target(HostFocusIntent::Windowed(first_page), true, Some(true),),
+                .target(HostFocusIntent::windowed(first_page), true, Some(true),),
             Some(first_page)
         );
         assert_eq!(
             app.world_mut()
                 .get_mut::<WindowedFocus>(second)
                 .unwrap()
-                .target(HostFocusIntent::Windowed(second_page), true, Some(true),),
+                .target(HostFocusIntent::windowed(second_page), true, Some(true),),
             None
         );
     }
@@ -364,7 +424,7 @@ mod tests {
         let page = app.world_mut().spawn((Browser, ChildOf(stack))).id();
         FocusFixture::set_focus(&mut app, stack);
         app.update();
-        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::Windowed(page));
+        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::windowed(page));
     }
 
     #[test]
@@ -380,7 +440,7 @@ mod tests {
 
         app.update();
 
-        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::WinitHost);
+        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::winit_host());
     }
 
     #[test]
@@ -401,7 +461,7 @@ mod tests {
 
         app.update();
 
-        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::WinitHost);
+        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::winit_host());
     }
 
     #[test]
@@ -416,7 +476,7 @@ mod tests {
         app.update();
         assert_eq!(
             FocusFixture::intent(&app),
-            HostFocusIntent::HostedPane(terminal)
+            HostFocusIntent::hosted_pane(terminal)
         );
     }
 
@@ -424,7 +484,7 @@ mod tests {
     fn no_active_stack_intends_winit_host() {
         let mut app = FocusFixture::app();
         app.update();
-        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::WinitHost);
+        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::winit_host());
     }
 
     #[test]
@@ -481,7 +541,7 @@ mod tests {
         ));
         FocusFixture::set_focus(&mut app, stack);
         app.update();
-        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::WinitHost);
+        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::winit_host());
     }
 
     #[test]
@@ -505,7 +565,7 @@ mod tests {
 
         app.update();
 
-        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::Windowed(modal));
+        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::windowed(modal));
     }
 
     #[test]
@@ -530,7 +590,7 @@ mod tests {
 
         app.update();
 
-        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::Windowed(modal));
+        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::windowed(modal));
     }
 
     #[test]
@@ -551,7 +611,7 @@ mod tests {
 
         app.update();
 
-        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::WinitHost);
+        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::winit_host());
     }
 
     #[test]
@@ -562,7 +622,7 @@ mod tests {
         app.world_mut().spawn((LayoutCef, BookmarkTextInputActive));
         FocusFixture::set_focus(&mut app, stack);
         app.update();
-        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::LayoutView);
+        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::layout_view());
     }
 
     #[test]
@@ -574,7 +634,7 @@ mod tests {
             .spawn((LayoutCef, BookmarkContextMenuActive));
         FocusFixture::set_focus(&mut app, stack);
         app.update();
-        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::LayoutView);
+        assert_eq!(FocusFixture::intent(&app), HostFocusIntent::layout_view());
     }
 
     #[test]
@@ -595,7 +655,7 @@ mod tests {
 
         assert_eq!(
             FocusFixture::intent(&app),
-            HostFocusIntent::LayoutView,
+            HostFocusIntent::layout_view(),
             "focusing the overlay's own webview takes the responder off the surface showing the field"
         );
     }
@@ -609,12 +669,12 @@ mod tests {
         };
 
         assert_eq!(
-            focus.target(HostFocusIntent::Windowed(webview), true, None),
+            focus.target(HostFocusIntent::windowed(webview), true, None),
             Some(webview)
         );
         assert_eq!(focus.surface, Some(webview));
         assert_eq!(
-            focus.target(HostFocusIntent::Windowed(webview), true, None),
+            focus.target(HostFocusIntent::windowed(webview), true, None),
             None
         );
         assert_eq!(focus.surface, Some(webview));
@@ -629,16 +689,16 @@ mod tests {
         };
 
         assert_eq!(
-            focus.target(HostFocusIntent::Windowed(webview), true, None),
+            focus.target(HostFocusIntent::windowed(webview), true, None),
             Some(webview)
         );
         assert_eq!(
-            focus.target(HostFocusIntent::Windowed(webview), false, None),
+            focus.target(HostFocusIntent::windowed(webview), false, None),
             None
         );
         assert_eq!(focus.surface, None);
         assert_eq!(
-            focus.target(HostFocusIntent::Windowed(webview), true, None),
+            focus.target(HostFocusIntent::windowed(webview), true, None),
             Some(webview)
         );
     }
@@ -652,7 +712,7 @@ mod tests {
         };
 
         assert_eq!(
-            focus.target(HostFocusIntent::Windowed(webview), true, Some(false)),
+            focus.target(HostFocusIntent::windowed(webview), true, Some(false)),
             Some(webview)
         );
     }
@@ -666,7 +726,7 @@ mod tests {
         };
 
         assert_eq!(
-            focus.target(HostFocusIntent::Windowed(webview), true, Some(true)),
+            focus.target(HostFocusIntent::windowed(webview), true, Some(true)),
             None
         );
     }
@@ -681,7 +741,7 @@ mod tests {
         };
 
         assert_eq!(
-            focus.target(HostFocusIntent::Windowed(next), true, Some(false)),
+            focus.target(HostFocusIntent::windowed(next), true, Some(false)),
             Some(next)
         );
         assert_eq!(focus.surface, Some(next));
@@ -697,7 +757,7 @@ mod tests {
         focus.layout_view = true;
 
         assert_eq!(
-            focus.target(HostFocusIntent::Windowed(webview), true, Some(true)),
+            focus.target(HostFocusIntent::windowed(webview), true, Some(true)),
             Some(webview)
         );
     }
@@ -709,7 +769,10 @@ mod tests {
             ..default()
         };
 
-        assert_eq!(focus.target(HostFocusIntent::WinitHost, false, None), None);
+        assert_eq!(
+            focus.target(HostFocusIntent::winit_host(), false, None),
+            None
+        );
         assert_eq!(focus.surface, None);
     }
 
@@ -720,7 +783,10 @@ mod tests {
             ..default()
         };
 
-        assert_eq!(focus.target(HostFocusIntent::WinitHost, false, None), None);
+        assert_eq!(
+            focus.target(HostFocusIntent::winit_host(), false, None),
+            None
+        );
         assert_eq!(focus.surface, None);
     }
 }

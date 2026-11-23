@@ -6,8 +6,6 @@ use crate::present::WindowedFrameRect;
 
 #[cfg(target_os = "macos")]
 pub(crate) use platform::CommandBarPointerEvent;
-#[cfg(target_os = "macos")]
-pub use platform::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
 
 pub(crate) use history::{HistoryClaims, NativeHistoryPlugin};
 

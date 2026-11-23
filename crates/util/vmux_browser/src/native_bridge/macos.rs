@@ -104,37 +104,46 @@ impl NativeBridge {
     fn command_bar_local_position(x_px: f32, y_px: f32) -> Option<Vec2> {
         CommandBarRoute::current().local_position(Vec2::new(x_px, y_px))
     }
-}
 
-pub fn queue_command_bar_pointer_move(x_px: f32, y_px: f32, buttons: NativeMouseButtons) -> bool {
-    let Some(position) = NativeBridge::command_bar_local_position(x_px, y_px) else {
-        return false;
-    };
-    BRIDGE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .pointer_events
-        .push(CommandBarPointerEvent::Move { position, buttons });
-    true
-}
+    pub fn queue_command_bar_pointer_move(
+        x_px: f32,
+        y_px: f32,
+        buttons: NativeMouseButtons,
+    ) -> bool {
+        let Some(position) = Self::command_bar_local_position(x_px, y_px) else {
+            return false;
+        };
+        BRIDGE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .pointer_events
+            .push(CommandBarPointerEvent::Move { position, buttons });
+        true
+    }
 
-pub fn queue_command_bar_pointer_button(x_px: f32, y_px: f32, button: u8, released: bool) -> bool {
-    let Some(position) = NativeBridge::command_bar_local_position(x_px, y_px) else {
-        return false;
-    };
-    let button = match button {
-        1 => PointerButton::Secondary,
-        2 => PointerButton::Middle,
-        _ => PointerButton::Primary,
-    };
-    BRIDGE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .pointer_events
-        .push(CommandBarPointerEvent::Button {
-            position,
-            button,
-            released,
-        });
-    true
+    pub fn queue_command_bar_pointer_button(
+        x_px: f32,
+        y_px: f32,
+        button: u8,
+        released: bool,
+    ) -> bool {
+        let Some(position) = Self::command_bar_local_position(x_px, y_px) else {
+            return false;
+        };
+        let button = match button {
+            1 => PointerButton::Secondary,
+            2 => PointerButton::Middle,
+            _ => PointerButton::Primary,
+        };
+        BRIDGE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .pointer_events
+            .push(CommandBarPointerEvent::Button {
+                position,
+                button,
+                released,
+            });
+        true
+    }
 }

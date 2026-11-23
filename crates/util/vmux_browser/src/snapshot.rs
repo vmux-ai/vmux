@@ -1,8 +1,9 @@
 use crate::dom_snapshot::{RawSnapshot, Snapshot};
 use crate::host::PendingNavigationSnapshot;
-use bevy::ecs::system::SystemParam;
+use bevy::ecs::system::{Commands, SystemParam};
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, SnapshotResult};
+use std::fmt::Write;
 use vmux_ecs::browser::{
     BrowserNavigationSnapshotResponse, BrowserScrollResponse, BrowserSnapshotRequest,
     BrowserSnapshotResponse,
@@ -22,30 +23,24 @@ struct SnapshotResponseRoute {
     request_id: [u8; 16],
 }
 
-struct SnapshotToken([u8; 16]);
-
-impl std::fmt::Display for SnapshotToken {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for byte in self.0 {
-            write!(formatter, "{byte:02x}")?;
+impl SnapshotResponseRoute {
+    fn encode_id(id: [u8; 16]) -> String {
+        let mut out = String::with_capacity(32);
+        for byte in id {
+            let _ = write!(&mut out, "{byte:02x}");
         }
-        Ok(())
+        out
     }
-}
 
-impl std::str::FromStr for SnapshotToken {
-    type Err = ();
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
+    fn decode_id(value: &str) -> Option<[u8; 16]> {
         if value.len() != 32 {
-            return Err(());
+            return None;
         }
         let mut bytes = [0u8; 16];
         for index in 0..16 {
-            bytes[index] =
-                u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).map_err(|_| ())?;
+            bytes[index] = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).ok()?;
         }
-        Ok(Self(bytes))
+        Some(bytes)
     }
 }
 
@@ -88,8 +83,10 @@ fn start_snapshots(
         let webview = targets.resolve(request.webview, request.pane.as_deref());
         let sent = webview
             .map(|webview| {
-                cef_browsers
-                    .request_snapshot(&webview, &SnapshotToken(request.request_id).to_string())
+                cef_browsers.request_snapshot(
+                    &webview,
+                    &SnapshotResponseRoute::encode_id(request.request_id),
+                )
             })
             .unwrap_or(false);
         if sent {
@@ -257,7 +254,7 @@ fn shape_results(
     mut commands: Commands,
 ) {
     for result in reader.read() {
-        let Ok(SnapshotToken(request_id)) = result.request_id.parse() else {
+        let Some(request_id) = SnapshotResponseRoute::decode_id(&result.request_id) else {
             continue;
         };
         let mapped = serde_json::from_str::<RawSnapshot>(&result.json)
@@ -386,7 +383,7 @@ mod tests {
                 .resource_mut::<Messages<SnapshotResult>>()
                 .write(SnapshotResult {
                     webview: Entity::PLACEHOLDER,
-                    request_id: SnapshotToken(request_id).to_string(),
+                    request_id: SnapshotResponseRoute::encode_id(request_id),
                     json: "invalid".to_string(),
                 });
         }
@@ -433,7 +430,7 @@ mod tests {
             .resource_mut::<Messages<SnapshotResult>>()
             .write(SnapshotResult {
                 webview: Entity::PLACEHOLDER,
-                request_id: SnapshotToken(request_id).to_string(),
+                request_id: SnapshotResponseRoute::encode_id(request_id),
                 json: "invalid".to_string(),
             });
 

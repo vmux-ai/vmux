@@ -159,10 +159,8 @@ fn dispatch_open_page_target(
     }
 }
 
-struct Home;
-
-impl Home {
-    fn resolve(value: &str) -> std::path::PathBuf {
+impl OpenPageTarget {
+    fn resolve_home(value: &str) -> std::path::PathBuf {
         let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
         if let Some(rest) = value.strip_prefix('~') {
             return match home {
@@ -186,7 +184,7 @@ impl Home {
         if !path.starts_with('~') {
             return value.to_string();
         }
-        format!("file://{}", Self::resolve(path).display())
+        format!("file://{}", Self::resolve_home(path).display())
     }
 }
 
@@ -256,8 +254,8 @@ fn open_from_bar(
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
-    let value = Home::expanded_file_url(&request.value);
-    let expanded = Home::resolve(&value);
+    let value = OpenPageTarget::expanded_file_url(&request.value);
+    let expanded = OpenPageTarget::resolve_home(&value);
     if expanded.exists() {
         let directory = if expanded.is_dir() {
             &expanded
@@ -363,14 +361,15 @@ fn invoke_from_bar(
 #[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NavigationRequest {
-    target: NavigationTarget,
+    target_kind: NavigationTargetKind,
+    target: Entity,
     operation: NavigationOperation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NavigationTarget {
-    Origin(Entity),
-    Surface(Entity),
+enum NavigationTargetKind {
+    Origin,
+    Surface,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -385,14 +384,16 @@ pub enum NavigationOperation {
 impl NavigationRequest {
     pub fn focused(operation: NavigationOperation) -> Self {
         Self {
-            target: NavigationTarget::Origin(Entity::PLACEHOLDER),
+            target_kind: NavigationTargetKind::Origin,
+            target: Entity::PLACEHOLDER,
             operation,
         }
     }
 
     pub fn surface(webview: Entity, operation: NavigationOperation) -> Self {
         Self {
-            target: NavigationTarget::Surface(webview),
+            target_kind: NavigationTargetKind::Surface,
+            target: webview,
             operation,
         }
     }
@@ -411,7 +412,8 @@ impl TryFrom<&CommandInvocation> for NavigationRequest {
             _ => return Err(()),
         };
         Ok(Self {
-            target: NavigationTarget::Origin(invocation.caller),
+            target_kind: NavigationTargetKind::Origin,
+            target: invocation.caller,
             operation,
         })
     }
@@ -578,18 +580,19 @@ impl BrowserRequestTarget<'_, '_> {
 impl BrowserRequestTarget<'_, '_> {
     fn navigation_stack(
         &self,
-        target: NavigationTarget,
+        kind: NavigationTargetKind,
+        target: Entity,
         surfaces: &vmux_layout::hosted_page::StackSurface,
     ) -> Option<Entity> {
-        match target {
-            NavigationTarget::Origin(origin) => self.stack(origin),
-            NavigationTarget::Surface(webview) => {
-                let stack = self.parents.get(webview).ok()?.parent();
-                if !self.stacks.contains(stack) || !surfaces.is_current(stack, webview) {
+        match kind {
+            NavigationTargetKind::Origin => self.stack(target),
+            NavigationTargetKind::Surface => {
+                let stack = self.parents.get(target).ok()?.parent();
+                if !self.stacks.contains(stack) || !surfaces.is_current(stack, target) {
                     return None;
                 }
-                if let Some(space) = self.space_hierarchy.get(webview)
-                    && self.scope.current_space(webview) != Some(space)
+                if let Some(space) = self.space_hierarchy.get(target)
+                    && self.scope.current_space(target) != Some(space)
                 {
                     return None;
                 }
@@ -644,12 +647,12 @@ fn handle_navigation_requests(
     mut gestures: Query<&mut HistoryGestureCooldown, With<Stack>>,
 ) {
     for request in navigation_requests.read() {
-        if let NavigationTarget::Surface(webview) = request.target
-            && blocked.contains(webview)
+        if request.target_kind == NavigationTargetKind::Surface && blocked.contains(request.target)
         {
             continue;
         }
-        let Some(active) = target.navigation_stack(request.target, &surfaces) else {
+        let Some(active) = target.navigation_stack(request.target_kind, request.target, &surfaces)
+        else {
             continue;
         };
         let Some(webview) = surfaces
@@ -659,7 +662,7 @@ fn handle_navigation_requests(
             continue;
         };
         let (is_terminal, _) = kind_q.get(webview).unwrap_or((false, false));
-        if matches!(request.target, NavigationTarget::Surface(_))
+        if request.target_kind == NavigationTargetKind::Surface
             && matches!(
                 request.operation,
                 NavigationOperation::Back | NavigationOperation::Forward

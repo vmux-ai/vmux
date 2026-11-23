@@ -1,18 +1,20 @@
 use bevy::prelude::*;
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
 pub(super) struct FallbackBrowserPlugin;
 
 impl Plugin for FallbackBrowserPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, report_missing_renderer);
+        app.init_resource::<MissingRendererReported>()
+            .add_systems(Update, report_missing_renderer);
     }
 }
 
-fn report_missing_renderer() {
-    static REPORTED: AtomicBool = AtomicBool::new(false);
-    if !REPORTED.swap(true, Ordering::Relaxed) {
+#[derive(Resource, Default)]
+struct MissingRendererReported(bool);
+
+fn report_missing_renderer(mut reported: ResMut<MissingRendererReported>) {
+    if !reported.0 {
+        reported.0 = true;
         warn!("browser_platform: no renderer on this platform, hosted pages will be missing");
     }
 }

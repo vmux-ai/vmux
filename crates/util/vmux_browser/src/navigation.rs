@@ -1,12 +1,12 @@
-use bevy::{
-    ecs::{relationship::Relationship, system::SystemParam},
-    prelude::*,
-};
+use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::{Commands, SystemParam};
+use bevy::prelude::*;
+use bevy::prelude::{App, Changed, Plugin};
 use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
-use vmux_command::{CommandDispatch, CommandRuntimePlugin, ReadCommandRequests};
+use vmux_command::{CommandInvocation, CommandRuntimePlugin, ReadCommandRequests};
 use vmux_ecs::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
 use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
 #[cfg(test)]
@@ -43,7 +43,6 @@ impl Plugin for NavigationPlugin {
                     .after(vmux_ecs::service::ServiceMessageSet)
                     .before(vmux_ecs::PageOpenSet::ResolveTarget),
             )
-            .add_observer(issue_open_history)
             .add_systems(
                 Update,
                 (
@@ -64,19 +63,17 @@ impl Plugin for NavigationPlugin {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OpenHistoryRequest;
 
-#[vmux_command::command]
-struct BrowserOpenHistoryBinding;
+impl TryFrom<&CommandInvocation> for OpenHistoryRequest {
+    type Error = ();
 
-fn issue_open_history(
-    trigger: On<CommandDispatch>,
-    registered: Query<(), With<BrowserOpenHistoryBinding>>,
-    mut requests: MessageWriter<OpenHistoryRequest>,
-) {
-    if registered.contains(trigger.event().command()) {
-        requests.write(OpenHistoryRequest);
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "browser_open_history")
+            .then_some(Self)
+            .ok_or(())
     }
 }
 
@@ -120,9 +117,9 @@ struct LastRecordedVisit(String);
 fn record_visits(
     changed_tabs: Query<
         (Entity, &PageMetadata, Option<&LastRecordedVisit>),
-        (With<Stack>, bevy::prelude::Changed<PageMetadata>),
+        (With<Stack>, Changed<PageMetadata>),
     >,
-    mut commands: bevy::prelude::Commands,
+    mut commands: Commands,
 ) {
     for (entity, meta, previous) in &changed_tabs {
         if meta.url.is_empty() || meta.url == "about:blank" {
@@ -555,7 +552,6 @@ mod committed_navigation_tests {
 #[cfg(test)]
 mod command_definition_tests {
     use super::*;
-    use vmux_command::CommandInvocation;
 
     #[test]
     fn history_mcp_definition_dispatches_to_the_typed_request() {
@@ -563,8 +559,7 @@ mod command_definition_tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(FeaturePlugin::<crate::Feature>::default())
             .add_plugins(CommandRuntimePlugin)
-            .add_message::<OpenHistoryRequest>()
-            .add_observer(issue_open_history);
+            .add_message::<OpenHistoryRequest>();
         app.update();
 
         let mut query = app.world_mut().query::<&CommandDefinition>();
