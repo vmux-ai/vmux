@@ -9223,6 +9223,27 @@ impl<'ast> Visit<'ast> for Footprint {
                                                 .is_some_and(|segment| segment.ident == "manifest")
                                 )
                     )
+                || call.args.len() == 1
+                    && matches!(
+                        call.args.first(),
+                        Some(syn::Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Int(_),
+                            ..
+                        }))
+                    )
+                || call.args.len() == 1
+                    && matches!(
+                        call.args.first(),
+                        Some(syn::Expr::Call(inner))
+                            if inner.args.len() == 1
+                                && matches!(
+                                    inner.args.first(),
+                                    Some(syn::Expr::Lit(syn::ExprLit {
+                                        lit: syn::Lit::Int(_),
+                                        ..
+                                    }))
+                                )
+                    )
                 || call.args.len() == 2
                     && matches!(
                         call.args.get(1),
@@ -14412,18 +14433,19 @@ impl Inventory {
         {
             return false;
         }
-        let has_serde = entry.derive_paths.iter().any(|path| {
-            self.external_path(&entry.namespace, path, &mut BTreeSet::new())
-                .is_some_and(|target| {
-                    matches!(
-                        target.as_str(),
-                        "serde::Deserialize"
-                            | "serde::Serialize"
-                            | "serde_derive::Deserialize"
-                            | "serde_derive::Serialize"
-                    )
-                })
-        });
+        let has_serde = entry.contract
+            || entry.derive_paths.iter().any(|path| {
+                self.external_path(&entry.namespace, path, &mut BTreeSet::new())
+                    .is_some_and(|target| {
+                        matches!(
+                            target.as_str(),
+                            "serde::Deserialize"
+                                | "serde::Serialize"
+                                | "serde_derive::Deserialize"
+                                | "serde_derive::Serialize"
+                        )
+                    })
+            });
         has_serde && self.renderer_impls_clean(entry)
     }
 
@@ -14437,12 +14459,25 @@ impl Inventory {
         for entry in self.entries.values() {
             if self.serde_dto_candidate(entry) {
                 candidates.insert(entry.key.clone());
-                candidate_names.insert(entry.name.as_str());
+                candidate_names.insert(entry.name.clone());
             }
         }
         let mut proved = BTreeSet::new();
         let mut queue = Vec::new();
         if !candidates.is_empty() {
+            loop {
+                let before = candidate_names.len();
+                for imports in self.imports.values() {
+                    for (alias, target) in &imports.aliases {
+                        if candidate_names.contains(target.rsplit("::").next().unwrap_or(target)) {
+                            candidate_names.insert(alias.clone());
+                        }
+                    }
+                }
+                if candidate_names.len() == before {
+                    break;
+                }
+            }
             self.ensure_job_adapters();
             self.ensure_renderer_graph();
             let jobs = self.job_adapters.borrow();
@@ -14462,7 +14497,6 @@ impl Inventory {
                 if !valid_root {
                     continue;
                 }
-                let owner_crate = owner.namespace.split("::").next();
                 let mut sources = vec![owner];
                 if matches!(owner.kind, Kind::Struct | Kind::Enum) {
                     for implementation in self.implementations(owner) {
@@ -14487,10 +14521,7 @@ impl Inventory {
                         else {
                             continue;
                         };
-                        if target.namespace.split("::").next() == owner_crate
-                            && candidates.contains(&target.key)
-                            && proved.insert(target.key.clone())
-                        {
+                        if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
                             queue.push(target.key.clone());
                         }
                     }
@@ -14500,7 +14531,6 @@ impl Inventory {
             drop(renderers);
             while let Some(owner_key) = queue.pop() {
                 let owner = &self.entries[&owner_key];
-                let owner_crate = owner.namespace.split("::").next();
                 let mut sources = vec![owner];
                 for implementation in self.implementations(owner) {
                     if implementation.production {
@@ -14523,10 +14553,7 @@ impl Inventory {
                         else {
                             continue;
                         };
-                        if target.namespace.split("::").next() == owner_crate
-                            && candidates.contains(&target.key)
-                            && proved.insert(target.key.clone())
-                        {
+                        if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
                             queue.push(target.key.clone());
                         }
                     }
@@ -15746,28 +15773,54 @@ impl Inventory {
         }
         let renderers = self.collect_renderer_roots();
         let mut helpers = self.collect_renderer_helpers(&renderers);
+        let mut contract_names = BTreeSet::new();
+        for entry in self.entries.values() {
+            if entry.production && entry.contract {
+                contract_names.insert(entry.name.clone());
+            }
+        }
         let mut contract_impls = BTreeSet::new();
-        for key in renderers.iter().chain(helpers.iter()) {
-            let source = &self.entries[key];
-            let source_crate = source.namespace.split("::").next();
-            for path in source
-                .field_paths
-                .iter()
-                .chain(source.reference_paths.iter())
-            {
-                let Some(target) = self.resolve_path_or_prefix(&source.namespace, path) else {
-                    continue;
-                };
-                if target.contract && target.namespace.split("::").next() == source_crate {
-                    for implementation in self.implementations(target) {
-                        if implementation.production
-                            && implementation.implemented_trait.is_none()
-                            && !implementation.local
-                            && !implementation.dynamic
-                            && !implementation.opaque
-                            && !self.renderer_has_forbidden_access(implementation)
-                        {
-                            contract_impls.insert(implementation.key.clone());
+        if !contract_names.is_empty() {
+            loop {
+                let before = contract_names.len();
+                for imports in self.imports.values() {
+                    for (alias, target) in &imports.aliases {
+                        if contract_names.contains(target.rsplit("::").next().unwrap_or(target)) {
+                            contract_names.insert(alias.clone());
+                        }
+                    }
+                }
+                if contract_names.len() == before {
+                    break;
+                }
+            }
+            for key in renderers.iter().chain(helpers.iter()) {
+                let source = &self.entries[key];
+                for path in source
+                    .field_paths
+                    .iter()
+                    .chain(source.reference_paths.iter())
+                {
+                    if !path
+                        .split("::")
+                        .any(|segment| contract_names.contains(segment))
+                    {
+                        continue;
+                    }
+                    let Some(target) = self.resolve_path_or_prefix(&source.namespace, path) else {
+                        continue;
+                    };
+                    if target.contract {
+                        for implementation in self.implementations(target) {
+                            if implementation.production
+                                && implementation.implemented_trait.is_none()
+                                && !implementation.local
+                                && !implementation.dynamic
+                                && !implementation.opaque
+                                && !self.renderer_has_forbidden_access(implementation)
+                            {
+                                contract_impls.insert(implementation.key.clone());
+                            }
                         }
                     }
                 }
@@ -16113,16 +16166,32 @@ impl Inventory {
                 continue;
             }
             if matches!(entry.kind, Kind::Function) {
-                helper_fn_names.insert(entry.name.as_str());
+                helper_fn_names.insert(entry.name.clone());
             } else {
-                helper_type_names.insert(entry.name.as_str());
+                helper_type_names.insert(entry.name.clone());
+            }
+        }
+        loop {
+            let before = helper_type_names.len() + helper_fn_names.len();
+            for imports in self.imports.values() {
+                for (alias, target) in &imports.aliases {
+                    let tail = target.rsplit("::").next().unwrap_or(target);
+                    if helper_type_names.contains(tail) {
+                        helper_type_names.insert(alias.clone());
+                    }
+                    if helper_fn_names.contains(tail) {
+                        helper_fn_names.insert(alias.clone());
+                    }
+                }
+            }
+            if helper_type_names.len() + helper_fn_names.len() == before {
+                break;
             }
         }
         let mut candidates = BTreeSet::new();
         let mut queue: Vec<String> = renderers.iter().cloned().collect();
         while let Some(owner_key) = queue.pop() {
             let owner = &self.entries[&owner_key];
-            let owner_crate = owner.namespace.split("::").next();
             let mut sources = vec![owner];
             if matches!(owner.kind, Kind::Struct | Kind::Enum) {
                 for implementation in self.implementations(owner) {
@@ -16160,7 +16229,11 @@ impl Inventory {
                     let Some(target) = target else {
                         continue;
                     };
-                    if target.namespace.split("::").next() != owner_crate
+                    if !target
+                        .namespace
+                        .split("::")
+                        .next()
+                        .is_some_and(|krate| renderer_crates.contains(krate))
                         || !self.renderer_helper_candidate(target)
                     {
                         continue;
@@ -16184,9 +16257,26 @@ impl Inventory {
         for key in candidates {
             let entry = &self.entries[key];
             if matches!(entry.kind, Kind::Function) {
-                candidate_fn_names.insert(entry.name.as_str());
+                candidate_fn_names.insert(entry.name.clone());
             } else {
-                candidate_type_names.insert(entry.name.as_str());
+                candidate_type_names.insert(entry.name.clone());
+            }
+        }
+        loop {
+            let before = candidate_type_names.len() + candidate_fn_names.len();
+            for imports in self.imports.values() {
+                for (alias, target) in &imports.aliases {
+                    let tail = target.rsplit("::").next().unwrap_or(target);
+                    if candidate_type_names.contains(tail) {
+                        candidate_type_names.insert(alias.clone());
+                    }
+                    if candidate_fn_names.contains(tail) {
+                        candidate_fn_names.insert(alias.clone());
+                    }
+                }
+            }
+            if candidate_type_names.len() + candidate_fn_names.len() == before {
+                break;
             }
         }
         let mut referencers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -16716,6 +16806,9 @@ impl Inventory {
         if matches!(entry.kind, Kind::Impl) && self.plugin_default(entry, owner) {
             return self.framework_child_interfaces(owner, visiting);
         }
+        if matches!(entry.kind, Kind::Impl) && self.plugin_const_only_impl(entry) {
+            return self.framework_bootstrap_from(owner, visiting);
+        }
         for implementation in self.implementations(owner) {
             if matches!(entry.kind, Kind::Impl) && implementation.key != entry.key {
                 continue;
@@ -16888,6 +16981,42 @@ impl Inventory {
         let owner_ref = References::path(&owner_path);
         if call.args.is_empty() && matches!(method.as_str(), "manifest" | "url") {
             return self.page_macro_owner_ref(implementation, &owner_ref);
+        }
+        if call.args.len() == 1 {
+            let full = References::path(&value.path);
+            let external =
+                self.external_path(&implementation.namespace, &full, &mut BTreeSet::new());
+            if matches!(
+                external.as_deref(),
+                Some(
+                    "std::time::Duration::from_secs"
+                        | "std::time::Duration::from_millis"
+                        | "std::time::Duration::from_micros"
+                        | "std::time::Duration::from_nanos"
+                        | "core::time::Duration::from_secs"
+                        | "core::time::Duration::from_millis"
+                        | "core::time::Duration::from_micros"
+                        | "core::time::Duration::from_nanos"
+                )
+            ) && matches!(
+                &call.args[0],
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Int(_),
+                    ..
+                })
+            ) {
+                return true;
+            }
+            if matches!(
+                external.as_deref(),
+                Some(
+                    "bevy::time::common_conditions::on_timer"
+                        | "bevy_time::common_conditions::on_timer"
+                )
+            ) && self.plugin_factory_expr(implementation, &call.args[0])
+            {
+                return true;
+            }
         }
         let Some(owner) = self.resolve(&implementation.namespace, &owner_ref, &mut BTreeSet::new())
         else {
@@ -17238,6 +17367,21 @@ impl Inventory {
         };
         let value = Bindings::apply(self, &alias.namespace, &bindings, &alias.field_types[0]);
         self.phantom_marker_type(&alias.namespace, &value, visiting)
+    }
+
+    fn plugin_const_only_impl(&self, implementation: &Declaration) -> bool {
+        if !implementation.production
+            || implementation.implemented_trait.is_some()
+            || !implementation.bodies.is_empty()
+        {
+            return false;
+        }
+        matches!(
+            &implementation.syntax,
+            Some(Item::Impl(block))
+                if !block.items.is_empty()
+                    && block.items.iter().all(|item| matches!(item, syn::ImplItem::Const(_)))
+        )
     }
 
     fn plugin_default(&self, implementation: &Declaration, owner: &Declaration) -> bool {
@@ -25220,4 +25364,45 @@ fn wave9_query_filter_aliases_and_libc_io_handles_prove_safely() {
         ),
         "expected SocketAddr value model to stay rejected"
     );
+}
+
+#[test]
+fn wave10_cross_crate_dtos_renderer_helpers_and_timer_plugins_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_macro/src/lib.rs",
+        "#[proc_macro_attribute] pub fn contract() {} #[proc_macro_attribute] pub fn ui_state() {} #[proc_macro_attribute] pub fn page() {}",
+    );
+    inventory.source(
+        "crates/util/vmux_page/src/lib.rs",
+        "pub use vmux_macro::page;",
+    );
+    inventory.source(
+        "crates/util/vmux_api/src/lib.rs",
+        "pub use vmux_macro::{contract, ui_state}; use serde::{Deserialize, Serialize}; #[derive(Deserialize, Serialize)] pub struct WirePayload { pub label: String } #[vmux_api::contract] pub struct SharedCard { pub title: String } impl SharedCard { pub fn headline(&self) -> &str { &self.title } } #[vmux_api::ui_state] pub struct DemoState { pub count: u32 }",
+    );
+    inventory.source(
+        "crates/util/vmux_ui/src/lib.rs",
+        "use dioxus::prelude::*; pub fn class_join(a: &str) -> String { a.to_string() } #[component] pub fn Badge() -> Element { rsx! { span { class: class_join(\"x\") } } }",
+    );
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use dioxus::prelude::*; use vmux_api::{DemoState, SharedCard, WirePayload}; use vmux_ui::{Badge, class_join}; #[vmux_page::page(component = DemoPage, states = [DemoState])] struct PageDef; #[component] fn DemoPage(card: SharedCard) -> Element { let _ = (card.headline(), class_join(\"y\")); rsx! { Badge {} } } #[derive(Component)] struct Item(u32); fn tick(items: Query<&Item>) { let _ = (items, std::mem::size_of::<WirePayload>(), std::mem::size_of::<SharedCard>()); } struct TimedPlugin; impl TimedPlugin { pub const PERIOD: u64 = 60; } impl Plugin for TimedPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, tick.run_if(bevy::time::common_conditions::on_timer(std::time::Duration::from_secs(60)))); } }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/util/vmux_api/src/lib.rs||struct:WirePayload",
+        "crates/util/vmux_api/src/lib.rs||impl:SharedCard",
+        "crates/util/vmux_ui/src/lib.rs||fn:Badge",
+        "crates/util/vmux_ui/src/lib.rs||fn:class_join",
+        "crates/feature/demo/src/lib.rs||struct:TimedPlugin",
+        "crates/feature/demo/src/lib.rs||impl:TimedPlugin",
+        "crates/feature/demo/src/lib.rs||impl:Plugin for TimedPlugin",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved Wave 10 entry: {key}"
+        );
+    }
 }
