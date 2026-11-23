@@ -427,6 +427,7 @@ impl<'tcx> Ownership<'tcx> {
                 || self.has_role(definition, "contract")
                 || self.stateless_unit_adapter(cx, definition)
                 || self.stack_local_or_copy_value(cx, definition)
+                || self.native_io_adapter(cx, definition)
                 || self.has_role(definition, "inventory")
                     && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
                 || self.has_role(definition, "props")
@@ -557,6 +558,115 @@ impl<'tcx> Ownership<'tcx> {
             }
             _ => false,
         }
+    }
+
+    fn native_io_adapter(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
+        if self.roles.contains_key(&definition)
+            || !matches!(cx.tcx.def_kind(definition), DefKind::Struct)
+        {
+            return false;
+        }
+        let ty = cx
+            .tcx
+            .type_of(definition)
+            .instantiate_identity()
+            .skip_norm_wip();
+        let TyKind::Adt(owner, arguments) = ty.kind() else {
+            return false;
+        };
+        owner.all_fields().any(|field| {
+            Self::has_native_io_handle(cx, field.ty(cx.tcx, arguments).skip_norm_wip())
+        })
+    }
+
+    fn has_native_io_handle(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
+        for argument in ty.walk() {
+            let Some(ty) = argument.as_type() else {
+                continue;
+            };
+            let TyKind::Adt(owner, _) = ty.kind() else {
+                continue;
+            };
+            if owner.did().is_local() {
+                continue;
+            }
+            let krate = cx.tcx.crate_name(owner.did().krate);
+            let name = cx.tcx.item_name(owner.did());
+            if matches!(
+                krate.as_str(),
+                "crossbeam_channel"
+                    | "async_channel"
+                    | "flume"
+                    | "tokio"
+                    | "quinn"
+                    | "rustls"
+                    | "rcgen"
+                    | "rusqlite"
+                    | "reqwest"
+                    | "hyper"
+                    | "tokio_tungstenite"
+                    | "tungstenite"
+                    | "taffy"
+                    | "syntect"
+                    | "portable_pty"
+                    | "alacritty_terminal"
+                    | "vte"
+                    | "objc2"
+                    | "objc2_app_kit"
+                    | "objc2_foundation"
+                    | "objc2_core_foundation"
+                    | "objc2_av_foundation"
+                    | "objc2_screen_capture_kit"
+                    | "objc2_user_notifications"
+                    | "core_foundation"
+                    | "core_graphics"
+                    | "security_framework"
+                    | "block2"
+                    | "dispatch2"
+                    | "tempfile"
+                    | "notify"
+                    | "arboard"
+                    | "ring"
+                    | "ed25519_dalek"
+                    | "aes_gcm"
+                    | "argon2"
+                    | "hkdf"
+                    | "zip"
+                    | "tar"
+                    | "flate2"
+                    | "cef"
+                    | "winit"
+                    | "lsp_types"
+                    | "ropey"
+                    | "git2"
+                    | "tree_sitter"
+                    | "pulldown_cmark"
+                    | "ureq"
+            ) {
+                return true;
+            }
+            if krate.as_str() == "std"
+                && matches!(
+                    name.as_str(),
+                    "File"
+                        | "Child"
+                        | "Command"
+                        | "TcpStream"
+                        | "TcpListener"
+                        | "UdpSocket"
+                        | "UnixStream"
+                        | "UnixListener"
+                        | "Sender"
+                        | "Receiver"
+                        | "SyncSender"
+                        | "JoinHandle"
+                        | "OwnedFd"
+                )
+            {
+                return true;
+            }
+        }
+        false
     }
 
     fn stateless_unit_adapter(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
