@@ -1569,6 +1569,7 @@ mod tests {
                 .spawn((
                     SessionId("s1".into()),
                     AcpSessionShared(shared),
+                    AcpSessionCwd(PathBuf::from("/tmp")),
                     AcpProjectionOrder::default(),
                     projection_inboxes,
                     AcpSessionConfigs::default(),

@@ -781,7 +781,7 @@ impl AcpShared {
         processes: impl Into<AcpProcesses>,
     ) -> Self {
         let (wake, _) = mpsc::unbounded_channel();
-        let (projection, _, _) = AcpProjectionSenders::open(wake);
+        let (projection, _) = AcpProjectionSenders::open(wake);
         Self::with_projection(sid, cwd, anchor, stream_tx, processes, projection)
     }
 
