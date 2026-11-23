@@ -1,8 +1,0 @@
-(
-legacy: [
-],
-boundaries: [
-    (key: "crates/util/vmux_spawn/src/lib.rs||struct:ProcessGroup", fingerprint: "ac32b07586cad8c3", interface: "POSIX process-group SIGTERM/SIGKILL signaling adapter", input: "ECS: crates/util/vmux_vm/src/process.rs||struct:Process", output: "external: libc::kill(-pgid, signal) delivery to one owned child process group", lifetime: "one validated child process group identifier (pid > 1) during termination or kill", bounds: "validates pid > 1 and delivers SIGTERM or SIGKILL while treating ESRCH as already exited; no process registry or retry loop", teardown: "Copy pid handle drops after signaling; owning Process retains child wait ownership", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_vm/src/process.rs||struct:Process")),
-    (key: "crates/util/vmux_spawn/src/lib.rs||impl:ProcessGroup", fingerprint: "9355c491ca6bc446", interface: "POSIX process-group SIGTERM/SIGKILL signaling adapter", input: "ECS: crates/util/vmux_vm/src/process.rs||struct:Process", output: "external: libc::kill(-pgid, signal) delivery to one owned child process group", lifetime: "one validated child process group identifier (pid > 1) during termination or kill", bounds: "validates pid > 1 and delivers SIGTERM or SIGKILL while treating ESRCH as already exited; no process registry or retry loop", teardown: "Copy pid handle drops after signaling; owning Process retains child wait ownership", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_vm/src/process.rs||struct:Process")),
-],
-)

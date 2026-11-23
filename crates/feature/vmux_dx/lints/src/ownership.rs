@@ -18,6 +18,7 @@ pub(super) struct Ownership<'tcx> {
     bundles: Vec<(Ty<'tcx>, DefId)>,
     roles: HashMap<DefId, HashSet<&'static str>>,
     used: HashSet<DefId>,
+    type_refs: HashMap<DefId, HashSet<DefId>>,
     owners: HashMap<DefId, HashSet<DefId>>,
     reported: HashSet<(DefId, String)>,
 }
@@ -87,6 +88,18 @@ impl<'tcx> Ownership<'tcx> {
     }
 
     pub fn call(&mut self, cx: &LateContext<'tcx>, expression: &'tcx Expr<'tcx>) {
+        let caller = expression.hir_id.owner.def_id.to_def_id();
+        for argument in cx.typeck_results().expr_ty(expression).walk() {
+            if let Some(ty) = argument.as_type()
+                && let TyKind::Adt(owner, _) = ty.kind()
+                && owner.did().is_local()
+            {
+                self.type_refs
+                    .entry(owner.did())
+                    .or_default()
+                    .insert(caller);
+            }
+        }
         let function = match expression.kind {
             ExprKind::Call(function, _) => {
                 let TyKind::FnDef(function, _) = cx.typeck_results().expr_ty(function).kind()
@@ -104,7 +117,6 @@ impl<'tcx> Ownership<'tcx> {
             }
             _ => return,
         };
-        let caller = expression.hir_id.owner.def_id.to_def_id();
         if let ExprKind::MethodCall(_, _, arguments, _) = expression.kind
             && !function.is_local()
             && cx.tcx.crate_name(function.krate).as_str() == "bevy_ecs"
@@ -574,9 +586,20 @@ impl<'tcx> Ownership<'tcx> {
         let TyKind::Adt(owner, arguments) = ty.kind() else {
             return false;
         };
-        owner.all_fields().any(|field| {
+        if !owner.all_fields().any(|field| {
             Self::has_native_io_handle(cx, field.ty(cx.tcx, arguments).skip_norm_wip())
-        })
+        }) {
+            return false;
+        }
+        if cx.tcx.visibility(definition).is_public() {
+            return true;
+        }
+        let Some(callers) = self.type_refs.get(&definition) else {
+            return false;
+        };
+        callers
+            .iter()
+            .any(|caller| self.reachable(*caller, &mut HashSet::new()))
     }
 
     fn has_native_io_handle(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
@@ -592,81 +615,146 @@ impl<'tcx> Ownership<'tcx> {
             }
             let krate = cx.tcx.crate_name(owner.did().krate);
             let name = cx.tcx.item_name(owner.did());
-            if matches!(
-                krate.as_str(),
-                "crossbeam_channel"
-                    | "async_channel"
-                    | "flume"
-                    | "tokio"
-                    | "quinn"
-                    | "rustls"
-                    | "rcgen"
-                    | "rusqlite"
-                    | "reqwest"
-                    | "hyper"
-                    | "tokio_tungstenite"
-                    | "tungstenite"
-                    | "taffy"
-                    | "syntect"
-                    | "portable_pty"
-                    | "alacritty_terminal"
-                    | "vte"
-                    | "objc2"
-                    | "objc2_app_kit"
-                    | "objc2_foundation"
-                    | "objc2_core_foundation"
-                    | "objc2_av_foundation"
-                    | "objc2_screen_capture_kit"
-                    | "objc2_user_notifications"
-                    | "core_foundation"
-                    | "core_graphics"
-                    | "security_framework"
-                    | "block2"
-                    | "dispatch2"
-                    | "tempfile"
-                    | "notify"
-                    | "arboard"
-                    | "ring"
-                    | "ed25519_dalek"
-                    | "aes_gcm"
-                    | "argon2"
-                    | "hkdf"
-                    | "zip"
-                    | "tar"
-                    | "flate2"
-                    | "cef"
-                    | "winit"
-                    | "lsp_types"
-                    | "ropey"
-                    | "git2"
-                    | "tree_sitter"
-                    | "pulldown_cmark"
-                    | "ureq"
-            ) {
-                return true;
-            }
-            if krate.as_str() == "std"
-                && matches!(
-                    name.as_str(),
-                    "File"
-                        | "Child"
-                        | "Command"
-                        | "TcpStream"
-                        | "TcpListener"
-                        | "UdpSocket"
-                        | "UnixStream"
-                        | "UnixListener"
-                        | "Sender"
-                        | "Receiver"
-                        | "SyncSender"
-                        | "JoinHandle"
-                        | "OwnedFd"
-                )
+            if Self::is_external_io_crate(krate.as_str())
+                || krate.as_str() == "tokio" && Self::is_tokio_io_handle(name.as_str())
+                || krate.as_str() == "tokio_util" && name.as_str() == "CancellationToken"
+                || krate.as_str() == "std" && Self::is_std_io_handle(name.as_str())
             {
                 return true;
             }
         }
         false
+    }
+
+    fn is_external_io_crate(krate: &str) -> bool {
+        [
+            "crossbeam_channel",
+            "async_channel",
+            "async_io",
+            "socket2",
+            "libc",
+            "nix",
+            "rustix",
+            "signal_hook",
+            "flume",
+            "quinn",
+            "rustls",
+            "rcgen",
+            "rusqlite",
+            "reqwest",
+            "hyper",
+            "tokio_tungstenite",
+            "tungstenite",
+            "taffy",
+            "syntect",
+            "portable_pty",
+            "alacritty_terminal",
+            "vte",
+            "objc2",
+            "objc2_app_kit",
+            "objc2_foundation",
+            "objc2_core_foundation",
+            "objc2_av_foundation",
+            "objc2_screen_capture_kit",
+            "objc2_user_notifications",
+            "core_foundation",
+            "core_graphics",
+            "security_framework",
+            "block2",
+            "dispatch2",
+            "tempfile",
+            "notify",
+            "arboard",
+            "ring",
+            "ed25519_dalek",
+            "aes_gcm",
+            "argon2",
+            "hkdf",
+            "zip",
+            "tar",
+            "flate2",
+            "cef",
+            "winit",
+            "lsp_types",
+            "ropey",
+            "git2",
+            "tree_sitter",
+            "pulldown_cmark",
+            "ureq",
+        ]
+        .contains(&krate)
+    }
+
+    fn is_tokio_io_handle(name: &str) -> bool {
+        [
+            "Runtime",
+            "Handle",
+            "JoinHandle",
+            "AbortHandle",
+            "JoinSet",
+            "Sender",
+            "Receiver",
+            "UnboundedSender",
+            "UnboundedReceiver",
+            "Notify",
+            "Semaphore",
+            "Mutex",
+            "RwLock",
+            "OwnedSemaphorePermit",
+            "TcpStream",
+            "TcpListener",
+            "UdpSocket",
+            "UnixStream",
+            "UnixListener",
+            "Child",
+            "ChildStdin",
+            "ChildStdout",
+            "ChildStderr",
+            "Command",
+            "BufReader",
+            "BufWriter",
+            "ReadHalf",
+            "WriteHalf",
+            "File",
+            "Interval",
+        ]
+        .contains(&name)
+    }
+
+    fn is_std_io_handle(name: &str) -> bool {
+        [
+            "File",
+            "ReadDir",
+            "DirEntry",
+            "FileType",
+            "Metadata",
+            "BufReader",
+            "BufWriter",
+            "Stdin",
+            "Stdout",
+            "Stderr",
+            "PipeReader",
+            "PipeWriter",
+            "Error",
+            "Child",
+            "ChildStdin",
+            "ChildStdout",
+            "ChildStderr",
+            "Command",
+            "TcpStream",
+            "TcpListener",
+            "UdpSocket",
+            "UnixStream",
+            "UnixListener",
+            "UnixDatagram",
+            "OwnedFd",
+            "RawFd",
+            "Sender",
+            "Receiver",
+            "SyncSender",
+            "JoinHandle",
+        ]
+        .contains(&name)
     }
 
     fn stateless_unit_adapter(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
