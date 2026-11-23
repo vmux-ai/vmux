@@ -84,11 +84,6 @@ fn receive_shutdown_signal(signal: Res<ShutdownSignal>, mut exits: MessageWriter
     }
 }
 
-const FOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
-const UNFOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
-const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_secs(60);
-const BACKGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_secs(1);
-
 #[derive(Message, Debug, Clone, Copy)]
 pub(crate) struct HideAllWindowsRequest;
 
@@ -144,6 +139,16 @@ fn start_quit_confirmation(
 pub(crate) struct WakePolicy;
 
 impl WakePolicy {
+    const FOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
+    const UNFOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
+    const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_secs(60);
+    const BACKGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_secs(1);
+    const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = if cfg!(target_os = "macos") {
+        Duration::from_millis(250)
+    } else {
+        Duration::from_nanos(33_333_333)
+    };
+
     pub(crate) fn foreground(
         live_resize: bool,
         pointer_inside_windowed_page: bool,
@@ -157,7 +162,7 @@ impl WakePolicy {
             }
         } else {
             UpdateMode::Reactive {
-                wait: FOCUSED_FRAME_INTERVAL,
+                wait: Self::FOCUSED_FRAME_INTERVAL,
                 react_to_device_events: false,
                 react_to_user_events: true,
                 react_to_window_events: !pointer_inside_windowed_page,
@@ -165,14 +170,14 @@ impl WakePolicy {
         };
         WinitSettings {
             focused_mode,
-            unfocused_mode: UpdateMode::reactive_low_power(UNFOCUSED_FRAME_INTERVAL),
+            unfocused_mode: UpdateMode::reactive_low_power(Self::UNFOCUSED_FRAME_INTERVAL),
         }
     }
 
     fn hidden() -> WinitSettings {
         WinitSettings {
-            focused_mode: UpdateMode::reactive_low_power(HIDDEN_FRAME_INTERVAL),
-            unfocused_mode: UpdateMode::reactive_low_power(HIDDEN_FRAME_INTERVAL),
+            focused_mode: UpdateMode::reactive_low_power(Self::HIDDEN_FRAME_INTERVAL),
+            unfocused_mode: UpdateMode::reactive_low_power(Self::HIDDEN_FRAME_INTERVAL),
         }
     }
 
@@ -180,7 +185,7 @@ impl WakePolicy {
         let display = windowless_frame_interval_from_refresh_millihertz(
             refresh_rates.into_iter().flatten().max(),
         );
-        display.max(MIN_FOREGROUND_CEF_WAKE_INTERVAL)
+        display.max(Self::MIN_FOREGROUND_CEF_WAKE_INTERVAL)
     }
 
     fn cef(
@@ -190,7 +195,7 @@ impl WakePolicy {
         foreground_interval: Duration,
     ) -> Duration {
         if all_hidden || !any_visible || !any_focused {
-            BACKGROUND_CEF_WAKE_INTERVAL
+            Self::BACKGROUND_CEF_WAKE_INTERVAL
         } else {
             foreground_interval
         }
@@ -235,11 +240,6 @@ fn sync_winit_power_mode(
         ));
     }
 }
-
-#[cfg(target_os = "macos")]
-const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_millis(250);
-#[cfg(not(target_os = "macos"))]
-const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_nanos(33_333_333);
 
 fn keep_awake_while_revealing(
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -533,7 +533,7 @@ mod tests {
     fn app_activation_starts_during_boot() {
         let update = platform_systems(Update);
         assert!(
-            update.contains(&"activate_app_during_boot".to_string()),
+            update.contains(&"activate".to_string()),
             "update systems: {update:?}"
         );
     }
@@ -556,24 +556,27 @@ mod tests {
     fn cef_wake_policy_uses_the_platform_foreground_cap() {
         assert_eq!(
             WakePolicy::foreground_cef([Some(60_000)]),
-            MIN_FOREGROUND_CEF_WAKE_INTERVAL
+            WakePolicy::MIN_FOREGROUND_CEF_WAKE_INTERVAL
         );
         assert_eq!(
             WakePolicy::foreground_cef([Some(144_000)]),
-            MIN_FOREGROUND_CEF_WAKE_INTERVAL,
+            WakePolicy::MIN_FOREGROUND_CEF_WAKE_INTERVAL,
             "a faster panel must not make the app wake faster"
         );
         #[cfg(target_os = "macos")]
         assert_eq!(
             WakePolicy::foreground_cef([Some(20_000)]),
-            MIN_FOREGROUND_CEF_WAKE_INTERVAL
+            WakePolicy::MIN_FOREGROUND_CEF_WAKE_INTERVAL
         );
         #[cfg(not(target_os = "macos"))]
         assert_eq!(
             WakePolicy::foreground_cef([Some(20_000)]),
             Duration::from_millis(50)
         );
-        assert!(WakePolicy::foreground_cef([Some(2_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL);
+        assert!(
+            WakePolicy::foreground_cef([Some(2_000)])
+                > WakePolicy::MIN_FOREGROUND_CEF_WAKE_INTERVAL
+        );
         assert_eq!(
             WakePolicy::cef(false, true, true, Duration::from_millis(7)),
             Duration::from_millis(7)

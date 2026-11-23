@@ -63,8 +63,8 @@ impl Plugin for VmuxPlugin {
                 .set(Self::window())
                 .set(bevy::log::LogPlugin {
                     filter: "bevy_camera_controller=warn,dioxus_document=off".into(),
-                    custom_layer: crate::log_forward::file_log_layer,
-                    fmt_layer: crate::log_forward::stderr_log_layer,
+                    custom_layer: crate::log_forward::LogForward::file_layer,
+                    fmt_layer: crate::log_forward::LogForward::stderr_layer,
                     ..default()
                 }),
             vmux_app::VmuxPlugin::builder().desktop().build(),
@@ -74,6 +74,9 @@ impl Plugin for VmuxPlugin {
 }
 
 impl VmuxPlugin {
+    const DEFAULT_WINDOW_WIDTH: u32 = 1280;
+    const DEFAULT_WINDOW_HEIGHT: u32 = 800;
+
     fn window() -> WindowPlugin {
         WindowPlugin {
             primary_window: Some(Self::window_config(false)),
@@ -103,7 +106,10 @@ impl VmuxPlugin {
             } else {
                 WindowPosition::Centered(MonitorSelection::Primary)
             },
-            resolution: WindowResolution::new(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT),
+            resolution: WindowResolution::new(
+                Self::DEFAULT_WINDOW_WIDTH,
+                Self::DEFAULT_WINDOW_HEIGHT,
+            ),
             ..default()
         }
     }
@@ -112,9 +118,6 @@ impl VmuxPlugin {
         env!("VMUX_BUILD_TITLE").to_string()
     }
 }
-
-const DEFAULT_WINDOW_WIDTH: u32 = 1280;
-const DEFAULT_WINDOW_HEIGHT: u32 = 800;
 
 #[cfg(test)]
 mod tests {
@@ -181,8 +184,14 @@ mod tests {
             window.position,
             WindowPosition::Centered(MonitorSelection::Primary)
         ));
-        assert_eq!(window.resolution.physical_width(), DEFAULT_WINDOW_WIDTH);
-        assert_eq!(window.resolution.physical_height(), DEFAULT_WINDOW_HEIGHT);
+        assert_eq!(
+            window.resolution.physical_width(),
+            VmuxPlugin::DEFAULT_WINDOW_WIDTH
+        );
+        assert_eq!(
+            window.resolution.physical_height(),
+            VmuxPlugin::DEFAULT_WINDOW_HEIGHT
+        );
     }
 
     #[test]

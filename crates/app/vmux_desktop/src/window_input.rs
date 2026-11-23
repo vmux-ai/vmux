@@ -7,7 +7,7 @@ use objc2::rc::Retained;
 use objc2_app_kit::{
     NSAnimatablePropertyContainer, NSAnimationContext, NSEvent, NSEventType, NSWindowStyleMask,
 };
-use objc2_foundation::{NSRect, NSString, NSUserDefaults};
+use objc2_foundation::{NSString, NSUserDefaults};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -243,7 +243,8 @@ enum WindowInputKind {
     Drag,
     Up,
     Cancel,
-    LiveResize(bool),
+    LiveResizeStart,
+    LiveResizeEnd,
 }
 
 #[derive(Message, Clone, Copy)]
@@ -359,7 +360,11 @@ impl WindowInputInbox {
                 preference: None,
             };
             if let Some(active) = queued.live_resize {
-                input.kind = WindowInputKind::LiveResize(active);
+                input.kind = if active {
+                    WindowInputKind::LiveResizeStart
+                } else {
+                    WindowInputKind::LiveResizeEnd
+                };
                 output.push(input);
                 continue;
             }
@@ -449,24 +454,11 @@ fn gestures(
                 capture.clear();
                 gesture.live_resize = false;
             }
-            WindowInputKind::LiveResize(active) => gesture.live_resize = active,
+            WindowInputKind::LiveResizeStart => gesture.live_resize = true,
+            WindowInputKind::LiveResizeEnd => gesture.live_resize = false,
             WindowInputKind::Down => {
                 native_drag.0 = None;
-                let edges = input.frame.resize_edges(
-                    input.cursor.x as f64,
-                    input.cursor.y as f64,
-                    WindowResizeDrag::GRIP_PX,
-                );
-                if !input.fullscreen && edges.any() {
-                    *resize = WindowResizeDrag {
-                        active: true,
-                        frame: input.frame,
-                        cursor_x: input.cursor.x as f64,
-                        cursor_y: input.cursor.y as f64,
-                        min_width: input.minimum.x as f64,
-                        min_height: input.minimum.y as f64,
-                        edges,
-                    };
+                if resize.begin(input.frame, input.cursor, input.minimum, input.fullscreen) {
                     capture.claim(input.window, MouseButton::Left);
                     capture.consume(input.token);
                     gesture.live_resize = true;
@@ -487,11 +479,8 @@ fn gestures(
                     8.0,
                 );
                 let kind = WindowTitlebarGesture::resolve(count, input.preference.as_deref());
-                let frame = if kind == WindowTitlebarGesture::Zoom {
-                    Some(zoom.toggled(input.frame, input.screen))
-                } else {
-                    None
-                };
+                let frame = (kind == WindowTitlebarGesture::Zoom)
+                    .then(|| zoom.toggled(input.frame, input.screen));
                 capture.claim(input.window, MouseButton::Left);
                 capture.consume(input.token);
                 if kind == WindowTitlebarGesture::Drag {
@@ -505,27 +494,27 @@ fn gestures(
                 });
             }
             WindowInputKind::Drag | WindowInputKind::Up => {
-                if matches!(input.kind, WindowInputKind::Up) {
+                let up = matches!(input.kind, WindowInputKind::Up);
+                if up {
                     native_drag.0 = None;
                 }
                 if resize.active {
                     capture.consume(input.token);
+                    let frame = resize.resized_frame(input.cursor.x as f64, input.cursor.y as f64);
                     effects.write(WindowEffect {
                         window: input.window,
                         token: input.token,
                         gesture: WindowTitlebarGesture::Ignore,
-                        frame: Some(
-                            resize.resized_frame(input.cursor.x as f64, input.cursor.y as f64),
-                        ),
+                        frame: Some(frame),
                     });
-                    if matches!(input.kind, WindowInputKind::Up) {
+                    if up {
                         resize.active = false;
                         capture.release(MouseButton::Left);
                         gesture.live_resize = false;
                     }
                 } else if capture.owner() == Some(input.window) {
                     capture.consume(input.token);
-                    if matches!(input.kind, WindowInputKind::Up) {
+                    if up {
                         capture.release(MouseButton::Left);
                     }
                 }
@@ -576,7 +565,7 @@ fn effects(
             continue;
         }
         if let Some(frame) = request.frame {
-            let target: NSRect = frame.into();
+            let target = frame.to_ns_rect();
             if request.gesture == WindowTitlebarGesture::Zoom {
                 let duration = window.animationResizeTime(target);
                 let changes = block2::RcBlock::new(move |context: NonNull<NSAnimationContext>| {

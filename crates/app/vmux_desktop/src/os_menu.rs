@@ -109,15 +109,17 @@ impl Default for OsMenuState {
     }
 }
 
+impl OsMenuState {
+    const WINDOW_CLOSE_SUPPRESSION: std::time::Duration = std::time::Duration::from_millis(300);
+    const HOSTED_PAGE_OPEN_SUPPRESSION: std::time::Duration =
+        std::time::Duration::from_millis(1500);
+}
+
 #[derive(Component)]
 struct HideWindowsMenuEntry;
 
 #[derive(Component, Clone)]
 struct OsMenuInbox(Receiver<String>);
-
-const WINDOW_CLOSE_SUPPRESSION_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
-const HOSTED_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
-    std::time::Duration::from_millis(1500);
 
 struct OsMenuResource {
     menu: Option<Menu>,
@@ -127,6 +129,69 @@ struct OsMenuResource {
     close_window: Option<MenuItem>,
     #[cfg(target_os = "macos")]
     edit_items: Vec<Retained<NSMenuItem>>,
+}
+
+impl OsMenuResource {
+    fn localize_root_menu(
+        menu: &Menu,
+        previous_locale: &Locale,
+        locale: &Locale,
+        definitions: &[CommandDefinition],
+    ) {
+        localize_menu_items(menu.items(), previous_locale, locale, definitions);
+    }
+
+    fn localized_submenu_title(
+        title: &str,
+        previous_locale: &Locale,
+        locale: &Locale,
+    ) -> Option<String> {
+        Self::submenu_message_id(title, previous_locale)
+            .map(|message_id| locale.translate(message_id))
+    }
+
+    fn submenu_message_id(title: &str, locale: &Locale) -> Option<&'static str> {
+        let english = Locale::from(DEFAULT_LOCALE);
+        [
+            "menu-scene",
+            "menu-layout",
+            "menu-terminal",
+            "menu-browser",
+            "menu-service",
+            "menu-bookmark",
+            "menu-edit",
+            "command-group-interactive-mode",
+            "command-group-window",
+            "command-group-tab",
+            "command-group-pane",
+            "command-group-stack",
+            "command-group-space",
+            "command-group-navigation",
+            "command-group-open",
+            "command-group-view",
+            "command-group-bar",
+        ]
+        .into_iter()
+        .find(|message_id| {
+            title == locale.translate(message_id) || title == english.translate(message_id)
+        })
+    }
+
+    fn find_menu_item(items: Vec<MenuItemKind>, id: &str) -> Option<MenuItem> {
+        for item in items {
+            if item.id().0 == id
+                && let Some(menu_item) = item.as_menuitem()
+            {
+                return Some(menu_item.clone());
+            }
+            if let Some(submenu) = item.as_submenu()
+                && let Some(menu_item) = Self::find_menu_item(submenu.items(), id)
+            {
+                return Some(menu_item);
+            }
+        }
+        None
+    }
 }
 
 fn setup(
@@ -151,13 +216,13 @@ fn setup(
         .as_deref()
         .map(|settings| Locale::requested(Some(&settings.appearance.locale)))
         .unwrap_or_else(Locale::preferred);
-    localize_root_menu(
+    OsMenuResource::localize_root_menu(
         &menu,
         &Locale::from(DEFAULT_LOCALE),
         &locale,
         &menu_definitions,
     );
-    let close_window = find_menu_item(menu.items(), "app_quit");
+    let close_window = OsMenuResource::find_menu_item(menu.items(), "app_quit");
 
     #[cfg(target_os = "macos")]
     menu.init_for_nsapp();
@@ -247,17 +312,8 @@ fn sync_menu_locale(
         return;
     };
     let definitions = definitions.iter().cloned().collect::<Vec<_>>();
-    localize_root_menu(native_menu, &menu.locale, &locale, &definitions);
+    OsMenuResource::localize_root_menu(native_menu, &menu.locale, &locale, &definitions);
     menu.locale = locale;
-}
-
-fn localize_root_menu(
-    menu: &Menu,
-    previous_locale: &Locale,
-    locale: &Locale,
-    definitions: &[CommandDefinition],
-) {
-    localize_menu_items(menu.items(), previous_locale, locale, definitions);
 }
 
 fn localize_menu_items(
@@ -291,47 +347,14 @@ fn localize_menu_items(
             }
         }
         if let Some(submenu) = item.as_submenu() {
-            if let Some(title) = localized_submenu_title(&submenu.text(), previous_locale, locale) {
+            if let Some(title) =
+                OsMenuResource::localized_submenu_title(&submenu.text(), previous_locale, locale)
+            {
                 submenu.set_text(title);
             }
             localize_menu_items(submenu.items(), previous_locale, locale, definitions);
         }
     }
-}
-
-fn localized_submenu_title(
-    title: &str,
-    previous_locale: &Locale,
-    locale: &Locale,
-) -> Option<String> {
-    submenu_message_id(title, previous_locale).map(|message_id| locale.translate(message_id))
-}
-
-fn submenu_message_id(title: &str, locale: &Locale) -> Option<&'static str> {
-    let english = Locale::from(DEFAULT_LOCALE);
-    [
-        "menu-scene",
-        "menu-layout",
-        "menu-terminal",
-        "menu-browser",
-        "menu-service",
-        "menu-bookmark",
-        "menu-edit",
-        "command-group-interactive-mode",
-        "command-group-window",
-        "command-group-tab",
-        "command-group-pane",
-        "command-group-stack",
-        "command-group-space",
-        "command-group-navigation",
-        "command-group-open",
-        "command-group-view",
-        "command-group-bar",
-    ]
-    .into_iter()
-    .find(|message_id| {
-        title == locale.translate(message_id) || title == english.translate(message_id)
-    })
 }
 
 fn append_standard_edit_menu(menu: &Menu) {
@@ -461,22 +484,6 @@ fn sync_edit_menu_items(
     }
 }
 
-fn find_menu_item(items: Vec<MenuItemKind>, id: &str) -> Option<MenuItem> {
-    for item in items {
-        if item.id().0 == id
-            && let Some(menu_item) = item.as_menuitem()
-        {
-            return Some(menu_item.clone());
-        }
-        if let Some(submenu) = item.as_submenu()
-            && let Some(menu_item) = find_menu_item(submenu.items(), id)
-        {
-            return Some(menu_item);
-        }
-    }
-    None
-}
-
 fn sync_close_menu_item(
     menu: Option<NonSend<OsMenuResource>>,
     windows: Query<&Window>,
@@ -591,16 +598,16 @@ fn hide_window_on_close_request(
 ) {
     let from_menu_key_equivalent = state
         .last_menu_command_at
-        .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
+        .is_some_and(|t| t.elapsed() < OsMenuState::WINDOW_CLOSE_SUPPRESSION);
     let from_tab_close = state
         .last_tab_close_at
-        .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
+        .is_some_and(|t| t.elapsed() < OsMenuState::WINDOW_CLOSE_SUPPRESSION);
     let from_stack_close = state
         .last_stack_close_at
-        .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
+        .is_some_and(|t| t.elapsed() < OsMenuState::WINDOW_CLOSE_SUPPRESSION);
     let from_hosted_page_open = state
         .last_hosted_page_open_at
-        .is_some_and(|t| t.elapsed() < HOSTED_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW);
+        .is_some_and(|t| t.elapsed() < OsMenuState::HOSTED_PAGE_OPEN_SUPPRESSION);
     let window_count = windows.iter().count();
     for event in closed.read() {
         if from_menu_key_equivalent || from_stack_close || from_tab_close || from_hosted_page_open {
@@ -690,7 +697,11 @@ mod tests {
         ]
         .into_iter()
         .filter_map(|title| {
-            localized_submenu_title(title, &Locale::from("en-US"), &Locale::from("ja"))
+            OsMenuResource::localized_submenu_title(
+                title,
+                &Locale::from("en-US"),
+                &Locale::from("ja"),
+            )
         })
         .collect::<Vec<_>>();
         assert_eq!(

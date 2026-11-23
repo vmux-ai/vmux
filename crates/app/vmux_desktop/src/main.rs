@@ -9,7 +9,7 @@ fn main() {
     #[cfg(target_os = "macos")]
     vmux_simulator::SimulatorPlugin::exit_helper_if_requested();
 
-    vmux_desktop::panic_hook::install();
+    vmux_desktop::panic_hook::PanicHook::install();
 
     #[cfg(not(target_os = "macos"))]
     early_exit_if_subprocess();
@@ -44,12 +44,6 @@ fn main() {
     };
     let mut app = App::new();
     app.add_plugins(VmuxPlugin);
-    run_update_on_one_thread(&mut app);
-
-    app.run();
-}
-
-fn run_update_on_one_thread(app: &mut App) {
     for label in [
         First.intern(),
         PreUpdate.intern(),
@@ -61,4 +55,6 @@ fn run_update_on_one_thread(app: &mut App) {
             schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
         });
     }
+
+    app.run();
 }
