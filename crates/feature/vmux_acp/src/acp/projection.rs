@@ -19,7 +19,8 @@ use vmux_ecs::Order;
 use super::workspace_driver::WorkspaceLocation;
 use super::{
     AcpApprovalDetailsInbox, AcpHistoryReplay, AcpReplayBeginInbox, AcpReplayFinishInbox,
-    AcpSessionConfigs, AcpSessionShared, AcpSessionUpdateInbox, AcpSnapshotRequestInbox, SessionId,
+    AcpSessionConfigs, AcpSessionCwd, AcpSessionShared, AcpSessionUpdateInbox,
+    AcpSnapshotRequestInbox, SessionId,
 };
 
 pub(super) struct AcpProjectionPlugin;
@@ -1319,13 +1320,14 @@ fn apply_session_update(
         &AcpSessionShared,
         &AcpHistoryReplay,
         &mut AcpSessionConfigs,
+        Option<&mut AcpSessionCwd>,
     )>,
     mut transcript: TranscriptWriter,
     mut touches: FileTouchTracker,
     mut commands: Commands,
 ) {
     let session = trigger.event().session;
-    let Ok((sid, shared, replay, mut configs)) = sessions.get_mut(session) else {
+    let Ok((sid, shared, replay, mut configs, mut session_cwd)) = sessions.get_mut(session) else {
         return;
     };
     let update = trigger.event().update.as_ref();
@@ -1392,6 +1394,9 @@ fn apply_session_update(
                 && let Ok(workspace) =
                     WorkspaceLocation::new(name.to_string(), branch.to_string(), cwd, workspace_cwd)
             {
+                if let Some(session_cwd) = session_cwd.as_deref_mut() {
+                    session_cwd.0 = workspace.working_directory.clone();
+                }
                 shared.0.publish_workspace_change(&workspace);
             }
         }
@@ -1564,6 +1569,7 @@ mod tests {
                 .spawn((
                     SessionId("s1".into()),
                     AcpSessionShared(shared),
+                    AcpSessionCwd(PathBuf::from("/tmp")),
                     AcpProjectionOrder::default(),
                     projection_inboxes,
                     AcpSessionConfigs::default(),

@@ -8,7 +8,6 @@ use vmux_api::session::RemoteMediaEntry;
 use vmux_ecs::{EntityTarget, OperationTarget, Uuid};
 use vmux_session::SessionId;
 
-use super::acp::AcpInput;
 use super::remote::{Live, RemoteSet, Response, Waiting};
 use super::remote_file_io::{Directory, DirectoryBatch, FileFacts, Home, Thumbnail};
 use super::remote_io::{Accepted, Joined, Loan, Output};
@@ -300,9 +299,11 @@ fn submit_simple(
             let sid = sid.0.clone();
             let native = commands
                 .spawn((
-                    Output::spawn(loan, accepted, async move {
-                        sessions_api.input(sid, AcpInput::Cancel).await
-                    }),
+                    Output::spawn(
+                        loan,
+                        accepted,
+                        async move { sessions_api.cancel(sid).await },
+                    ),
                     OperationTarget::new(entity),
                 ))
                 .id();
@@ -318,9 +319,7 @@ fn submit_simple(
             let native = commands
                 .spawn((
                     Output::spawn(loan, accepted, async move {
-                        sessions_api
-                            .input(sid, AcpInput::Approve { call_id, decision })
-                            .await
+                        sessions_api.approve(sid, call_id, decision).await
                     }),
                     OperationTarget::new(entity),
                 ))
@@ -648,12 +647,10 @@ fn submit_prompt(
         };
         let sessions = service.sessions().clone();
         let sid = sid.0.clone();
-        let input = AcpInput::User {
-            text: prompt.text.clone(),
-            context: prompt.context.clone(),
-            attachments: prompt.attachments.clone(),
-            preferred_mode: prompt.preferred_mode.clone(),
-        };
+        let text = prompt.text.clone();
+        let context = prompt.context.clone();
+        let attachments = prompt.attachments.clone();
+        let preferred_mode = prompt.preferred_mode.clone();
         let native = commands
             .spawn((
                 Output::spawn(
@@ -662,7 +659,11 @@ fn submit_prompt(
                         owner: owner.entity(),
                         uuid: uuid.clone(),
                     },
-                    async move { sessions.input(sid, input).await },
+                    async move {
+                        sessions
+                            .send_prompt(sid, text, context, attachments, preferred_mode)
+                            .await
+                    },
                 ),
                 OperationTarget::new(entity),
             ))

@@ -3,9 +3,9 @@ use bevy::prelude::{
     Update,
 };
 pub(crate) use catalog_driver::{CatalogDriver, CatalogRequest};
-pub use driver::AcpInput;
 use driver::{
-    AcpConfigStateInput, AcpMcpServers, AcpProjectionSenders, AcpSelectedConfigInput, AcpShared,
+    AcpApprovalCommand, AcpConfigCommand, AcpConfigStateInput, AcpMcpServers, AcpProjectionSenders,
+    AcpPromptCommand, AcpSelectedConfigInput, AcpShared,
 };
 use projection::{
     AcpProjectionOrder, AcpProjectionPlugin, AcpProjectionSet, AcpTranscripts,
@@ -16,7 +16,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
-use vmux_api::protocol::{AcpSessionConfig, AgentRunStatus, ServiceMessage, SharedEvent};
+use vmux_api::protocol::{
+    AcpSessionConfig, AgentAttachment, AgentRunStatus, ApprovalDecision, ServiceMessage,
+    SharedEvent,
+};
 #[cfg(test)]
 use vmux_api::session::Message;
 use vmux_api::session::{RemoteApproval, RemoteSession, RemoteStatus};
@@ -53,12 +56,13 @@ impl bevy::prelude::Plugin for AcpRuntimePlugin {
                         project_config_state,
                         project_selected_config,
                         project_status,
+                        project_startup,
                         project_approval_requested,
                         project_approval_resolved,
                         snapshot_selection,
                     )
                         .chain(),
-                    route_input,
+                    (route_prompts, route_approvals, route_configs, route_cancels).chain(),
                     ApplyDeferred,
                     (subscribe, read, list, rebind, close, reap).chain(),
                 )
@@ -81,7 +85,10 @@ struct AcpSelectionSnapshot {
 #[derive(Clone)]
 pub struct AcpSessions {
     spawns: mpsc::UnboundedSender<SpawnAcpSession>,
-    inputs: mpsc::UnboundedSender<AcpSessionInputRequest>,
+    prompts: mpsc::UnboundedSender<SendAcpPrompt>,
+    approvals: mpsc::UnboundedSender<ApproveAcpTool>,
+    configs: mpsc::UnboundedSender<SetAcpConfig>,
+    cancels: mpsc::UnboundedSender<CancelAcpSession>,
     subscriptions: mpsc::UnboundedSender<SubscribeAcpSession>,
     snapshots: mpsc::UnboundedSender<SnapshotAcpSession>,
     agent_infos: mpsc::UnboundedSender<AcpSessionAgentInfo>,
@@ -96,7 +103,10 @@ pub struct AcpSessions {
 
 struct AcpSessionReceivers {
     spawns: mpsc::UnboundedReceiver<SpawnAcpSession>,
-    inputs: mpsc::UnboundedReceiver<AcpSessionInputRequest>,
+    prompts: mpsc::UnboundedReceiver<SendAcpPrompt>,
+    approvals: mpsc::UnboundedReceiver<ApproveAcpTool>,
+    configs: mpsc::UnboundedReceiver<SetAcpConfig>,
+    cancels: mpsc::UnboundedReceiver<CancelAcpSession>,
     subscriptions: mpsc::UnboundedReceiver<SubscribeAcpSession>,
     snapshots: mpsc::UnboundedReceiver<SnapshotAcpSession>,
     agent_infos: mpsc::UnboundedReceiver<AcpSessionAgentInfo>,
@@ -133,9 +143,35 @@ struct SpawnAcpSession {
 }
 
 #[derive(Component)]
-struct AcpSessionInputRequest {
+struct SendAcpPrompt {
     sid: String,
-    input: Option<AcpInput>,
+    text: String,
+    context: Option<String>,
+    attachments: Vec<AgentAttachment>,
+    preferred_mode: Option<String>,
+    response: Option<oneshot::Sender<bool>>,
+}
+
+#[derive(Component)]
+struct ApproveAcpTool {
+    sid: String,
+    call_id: String,
+    decision: ApprovalDecision,
+    response: Option<oneshot::Sender<bool>>,
+}
+
+#[derive(Component)]
+struct SetAcpConfig {
+    sid: String,
+    request_id: u64,
+    config_id: Option<String>,
+    value: String,
+    response: Option<oneshot::Sender<bool>>,
+}
+
+#[derive(Component)]
+struct CancelAcpSession {
+    sid: String,
     response: Option<oneshot::Sender<bool>>,
 }
 
@@ -194,10 +230,34 @@ struct CloseAcpSession {
 }
 
 #[derive(Component)]
-struct AcpSessionInput(mpsc::UnboundedSender<AcpInput>);
+struct AcpPromptInput(mpsc::UnboundedSender<AcpPromptCommand>);
+
+#[derive(Component)]
+struct AcpApprovalInput(mpsc::UnboundedSender<AcpApprovalCommand>);
+
+#[derive(Component)]
+struct AcpConfigInput(mpsc::UnboundedSender<AcpConfigCommand>);
+
+#[derive(Component)]
+struct AcpCancelInput(mpsc::UnboundedSender<()>);
+
+#[derive(Component)]
+struct AcpCloseInput(mpsc::UnboundedSender<()>);
 
 #[derive(Component)]
 struct AcpSessionShared(Arc<AcpShared>);
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct AcpSessionCwd(PathBuf);
+
+#[derive(Component)]
+struct AcpStartupReady;
+
+#[derive(Component)]
+struct AcpStartupFailed;
+
+#[derive(Component)]
+struct AcpStartupInbox(mpsc::UnboundedReceiver<bool>);
 
 #[derive(Component)]
 struct AcpReplayBeginInbox(mpsc::UnboundedReceiver<u64>);
@@ -259,7 +319,16 @@ fn receive(mut inbox: Single<&mut AcpSessionInbox>, mut commands: Commands) {
     while let Ok(request) = inbox.0.spawns.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = inbox.0.inputs.try_recv() {
+    while let Ok(request) = inbox.0.prompts.try_recv() {
+        commands.spawn(request);
+    }
+    while let Ok(request) = inbox.0.approvals.try_recv() {
+        commands.spawn(request);
+    }
+    while let Ok(request) = inbox.0.configs.try_recv() {
+        commands.spawn(request);
+    }
+    while let Ok(request) = inbox.0.cancels.try_recv() {
         commands.spawn(request);
     }
     while let Ok(request) = inbox.0.subscriptions.try_recv() {
@@ -294,15 +363,13 @@ fn receive(mut inbox: Single<&mut AcpSessionInbox>, mut commands: Commands) {
 fn spawn(
     runtime: Single<&AcpSessionRuntime>,
     wake: Single<&AcpSessionWake>,
-    sessions: Query<(Entity, &SessionId, Option<&AcpSessionShared>)>,
+    sessions: Query<(Entity, &SessionId, Option<&AcpStartupFailed>)>,
     mut requests: Query<(Entity, &mut SpawnAcpSession)>,
     mut commands: Commands,
 ) {
     let mut session_ids = HashSet::new();
-    for (entity, sid, shared) in &sessions {
-        if requests.iter().any(|(_, request)| request.sid == sid.0)
-            && shared.is_some_and(|shared| shared.0.startup_failed())
-        {
+    for (entity, sid, startup_failed) in &sessions {
+        if requests.iter().any(|(_, request)| request.sid == sid.0) && startup_failed.is_some() {
             commands
                 .entity(entity)
                 .remove::<SessionId>()
@@ -313,12 +380,17 @@ fn spawn(
     }
     for (request_entity, mut request) in &mut requests {
         if !session_ids.contains(&request.sid) {
-            let (input_tx, input_rx) = mpsc::unbounded_channel();
+            let (prompt_tx, prompt_rx) = mpsc::unbounded_channel();
+            let (approval_tx, approval_rx) = mpsc::unbounded_channel();
+            let (config_tx, config_rx) = mpsc::unbounded_channel();
+            let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
+            let (close_tx, close_rx) = mpsc::unbounded_channel();
             let (projection, projection_inboxes) = AcpProjectionSenders::open(wake.0.clone());
             let (stream_tx, _) = broadcast::channel(256);
+            let cwd = std::mem::take(&mut request.cwd);
             let shared = Arc::new(AcpShared::with_projection(
                 request.sid.clone(),
-                std::mem::take(&mut request.cwd),
+                cwd.clone(),
                 request.anchor,
                 stream_tx,
                 request.processes.clone(),
@@ -332,13 +404,20 @@ fn spawn(
                 std::mem::take(&mut request.mcp_servers),
                 request.resume.take(),
                 Arc::clone(&shared),
-                input_rx,
+                (prompt_rx, approval_rx, config_rx, cancel_rx, close_rx),
             ));
             commands.spawn((
                 Name::new(format!("ACP session {}", request.sid)),
                 SessionId(request.sid.clone()),
-                AcpSessionInput(input_tx),
+                (
+                    AcpPromptInput(prompt_tx),
+                    AcpApprovalInput(approval_tx),
+                    AcpConfigInput(config_tx),
+                    AcpCancelInput(cancel_tx),
+                    AcpCloseInput(close_tx),
+                ),
                 AcpSessionShared(shared),
+                AcpSessionCwd(cwd),
                 AcpProjectionOrder::default(),
                 projection_inboxes,
                 AcpAgentName::default(),
@@ -358,6 +437,24 @@ fn spawn(
             let _ = response.send(());
         }
         commands.entity(request_entity).despawn();
+    }
+}
+
+fn project_startup(mut sessions: Query<(Entity, &mut AcpStartupInbox)>, mut commands: Commands) {
+    for (entity, mut inbox) in &mut sessions {
+        while let Ok(ready) = inbox.0.try_recv() {
+            if ready {
+                commands
+                    .entity(entity)
+                    .remove::<AcpStartupFailed>()
+                    .insert(AcpStartupReady);
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<AcpStartupReady>()
+                    .insert(AcpStartupFailed);
+            }
+        }
     }
 }
 
@@ -545,9 +642,9 @@ fn snapshot_selection(mut sessions: Query<(&mut AcpSelectionSnapshotInbox, &AcpS
     }
 }
 
-fn route_input(
-    sessions: Query<(Entity, &SessionId, &AcpSessionInput)>,
-    mut requests: Query<(Entity, &mut AcpSessionInputRequest)>,
+fn route_prompts(
+    sessions: Query<(Entity, &SessionId, &AcpPromptInput)>,
+    mut requests: Query<(Entity, &mut SendAcpPrompt)>,
     mut commands: Commands,
 ) {
     for (request_entity, mut request) in &mut requests {
@@ -556,22 +653,100 @@ fn route_input(
             if sid.0 != request.sid {
                 continue;
             }
-            if let Some(session_input) = request.input.take() {
-                let user = match &session_input {
-                    AcpInput::User {
-                        text, attachments, ..
-                    } => Some((text.clone(), attachments.clone())),
-                    _ => None,
-                };
-                accepted = input.0.send(session_input).is_ok();
-                if accepted && let Some((text, attachments)) = user {
-                    commands.trigger(RecordUserMessage {
-                        session,
-                        text,
-                        attachments,
-                    });
-                }
+            let text = std::mem::take(&mut request.text);
+            let attachments = std::mem::take(&mut request.attachments);
+            accepted = input
+                .0
+                .send(AcpPromptCommand {
+                    text: text.clone(),
+                    context: request.context.take(),
+                    attachments: attachments.clone(),
+                    preferred_mode: request.preferred_mode.take(),
+                })
+                .is_ok();
+            if accepted {
+                commands.trigger(RecordUserMessage {
+                    session,
+                    text,
+                    attachments,
+                });
             }
+            break;
+        }
+        if let Some(response) = request.response.take() {
+            let _ = response.send(accepted);
+        }
+        commands.entity(request_entity).despawn();
+    }
+}
+
+fn route_approvals(
+    sessions: Query<(&SessionId, &AcpApprovalInput)>,
+    mut requests: Query<(Entity, &mut ApproveAcpTool)>,
+    mut commands: Commands,
+) {
+    for (request_entity, mut request) in &mut requests {
+        let mut accepted = false;
+        for (sid, input) in &sessions {
+            if sid.0 != request.sid {
+                continue;
+            }
+            accepted = input
+                .0
+                .send(AcpApprovalCommand {
+                    call_id: std::mem::take(&mut request.call_id),
+                    decision: request.decision,
+                })
+                .is_ok();
+            break;
+        }
+        if let Some(response) = request.response.take() {
+            let _ = response.send(accepted);
+        }
+        commands.entity(request_entity).despawn();
+    }
+}
+
+fn route_configs(
+    sessions: Query<(&SessionId, &AcpConfigInput)>,
+    mut requests: Query<(Entity, &mut SetAcpConfig)>,
+    mut commands: Commands,
+) {
+    for (request_entity, mut request) in &mut requests {
+        let mut accepted = false;
+        for (sid, input) in &sessions {
+            if sid.0 != request.sid {
+                continue;
+            }
+            accepted = input
+                .0
+                .send(AcpConfigCommand {
+                    request_id: request.request_id,
+                    config_id: request.config_id.take(),
+                    value: std::mem::take(&mut request.value),
+                })
+                .is_ok();
+            break;
+        }
+        if let Some(response) = request.response.take() {
+            let _ = response.send(accepted);
+        }
+        commands.entity(request_entity).despawn();
+    }
+}
+
+fn route_cancels(
+    sessions: Query<(&SessionId, &AcpCancelInput)>,
+    mut requests: Query<(Entity, &mut CancelAcpSession)>,
+    mut commands: Commands,
+) {
+    for (request_entity, mut request) in &mut requests {
+        let mut accepted = false;
+        for (sid, input) in &sessions {
+            if sid.0 != request.sid {
+                continue;
+            }
+            accepted = input.0.send(()).is_ok();
             break;
         }
         if let Some(response) = request.response.take() {
@@ -690,7 +865,7 @@ fn list(
     sessions: Query<(
         Entity,
         &SessionId,
-        &AcpSessionShared,
+        &AcpSessionCwd,
         &AcpSessionAgent,
         &CreatedAt,
         &AcpAgentName,
@@ -705,7 +880,7 @@ fn list(
 ) {
     for (request_entity, mut request) in &mut lists {
         let mut result = Vec::new();
-        for (entity, sid, shared, agent, created_at, name, configs, status, approval) in &sessions {
+        for (entity, sid, cwd, agent, created_at, name, configs, status, approval) in &sessions {
             let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
             let messages = transcripts.messages(entity);
             result.push(RemoteSession {
@@ -720,7 +895,7 @@ fn list(
                     .find(|config| config.category.as_deref() == Some("model"))
                     .map(|config| config.current_value.clone())
                     .filter(|model| !model.is_empty()),
-                cwd: shared.0.cwd().to_string_lossy().into_owned(),
+                cwd: cwd.0.to_string_lossy().into_owned(),
                 status: RemoteStatus::from(&status.0),
                 approval: approval.0.clone(),
                 created_at_ms: created_at.0.max(0) as u64,
@@ -734,7 +909,7 @@ fn list(
     }
     for (request_entity, mut request) in &mut lookups {
         let mut result = None;
-        for (entity, sid, shared, agent, created_at, name, configs, status, approval) in &sessions {
+        for (entity, sid, cwd, agent, created_at, name, configs, status, approval) in &sessions {
             if sid.0 == request.sid {
                 let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
                 let messages = transcripts.messages(entity);
@@ -750,7 +925,7 @@ fn list(
                         .find(|config| config.category.as_deref() == Some("model"))
                         .map(|config| config.current_value.clone())
                         .filter(|model| !model.is_empty()),
-                    cwd: shared.0.cwd().to_string_lossy().into_owned(),
+                    cwd: cwd.0.to_string_lossy().into_owned(),
                     status: RemoteStatus::from(&status.0),
                     approval: approval.0.clone(),
                     created_at_ms: created_at.0.max(0) as u64,
@@ -766,18 +941,22 @@ fn list(
 }
 
 fn rebind(
-    sessions: Query<(&SessionId, &AcpSessionShared)>,
+    mut sessions: Query<(&SessionId, &AcpSessionShared, &mut AcpSessionCwd)>,
     mut requests: Query<(Entity, &mut RebindAcpSession)>,
     mut commands: Commands,
 ) {
     for (request_entity, mut request) in &mut requests {
         let mut result = Err("ACP session not found".to_string());
-        for (sid, shared) in &sessions {
+        for (sid, shared, mut session_cwd) in &mut sessions {
             if sid.0 == request.sid {
                 result = shared
                     .0
                     .rebind_cwd(std::mem::take(&mut request.cwd))
-                    .map(|()| shared.0.cwd());
+                    .map(|()| {
+                        let updated = shared.0.cwd();
+                        session_cwd.0 = updated.clone();
+                        updated
+                    });
                 break;
             }
         }
@@ -789,17 +968,17 @@ fn rebind(
 }
 
 fn close(
-    sessions: Query<(Entity, &SessionId, &AcpSessionInput)>,
+    sessions: Query<(Entity, &SessionId, &AcpCloseInput)>,
     mut requests: Query<(Entity, &mut CloseAcpSession)>,
     mut commands: Commands,
 ) {
     for (request_entity, mut request) in &mut requests {
         let mut closed = false;
-        for (session_entity, sid, input) in &sessions {
+        for (session_entity, sid, close_input) in &sessions {
             if sid.0 != request.sid {
                 continue;
             }
-            let _ = input.0.send(AcpInput::Close);
+            let _ = close_input.0.send(());
             commands
                 .entity(session_entity)
                 .remove::<SessionId>()
@@ -827,15 +1006,21 @@ fn reap(
 
 fn begin_shutdown(
     mut inbox: Single<&mut AcpSessionInbox>,
-    tasks: Query<(Entity, &AcpSessionInput), bevy::prelude::With<AcpSessionShared>>,
+    tasks: Query<(Entity, &AcpCloseInput), bevy::prelude::With<AcpSessionShared>>,
     mut commands: Commands,
 ) {
     inbox.0.spawns.close();
-    inbox.0.inputs.close();
+    inbox.0.prompts.close();
+    inbox.0.approvals.close();
+    inbox.0.configs.close();
+    inbox.0.cancels.close();
     while inbox.0.spawns.try_recv().is_ok() {}
-    while inbox.0.inputs.try_recv().is_ok() {}
-    for (entity, input) in &tasks {
-        let _ = input.0.send(AcpInput::Close);
+    while inbox.0.prompts.try_recv().is_ok() {}
+    while inbox.0.approvals.try_recv().is_ok() {}
+    while inbox.0.configs.try_recv().is_ok() {}
+    while inbox.0.cancels.try_recv().is_ok() {}
+    for (entity, close_input) in &tasks {
+        let _ = close_input.0.send(());
         commands.entity(entity).insert(ShutdownPending);
     }
 }
@@ -1037,12 +1222,24 @@ mod tests {
                     vmux_process::ProcessManager::default(),
                 )),
             ));
-            let (input, _input_rx) = mpsc::unbounded_channel();
+            let (prompt_tx, _prompt_rx) = mpsc::unbounded_channel();
+            let (approval_tx, _approval_rx) = mpsc::unbounded_channel();
+            let (config_tx, _config_rx) = mpsc::unbounded_channel();
+            let (cancel_tx, _cancel_rx) = mpsc::unbounded_channel();
+            let (close_tx, _close_rx) = mpsc::unbounded_channel();
             self.app.world_mut().spawn((
                 SessionId("remote-session".into()),
                 AcpSessionShared(shared),
+                AcpSessionCwd(PathBuf::from("/tmp")),
+                AcpStartupReady,
                 AcpProjectionOrder::default(),
-                AcpSessionInput(input),
+                (
+                    AcpPromptInput(prompt_tx),
+                    AcpApprovalInput(approval_tx),
+                    AcpConfigInput(config_tx),
+                    AcpCancelInput(cancel_tx),
+                    AcpCloseInput(close_tx),
+                ),
                 AcpSessionAgent("mock".into()),
                 CreatedAt(1),
                 AcpAgentName::default(),
@@ -1382,7 +1579,7 @@ mod tests {
     fn accepted_user_input_is_projected_before_agent_startup() {
         let mut app = App::new();
         app.add_plugins(AcpRuntimePlugin);
-        let (input_tx, mut input_rx) = mpsc::unbounded_channel();
+        let (prompt_tx, mut prompt_rx) = mpsc::unbounded_channel();
         let (stream_tx, mut stream_rx) = broadcast::channel(4);
         let shared = Arc::new(AcpShared::new(
             "s1".into(),
@@ -1397,25 +1594,26 @@ mod tests {
             .world_mut()
             .spawn((
                 SessionId("s1".into()),
-                AcpSessionInput(input_tx),
+                AcpPromptInput(prompt_tx),
                 AcpSessionShared(shared),
+                AcpSessionCwd(PathBuf::from("/tmp")),
                 AcpProjectionOrder::default(),
             ))
             .id();
-        app.world_mut().spawn(AcpSessionInputRequest {
+        app.world_mut().spawn(SendAcpPrompt {
             sid: "s1".into(),
-            input: Some(AcpInput::User {
-                text: "hello".into(),
-                context: None,
-                attachments: Vec::new(),
-                preferred_mode: None,
-            }),
+            text: "hello".into(),
+            context: None,
+            attachments: Vec::new(),
+            preferred_mode: None,
             response: None,
         });
 
         app.update();
 
-        assert!(matches!(input_rx.try_recv(), Ok(AcpInput::User { text, .. }) if text == "hello"));
+        assert!(
+            matches!(prompt_rx.try_recv(), Ok(AcpPromptCommand { text, .. }) if text == "hello")
+        );
         let messages = app
             .world_mut()
             .run_system_once(move |transcripts: AcpTranscripts| transcripts.messages(session))

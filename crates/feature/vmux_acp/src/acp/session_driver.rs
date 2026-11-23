@@ -3,23 +3,26 @@ use std::path::PathBuf;
 use bevy::prelude::Bundle;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
-use vmux_api::protocol::ServiceMessage;
+use vmux_api::protocol::{AgentAttachment, ApprovalDecision, ServiceMessage};
 use vmux_api::session::RemoteSession;
 use vmux_ecs::ProcessId;
 use vmux_process::ProcessRuntime;
 
-use super::driver::{AcpInput, AcpMcpServers};
+use super::driver::AcpMcpServers;
 use super::{
-    AcpSessionAgentInfo, AcpSessionConfigRequest, AcpSessionInbox, AcpSessionInputRequest,
-    AcpSessionReceivers, AcpSessionRuntime, AcpSessionStatusRequest, AcpSessionWake, AcpSessions,
-    CloseAcpSession, FindAcpSession, ListAcpSessions, RebindAcpSession, SnapshotAcpSession,
-    SpawnAcpSession, SubscribeAcpSession,
+    AcpSessionAgentInfo, AcpSessionConfigRequest, AcpSessionInbox, AcpSessionReceivers,
+    AcpSessionRuntime, AcpSessionStatusRequest, AcpSessionWake, AcpSessions, ApproveAcpTool,
+    CancelAcpSession, CloseAcpSession, FindAcpSession, ListAcpSessions, RebindAcpSession,
+    SendAcpPrompt, SetAcpConfig, SnapshotAcpSession, SpawnAcpSession, SubscribeAcpSession,
 };
 
 impl AcpSessions {
     pub fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
         let (spawns, spawn_inbox) = mpsc::unbounded_channel();
-        let (inputs, input_inbox) = mpsc::unbounded_channel();
+        let (prompts, prompt_inbox) = mpsc::unbounded_channel();
+        let (approvals, approval_inbox) = mpsc::unbounded_channel();
+        let (configs, config_inbox) = mpsc::unbounded_channel();
+        let (cancels, cancel_inbox) = mpsc::unbounded_channel();
         let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
         let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
         let (agent_infos, agent_info_inbox) = mpsc::unbounded_channel();
@@ -32,7 +35,10 @@ impl AcpSessions {
         (
             Self {
                 spawns,
-                inputs,
+                prompts,
+                approvals,
+                configs,
+                cancels,
                 subscriptions,
                 snapshots,
                 agent_infos,
@@ -49,7 +55,10 @@ impl AcpSessions {
                 AcpSessionWake(wake),
                 AcpSessionInbox(AcpSessionReceivers {
                     spawns: spawn_inbox,
-                    inputs: input_inbox,
+                    prompts: prompt_inbox,
+                    approvals: approval_inbox,
+                    configs: config_inbox,
+                    cancels: cancel_inbox,
                     subscriptions: subscription_inbox,
                     snapshots: snapshot_inbox,
                     agent_infos: agent_info_inbox,
@@ -137,13 +146,82 @@ impl AcpSessions {
             .map_err(|_| "ACP session spawn was cancelled".to_string())
     }
 
-    pub async fn input(&self, sid: String, input: AcpInput) -> bool {
+    pub async fn send_prompt(
+        &self,
+        sid: String,
+        text: String,
+        context: Option<String>,
+        attachments: Vec<AgentAttachment>,
+        preferred_mode: Option<String>,
+    ) -> bool {
         let (response, receiver) = oneshot::channel();
         if self
-            .inputs
-            .send(AcpSessionInputRequest {
+            .prompts
+            .send(SendAcpPrompt {
                 sid,
-                input: Some(input),
+                text,
+                context,
+                attachments,
+                preferred_mode,
+                response: Some(response),
+            })
+            .is_err()
+            || self.wake.send(()).is_err()
+        {
+            return false;
+        }
+        receiver.await.unwrap_or(false)
+    }
+
+    pub async fn approve(&self, sid: String, call_id: String, decision: ApprovalDecision) -> bool {
+        let (response, receiver) = oneshot::channel();
+        if self
+            .approvals
+            .send(ApproveAcpTool {
+                sid,
+                call_id,
+                decision,
+                response: Some(response),
+            })
+            .is_err()
+            || self.wake.send(()).is_err()
+        {
+            return false;
+        }
+        receiver.await.unwrap_or(false)
+    }
+
+    pub async fn set_config(
+        &self,
+        sid: String,
+        request_id: u64,
+        config_id: Option<String>,
+        value: String,
+    ) -> bool {
+        let (response, receiver) = oneshot::channel();
+        if self
+            .configs
+            .send(SetAcpConfig {
+                sid,
+                request_id,
+                config_id,
+                value,
+                response: Some(response),
+            })
+            .is_err()
+            || self.wake.send(()).is_err()
+        {
+            return false;
+        }
+        receiver.await.unwrap_or(false)
+    }
+
+    pub async fn cancel(&self, sid: String) -> bool {
+        let (response, receiver) = oneshot::channel();
+        if self
+            .cancels
+            .send(CancelAcpSession {
+                sid,
                 response: Some(response),
             })
             .is_err()
