@@ -12699,12 +12699,18 @@ impl Inventory {
                     all_valid = false;
                     break;
                 };
-                let owner_ok =
-                    owner.ecs && self.used(owner) && self.event_interface(owner).is_none()
-                        || jobs.as_ref().is_some_and(|keys| keys.contains(&owner.key))
-                        || guards
-                            .as_ref()
-                            .is_some_and(|keys| keys.contains(&owner.key));
+                let has_event_derive = owner
+                    .derive_paths
+                    .iter()
+                    .any(|path| matches!(path.rsplit("::").next(), Some("Event" | "EntityEvent")));
+                let owner_ok = owner.ecs
+                    && self.used(owner)
+                    && !has_event_derive
+                    && self.event_interface(owner).is_none()
+                    || jobs.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                    || guards
+                        .as_ref()
+                        .is_some_and(|keys| keys.contains(&owner.key));
                 if !owner_ok
                     || implementation.local
                     || implementation.dynamic
