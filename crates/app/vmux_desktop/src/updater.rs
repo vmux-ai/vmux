@@ -179,6 +179,7 @@ fn apply_update_progress(
     }
     for completion in completions {
         checker.in_flight = false;
+        while checker.progress_rx.try_recv().is_ok() {}
         match completion {
             Ok(None) => {
                 status.0 = UpdateCheckStatus::UpToDate;
