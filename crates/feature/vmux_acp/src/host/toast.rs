@@ -4,10 +4,14 @@ use bevy_cef::prelude::UiEventPlugin;
 use vmux_session::Session;
 use vmux_session::{RunState, SessionId};
 
-pub(super) fn add(app: &mut App) {
-    app.add_message::<AgentToast>()
-        .add_plugins(UiEventPlugin::<(AgentToast,)>::default())
-        .add_systems(Update, surface_errors);
+pub(super) struct ToastPlugin;
+
+impl Plugin for ToastPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<AgentToast>()
+            .add_plugins(UiEventPlugin::<(AgentToast,)>::default())
+            .add_systems(Update, surface_errors);
+    }
 }
 
 #[vmux_api::contract(Copy, Eq)]
@@ -61,8 +65,7 @@ mod tests {
     #[test]
     fn an_active_writer_refusal_does_not_emit_an_error_toast() {
         let mut app = App::new();
-        app.add_message::<AgentToast>()
-            .add_systems(Update, surface_errors);
+        app.add_plugins((MinimalPlugins, ToastPlugin));
         app.world_mut().spawn((
             Session,
             SessionId("busy".into()),
@@ -96,9 +99,7 @@ mod tests {
     #[test]
     fn errored_transition_fires_toast() {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_message::<AgentToast>()
-            .add_systems(Update, surface_errors);
+        app.add_plugins((MinimalPlugins, ToastPlugin));
         app.world_mut().spawn((
             Session,
             SessionId("abc".into()),
@@ -119,9 +120,7 @@ mod tests {
     #[test]
     fn acp_errored_transition_fires_toast() {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_message::<AgentToast>()
-            .add_systems(Update, surface_errors);
+        app.add_plugins((MinimalPlugins, ToastPlugin));
         app.world_mut().spawn((
             Session,
             SessionId("acp1".into()),
@@ -141,9 +140,7 @@ mod tests {
     #[test]
     fn no_op_when_state_kind_unchanged() {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_message::<AgentToast>()
-            .add_systems(Update, surface_errors);
+        app.add_plugins((MinimalPlugins, ToastPlugin));
         app.world_mut().spawn((
             Session,
             SessionId("abc".into()),

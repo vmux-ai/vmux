@@ -7,16 +7,20 @@ use vmux_ecs::agent::AgentContinuationRequest;
 use vmux_ecs::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 use vmux_session::{RunState, SessionId};
 
-pub(super) fn add(app: &mut App) {
-    app.add_message::<AgentContinuationRequest>()
-        .add_message::<ServiceRequest>()
-        .add_systems(
-            Update,
-            (queue_continuations, send_continuations)
-                .chain()
-                .in_set(WriteCommandRequests)
-                .after(ServiceMessageSet),
-        );
+pub(super) struct ContinuationPlugin;
+
+impl Plugin for ContinuationPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<AgentContinuationRequest>()
+            .add_message::<ServiceRequest>()
+            .add_systems(
+                Update,
+                (queue_continuations, send_continuations)
+                    .chain()
+                    .in_set(WriteCommandRequests)
+                    .after(ServiceMessageSet),
+            );
+    }
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -72,6 +76,7 @@ fn send_continuations(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn chat_workspace_continuation_is_private_same_session_input() {
         let message: ClientMessage = SharedMessage::AgentInput {

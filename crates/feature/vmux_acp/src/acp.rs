@@ -1,14 +1,16 @@
 use bevy::prelude::{
-    App, ApplyDeferred, Bundle, Commands, Component, Entity, IntoScheduleConfigs, Name, Query,
-    Single, Update,
+    App, ApplyDeferred, Commands, Component, Entity, IntoScheduleConfigs, Name, Query, Single,
+    Update,
 };
 pub(crate) use catalog_driver::{CatalogDriver, CatalogRequest};
 pub use driver::AcpInput;
 use driver::{
     AcpConfigStateInput, AcpMcpServers, AcpProjectionSenders, AcpSelectedConfigInput, AcpShared,
-    AcpTranscriptInput,
 };
-use projection_driver::AcpProjector;
+use projection::{
+    AcpProjectionOrder, AcpProjectionPlugin, AcpProjectionSet, AcpTranscripts,
+    ApprovalDetailsRequest, RecordUserMessage,
+};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,11 +25,11 @@ use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
 use vmux_session::SessionId;
 
+use agent_client_protocol::schema::v1::SessionUpdate;
 mod agent_process;
 mod catalog_driver;
 mod driver;
 mod projection;
-mod projection_driver;
 mod session_driver;
 mod workspace_driver;
 
@@ -35,32 +37,36 @@ pub(crate) struct AcpRuntimePlugin;
 
 impl bevy::prelude::Plugin for AcpRuntimePlugin {
     fn build(&self, app: &mut App) {
-        projection::add(app);
-        app.add_systems(
-            Update,
-            (
-                receive,
-                ApplyDeferred,
-                spawn,
-                project_info,
-                project_config_state,
-                project_selected_config,
-                project_status,
-                project_approval_requested,
-                project_approval_resolved,
-                snapshot_selection,
-                route_input,
-                subscribe,
-                read,
-                list,
-                rebind,
-                close,
-                reap,
+        app.add_plugins(AcpProjectionPlugin)
+            .add_systems(
+                Update,
+                (receive, ApplyDeferred, spawn, ApplyDeferred)
+                    .chain()
+                    .before(AcpProjectionSet),
             )
-                .chain(),
-        )
-        .add_systems(Shutdown, begin_shutdown)
-        .add_systems(ShutdownComplete, shutdown);
+            .add_systems(
+                Update,
+                (
+                    ApplyDeferred,
+                    (
+                        project_info,
+                        project_config_state,
+                        project_selected_config,
+                        project_status,
+                        project_approval_requested,
+                        project_approval_resolved,
+                        snapshot_selection,
+                    )
+                        .chain(),
+                    route_input,
+                    ApplyDeferred,
+                    (subscribe, read, list, rebind, close, reap).chain(),
+                )
+                    .chain()
+                    .after(AcpProjectionSet),
+            )
+            .add_systems(Shutdown, begin_shutdown)
+            .add_systems(ShutdownComplete, shutdown);
     }
 }
 
@@ -194,7 +200,19 @@ struct AcpSessionInput(mpsc::UnboundedSender<AcpInput>);
 struct AcpSessionShared(Arc<AcpShared>);
 
 #[derive(Component)]
-struct AcpTranscriptInbox(mpsc::UnboundedReceiver<AcpTranscriptInput>);
+struct AcpReplayBeginInbox(mpsc::UnboundedReceiver<u64>);
+
+#[derive(Component)]
+struct AcpSessionUpdateInbox(mpsc::UnboundedReceiver<(u64, Box<SessionUpdate>)>);
+
+#[derive(Component)]
+struct AcpReplayFinishInbox(mpsc::UnboundedReceiver<(u64, bool)>);
+
+#[derive(Component)]
+struct AcpSnapshotRequestInbox(mpsc::UnboundedReceiver<u64>);
+
+#[derive(Component)]
+struct AcpApprovalDetailsInbox(mpsc::UnboundedReceiver<(u64, ApprovalDetailsRequest)>);
 
 #[derive(Component)]
 struct AcpAgentInfoInbox(mpsc::UnboundedReceiver<String>);
@@ -216,18 +234,6 @@ struct AcpApprovalResolvedInbox(mpsc::UnboundedReceiver<String>);
 
 #[derive(Component)]
 struct AcpSelectionSnapshotInbox(mpsc::UnboundedReceiver<oneshot::Sender<AcpSelectionSnapshot>>);
-
-#[derive(Bundle)]
-struct AcpProjectionInboxes {
-    transcript: AcpTranscriptInbox,
-    agent_info: AcpAgentInfoInbox,
-    config_state: AcpConfigStateInbox,
-    selected_config: AcpSelectedConfigInbox,
-    status: AcpStatusInbox,
-    approval_requested: AcpApprovalRequestedInbox,
-    approval_resolved: AcpApprovalResolvedInbox,
-    selection_snapshot: AcpSelectionSnapshotInbox,
-}
 
 #[derive(Component, Default)]
 struct AcpAgentName(Option<String>);
@@ -333,8 +339,8 @@ fn spawn(
                 SessionId(request.sid.clone()),
                 AcpSessionInput(input_tx),
                 AcpSessionShared(shared),
+                AcpProjectionOrder::default(),
                 projection_inboxes,
-                AcpProjector::default(),
                 AcpAgentName::default(),
                 AcpSessionConfigs::default(),
                 AcpRunState(AgentRunStatus::Idle),
@@ -540,18 +546,13 @@ fn snapshot_selection(mut sessions: Query<(&mut AcpSelectionSnapshotInbox, &AcpS
 }
 
 fn route_input(
-    mut sessions: Query<(
-        &SessionId,
-        &AcpSessionInput,
-        &AcpSessionShared,
-        &mut AcpProjector,
-    )>,
+    sessions: Query<(Entity, &SessionId, &AcpSessionInput)>,
     mut requests: Query<(Entity, &mut AcpSessionInputRequest)>,
     mut commands: Commands,
 ) {
     for (request_entity, mut request) in &mut requests {
         let mut accepted = false;
-        for (sid, input, shared, mut projector) in &mut sessions {
+        for (session, sid, input) in &sessions {
             if sid.0 != request.sid {
                 continue;
             }
@@ -564,10 +565,11 @@ fn route_input(
                 };
                 accepted = input.0.send(session_input).is_ok();
                 if accepted && let Some((text, attachments)) = user {
-                    projector.push_user(text, attachments);
-                    shared
-                        .0
-                        .emit(shared.0.snapshot_message(projector.messages()));
+                    commands.trigger(RecordUserMessage {
+                        session,
+                        text,
+                        attachments,
+                    });
                 }
             }
             break;
@@ -601,14 +603,15 @@ fn subscribe(
 
 fn read(
     sessions: Query<(
+        Entity,
         &SessionId,
         &AcpSessionShared,
-        &AcpProjector,
         &AcpAgentName,
         &AcpSessionConfigs,
         &AcpRunState,
         &AcpHistoryReplay,
     )>,
+    transcripts: AcpTranscripts,
     mut snapshots: Query<(Entity, &mut SnapshotAcpSession)>,
     mut agent_infos: Query<(Entity, &mut AcpSessionAgentInfo)>,
     mut config_states: Query<(Entity, &mut AcpSessionConfigRequest)>,
@@ -617,10 +620,11 @@ fn read(
 ) {
     for (request_entity, mut request) in &mut snapshots {
         let mut result = None;
-        for (sid, shared, projector, _, _, _, replay) in &sessions {
+        for (entity, sid, shared, _, _, _, replay) in &sessions {
             if sid.0 == request.sid {
                 if !replay.active {
-                    result = Some(shared.0.snapshot_message(projector.messages()));
+                    let messages = transcripts.messages(entity);
+                    result = Some(shared.0.snapshot_message(&messages));
                 }
                 break;
             }
@@ -632,7 +636,7 @@ fn read(
     }
     for (request_entity, mut request) in &mut agent_infos {
         let mut result = None;
-        for (sid, _, _, agent_name, _, _, _) in &sessions {
+        for (_, sid, _, agent_name, _, _, _) in &sessions {
             if sid.0 == request.sid {
                 result = agent_name.0.as_ref().map(|name| {
                     ServiceMessage::Shared(SharedEvent::AcpAgentInfo {
@@ -650,7 +654,7 @@ fn read(
     }
     for (request_entity, mut request) in &mut config_states {
         let mut result = None;
-        for (sid, _, _, _, configs, _, _) in &sessions {
+        for (_, sid, _, _, configs, _, _) in &sessions {
             if sid.0 == request.sid {
                 result = Some(ServiceMessage::AcpSessionConfigState {
                     sid: sid.0.clone(),
@@ -666,7 +670,7 @@ fn read(
     }
     for (request_entity, mut request) in &mut statuses {
         let mut result = None;
-        for (sid, _, _, _, _, status, _) in &sessions {
+        for (_, sid, _, _, _, status, _) in &sessions {
             if sid.0 == request.sid {
                 result = Some(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
                     sid: sid.0.clone(),
@@ -684,30 +688,30 @@ fn read(
 
 fn list(
     sessions: Query<(
+        Entity,
         &SessionId,
         &AcpSessionShared,
         &AcpSessionAgent,
         &CreatedAt,
-        &AcpProjector,
         &AcpAgentName,
         &AcpSessionConfigs,
         &AcpRunState,
         &AcpApprovalState,
     )>,
+    transcripts: AcpTranscripts,
     mut lists: Query<(Entity, &mut ListAcpSessions)>,
     mut lookups: Query<(Entity, &mut FindAcpSession)>,
     mut commands: Commands,
 ) {
     for (request_entity, mut request) in &mut lists {
         let mut result = Vec::new();
-        for (sid, shared, agent, created_at, projector, name, configs, status, approval) in
-            &sessions
-        {
+        for (entity, sid, shared, agent, created_at, name, configs, status, approval) in &sessions {
             let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
+            let messages = transcripts.messages(entity);
             result.push(RemoteSession {
                 id: sid.clone(),
                 url: format!("{}{}", vmux_api::VmuxRoute::SESSIONS_ROOT, sid.0),
-                title: vmux_session::ConversationTitle::from_messages(projector.messages(), &name),
+                title: vmux_session::ConversationTitle::from_messages(&messages, &name),
                 name,
                 runtime: "acp".to_string(),
                 model: configs
@@ -730,18 +734,14 @@ fn list(
     }
     for (request_entity, mut request) in &mut lookups {
         let mut result = None;
-        for (sid, shared, agent, created_at, projector, name, configs, status, approval) in
-            &sessions
-        {
+        for (entity, sid, shared, agent, created_at, name, configs, status, approval) in &sessions {
             if sid.0 == request.sid {
                 let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
+                let messages = transcripts.messages(entity);
                 result = Some(RemoteSession {
                     id: sid.clone(),
                     url: format!("{}{}", vmux_api::VmuxRoute::SESSIONS_ROOT, sid.0),
-                    title: vmux_session::ConversationTitle::from_messages(
-                        projector.messages(),
-                        &name,
-                    ),
+                    title: vmux_session::ConversationTitle::from_messages(&messages, &name),
                     name,
                     runtime: "acp".to_string(),
                     model: configs
@@ -857,6 +857,7 @@ fn shutdown(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
     use std::collections::VecDeque;
     use vmux_api::protocol::{
         AgentCommandResult, AgentNewChat, AgentRequest, AgentRequestId, ClientMessage,
@@ -1040,10 +1041,10 @@ mod tests {
             self.app.world_mut().spawn((
                 SessionId("remote-session".into()),
                 AcpSessionShared(shared),
+                AcpProjectionOrder::default(),
                 AcpSessionInput(input),
                 AcpSessionAgent("mock".into()),
                 CreatedAt(1),
-                AcpProjector::default(),
                 AcpAgentName::default(),
                 AcpSessionConfigs::default(),
                 AcpRunState(AgentRunStatus::Idle),
@@ -1317,12 +1318,16 @@ mod tests {
         fixture.connection.disconnect().await;
     }
 
-    #[tokio::test]
-    async fn subscriptions_receive_no_empty_snapshot_while_history_is_replaying() {
+    #[test]
+    fn subscriptions_receive_no_empty_snapshot_while_history_is_replaying() {
+        let runtime_handle = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let mut app = App::new();
         app.add_plugins(crate::service::AcpServicePlugin);
         let (wake, _wake_rx) = mpsc::unbounded_channel();
-        let (_sessions, runtime) = AcpSessions::new(Handle::current(), wake);
+        let (_sessions, runtime) = AcpSessions::new(runtime_handle.handle().clone(), wake);
         app.world_mut().spawn(runtime);
         let (stream, _receiver) = broadcast::channel(4);
         let shared = Arc::new(AcpShared::new(
@@ -1334,20 +1339,23 @@ mod tests {
                 vmux_process::ProcessManager::default(),
             )),
         ));
-        let mut projector = AcpProjector::default();
-        projector.push_user("restored".into(), Vec::new());
         let session = app
             .world_mut()
             .spawn((
                 SessionId("session".into()),
                 AcpSessionShared(shared),
-                projector,
+                AcpProjectionOrder::default(),
                 AcpAgentName::default(),
                 AcpSessionConfigs::default(),
                 AcpRunState(AgentRunStatus::Idle),
                 AcpHistoryReplay { active: true },
             ))
             .id();
+        app.world_mut().trigger(RecordUserMessage {
+            session,
+            text: "restored".into(),
+            attachments: Vec::new(),
+        });
         let (response, mut receiver) = oneshot::channel();
         app.world_mut().spawn(SnapshotAcpSession {
             sid: "session".into(),
@@ -1373,7 +1381,7 @@ mod tests {
     #[test]
     fn accepted_user_input_is_projected_before_agent_startup() {
         let mut app = App::new();
-        app.add_systems(Update, route_input);
+        app.add_plugins(AcpRuntimePlugin);
         let (input_tx, mut input_rx) = mpsc::unbounded_channel();
         let (stream_tx, mut stream_rx) = broadcast::channel(4);
         let shared = Arc::new(AcpShared::new(
@@ -1391,7 +1399,7 @@ mod tests {
                 SessionId("s1".into()),
                 AcpSessionInput(input_tx),
                 AcpSessionShared(shared),
-                AcpProjector::default(),
+                AcpProjectionOrder::default(),
             ))
             .id();
         app.world_mut().spawn(AcpSessionInputRequest {
@@ -1408,8 +1416,12 @@ mod tests {
         app.update();
 
         assert!(matches!(input_rx.try_recv(), Ok(AcpInput::User { text, .. }) if text == "hello"));
+        let messages = app
+            .world_mut()
+            .run_system_once(move |transcripts: AcpTranscripts| transcripts.messages(session))
+            .unwrap();
         assert!(matches!(
-            app.world().get::<AcpProjector>(session).unwrap().messages(),
+            messages.as_slice(),
             [Message::User { text, .. }] if text == "hello"
         ));
         assert!(matches!(

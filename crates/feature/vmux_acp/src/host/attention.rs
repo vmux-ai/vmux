@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 #[cfg(test)]
 use vmux_api::protocol::AgentRequest;
@@ -16,9 +18,6 @@ use super::attention_driver::AttentionContext;
 #[cfg(test)]
 use crate::host::event::AgentRequestInput;
 use vmux_session::SessionId;
-
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(super) struct TurnEndedSet;
 
 pub(super) struct AttentionPlugin;
 
@@ -52,6 +51,19 @@ impl Plugin for AttentionPlugin {
     }
 }
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct TurnEndedSet;
+
+#[derive(Component)]
+struct LastAttentionNotified(f64);
+
+impl LastAttentionNotified {
+    const DEDUP_WINDOW_SECS: f64 = 3.0;
+}
+
+#[derive(Component)]
+struct PreviouslyFocusedStack;
+
 fn bell(
     mut reader: MessageReader<BellReceived>,
     mut attention: MessageWriter<AgentAttention>,
@@ -68,17 +80,16 @@ fn bell(
     }
 }
 
-const DONE_DEDUP_WINDOW_SECS: f64 = 3.0;
-
 fn mark_done(
     mut reader: MessageReader<AgentAttention>,
     mut notify: MessageWriter<OsNotify>,
     context: AttentionContext,
     meta: Query<(&Profile, Option<&SessionId>, Option<&Agent>)>,
+    last_notified: Query<&LastAttentionNotified>,
     time: Res<Time>,
-    mut last_notify: Local<std::collections::HashMap<Entity, f64>>,
     mut commands: Commands,
 ) {
+    let mut notified_this_frame = HashSet::new();
     for att in reader.read() {
         if context.viewed(att.entity) {
             commands.entity(att.entity).remove::<AgentDoneUnseen>();
@@ -86,13 +97,16 @@ fn mark_done(
         }
         commands.entity(att.entity).insert(AgentDoneUnseen);
         let now = time.elapsed_secs_f64();
-        if last_notify
-            .get(&att.entity)
-            .is_some_and(|t| now - t < DONE_DEDUP_WINDOW_SECS)
-        {
+        let recently_notified = !notified_this_frame.insert(att.entity)
+            || last_notified
+                .get(att.entity)
+                .is_ok_and(|last| now - last.0 < LastAttentionNotified::DEDUP_WINDOW_SECS);
+        if recently_notified {
             continue;
         }
-        last_notify.insert(att.entity, now);
+        commands
+            .entity(att.entity)
+            .insert(LastAttentionNotified(now));
         let (name, sid) = match meta.get(att.entity) {
             Ok((profile, session, agent)) => {
                 let sid = session
@@ -131,8 +145,8 @@ fn mark_done(
 
 fn clear_done(
     done: Query<Entity, With<AgentDoneUnseen>>,
+    previous: Query<Entity, With<PreviouslyFocusedStack>>,
     context: AttentionContext,
-    mut prev_focused: Local<Option<Entity>>,
     mut commands: Commands,
 ) {
     let current = if context.foreground() {
@@ -140,13 +154,17 @@ fn clear_done(
     } else {
         None
     };
-    if current == *prev_focused {
+    let prev = previous.iter().next();
+    if current == prev {
         return;
     }
-    *prev_focused = current;
+    for entity in &previous {
+        commands.entity(entity).remove::<PreviouslyFocusedStack>();
+    }
     let Some(stack) = current else {
         return;
     };
+    commands.entity(stack).insert(PreviouslyFocusedStack);
     for entity in &done {
         if context.stack(entity) == Some(stack) {
             commands.entity(entity).remove::<AgentDoneUnseen>();
@@ -179,210 +197,213 @@ mod tests {
     use super::*;
     use crate::host::event::CommandOrigin;
 
-    pub(crate) fn bell_test_app() -> App {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<BellReceived>()
-            .add_message::<AgentAttention>()
-            .add_plugins(AttentionPlugin);
-        app
-    }
+    struct AttentionFixture(App);
 
-    pub(crate) fn spawn_agent_with_pid(app: &mut App, pid: ProcessId) -> Entity {
-        app.world_mut()
-            .spawn((
-                Agent {
-                    sid: "s".to_string(),
-                },
-                pid,
+    impl AttentionFixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_layout::LayoutContractPlugin,
+                AttentionPlugin,
             ))
-            .id()
-    }
+            .add_message::<AgentRequestInput>();
+            app.world_mut().spawn(ActiveStack::default().local_bundle());
+            Self(app)
+        }
 
-    pub(crate) fn attentions(app: &App) -> Vec<Entity> {
-        let messages = app
-            .world()
-            .resource::<bevy::ecs::message::Messages<AgentAttention>>();
-        let mut cursor = messages.get_cursor();
-        cursor.read(messages).map(|a| a.entity).collect()
-    }
+        fn spawn_agent_with_pid(&mut self, pid: ProcessId) -> Entity {
+            self.0
+                .world_mut()
+                .spawn((
+                    Agent {
+                        sid: "s".to_string(),
+                    },
+                    pid,
+                ))
+                .id()
+        }
 
-    pub(crate) fn turn_end_test_app() -> App {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<AgentRequestInput>()
-            .add_message::<AgentAttention>()
-            .add_plugins(AttentionPlugin);
-        app
-    }
+        fn spawn_agent_in_stack(&mut self) -> (Entity, Entity) {
+            let stack = self.0.world_mut().spawn(Stack::default()).id();
+            let agent = self
+                .0
+                .world_mut()
+                .spawn((Profile::registry("Agent", "test-agent"), ChildOf(stack)))
+                .id();
+            (agent, stack)
+        }
 
-    pub(crate) fn send_turn_ended(app: &mut App, anchor: ProcessId) {
-        app.world_mut()
-            .resource_mut::<bevy::ecs::message::Messages<AgentRequestInput>>()
-            .write(AgentRequestInput {
-                request_id: vmux_api::protocol::AgentRequestId::new(),
-                origin: CommandOrigin::Agent {
-                    sid: None,
-                    anchor: Some(anchor),
+        fn set_window(&mut self, focused: bool) {
+            self.0.world_mut().spawn((
+                Window {
+                    focused,
+                    visible: true,
+                    ..default()
                 },
-                request: AgentRequest::encode(&AgentTurnEnded { anchor }).unwrap(),
-            });
+                bevy::window::PrimaryWindow,
+            ));
+        }
+
+        fn focus_stack(&mut self, stack: Entity) {
+            let world = self.0.world_mut();
+            let mut query = world.query::<&mut ActiveStack>();
+            query.single_mut(world).unwrap().stack = Some(stack);
+        }
+
+        fn send_attention(&mut self, entity: Entity) {
+            self.0
+                .world_mut()
+                .resource_mut::<bevy::ecs::message::Messages<AgentAttention>>()
+                .write(AgentAttention {
+                    entity,
+                    title: None,
+                    body: None,
+                });
+        }
+
+        fn send_turn_ended(&mut self, anchor: ProcessId) {
+            self.0
+                .world_mut()
+                .resource_mut::<bevy::ecs::message::Messages<AgentRequestInput>>()
+                .write(AgentRequestInput {
+                    request_id: vmux_api::protocol::AgentRequestId::new(),
+                    origin: CommandOrigin::Agent {
+                        sid: None,
+                        anchor: Some(anchor),
+                    },
+                    request: AgentRequest::encode(&AgentTurnEnded { anchor }).unwrap(),
+                });
+        }
+
+        fn attentions(&self) -> Vec<Entity> {
+            let messages = self
+                .0
+                .world()
+                .resource::<bevy::ecs::message::Messages<AgentAttention>>();
+            let mut cursor = messages.get_cursor();
+            cursor.read(messages).map(|a| a.entity).collect()
+        }
+
+        fn os_notify_count(&self) -> usize {
+            let messages = self
+                .0
+                .world()
+                .resource::<bevy::ecs::message::Messages<OsNotify>>();
+            let mut cursor = messages.get_cursor();
+            cursor.read(messages).count()
+        }
     }
 
     #[test]
     fn turn_ended_resolves_to_agent_attention() {
-        let mut app = turn_end_test_app();
+        let mut fixture = AttentionFixture::new();
         let pid = ProcessId::new();
-        let agent = spawn_agent_with_pid(&mut app, pid);
-        send_turn_ended(&mut app, pid);
-        app.update();
-        assert_eq!(attentions(&app), vec![agent]);
+        let agent = fixture.spawn_agent_with_pid(pid);
+        fixture.send_turn_ended(pid);
+        fixture.0.update();
+        assert_eq!(fixture.attentions(), vec![agent]);
     }
 
     #[test]
     fn turn_ended_unknown_anchor_emits_nothing() {
-        let mut app = turn_end_test_app();
-        let _agent = spawn_agent_with_pid(&mut app, ProcessId::new());
-        send_turn_ended(&mut app, ProcessId::new());
-        app.update();
-        assert!(attentions(&app).is_empty());
+        let mut fixture = AttentionFixture::new();
+        let _agent = fixture.spawn_agent_with_pid(ProcessId::new());
+        fixture.send_turn_ended(ProcessId::new());
+        fixture.0.update();
+        assert!(fixture.attentions().is_empty());
     }
 
     #[test]
     fn bell_resolves_to_agent_attention() {
-        let mut app = bell_test_app();
+        let mut fixture = AttentionFixture::new();
         let pid = ProcessId::new();
-        let agent = spawn_agent_with_pid(&mut app, pid);
-        app.world_mut()
+        let agent = fixture.spawn_agent_with_pid(pid);
+        fixture
+            .0
+            .world_mut()
             .resource_mut::<bevy::ecs::message::Messages<BellReceived>>()
             .write(BellReceived { process_id: pid });
-        app.update();
-        assert_eq!(attentions(&app), vec![agent]);
+        fixture.0.update();
+        assert_eq!(fixture.attentions(), vec![agent]);
     }
 
     #[test]
     fn bell_unknown_process_id_emits_nothing() {
-        let mut app = bell_test_app();
-        let _agent = spawn_agent_with_pid(&mut app, ProcessId::new());
-        app.world_mut()
+        let mut fixture = AttentionFixture::new();
+        let _agent = fixture.spawn_agent_with_pid(ProcessId::new());
+        fixture
+            .0
+            .world_mut()
             .resource_mut::<bevy::ecs::message::Messages<BellReceived>>()
             .write(BellReceived {
                 process_id: ProcessId::new(),
             });
-        app.update();
-        assert!(attentions(&app).is_empty());
-    }
-
-    pub(crate) fn done_test_app() -> App {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
-            .add_message::<AgentAttention>()
-            .add_message::<OsNotify>()
-            .add_systems(Update, (mark_done, clear_done));
-        app.world_mut().spawn(ActiveStack::default().local_bundle());
-        app
-    }
-
-    pub(crate) fn spawn_agent_in_stack(app: &mut App) -> (Entity, Entity) {
-        let stack = app.world_mut().spawn(Stack::default()).id();
-        let agent = app
-            .world_mut()
-            .spawn((Profile::registry("Agent", "test-agent"), ChildOf(stack)))
-            .id();
-        (agent, stack)
-    }
-
-    pub(crate) fn set_window(app: &mut App, focused: bool) {
-        app.world_mut().spawn((
-            Window {
-                focused,
-                visible: true,
-                ..default()
-            },
-            bevy::window::PrimaryWindow,
-        ));
-    }
-
-    pub(crate) fn os_notify_count(app: &App) -> usize {
-        let messages = app
-            .world()
-            .resource::<bevy::ecs::message::Messages<OsNotify>>();
-        let mut cursor = messages.get_cursor();
-        cursor.read(messages).count()
-    }
-
-    pub(crate) fn send_attention(app: &mut App, entity: Entity) {
-        app.world_mut()
-            .resource_mut::<bevy::ecs::message::Messages<AgentAttention>>()
-            .write(AgentAttention {
-                entity,
-                title: None,
-                body: None,
-            });
-    }
-
-    fn focus_stack(app: &mut App, stack: Entity) {
-        let world = app.world_mut();
-        let mut query = world.query::<&mut ActiveStack>();
-        query.single_mut(world).unwrap().stack = Some(stack);
+        fixture.0.update();
+        assert!(fixture.attentions().is_empty());
     }
 
     #[test]
     fn done_notifies_and_marks_when_backgrounded() {
-        let mut app = done_test_app();
-        let (agent, _stack) = spawn_agent_in_stack(&mut app);
-        set_window(&mut app, false);
-        send_attention(&mut app, agent);
-        app.update();
-        assert!(app.world().get::<AgentDoneUnseen>(agent).is_some());
-        assert_eq!(os_notify_count(&app), 1);
+        let mut fixture = AttentionFixture::new();
+        let (agent, _stack) = fixture.spawn_agent_in_stack();
+        fixture.set_window(false);
+        fixture.send_attention(agent);
+        fixture.0.update();
+        assert!(fixture.0.world().get::<AgentDoneUnseen>(agent).is_some());
+        assert_eq!(fixture.os_notify_count(), 1);
     }
 
     #[test]
     fn focused_child_agent_does_not_notify_or_mark() {
-        let mut app = done_test_app();
-        let (agent, stack) = spawn_agent_in_stack(&mut app);
-        set_window(&mut app, true);
-        focus_stack(&mut app, stack);
-        app.update();
-        send_attention(&mut app, agent);
-        app.update();
+        let mut fixture = AttentionFixture::new();
+        let (agent, stack) = fixture.spawn_agent_in_stack();
+        fixture.set_window(true);
+        fixture.focus_stack(stack);
+        fixture.0.update();
+        fixture.send_attention(agent);
+        fixture.0.update();
         assert!(
-            app.world().get::<AgentDoneUnseen>(agent).is_none(),
+            fixture.0.world().get::<AgentDoneUnseen>(agent).is_none(),
             "focused agent has no unseen marker"
         );
-        assert_eq!(os_notify_count(&app), 0, "no banner when foreground");
+        assert_eq!(fixture.os_notify_count(), 0, "no banner when foreground");
     }
 
     #[test]
     fn focused_stack_agent_does_not_notify_or_mark() {
-        let mut app = done_test_app();
-        let stack = app
+        let mut fixture = AttentionFixture::new();
+        let stack = fixture
+            .0
             .world_mut()
             .spawn((Stack::default(), Profile::registry("Agent", "test-agent")))
             .id();
-        set_window(&mut app, true);
-        focus_stack(&mut app, stack);
-        app.update();
-        send_attention(&mut app, stack);
-        app.update();
+        fixture.set_window(true);
+        fixture.focus_stack(stack);
+        fixture.0.update();
+        fixture.send_attention(stack);
+        fixture.0.update();
         assert!(
-            app.world().get::<AgentDoneUnseen>(stack).is_none(),
+            fixture.0.world().get::<AgentDoneUnseen>(stack).is_none(),
             "focused stack agent has no unseen marker"
         );
-        assert_eq!(os_notify_count(&app), 0, "no banner when foreground");
+        assert_eq!(fixture.os_notify_count(), 0, "no banner when foreground");
     }
 
     #[test]
     fn clear_removes_marker_from_focused_stack_agent() {
-        let mut app = done_test_app();
-        let stack = app.world_mut().spawn(Stack::default()).id();
-        set_window(&mut app, true);
-        app.world_mut().entity_mut(stack).insert(AgentDoneUnseen);
-        app.update();
-        assert!(app.world().get::<AgentDoneUnseen>(stack).is_some());
-        focus_stack(&mut app, stack);
-        app.update();
-        assert!(app.world().get::<AgentDoneUnseen>(stack).is_none());
+        let mut fixture = AttentionFixture::new();
+        let stack = fixture.0.world_mut().spawn(Stack::default()).id();
+        fixture.set_window(true);
+        fixture
+            .0
+            .world_mut()
+            .entity_mut(stack)
+            .insert(AgentDoneUnseen);
+        fixture.0.update();
+        assert!(fixture.0.world().get::<AgentDoneUnseen>(stack).is_some());
+        fixture.focus_stack(stack);
+        fixture.0.update();
+        assert!(fixture.0.world().get::<AgentDoneUnseen>(stack).is_none());
     }
 }

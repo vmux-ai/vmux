@@ -11,27 +11,30 @@ pub struct AcpPlugin;
 
 impl Plugin for AcpPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((super::acp::ConfigPlugin, super::runtime::RuntimePlugin));
-        app.add_plugins(super::command_bar::CommandBarPlugin);
-        app.add_plugins(super::approval::ApprovalPlugin);
-        app.add_plugins(super::attach::AttachPlugin);
-        app.add_plugins(super::attention::AttentionPlugin);
-        app.add_plugins(super::command::CommandPlugin);
-        super::continuation::add(app);
-        app.add_plugins(super::external::ExternalPlugin);
-        app.add_plugins(super::follow::FollowPlugin);
-        super::handoff::add(app);
-        app.add_plugins(super::ingress::IngressPlugin);
-        app.add_plugins(super::navigation::NavigationPlugin);
-        super::tidy::add(app);
-        super::toast::add(app);
-        app.register_stored::<AcpSessionId>()
-            .add_message::<AgentRequestInput>()
-            .add_message::<AgentToolCallRequest>()
-            .add_message::<SwapStackSession>()
-            .add_message::<BellReceived>()
-            .add_message::<AgentAttention>()
-            .add_message::<OsNotify>()
-            .init_resource::<bevy::ecs::message::Messages<PageOpenRequest>>();
+        app.add_plugins((
+            super::acp::ConfigPlugin,
+            super::runtime::RuntimePlugin,
+            super::command_bar::CommandBarPlugin,
+            super::approval::ApprovalPlugin,
+            super::attach::AttachPlugin,
+            super::attention::AttentionPlugin,
+            super::command::CommandPlugin,
+            super::continuation::ContinuationPlugin,
+            super::external::ExternalPlugin,
+            super::follow::FollowPlugin,
+            super::handoff::HandoffPlugin,
+            super::ingress::IngressPlugin,
+            super::navigation::NavigationPlugin,
+            super::tidy::TidyPlugin,
+            super::toast::ToastPlugin,
+        ))
+        .register_stored::<AcpSessionId>()
+        .add_message::<AgentRequestInput>()
+        .add_message::<AgentToolCallRequest>()
+        .add_message::<SwapStackSession>()
+        .add_message::<BellReceived>()
+        .add_message::<AgentAttention>()
+        .add_message::<OsNotify>()
+        .init_resource::<bevy::ecs::message::Messages<PageOpenRequest>>();
     }
 }

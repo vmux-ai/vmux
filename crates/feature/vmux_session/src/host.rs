@@ -17,7 +17,7 @@ pub use SessionClientPlugin as SessionPlugin;
 pub use catalog::{ScopeProjectionRequest, SessionCatalogView, SessionManagerView};
 pub use conversation::{Agents, Conversation, LiveTurn, Log, Reported, Submitted};
 #[cfg(host)]
-pub use handoff::ImportedConversation;
+pub use handoff::{HandoffEvent, HandoffMessages, ImportedConversation};
 #[cfg(host)]
 pub use media::ChatAttachmentHydrationRequest;
 pub use model::{ChatModeStateChanged, ChatModelStateChanged, Models};

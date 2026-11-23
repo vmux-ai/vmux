@@ -4,9 +4,13 @@ use vmux_feature::manifest::{FeatureManifest, FeatureManifestOwner};
 #[cfg(test)]
 use vmux_feature::manifest::{FeatureManifestSource, FeaturePlugin};
 
-pub(crate) fn add(app: &mut App) {
-    app.configure_sets(Startup, PolicyLoaded)
-        .add_systems(Startup, load.in_set(PolicyLoaded));
+pub(crate) struct PolicyPlugin;
+
+impl Plugin for PolicyPlugin {
+    fn build(&self, app: &mut App) {
+        app.configure_sets(Startup, PolicyLoaded)
+            .add_systems(Startup, load.in_set(PolicyLoaded));
+    }
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -79,8 +83,8 @@ mod tests {
             MinimalPlugins,
             FeaturePlugin::<crate::Feature>::default(),
             FeaturePlugin::<ForeignFeature>::default(),
+            PolicyPlugin,
         ));
-        add(&mut app);
         app.update();
 
         let entries = app

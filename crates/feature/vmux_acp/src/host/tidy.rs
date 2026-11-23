@@ -2,13 +2,13 @@
 use std::path::PathBuf;
 
 use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::FileUiStateWrite;
 use vmux_ecs::event::{FileTidyRequest, FileTidyState, TidyChoice};
 use vmux_ecs::notify::AgentAttention;
 use vmux_ecs::team::Agent;
-use vmux_ecs::{ProcessAnchor, ProcessId};
+use vmux_ecs::{FileUiStateWrite, LastActivatedAt, ProcessAnchor, ProcessId};
 use vmux_layout::CloseStackRequest;
 use vmux_layout::stack::ComputeFocusSet;
 #[cfg(test)]
@@ -16,25 +16,127 @@ use vmux_path::FileUrl;
 use vmux_session::RunState;
 use vmux_setting::{AppSettings, SettingsSaveRequest};
 
-use super::tidy_driver::{PendingTidy, TidyFiles};
+use super::follow_driver::AgentFileLayout;
+
+pub(super) struct TidyPlugin;
+
+impl Plugin for TidyPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<AgentAttention>()
+            .add_message::<CloseStackRequest>()
+            .add_message::<SettingsSaveRequest>()
+            .add_plugins(UiEventPlugin::<(FileTidyRequest,)>::default())
+            .add_observer(request)
+            .add_systems(
+                Update,
+                attention
+                    .in_set(TidySet)
+                    .after(ComputeFocusSet)
+                    .after(crate::host::attention::TurnEndedSet),
+            )
+            .add_systems(Update, idle.after(ComputeFocusSet));
+    }
+}
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TidySet;
 
-pub(super) fn add(app: &mut App) {
-    app.add_message::<AgentAttention>()
-        .add_message::<CloseStackRequest>()
-        .add_message::<SettingsSaveRequest>()
-        .add_plugins(UiEventPlugin::<(FileTidyRequest,)>::default())
-        .add_observer(request)
-        .add_systems(
-            Update,
-            attention
-                .in_set(TidySet)
-                .after(ComputeFocusSet)
-                .after(crate::host::attention::TurnEndedSet),
-        )
-        .add_systems(Update, idle.after(ComputeFocusSet));
+#[derive(Component)]
+struct PendingTidy {
+    closable: Vec<Entity>,
+}
+
+impl PendingTidy {
+    fn select_closable(stacks: &[(Entity, i64, bool)], max: usize) -> Vec<Entity> {
+        if stacks.len() <= max {
+            return Vec::new();
+        }
+        let active = stacks
+            .iter()
+            .max_by_key(|(_, timestamp, _)| *timestamp)
+            .map(|(stack, _, _)| *stack);
+        let mut closable = Vec::new();
+        for (stack, _, changed) in stacks {
+            if Some(*stack) != active && !*changed {
+                closable.push(*stack);
+            }
+        }
+        closable
+    }
+}
+
+#[derive(SystemParam)]
+struct TidyFiles<'w, 's> {
+    layout: AgentFileLayout<'w, 's>,
+    last_activated: Query<'w, 's, &'static LastActivatedAt>,
+    file_git: Query<'w, 's, &'static vmux_git::FileGit>,
+    diff_sources: Query<'w, 's, &'static vmux_git::GitDiffSource>,
+    pending: Query<'w, 's, (), With<PendingTidy>>,
+    close: MessageWriter<'w, CloseStackRequest>,
+    commands: Commands<'w, 's>,
+}
+
+impl TidyFiles<'_, '_> {
+    fn agent_pane(&self, process: ProcessId) -> Option<Entity> {
+        self.layout.agent_pane(process)
+    }
+
+    fn run(&mut self, agent_pane: Entity, settings: &AppSettings) {
+        let Some((follow_pane, stacks)) = self.layout.file_stacks_for(agent_pane) else {
+            return;
+        };
+        if self.pending.get(follow_pane).is_ok() {
+            return;
+        }
+        let mut rows = Vec::with_capacity(stacks.len());
+        for (stack, page, _) in &stacks {
+            let timestamp = self
+                .last_activated
+                .get(*stack)
+                .map(|timestamp| timestamp.0)
+                .unwrap_or(i64::MIN);
+            let changed = self
+                .diff_sources
+                .get(*page)
+                .is_ok_and(|source| source.dirty)
+                || self
+                    .file_git
+                    .get(*page)
+                    .ok()
+                    .and_then(vmux_git::FileGit::has_changes)
+                    .unwrap_or(true);
+            rows.push((*stack, timestamp, changed));
+        }
+        let closable = PendingTidy::select_closable(&rows, settings.agent.tidy_files_max);
+        if closable.is_empty() {
+            return;
+        }
+        if settings.agent.tidy_files_auto {
+            for stack in closable {
+                self.close.write(CloseStackRequest::tidying(stack));
+            }
+            return;
+        }
+        let count = closable.len() as u32;
+        let active_page = stacks
+            .iter()
+            .max_by_key(|(stack, _, _)| {
+                self.last_activated
+                    .get(*stack)
+                    .map(|timestamp| timestamp.0)
+                    .unwrap_or(i64::MIN)
+            })
+            .map(|(_, page, _)| *page);
+        if let Some(page) = active_page {
+            self.commands.trigger(FileUiStateWrite::from_event(
+                page,
+                &FileTidyState { count: Some(count) },
+            ));
+            self.commands
+                .entity(follow_pane)
+                .insert(PendingTidy { closable });
+        }
+    }
 }
 
 fn request(
@@ -157,7 +259,7 @@ mod tests {
             (ids[1], 20, false),
             (ids[2], 30, false),
         ];
-        assert!(crate::host::tidy_driver::TidyPolicy::closable(&stacks, 5).is_empty());
+        assert!(PendingTidy::select_closable(&stacks, 5).is_empty());
     }
 
     #[test]
@@ -172,7 +274,7 @@ mod tests {
             (ids[4], 50, false),
             (ids[5], 60, false),
         ];
-        let mut got = crate::host::tidy_driver::TidyPolicy::closable(&stacks, 5);
+        let mut got = PendingTidy::select_closable(&stacks, 5);
         got.sort();
         let mut want = vec![ids[0], ids[2], ids[4]];
         want.sort();
@@ -188,6 +290,6 @@ mod tests {
             .enumerate()
             .map(|(i, &e)| (e, i as i64, true))
             .collect();
-        assert!(crate::host::tidy_driver::TidyPolicy::closable(&stacks, 5).is_empty());
+        assert!(PendingTidy::select_closable(&stacks, 5).is_empty());
     }
 }

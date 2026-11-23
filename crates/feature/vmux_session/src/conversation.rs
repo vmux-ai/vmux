@@ -1756,58 +1756,86 @@ impl EventMaterializer<'_, '_> {
             }
         }
         if bindings.is_empty() {
-            let sequence = index
-                .latest_sequences
-                .get(&session)
-                .copied()
-                .unwrap_or_default()
-                .checked_add(1)
-                .expect("preflight bounded history sequence");
-            let id = EventId::new(format!(
-                "session:{}:event:{sequence}",
-                read.session.as_str()
-            ));
-            let is_user = matches!(message, Message::User { .. });
-            let _ = self.apply(
-                index,
-                SerializedEvent {
-                    event_id: id.clone(),
-                    session_id: read.session.clone(),
-                    actor_id: if is_user {
-                        MemberId::local(&read.session)
-                    } else {
-                        MemberId::agent(&read.session)
-                    },
-                    client_op_id: None,
-                    server_seq: sequence,
-                    created_at_ms: created_at,
-                    reply_to: if is_user {
-                        None
-                    } else {
-                        index.latest_users.get(&session).map(|(_, id)| id.clone())
-                    },
-                    message: message.clone(),
-                },
-                MessageDelivery::Committed,
-                MaterializationSource::Native,
-            );
-            let entity = index.events[&(session, id)];
-            for slot in MessageContent::slots(message) {
-                bindings.push((entity, slot, slot));
-            }
+            bindings = self.append_native_event(index, session, read, message, created_at);
         } else {
             self.resize(index, &mut bindings, message, true);
             self.patch(index, &mut bindings, message);
         }
+        self.bind_native_units(index, session, read, key, &previous, &bindings, *page_limit);
+        bindings
+    }
+
+    fn append_native_event(
+        &mut self,
+        index: &mut EventIndex,
+        session: Entity,
+        read: &Read,
+        message: &Message,
+        created_at: u64,
+    ) -> Vec<(Entity, Option<usize>, Option<usize>)> {
+        let sequence = index
+            .latest_sequences
+            .get(&session)
+            .copied()
+            .unwrap_or_default()
+            .checked_add(1)
+            .expect("preflight bounded history sequence");
+        let id = EventId::new(format!(
+            "session:{}:event:{sequence}",
+            read.session.as_str()
+        ));
+        let is_user = matches!(message, Message::User { .. });
+        let _ = self.apply(
+            index,
+            SerializedEvent {
+                event_id: id.clone(),
+                session_id: read.session.clone(),
+                actor_id: if is_user {
+                    MemberId::local(&read.session)
+                } else {
+                    MemberId::agent(&read.session)
+                },
+                client_op_id: None,
+                server_seq: sequence,
+                created_at_ms: created_at,
+                reply_to: if is_user {
+                    None
+                } else {
+                    index.latest_users.get(&session).map(|(_, id)| id.clone())
+                },
+                message: message.clone(),
+            },
+            MessageDelivery::Committed,
+            MaterializationSource::Native,
+        );
+        let entity = index.events[&(session, id)];
+        let mut bindings = Vec::new();
+        for slot in MessageContent::slots(message) {
+            bindings.push((entity, slot, slot));
+        }
+        bindings
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bind_native_units(
+        &mut self,
+        index: &mut EventIndex,
+        session: Entity,
+        read: &Read,
+        key: Option<(Entity, ProviderSessionKey, NativeAlias, String)>,
+        previous: &[(Entity, Option<usize>, Option<usize>)],
+        bindings: &[(Entity, Option<usize>, Option<usize>)],
+        page_limit: Option<usize>,
+    ) {
         let cursor = index.native_positions.entry(session).or_default();
-        for (entity, _, target) in &bindings {
+        for (entity, _, target) in bindings {
             if let Some(position) = index.unit_positions.get(&(*entity, *target))
-                && (*page_limit).is_none_or(|before| *position < before)
+                && page_limit.is_none_or(|before| *position < before)
             {
                 *cursor = (*cursor).max(position + 1);
             }
         }
-        for (entity, _, target) in &bindings {
+        for (entity, _, target) in bindings {
             if let Some(identity) = index.identities.get(entity)
                 && let Some(events) = index.snapshot_events.get_mut(&session)
             {
@@ -1826,7 +1854,7 @@ impl EventMaterializer<'_, '_> {
                 }
             }
             let mut entities = Vec::new();
-            for (entity, source_slot, target_slot) in &bindings {
+            for (entity, source_slot, target_slot) in bindings {
                 let mut alias = self.commands.spawn((
                     key.2,
                     Name::new(key.3.clone()),
@@ -1843,9 +1871,8 @@ impl EventMaterializer<'_, '_> {
                 entities.push(alias.id());
             }
             index.native_entities.insert(key.clone(), entities);
-            index.native_aliases.insert(key, bindings.clone());
+            index.native_aliases.insert(key, bindings.to_vec());
         }
-        bindings
     }
 
     fn splice_page(
@@ -2034,7 +2061,6 @@ impl EventMaterializer<'_, '_> {
         {
             return;
         }
-
         if bindings.iter().all(|(current, _, _)| *current == entity)
             && bindings.iter().any(|(_, _, target)| target.is_none())
         {
@@ -2055,67 +2081,88 @@ impl EventMaterializer<'_, '_> {
             .iter()
             .any(|(current, _, target)| *current != entity || target.is_none())
         {
-            let covered = bindings
-                .iter()
-                .filter_map(|(_, source, _)| *source)
-                .max()
-                .map_or(0, |last| last + 1);
-            if covered >= incoming.len() {
-                return;
-            }
-            let Some(session) = index.event_owners.get(&entity).copied() else {
-                return;
-            };
-            let Some((session_id, _)) = index
-                .sessions
-                .iter()
-                .find(|(_, current)| **current == session)
-            else {
-                return;
-            };
-            let session_id = session_id.clone();
-            let Some(sequence) = index
-                .latest_sequences
-                .get(&session)
-                .copied()
-                .unwrap_or_default()
-                .checked_add(1)
-            else {
-                return;
-            };
-            let event_id =
-                EventId::new(format!("session:{}:event:{sequence}", session_id.as_str()));
-            let mut appended = Vec::with_capacity(incoming.len() - covered);
-            for block in &incoming[covered..] {
-                appended.push(block.clone());
-            }
-            let event = SerializedEvent {
-                event_id,
-                session_id: session_id.clone(),
-                actor_id: MemberId::agent(&session_id),
-                client_op_id: None,
-                server_seq: sequence,
-                created_at_ms: index
-                    .timestamps
-                    .get(&entity)
-                    .map_or(0, |time| time.0.max(0) as u64),
-                reply_to: index.latest_users.get(&session).map(|(_, id)| id.clone()),
-                message: Message::Assistant { blocks: appended },
-            };
-            let source = if native {
-                MaterializationSource::Native
-            } else {
-                MaterializationSource::Snapshot
-            };
-            let Some(new_entity) = self.apply(index, event, MessageDelivery::Committed, source)
-            else {
-                return;
-            };
-            for source_slot in covered..incoming.len() {
-                bindings.push((new_entity, Some(source_slot), Some(source_slot - covered)));
-            }
+            self.append_split_blocks(index, entity, bindings, incoming, native);
             return;
         }
+        self.replace_assistant_slice(index, entity, bindings, message, incoming, native);
+    }
+
+    fn append_split_blocks(
+        &mut self,
+        index: &mut EventIndex,
+        entity: Entity,
+        bindings: &mut Vec<(Entity, Option<usize>, Option<usize>)>,
+        incoming: &[AssistantBlock],
+        native: bool,
+    ) {
+        let covered = bindings
+            .iter()
+            .filter_map(|(_, source, _)| *source)
+            .max()
+            .map_or(0, |last| last + 1);
+        if covered >= incoming.len() {
+            return;
+        }
+        let Some(session) = index.event_owners.get(&entity).copied() else {
+            return;
+        };
+        let Some((session_id, _)) = index
+            .sessions
+            .iter()
+            .find(|(_, current)| **current == session)
+        else {
+            return;
+        };
+        let session_id = session_id.clone();
+        let Some(sequence) = index
+            .latest_sequences
+            .get(&session)
+            .copied()
+            .unwrap_or_default()
+            .checked_add(1)
+        else {
+            return;
+        };
+        let event_id = EventId::new(format!("session:{}:event:{sequence}", session_id.as_str()));
+        let mut appended = Vec::with_capacity(incoming.len() - covered);
+        for block in &incoming[covered..] {
+            appended.push(block.clone());
+        }
+        let event = SerializedEvent {
+            event_id,
+            session_id: session_id.clone(),
+            actor_id: MemberId::agent(&session_id),
+            client_op_id: None,
+            server_seq: sequence,
+            created_at_ms: index
+                .timestamps
+                .get(&entity)
+                .map_or(0, |time| time.0.max(0) as u64),
+            reply_to: index.latest_users.get(&session).map(|(_, id)| id.clone()),
+            message: Message::Assistant { blocks: appended },
+        };
+        let source = if native {
+            MaterializationSource::Native
+        } else {
+            MaterializationSource::Snapshot
+        };
+        let Some(new_entity) = self.apply(index, event, MessageDelivery::Committed, source) else {
+            return;
+        };
+        for source_slot in covered..incoming.len() {
+            bindings.push((new_entity, Some(source_slot), Some(source_slot - covered)));
+        }
+    }
+
+    fn replace_assistant_slice(
+        &mut self,
+        index: &mut EventIndex,
+        entity: Entity,
+        bindings: &mut Vec<(Entity, Option<usize>, Option<usize>)>,
+        message: &Message,
+        incoming: &[AssistantBlock],
+        native: bool,
+    ) {
         let Ok(content) = self.existing.get(entity) else {
             return;
         };
@@ -2135,63 +2182,16 @@ impl EventMaterializer<'_, '_> {
         if end > current.len() || end - start != targets.len() {
             return;
         }
-        if incoming.len() == targets.len() {
-            let mut reordered = false;
-            for (_, source, target) in bindings.iter() {
-                if content.same_unit(*target, message, *source) {
-                    continue;
-                }
-                for (_, _, other_target) in bindings.iter() {
-                    if other_target != target && content.same_unit(*other_target, message, *source)
-                    {
-                        reordered = true;
-                        break;
-                    }
-                }
-                if reordered {
-                    break;
-                }
-            }
-            if !reordered {
-                return;
-            }
+        if incoming.len() == targets.len() && !Self::slice_reordered(content, bindings, message) {
+            return;
         }
         if !native && index.native_bound.contains(&entity) && incoming.len() < targets.len() {
             return;
         }
-        let old = content;
         let mut replaced = current.clone();
         replaced.splice(start..end, incoming.iter().cloned());
         let next = Message::Assistant { blocks: replaced };
-        let mut mapping = Vec::with_capacity(current.len());
-        let mut consumed = HashSet::new();
-        for old_slot in 0..current.len() {
-            if old_slot < start {
-                mapping.push(Some(old_slot));
-                continue;
-            }
-            if old_slot >= end {
-                mapping.push(Some(old_slot - (end - start) + incoming.len()));
-                continue;
-            }
-            let mut found = None;
-            for new_slot in start..start + incoming.len() {
-                if consumed.contains(&new_slot) {
-                    continue;
-                }
-                if old.same_unit(Some(old_slot), &next, Some(new_slot)) {
-                    found = Some(new_slot);
-                    break;
-                }
-            }
-            if found.is_none() && old_slot - start < incoming.len() {
-                found = Some(start + old_slot - start);
-            }
-            if let Some(slot) = found {
-                consumed.insert(slot);
-            }
-            mapping.push(found);
-        }
+        let mapping = Self::slot_mapping(content, &next, current.len(), start, end, incoming.len());
         if let Ok(mut content) = self.existing.get_mut(entity)
             && content.0 != next
         {
@@ -2202,6 +2202,63 @@ impl EventMaterializer<'_, '_> {
         for slot in 0..incoming.len() {
             bindings.push((entity, Some(slot), Some(start + slot)));
         }
+    }
+
+    fn slice_reordered(
+        content: &MessageContent,
+        bindings: &[(Entity, Option<usize>, Option<usize>)],
+        message: &Message,
+    ) -> bool {
+        for (_, source, target) in bindings {
+            if content.same_unit(*target, message, *source) {
+                continue;
+            }
+            for (_, _, other_target) in bindings {
+                if other_target != target && content.same_unit(*other_target, message, *source) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn slot_mapping(
+        old: &MessageContent,
+        next: &Message,
+        old_len: usize,
+        start: usize,
+        end: usize,
+        incoming_len: usize,
+    ) -> Vec<Option<usize>> {
+        let mut mapping = Vec::with_capacity(old_len);
+        let mut consumed = HashSet::new();
+        for old_slot in 0..old_len {
+            if old_slot < start {
+                mapping.push(Some(old_slot));
+                continue;
+            }
+            if old_slot >= end {
+                mapping.push(Some(old_slot - (end - start) + incoming_len));
+                continue;
+            }
+            let mut found = None;
+            for new_slot in start..start + incoming_len {
+                if !consumed.contains(&new_slot)
+                    && old.same_unit(Some(old_slot), next, Some(new_slot))
+                {
+                    found = Some(new_slot);
+                    break;
+                }
+            }
+            if found.is_none() && old_slot - start < incoming_len {
+                found = Some(start + old_slot - start);
+            }
+            if let Some(slot) = found {
+                consumed.insert(slot);
+            }
+            mapping.push(found);
+        }
+        mapping
     }
 
     fn trim(
@@ -2547,45 +2604,7 @@ impl EventMaterializer<'_, '_> {
     ) -> Option<Entity> {
         let session = index.session(&event.session_id)?;
         if source == MaterializationSource::Snapshot {
-            let current_source = index.sources.get(&session);
-            let incompatible = index
-                .events
-                .get(&(session, event.event_id.clone()))
-                .is_some_and(|entity| {
-                    index
-                        .origins
-                        .get(entity)
-                        .is_some_and(|origin| Some(origin) != current_source)
-                });
-            if incompatible {
-                let mut sequence = index
-                    .latest_sequences
-                    .get(&session)
-                    .copied()
-                    .unwrap_or_default();
-                loop {
-                    sequence = sequence.checked_add(1)?;
-                    let id = EventId::new(format!(
-                        "session:{}:event:{sequence}",
-                        event.session_id.as_str()
-                    ));
-                    if index.events.contains_key(&(session, id.clone())) {
-                        continue;
-                    }
-                    event.event_id = id;
-                    event.server_seq = sequence;
-                    break;
-                }
-            }
-            if let Some(reply) = &event.reply_to {
-                let key = (session, current_source.cloned(), reply.clone());
-                if let Some(bindings) = index.replay_aliases.get(&key)
-                    && let Some((entity, _, _)) = bindings.first()
-                    && let Some(identity) = index.identities.get(entity)
-                {
-                    event.reply_to = Some(identity.event_id.clone());
-                }
-            }
+            Self::normalize_snapshot_event(index, session, &mut event)?;
         }
         let existing = index
             .events
@@ -2598,33 +2617,73 @@ impl EventMaterializer<'_, '_> {
                     .and_then(|id| index.operations.get(&(session, id.clone())).copied())
             });
         let identity = EventIdentity::from_event(&event);
-        let mut timestamp = CreatedAt(i64::try_from(event.created_at_ms).unwrap_or(i64::MAX));
-        let entity = if let Some(entity) = existing {
-            if let Some((event_id, client_op_id)) = index.entity_keys.remove(&entity) {
-                index.events.remove(&(session, event_id));
-                if let Some(client_op_id) = client_op_id {
-                    index.operations.remove(&(session, client_op_id));
+        let (entity, timestamp) = self.upsert_event_entity(
+            index, session, existing, &event, &identity, delivery, source,
+        );
+        self.record_applied_event(index, session, entity, event, identity, timestamp, source);
+        Some(entity)
+    }
+
+    fn normalize_snapshot_event(
+        index: &EventIndex,
+        session: Entity,
+        event: &mut SerializedEvent,
+    ) -> Option<()> {
+        let current_source = index.sources.get(&session);
+        let incompatible = index
+            .events
+            .get(&(session, event.event_id.clone()))
+            .is_some_and(|entity| {
+                index
+                    .origins
+                    .get(entity)
+                    .is_some_and(|origin| Some(origin) != current_source)
+            });
+        if incompatible {
+            let mut sequence = index
+                .latest_sequences
+                .get(&session)
+                .copied()
+                .unwrap_or_default();
+            loop {
+                sequence = sequence.checked_add(1)?;
+                let id = EventId::new(format!(
+                    "session:{}:event:{sequence}",
+                    event.session_id.as_str()
+                ));
+                if index.events.contains_key(&(session, id.clone())) {
+                    continue;
                 }
+                event.event_id = id;
+                event.server_seq = sequence;
+                break;
             }
-            timestamp = if source == MaterializationSource::Snapshot {
-                index.timestamps.get(&entity).copied().unwrap_or(timestamp)
-            } else {
-                timestamp
-            };
-            let mut entity_commands = self.commands.entity(entity);
-            entity_commands.insert((
-                identity.clone(),
-                timestamp,
-                MessageContent(event.message.clone()),
-                delivery,
-            ));
-            if source == MaterializationSource::Snapshot && !index.native_bound.contains(&entity) {
-                entity_commands.insert(SnapshotEvent);
-            } else {
-                entity_commands.remove::<SnapshotEvent>();
+        }
+        if let Some(reply) = &event.reply_to {
+            let key = (session, current_source.cloned(), reply.clone());
+            if let Some(bindings) = index.replay_aliases.get(&key)
+                && let Some((entity, _, _)) = bindings.first()
+                && let Some(identity) = index.identities.get(entity)
+            {
+                event.reply_to = Some(identity.event_id.clone());
             }
-            entity
-        } else {
+        }
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn upsert_event_entity(
+        &mut self,
+        index: &mut EventIndex,
+        session: Entity,
+        existing: Option<Entity>,
+        event: &SerializedEvent,
+        identity: &EventIdentity,
+        delivery: MessageDelivery,
+        source: MaterializationSource,
+    ) -> (Entity, CreatedAt) {
+        let mut timestamp = CreatedAt(i64::try_from(event.created_at_ms).unwrap_or(i64::MAX));
+        let Some(entity) = existing else {
             let mut entity_commands = self.commands.spawn((
                 ConversationEvent,
                 MaterializedEvent,
@@ -2637,8 +2696,43 @@ impl EventMaterializer<'_, '_> {
             if source == MaterializationSource::Snapshot {
                 entity_commands.insert(SnapshotEvent);
             }
-            entity_commands.id()
+            return (entity_commands.id(), timestamp);
         };
+        if let Some((event_id, client_op_id)) = index.entity_keys.remove(&entity) {
+            index.events.remove(&(session, event_id));
+            if let Some(client_op_id) = client_op_id {
+                index.operations.remove(&(session, client_op_id));
+            }
+        }
+        if source == MaterializationSource::Snapshot {
+            timestamp = index.timestamps.get(&entity).copied().unwrap_or(timestamp);
+        }
+        let mut entity_commands = self.commands.entity(entity);
+        entity_commands.insert((
+            identity.clone(),
+            timestamp,
+            MessageContent(event.message.clone()),
+            delivery,
+        ));
+        if source == MaterializationSource::Snapshot && !index.native_bound.contains(&entity) {
+            entity_commands.insert(SnapshotEvent);
+        } else {
+            entity_commands.remove::<SnapshotEvent>();
+        }
+        (entity, timestamp)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_applied_event(
+        &mut self,
+        index: &mut EventIndex,
+        session: Entity,
+        entity: Entity,
+        event: SerializedEvent,
+        identity: EventIdentity,
+        timestamp: CreatedAt,
+        source: MaterializationSource,
+    ) {
         index
             .events
             .insert((session, event.event_id.clone()), entity);
@@ -2654,7 +2748,7 @@ impl EventMaterializer<'_, '_> {
             index.operations.insert((session, client_op_id), entity);
         }
         index.timestamps.insert(entity, timestamp);
-        index.identities.insert(entity, identity.clone());
+        index.identities.insert(entity, identity);
         index.event_owners.insert(entity, session);
         if source == MaterializationSource::Operation {
             self.commands.entity(entity).insert(OperationEvent);
@@ -2686,7 +2780,6 @@ impl EventMaterializer<'_, '_> {
         index
             .entity_keys
             .insert(entity, (event.event_id, event.client_op_id));
-        Some(entity)
     }
 }
 
