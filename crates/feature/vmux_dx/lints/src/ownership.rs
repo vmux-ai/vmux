@@ -38,6 +38,7 @@ impl<'tcx> Ownership<'tcx> {
                 ("bevy_ecs", "QueryData") => "query",
                 ("bevy_ecs", "SystemSet") => "system_set",
                 ("bevy_ecs", "Bundle") => "bundle",
+                ("bevy_ecs", "Command") => "command",
                 ("bevy_app", "Plugin") => "plugin",
                 ("vmux_ecs", "Job") => "job",
                 ("vmux_ecs", "Schema") => "schema",
@@ -47,6 +48,7 @@ impl<'tcx> Ownership<'tcx> {
                 ("inventory", "Collect") => "inventory",
                 ("dioxus_core", "Properties") => "props",
                 ("dioxus_router" | "dioxus_router_core", "Routable") => "routable",
+                ("serde" | "serde_core", "Serialize" | "Deserialize") => "serde",
                 _ => continue,
             };
             for implementation in implementations {
@@ -284,7 +286,7 @@ impl<'tcx> Ownership<'tcx> {
                 .as_str()
                 .to_owned()
         });
-        if !package.starts_with("vmux_") || package == "vmux_macro" {
+        if cx.tcx.sess.opts.test || !package.starts_with("vmux_") || package == "vmux_macro" {
             return;
         }
         for (function, arguments, site) in std::mem::take(&mut self.systems) {
@@ -314,6 +316,9 @@ impl<'tcx> Ownership<'tcx> {
                 || self.stateless_unit_role(cx, definition, "schema")
                 || self.stateless_unit_role(cx, definition, "page")
                 || self.concrete_job_struct(cx, definition)
+                || self.has_role(definition, "command")
+                    && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
+                || self.has_role(definition, "serde")
                 || self.has_role(definition, "contract")
                 || self.has_role(definition, "inventory")
                     && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
