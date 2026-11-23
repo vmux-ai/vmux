@@ -88,18 +88,30 @@ pub type BytesListener = Box<dyn FnMut(&[u8]) -> bool>;
 
 pub type TextOffsetAnswer = std::pin::Pin<Box<dyn std::future::Future<Output = Option<u32>>>>;
 
-pub fn install_host(host: Rc<dyn PageHost>) {
-    HOST.with(|slot| *slot.borrow_mut() = Some(host));
-}
-
 pub struct HostScope(Option<Rc<dyn PageHost>>);
 
 #[derive(Clone)]
 pub struct HostBinding(pub Rc<dyn PageHost>);
 
 impl HostBinding {
+    fn with_slot<R>(f: impl FnOnce(&mut Option<Rc<dyn PageHost>>) -> R) -> R {
+        thread_local! {
+            static HOST: RefCell<Option<Rc<dyn PageHost>>> = const { RefCell::new(None) };
+        }
+        HOST.with(|slot| f(&mut slot.borrow_mut()))
+    }
+
     pub fn navigation_revision(&self) -> u64 {
         self.0.navigation_revision()
+    }
+
+    pub fn current() -> Option<Self> {
+        if dioxus::core::Runtime::try_current().is_some()
+            && let Some(binding) = dioxus::prelude::try_consume_context::<Self>()
+        {
+            return Some(binding);
+        }
+        HostScope::binding()
     }
 }
 
@@ -109,30 +121,19 @@ impl PartialEq for HostBinding {
     }
 }
 
-impl HostBinding {
-    pub fn current() -> Option<Self> {
-        if dioxus::core::Runtime::try_current().is_some()
-            && let Some(binding) = dioxus::prelude::try_consume_context::<Self>()
-        {
-            return Some(binding);
-        }
-        HOST.with(|slot| slot.borrow().clone().map(Self))
-    }
-}
-
 impl HostScope {
     pub fn binding() -> Option<HostBinding> {
-        HOST.with(|slot| slot.borrow().clone().map(HostBinding))
+        HostBinding::with_slot(|slot| slot.clone().map(HostBinding))
     }
 
     pub fn enter(host: Rc<dyn PageHost>) -> Self {
-        Self(HOST.with(|slot| slot.borrow_mut().replace(host)))
+        Self(HostBinding::with_slot(|slot| slot.replace(host)))
     }
 }
 
 impl Drop for HostScope {
     fn drop(&mut self) {
-        HOST.with(|slot| *slot.borrow_mut() = self.0.take());
+        HostBinding::with_slot(|slot| *slot = self.0.take());
     }
 }
 
@@ -248,6 +249,16 @@ impl Host {
         }
     }
 
+    pub(crate) fn apply_locale(locale: &crate::i18n::Locale) {
+        locale.make_current();
+        let direction = match locale.direction() {
+            unic_langid::CharacterDirection::RTL => "rtl",
+            unic_langid::CharacterDirection::LTR => "ltr",
+            unic_langid::CharacterDirection::TTB => "auto",
+        };
+        Self::set_root_language(locale.as_str(), direction);
+    }
+
     fn with_installed<R>(f: impl FnOnce(&dyn PageHost) -> R) -> Result<R, EventListenerError> {
         if let Some(binding) = HostBinding::current() {
             return Ok(f(binding.0.as_ref()));
@@ -276,10 +287,6 @@ impl<'a> HostPayload<'a> {
     {
         rkyv::from_bytes::<T, rkyv::rancor::Error>(self.0).ok()
     }
-}
-
-thread_local! {
-    static HOST: RefCell<Option<Rc<dyn PageHost>>> = const { RefCell::new(None) };
 }
 
 pub mod bin_ipc_envelope;
@@ -320,7 +327,7 @@ mod tests {
 
     #[test]
     fn a_payload_reaches_the_listener_registered_for_its_id() {
-        install_host(Rc::new(LoopbackHost::default()));
+        let _scope = HostScope::enter(Rc::new(LoopbackHost::default()));
 
         let seen = Rc::new(RefCell::new(Vec::<Ping>::new()));
         let sink = seen.clone();
@@ -345,7 +352,7 @@ mod tests {
     #[test]
     fn an_inactive_listener_is_removed_after_delivery() {
         let host = Rc::new(LoopbackHost::default());
-        install_host(host.clone());
+        let _scope = HostScope::enter(host.clone());
         Host::listen("once", Box::new(|_| false)).unwrap();
 
         Host::emit("once", &[]).unwrap();
@@ -357,7 +364,7 @@ mod tests {
     #[test]
     fn mobile_state_emit_reaches_the_shared_state_listener() {
         let host = Rc::new(LoopbackHost::default());
-        install_host(host.clone());
+        let _scope = HostScope::enter(host.clone());
         let seen = Rc::new(RefCell::new(Vec::new()));
         let sink = seen.clone();
         Host::listen_state::<SnapshotState, _>(move |frame| {

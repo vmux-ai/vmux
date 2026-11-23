@@ -15,7 +15,6 @@ const PROMPT_POPUP_HEADING: &str = "mr-auto truncate px-3 text-[10px] font-mediu
 pub const PROMPT_MENU_ROW: &str =
     "flex w-full min-h-9 items-center gap-2 px-3 py-1.5 text-left text-sm";
 pub const PROMPT_MENU_ROW_IDLE: &str = "transition hover:bg-foreground/[0.06]";
-pub const PROMPT_MENU_ROW_SELECTED: &str = "bg-foreground/[0.08]";
 pub const PROMPT_MENU_INDENT: &str = "pl-8";
 
 pub struct PromptMenuRow;

@@ -58,13 +58,21 @@ pub fn DirectoryNavigator(
         .get(selected)
         .map(|entry| entry.path.clone())
         .unwrap_or_default();
+    let mut selected_row = use_signal(|| selected);
+    if *selected_row.peek() != selected {
+        selected_row.set(selected);
+    }
+    crate::hooks::use_selector(
+        move || *selected_row.read(),
+        |index| format!("dir-row-{index}"),
+    );
     use_effect(move || {
         ScrollIntoView::nearest(&format!("dir-row-{selected}"));
     });
 
     rsx! {
         div {
-            id: DIRECTORY_NAVIGATOR_ID,
+            id: DirectoryKeys::ELEMENT_ID,
             tabindex: "-1",
             autofocus: true,
             class: "grid min-h-0 flex-1 grid-cols-[minmax(8rem,14rem)_minmax(10rem,18rem)_minmax(12rem,1fr)] gap-4 px-3 py-3 font-sans outline-none",
@@ -151,9 +159,6 @@ pub fn DirectoryNavigator(
     }
 }
 
-pub const DIRECTORY_PANE_CLASS: &str = "min-h-0 overflow-y-auto py-1";
-const DIRECTORY_NAVIGATOR_ID: &str = "directory-navigator";
-
 #[component]
 fn DirectoryColumn(
     identity: String,
@@ -178,8 +183,10 @@ pub struct DirectoryKeys {
 }
 
 impl DirectoryKeys {
+    const ELEMENT_ID: &'static str = "directory-navigator";
+
     pub fn focus() {
-        FocusClaim::new(DIRECTORY_NAVIGATOR_ID).request();
+        FocusClaim::new(Self::ELEMENT_ID).request();
     }
 
     pub fn offer(self, event: &Event<KeyboardData>) -> bool {
@@ -238,9 +245,6 @@ pub fn DirectoryEntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Eleme
     }
 }
 
-const DOUBLE_CLICK_MS: i64 = 500;
-const DOUBLE_CLICK_SLOP_PX: f64 = 6.0;
-
 #[derive(Clone, PartialEq)]
 struct PendingOpen {
     entry: FileDirEntry,
@@ -249,10 +253,13 @@ struct PendingOpen {
 }
 
 impl PendingOpen {
+    const DOUBLE_CLICK_MS: i64 = 500;
+    const DOUBLE_CLICK_SLOP_PX: f64 = 6.0;
+
     fn claims(&self, at: ClientPoint) -> bool {
-        Platform::now() - self.at < DOUBLE_CLICK_MS
-            && (at.x - self.origin.0).abs() <= DOUBLE_CLICK_SLOP_PX
-            && (at.y - self.origin.1).abs() <= DOUBLE_CLICK_SLOP_PX
+        Platform::now() - self.at < Self::DOUBLE_CLICK_MS
+            && (at.x - self.origin.0).abs() <= Self::DOUBLE_CLICK_SLOP_PX
+            && (at.y - self.origin.1).abs() <= Self::DOUBLE_CLICK_SLOP_PX
     }
 }
 

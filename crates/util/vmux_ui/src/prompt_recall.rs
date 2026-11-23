@@ -8,9 +8,7 @@ impl PromptHistoryDirection {
     pub fn from_menu(next: Option<bool>) -> Option<Self> {
         Some(if next? { Self::Newer } else { Self::Older })
     }
-}
 
-impl PromptHistoryDirection {
     pub fn from_key(
         key: &str,
         ctrl: bool,

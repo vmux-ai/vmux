@@ -5,8 +5,6 @@ use dioxus::prelude::*;
 
 use crate::platform::Platform;
 
-const OPTIMISTIC_TIMEOUT_MS: u32 = 10_000;
-
 #[derive(Clone)]
 struct Pending<V> {
     baseline: V,
@@ -82,7 +80,7 @@ where
             return;
         }
         spawn(async move {
-            Platform::sleep(OPTIMISTIC_TIMEOUT_MS).await;
+            Platform::sleep(10_000).await;
             self.pending
                 .write()
                 .retain(|key, pending| !keys.contains(key) || pending.generation != generation);

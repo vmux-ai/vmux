@@ -14,10 +14,9 @@ pub struct UiStateSnapshots(Rc<RefCell<SnapshotValues>>);
 #[derive(Default)]
 struct SnapshotValues {
     values: HashMap<TypeId, Box<dyn Any>>,
-    readers: HashMap<TypeId, SnapshotReader>,
+    #[allow(clippy::type_complexity)]
+    readers: HashMap<TypeId, Box<dyn Fn() -> Option<Box<dyn Any>>>>,
 }
-
-type SnapshotReader = Box<dyn Fn() -> Option<Box<dyn Any>>>;
 
 impl UiStateSnapshots {
     pub fn capture(&self) {
@@ -64,10 +63,6 @@ impl UiStateSnapshots {
     }
 }
 
-struct UiStateListener {
-    error: Signal<Option<String>>,
-}
-
 pub struct UiStateBinding<T> {
     pub state: Signal<T>,
     pub error: Signal<Option<String>>,
@@ -87,57 +82,6 @@ where
     {
         use_memo(move || select(&self.state.read()))
     }
-}
-
-fn use_ui_state_listener<T, F>(on_state: F) -> UiStateListener
-where
-    T: UiState + rkyv::Archive + 'static,
-    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-    UiStateFrame<T, T::Update>: rkyv::Archive,
-    <UiStateFrame<T, T::Update> as rkyv::Archive>::Archived: rkyv::Deserialize<
-            UiStateFrame<T, T::Update>,
-            rkyv::api::high::HighDeserializer<rkyv::rancor::Error>,
-        > + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-    F: FnMut(UiStateFrame<T, T::Update>) + 'static,
-{
-    let listener = use_hook(|| GuardedListener::new(on_state));
-    let listener_guard = listener.guard();
-    use_drop(move || listener_guard.deactivate());
-    let mut error = use_signal(|| None::<String>);
-    let mut listening = use_signal(|| false);
-    let retry_tick = use_signal(|| 0u32);
-
-    use_effect(move || {
-        let current_retry = retry_tick();
-        if listening() {
-            return;
-        }
-        let listener = listener.clone();
-        let Some(runtime) = Runtime::try_current() else {
-            error.set(Some("use_ui_state: no Dioxus runtime".into()));
-            return;
-        };
-        let scope = current_scope_id();
-        match Host::listen_state::<T, _>(move |state| {
-            let listener = listener.clone();
-            runtime.in_scope(scope, || listener.call(state))
-        }) {
-            Ok(()) => {
-                listening.set(true);
-                error.set(None);
-                if let Err(cause) = Host::announce_ready() {
-                    error.set(Some(format!("page ready emit failed: {cause}")));
-                }
-            }
-            Err(cause) => {
-                error.set(Some(format!("host listen failed: {cause}")));
-                Host::schedule_listener_retry(retry_tick, current_retry);
-            }
-        }
-    });
-
-    UiStateListener { error }
 }
 
 impl<T> Clone for UiStateBinding<T> {
@@ -174,16 +118,48 @@ where
             snapshots.track(state);
         }
     });
-    let listener = use_ui_state_listener::<T, _>(move |frame| match frame {
-        UiStateFrame::Snapshot(snapshot) => state.set(snapshot),
-        UiStateFrame::Updates(updates) => {
-            state.write().apply_updates(updates);
+    let listener = use_hook(|| {
+        GuardedListener::new(move |frame: UiStateFrame<T, T::Update>| match frame {
+            UiStateFrame::Snapshot(snapshot) => state.set(snapshot),
+            UiStateFrame::Updates(updates) => {
+                state.write().apply_updates(updates);
+            }
+        })
+    });
+    let listener_guard = listener.guard();
+    use_drop(move || listener_guard.deactivate());
+    let mut error = use_signal(|| None::<String>);
+    let mut listening = use_signal(|| false);
+    let retry_tick = use_signal(|| 0u32);
+    use_effect(move || {
+        let current_retry = retry_tick();
+        if listening() {
+            return;
+        }
+        let listener = listener.clone();
+        let Some(runtime) = Runtime::try_current() else {
+            error.set(Some("use_ui_state: no Dioxus runtime".into()));
+            return;
+        };
+        let scope = current_scope_id();
+        match Host::listen_state::<T, _>(move |frame| {
+            let listener = listener.clone();
+            runtime.in_scope(scope, || listener.call(frame))
+        }) {
+            Ok(()) => {
+                listening.set(true);
+                error.set(None);
+                if let Err(cause) = Host::announce_ready() {
+                    error.set(Some(format!("page ready emit failed: {cause}")));
+                }
+            }
+            Err(cause) => {
+                error.set(Some(format!("host listen failed: {cause}")));
+                Host::schedule_listener_retry(retry_tick, current_retry);
+            }
         }
     });
-    let binding = UiStateBinding {
-        state,
-        error: listener.error,
-    };
+    let binding = UiStateBinding { state, error };
     use_context_provider(|| binding);
     binding
 }

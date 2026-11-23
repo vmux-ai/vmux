@@ -1,7 +1,6 @@
 use crate::motion::Motion;
 use dioxus::core::Task;
 use dioxus::prelude::*;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone, Copy)]
 pub enum Surface {
@@ -14,24 +13,7 @@ impl Surface {
     pub const ENTER: &str = "animate-[vmux-popup-in_var(--vmux-motion-ms)_ease-out_forwards] motion-reduce:animate-none";
     pub const SELECT: &str = "data-[state=closed]:pointer-events-none data-[state=closed]:opacity-0 data-[state=open]:pointer-events-auto data-[state=open]:opacity-100 data-[state=open]:animate-[vmux-popup-in_var(--vmux-motion-ms)_ease-out_forwards] motion-reduce:animate-none";
 
-    pub fn kind(self) -> &'static str {
-        match self {
-            Self::Context => "context",
-            Self::Dropdown => "dropdown",
-            Self::Select => "select",
-        }
-    }
-
-    pub fn style() -> String {
-        format!("--vmux-motion-ms:{}ms;", Motion::CONTENT_MS)
-    }
-
-    pub fn runtime() -> String {
-        RUNTIME.replace("__VMUX_POPUP_EXIT_MS__", &Motion::FEEDBACK_MS.to_string())
-    }
-}
-
-const RUNTIME: &str = r#"
+    const RUNTIME: &str = r#"
 globalThis.__vmuxPopupPresentation ??= (() => {
   class Presentation {
     known = new WeakSet();
@@ -236,10 +218,53 @@ globalThis.__vmuxPopupPresentation ??= (() => {
 globalThis.__vmuxPopupPresentation.apply([]);
 "#;
 
+    pub fn kind(self) -> &'static str {
+        match self {
+            Self::Context => "context",
+            Self::Dropdown => "dropdown",
+            Self::Select => "select",
+        }
+    }
+
+    pub fn style() -> String {
+        format!("--vmux-motion-ms:{}ms;", Motion::CONTENT_MS)
+    }
+
+    pub fn runtime() -> String {
+        Self::RUNTIME.replace("__VMUX_POPUP_EXIT_MS__", &Motion::FEEDBACK_MS.to_string())
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Dismissal(u64);
 
 impl Dismissal {
+    const RUNTIME: &str = r#"
+globalThis.__vmuxPopupDismissal ??= (() => {
+  class Dismissal {
+    listeners = new Map();
+    subscribe(owner, dismiss) { this.listeners.set(owner, dismiss); }
+    remove(owner) { this.listeners.delete(owner); }
+    dismiss() {
+      const listeners = [...this.listeners.entries()];
+      for (const [owner, dismiss] of listeners) {
+        try { dismiss(); } catch (_) { this.listeners.delete(owner); }
+      }
+    }
+  }
+  const dismissal = new Dismissal();
+  window.addEventListener('blur', event => {
+    if (event.target === window) dismissal.dismiss();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') dismissal.dismiss();
+  });
+  window.addEventListener('pagehide', () => dismissal.dismiss());
+  window.addEventListener('vmux-deactivated', () => dismissal.dismiss());
+  return dismissal;
+})();
+"#;
+
     pub fn use_open(
         open: ReadSignal<Option<bool>>,
         default_open: bool,
@@ -281,13 +306,13 @@ impl Dismissal {
     }
 
     fn next() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+        Self(dioxus::core::current_scope_id().0 as u64)
     }
 
     fn listen_script(self) -> String {
         format!(
-            "{DISMISSAL_RUNTIME}\nglobalThis.__vmuxPopupDismissal.subscribe({}, () => dioxus.send(true));",
+            "{}\nglobalThis.__vmuxPopupDismissal.subscribe({}, () => dioxus.send(true));",
+            Self::RUNTIME,
             self.0
         )
     }
@@ -296,32 +321,6 @@ impl Dismissal {
         format!("globalThis.__vmuxPopupDismissal?.remove({});", self.0)
     }
 }
-
-const DISMISSAL_RUNTIME: &str = r#"
-globalThis.__vmuxPopupDismissal ??= (() => {
-  class Dismissal {
-    listeners = new Map();
-    subscribe(owner, dismiss) { this.listeners.set(owner, dismiss); }
-    remove(owner) { this.listeners.delete(owner); }
-    dismiss() {
-      const listeners = [...this.listeners.entries()];
-      for (const [owner, dismiss] of listeners) {
-        try { dismiss(); } catch (_) { this.listeners.delete(owner); }
-      }
-    }
-  }
-  const dismissal = new Dismissal();
-  window.addEventListener('blur', event => {
-    if (event.target === window) dismissal.dismiss();
-  });
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') dismissal.dismiss();
-  });
-  window.addEventListener('pagehide', () => dismissal.dismiss());
-  window.addEventListener('vmux-deactivated', () => dismissal.dismiss());
-  return dismissal;
-})();
-"#;
 
 #[cfg(test)]
 mod tests {
@@ -353,15 +352,22 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+        fn verify_state() {
+            Self::verify(include_str!("popup_state_test.js"), &Surface::runtime());
+        }
+
+        fn verify_dismissal() {
+            Self::verify(include_str!("popup_dismissal_test.js"), Dismissal::RUNTIME);
+        }
     }
 
     #[test]
     fn native_popup_close_updates_the_trigger_before_the_host_round_trip() {
-        PopupProbe::verify(include_str!("popup_state_test.js"), &Surface::runtime());
+        PopupProbe::verify_state();
     }
 
     #[test]
     fn popups_share_deactivation_and_preserve_focus_moves_inside_the_page() {
-        PopupProbe::verify(include_str!("popup_dismissal_test.js"), DISMISSAL_RUNTIME);
+        PopupProbe::verify_dismissal();
     }
 }

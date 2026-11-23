@@ -31,9 +31,7 @@ impl ManagerTone {
             _ => Self::Neutral,
         }
     }
-}
 
-impl ManagerTone {
     fn classes(self) -> &'static str {
         match self {
             Self::Neutral => "bg-foreground/[0.06] text-muted-foreground ring-foreground/10",

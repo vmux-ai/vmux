@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 pub fn use_theme() -> Signal<String> {
     let state = use_ui_state::<ThemeUiState>().state;
     let mut locale = use_signal(|| Locale::preferred().into_string());
-    apply_locale(&Locale::from(locale().as_str()));
+    Host::apply_locale(&Locale::from(locale().as_str()));
     use_effect(move || {
         let data = state();
         if data.locale.is_empty() {
@@ -22,18 +22,8 @@ pub fn use_theme() -> Signal<String> {
         if let Some(catalog) = data.catalog.as_deref() {
             let _ = resolved.register_catalog(catalog);
         }
-        apply_locale(&resolved);
+        Host::apply_locale(&resolved);
         locale.set(data.locale);
     });
     locale
-}
-
-fn apply_locale(locale: &Locale) {
-    locale.make_current();
-    let direction = match locale.direction() {
-        unic_langid::CharacterDirection::RTL => "rtl",
-        unic_langid::CharacterDirection::LTR => "ltr",
-        unic_langid::CharacterDirection::TTB => "auto",
-    };
-    Host::set_root_language(locale.as_str(), direction);
 }

@@ -117,8 +117,6 @@ mod component {
     use super::{AGENT_PROMPT_EXAMPLES, PromptTypewriter, TERMINAL_PROMPT_EXAMPLES};
     use crate::platform::Platform;
 
-    const TICK_MS: u32 = 50;
-
     #[component]
     pub fn PromptGhost(accent_bg: String, terminal: bool) -> Element {
         let examples = if terminal {
@@ -131,7 +129,7 @@ mod component {
 
         use_future(move || async move {
             loop {
-                Platform::sleep(TICK_MS).await;
+                Platform::sleep(50).await;
                 let mut next = *typewriter.peek();
                 next.advance(Platform::random_index(examples.len()));
                 typewriter.set(next);

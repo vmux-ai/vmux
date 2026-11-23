@@ -38,10 +38,10 @@ struct ContextMenuOverlay(String);
 
 impl ContextMenuOverlay {
     fn next() -> Self {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-        Self(format!("vmux-context-menu-{serial}"))
+        Self(format!(
+            "vmux-context-menu-{}",
+            dioxus::core::current_scope_id().0
+        ))
     }
 
     fn id(&self) -> String {

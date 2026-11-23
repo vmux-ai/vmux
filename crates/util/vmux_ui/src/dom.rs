@@ -15,9 +15,7 @@ impl DomSelection {
     pub fn caret_in(element_id: &str) -> usize {
         Self::in_field(element_id).0
     }
-}
 
-impl DomSelection {
     pub fn in_field(element_id: &str) -> (usize, usize) {
         crate::transport::Host::event_field_selection(element_id)
     }
