@@ -13,10 +13,6 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::world::DeferredWorld;
 use bevy_tasks::Task;
 
-const ACTIVE: u8 = 0;
-const APPLIED: u8 = 1;
-const CANCELED: u8 = 2;
-
 pub struct TaskPlugin<T: Send + Sync + 'static>(PhantomData<fn() -> T>);
 
 impl<T: Send + Sync + 'static> Default for TaskPlugin<T> {
@@ -55,31 +51,38 @@ impl Default for TaskToken {
     fn default() -> Self {
         Self {
             id: uuid::Uuid::nil(),
-            state: Arc::new(AtomicU8::new(CANCELED)),
+            state: Arc::new(AtomicU8::new(Self::CANCELED)),
         }
     }
 }
 
 impl TaskToken {
+    const ACTIVE: u8 = 0;
+    const APPLIED: u8 = 1;
+    const CANCELED: u8 = 2;
+
     fn new() -> Self {
         Self {
             id: uuid::Uuid::new_v4(),
-            state: Arc::new(AtomicU8::new(ACTIVE)),
+            state: Arc::new(AtomicU8::new(Self::ACTIVE)),
         }
     }
 
     pub fn is_active(&self) -> bool {
-        self.state.load(Ordering::Acquire) == ACTIVE
+        self.state.load(Ordering::Acquire) == Self::ACTIVE
     }
 
     pub fn is_canceled(&self) -> bool {
-        self.state.load(Ordering::Acquire) == CANCELED
+        self.state.load(Ordering::Acquire) == Self::CANCELED
     }
 
     pub fn cancel(&self) {
-        let _ = self
-            .state
-            .compare_exchange(ACTIVE, CANCELED, Ordering::AcqRel, Ordering::Acquire);
+        let _ = self.state.compare_exchange(
+            Self::ACTIVE,
+            Self::CANCELED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
     }
 
     fn same(&self, other: &Self) -> bool {
@@ -90,7 +93,12 @@ impl TaskToken {
         self.same(current)
             && self
                 .state
-                .compare_exchange(ACTIVE, APPLIED, Ordering::AcqRel, Ordering::Acquire)
+                .compare_exchange(
+                    Self::ACTIVE,
+                    Self::APPLIED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
                 .is_ok()
     }
 }

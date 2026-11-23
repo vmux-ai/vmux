@@ -10,121 +10,144 @@ impl ExploreStep {
         let mut steps = Vec::new();
         let mut directory = std::path::PathBuf::new();
         for command in Source::parts(source) {
-            if command.contains("$(") || command.contains('`') {
-                return None;
-            }
-            let words = shlex::split(command)?;
-            let Some(program) = words.first() else {
-                continue;
-            };
-            if words
-                .iter()
-                .any(|word| word.starts_with('>') || word.starts_with('<'))
-            {
-                return None;
-            }
-            let program_name = program.rsplit('/').next().unwrap_or(program);
-            if matches!(program_name, "bash" | "sh" | "zsh") {
-                let argument = words.iter().position(|word| {
-                    matches!(word.as_str(), "-c" | "-lc" | "-ic" | "-lic" | "-ilc")
-                })?;
-                for mut step in Self::commands(words.get(argument + 1)?)? {
-                    step.in_directory(&directory);
-                    steps.push(step);
-                }
-                continue;
-            }
-            if program_name == "cd" {
-                let path = words.get(1)?;
-                if words.len() != 2 || path == "-" {
-                    return None;
-                }
-                directory = directory.join(path);
-                continue;
-            }
-            if words.iter().any(|word| {
-                program.ends_with("sed")
-                    && (word.starts_with("-i") || word.starts_with("--in-place"))
-            }) {
-                return None;
-            }
-            let mut positional = Vec::new();
-            let mut skip = false;
-            for word in &words[1..] {
-                if skip {
-                    skip = false;
-                    continue;
-                }
-                if matches!(
-                    word.as_str(),
-                    "-g" | "--glob"
-                        | "-t"
-                        | "--type"
-                        | "-m"
-                        | "--max-count"
-                        | "-A"
-                        | "-B"
-                        | "-C"
-                        | "-e"
-                        | "-f"
-                ) {
-                    skip = true;
-                    continue;
-                }
-                if word.starts_with('-') {
-                    continue;
-                }
-                positional.push(word.clone());
-            }
-            let previous = steps.len();
-            match program_name {
-                "rg" if words.iter().any(|word| word == "--files") => steps.push(Self::List {
-                    path: positional.first().cloned().unwrap_or_else(|| ".".into()),
-                }),
-                "rg" | "grep" => {
-                    let query = positional.first()?.clone();
-                    let path = if positional.len() > 1 {
-                        positional[1..].join(" ")
-                    } else {
-                        ".".into()
-                    };
-                    steps.push(Self::Search { query, path });
-                }
-                "cat" | "bat" => {
-                    for path in positional {
-                        steps.push(Self::Read { path });
-                    }
-                }
-                "sed" => {
-                    let first = usize::from(
-                        !words
-                            .iter()
-                            .any(|word| matches!(word.as_str(), "-e" | "-f")),
-                    );
-                    for path in positional.iter().skip(first) {
-                        steps.push(Self::Read { path: path.clone() });
-                    }
-                }
-                "head" | "tail"
-                    if positional
-                        .iter()
-                        .any(|word| word.contains('/') || word.contains('.')) =>
-                {
-                    steps.push(Self::Read {
-                        path: positional.last()?.clone(),
-                    });
-                }
-                "ls" | "find" => steps.push(Self::List {
-                    path: positional.first().cloned().unwrap_or_else(|| ".".into()),
-                }),
-                "head" | "tail" | "sort" | "uniq" | "cut" | "wc" => {}
-                _ => return None,
-            }
-            for step in &mut steps[previous..] {
-                step.in_directory(&directory);
-            }
+            Self::parse_command(command, &mut directory, &mut steps)?;
         }
         (!steps.is_empty()).then_some(steps)
+    }
+
+    fn parse_command(
+        command: &str,
+        directory: &mut std::path::PathBuf,
+        steps: &mut Vec<Self>,
+    ) -> Option<()> {
+        if command.contains("$(") || command.contains('`') {
+            return None;
+        }
+        let words = shlex::split(command)?;
+        let Some(program) = words.first() else {
+            return Some(());
+        };
+        if words
+            .iter()
+            .any(|word| word.starts_with('>') || word.starts_with('<'))
+        {
+            return None;
+        }
+        let program_name = program.rsplit('/').next().unwrap_or(program);
+        if matches!(program_name, "bash" | "sh" | "zsh") {
+            let argument = words
+                .iter()
+                .position(|word| matches!(word.as_str(), "-c" | "-lc" | "-ic" | "-lic" | "-ilc"))?;
+            for mut step in Self::commands(words.get(argument + 1)?)? {
+                step.in_directory(directory);
+                steps.push(step);
+            }
+            return Some(());
+        }
+        if program_name == "cd" {
+            let path = words.get(1)?;
+            if words.len() != 2 || path == "-" {
+                return None;
+            }
+            *directory = directory.join(path);
+            return Some(());
+        }
+        if words.iter().any(|word| {
+            program.ends_with("sed") && (word.starts_with("-i") || word.starts_with("--in-place"))
+        }) {
+            return None;
+        }
+        let positional = Self::positional_args(&words[1..]);
+        let previous = steps.len();
+        Self::append_program_steps(program_name, &words, positional, steps)?;
+        for step in &mut steps[previous..] {
+            step.in_directory(directory);
+        }
+        Some(())
+    }
+
+    fn positional_args(args: &[String]) -> Vec<String> {
+        let mut positional = Vec::new();
+        let mut skip = false;
+        for word in args {
+            if skip {
+                skip = false;
+                continue;
+            }
+            if matches!(
+                word.as_str(),
+                "-g" | "--glob"
+                    | "-t"
+                    | "--type"
+                    | "-m"
+                    | "--max-count"
+                    | "-A"
+                    | "-B"
+                    | "-C"
+                    | "-e"
+                    | "-f"
+            ) {
+                skip = true;
+                continue;
+            }
+            if word.starts_with('-') {
+                continue;
+            }
+            positional.push(word.clone());
+        }
+        positional
+    }
+
+    fn append_program_steps(
+        program_name: &str,
+        words: &[String],
+        positional: Vec<String>,
+        steps: &mut Vec<Self>,
+    ) -> Option<()> {
+        match program_name {
+            "rg" if words.iter().any(|word| word == "--files") => steps.push(Self::List {
+                path: positional.first().cloned().unwrap_or_else(|| ".".into()),
+            }),
+            "rg" | "grep" => {
+                let query = positional.first()?.clone();
+                let path = if positional.len() > 1 {
+                    positional[1..].join(" ")
+                } else {
+                    ".".into()
+                };
+                steps.push(Self::Search { query, path });
+            }
+            "cat" | "bat" => {
+                for path in positional {
+                    steps.push(Self::Read { path });
+                }
+            }
+            "sed" => {
+                let first = usize::from(
+                    !words
+                        .iter()
+                        .any(|word| matches!(word.as_str(), "-e" | "-f")),
+                );
+                for path in positional.iter().skip(first) {
+                    steps.push(Self::Read { path: path.clone() });
+                }
+            }
+            "head" | "tail"
+                if positional
+                    .iter()
+                    .any(|word| word.contains('/') || word.contains('.')) =>
+            {
+                steps.push(Self::Read {
+                    path: positional.last()?.clone(),
+                });
+            }
+            "ls" | "find" => steps.push(Self::List {
+                path: positional.first().cloned().unwrap_or_else(|| ".".into()),
+            }),
+            "head" | "tail" | "sort" | "uniq" | "cut" | "wc" => {}
+            _ => return None,
+        }
+        Some(())
     }
 
     pub(crate) fn in_directory(&mut self, directory: &std::path::Path) {
