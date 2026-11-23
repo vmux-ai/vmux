@@ -9978,6 +9978,8 @@ struct Inventory {
     error_types: RefCell<Option<BTreeSet<String>>>,
     stateless_adapters: RefCell<Option<BTreeSet<String>>>,
     value_handles: RefCell<Option<BTreeSet<String>>>,
+    drop_guards: RefCell<Option<BTreeSet<String>>>,
+    cef_ffi: RefCell<Option<BTreeSet<String>>>,
     enum_owner_candidates: RefCell<Option<BTreeMap<String, Vec<String>>>>,
     owned_values: RefCell<Option<BTreeSet<String>>>,
     test_fixtures: RefCell<Option<BTreeSet<String>>>,
@@ -11156,6 +11158,8 @@ impl Inventory {
         *self.error_types.get_mut() = None;
         *self.stateless_adapters.get_mut() = None;
         *self.value_handles.get_mut() = None;
+        *self.drop_guards.get_mut() = None;
+        *self.cef_ffi.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -11902,6 +11906,8 @@ impl Inventory {
         *self.error_types.get_mut() = None;
         *self.stateless_adapters.get_mut() = None;
         *self.value_handles.get_mut() = None;
+        *self.drop_guards.get_mut() = None;
+        *self.cef_ffi.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -11976,6 +11982,8 @@ impl Inventory {
         *self.error_types.get_mut() = None;
         *self.stateless_adapters.get_mut() = None;
         *self.value_handles.get_mut() = None;
+        *self.drop_guards.get_mut() = None;
+        *self.cef_ffi.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -12189,6 +12197,8 @@ impl Inventory {
                 && declaration.generated_query.is_none()
                 && !self.automatic_owned_value(declaration)
                 && !self.automatic_value_handle(declaration)
+                && !self.automatic_drop_guard(declaration)
+                && !self.automatic_serde_dto(declaration)
                 && !self.contract_standard_impl(entry, declaration, policy, visiting)
                 && !policy
                     .values
@@ -12460,6 +12470,358 @@ impl Inventory {
             || self.automatic_error_type(entry)
             || self.automatic_stateless_adapter(entry)
             || self.automatic_value_handle(entry)
+            || self.automatic_drop_guard(entry)
+            || self.automatic_cef_ffi(entry)
+    }
+
+    fn automatic_drop_guard(&self, entry: &Declaration) -> bool {
+        if !entry.production {
+            return false;
+        }
+        self.ensure_drop_guards();
+        self.drop_guards
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn drop_guard_candidate(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || !matches!(entry.kind, Kind::Struct)
+            || entry.ecs
+            || entry.plugin
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.projection
+            || entry.bundle_derive.is_some()
+            || entry.query_derive.is_some()
+            || self.has_bevy_runtime_access(entry)
+            || self.manifest_source(entry)
+            || self.typed_page(entry)
+            || self.host_page_marker(entry)
+            || self.store_schema(entry)
+        {
+            return false;
+        }
+        let mut has_drop = false;
+        for implementation in self.implementations(entry) {
+            if !implementation.production {
+                continue;
+            }
+            if implementation.plugin
+                || implementation.local
+                || implementation.dynamic
+                || implementation.opaque
+                || self.has_bevy_runtime_access(implementation)
+            {
+                return false;
+            }
+            if let Some(tr) = implementation.implemented_trait.as_deref() {
+                let tail = tr.rsplit("::").next().unwrap_or(tr);
+                if matches!(
+                    tail,
+                    "Plugin" | "FeatureManifestSource" | "LateLintPass" | "Job" | "Command"
+                ) {
+                    return false;
+                }
+                let is_drop = match self
+                    .external_path(&implementation.namespace, tr, &mut BTreeSet::new())
+                    .as_deref()
+                {
+                    Some("std::ops::Drop" | "core::ops::Drop") => true,
+                    None => tr == "Drop" && !self.local_binding(&implementation.namespace, tr),
+                    _ => false,
+                };
+                if is_drop {
+                    has_drop = true;
+                }
+            }
+        }
+        has_drop
+    }
+
+    #[inline(never)]
+    fn ensure_drop_guards(&self) {
+        if self.drop_guards.borrow().is_some() {
+            return;
+        }
+        let mut candidates = BTreeSet::new();
+        let mut candidate_names = BTreeSet::new();
+        for entry in self.entries.values() {
+            if self.drop_guard_candidate(entry) {
+                candidates.insert(entry.key.clone());
+                candidate_names.insert(entry.name.clone());
+            }
+        }
+        let mut proved = BTreeSet::new();
+        let mut queue = Vec::new();
+        if !candidates.is_empty() {
+            loop {
+                let before = candidate_names.len();
+                for imports in self.imports.values() {
+                    for (alias, target) in &imports.aliases {
+                        if candidate_names.contains(target.rsplit("::").next().unwrap_or(target)) {
+                            candidate_names.insert(alias.clone());
+                        }
+                    }
+                }
+                if candidate_names.len() == before {
+                    break;
+                }
+            }
+            self.ensure_job_adapters();
+            self.ensure_ecs_commands();
+            self.ensure_stateless_adapters();
+            self.ensure_value_handles();
+            let jobs = self.job_adapters.borrow();
+            let cmds = self.ecs_commands.borrow();
+            let adapters = self.stateless_adapters.borrow();
+            let handles = self.value_handles.borrow();
+            for owner in self.entries.values() {
+                if !owner.production || owner.local || owner.dynamic || owner.opaque {
+                    continue;
+                }
+                let valid_root =
+                    (owner.ecs || owner.bundle_derive.is_some() || owner.query_derive.is_some())
+                        && self.used(owner)
+                        || matches!(owner.kind, Kind::Function) && self.registered(owner)
+                        || jobs.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || cmds.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || adapters
+                            .as_ref()
+                            .is_some_and(|keys| keys.contains(&owner.key))
+                        || handles
+                            .as_ref()
+                            .is_some_and(|keys| keys.contains(&owner.key));
+                if !valid_root {
+                    continue;
+                }
+                let mut sources = vec![owner];
+                if matches!(owner.kind, Kind::Struct | Kind::Enum) {
+                    for implementation in self.implementations(owner) {
+                        if implementation.production {
+                            sources.push(implementation);
+                        }
+                    }
+                }
+                for source in sources {
+                    for path in source
+                        .field_paths
+                        .iter()
+                        .chain(source.reference_paths.iter())
+                    {
+                        if !path
+                            .split("::")
+                            .any(|segment| candidate_names.contains(segment))
+                        {
+                            continue;
+                        }
+                        let Some(target) = self.resolve_path_or_prefix(&source.namespace, path)
+                        else {
+                            continue;
+                        };
+                        if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
+                            queue.push(target.key.clone());
+                        }
+                    }
+                }
+            }
+            drop(jobs);
+            drop(cmds);
+            drop(adapters);
+            drop(handles);
+            while let Some(owner_key) = queue.pop() {
+                let owner = &self.entries[&owner_key];
+                let mut sources = vec![owner];
+                for implementation in self.implementations(owner) {
+                    if implementation.production {
+                        sources.push(implementation);
+                    }
+                }
+                for source in sources {
+                    for path in source
+                        .field_paths
+                        .iter()
+                        .chain(source.reference_paths.iter())
+                    {
+                        if !path
+                            .split("::")
+                            .any(|segment| candidate_names.contains(segment))
+                        {
+                            continue;
+                        }
+                        let Some(target) = self.resolve_path_or_prefix(&source.namespace, path)
+                        else {
+                            continue;
+                        };
+                        if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
+                            queue.push(target.key.clone());
+                        }
+                    }
+                }
+            }
+            let mut finalized = proved.clone();
+            for key in &proved {
+                let entry = &self.entries[key];
+                for implementation in self.implementations(entry) {
+                    if implementation.production {
+                        finalized.insert(implementation.key.clone());
+                    }
+                }
+            }
+            proved = finalized;
+        }
+        *self.drop_guards.borrow_mut() = Some(proved);
+    }
+
+    fn automatic_cef_ffi(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || (!entry.path.starts_with("patches/bevy_cef_core-0.5.2/")
+                && !entry.path.starts_with("patches/bevy_cef-0.5.2/"))
+        {
+            return false;
+        }
+        self.ensure_cef_ffi();
+        self.cef_ffi
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn is_cef_handler_struct(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || !matches!(entry.kind, Kind::Struct)
+            || entry.ecs
+            || entry.plugin
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.projection
+            || self.has_bevy_runtime_access(entry)
+        {
+            return false;
+        }
+        let mut has_cef_trait = false;
+        for implementation in self.implementations(entry) {
+            if !implementation.production {
+                continue;
+            }
+            if implementation.plugin
+                || implementation.local
+                || implementation.dynamic
+                || implementation.opaque
+                || self.has_bevy_runtime_access(implementation)
+            {
+                return false;
+            }
+            if let Some(tr) = implementation.implemented_trait.as_deref() {
+                let tail = tr.rsplit("::").next().unwrap_or(tr);
+                let is_cef_ext = self
+                    .external_path(&implementation.namespace, tr, &mut BTreeSet::new())
+                    .is_some_and(|resolved| resolved.starts_with("cef::"));
+                if is_cef_ext
+                    || tail == "ProcessMessageHandler"
+                    || tail.starts_with("Impl") && tail.ends_with("Handler")
+                    || tail.starts_with("Wrap") && tail.ends_with("Handler")
+                    || matches!(
+                        tail,
+                        "ImplApp"
+                            | "WrapApp"
+                            | "ImplClient"
+                            | "WrapClient"
+                            | "ImplSchemeHandlerFactory"
+                            | "WrapSchemeHandlerFactory"
+                    )
+                {
+                    has_cef_trait = true;
+                }
+            }
+        }
+        has_cef_trait
+    }
+
+    #[inline(never)]
+    fn ensure_cef_ffi(&self) {
+        if self.cef_ffi.borrow().is_some() {
+            return;
+        }
+        let mut proved = BTreeSet::new();
+        let mut queue = Vec::new();
+        for entry in self.entries.values() {
+            if (entry.path.starts_with("patches/bevy_cef_core-0.5.2/")
+                || entry.path.starts_with("patches/bevy_cef-0.5.2/"))
+                && self.is_cef_handler_struct(entry)
+                && proved.insert(entry.key.clone())
+            {
+                queue.push(entry.key.clone());
+                for implementation in self.implementations(entry) {
+                    if implementation.production && proved.insert(implementation.key.clone()) {
+                        queue.push(implementation.key.clone());
+                    }
+                }
+            }
+        }
+        while let Some(source_key) = queue.pop() {
+            let source = &self.entries[&source_key];
+            for path in source
+                .field_paths
+                .iter()
+                .chain(source.reference_paths.iter())
+            {
+                let target = self
+                    .resolve_path_or_prefix(&source.namespace, path)
+                    .or_else(|| {
+                        self.function_reference(&source.namespace, path, &mut BTreeSet::new())
+                    });
+                let Some(target) = target else {
+                    continue;
+                };
+                if !target.production
+                    || !target.path.starts_with("patches/bevy_cef_core-0.5.2/")
+                    || target.ecs
+                    || target.plugin
+                    || target.local
+                    || target.dynamic
+                    || target.opaque
+                    || target.projection
+                    || self.has_bevy_runtime_access(target)
+                {
+                    continue;
+                }
+                if !matches!(
+                    target.kind,
+                    Kind::Function | Kind::Const | Kind::Alias | Kind::Struct
+                ) {
+                    continue;
+                }
+                if matches!(target.kind, Kind::Struct)
+                    && self.implementations(target).into_iter().any(|i| {
+                        i.production
+                            && (i.plugin
+                                || i.local
+                                || i.dynamic
+                                || i.opaque
+                                || self.has_bevy_runtime_access(i))
+                    })
+                {
+                    continue;
+                }
+                if proved.insert(target.key.clone()) {
+                    queue.push(target.key.clone());
+                    if matches!(target.kind, Kind::Struct) {
+                        for implementation in self.implementations(target) {
+                            if implementation.production
+                                && proved.insert(implementation.key.clone())
+                            {
+                                queue.push(implementation.key.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        *self.cef_ffi.borrow_mut() = Some(proved);
     }
 
     fn automatic_value_handle(&self, entry: &Declaration) -> bool {
@@ -12719,7 +13081,9 @@ impl Inventory {
             || path.starts_with("crates/util/vmux_app/src/bin/")
             || matches!(
                 path,
-                "crates/util/vmux_vm/src/main.rs" | "crates/feature/vmux_dx/src/ci_main.rs"
+                "crates/util/vmux_vm/src/main.rs"
+                    | "crates/feature/vmux_dx/src/ci_main.rs"
+                    | "website/src/main.rs"
             )
     }
 
@@ -13357,7 +13721,9 @@ impl Inventory {
         let mut queue = Vec::new();
         if !candidates.is_empty() {
             self.ensure_job_adapters();
+            self.ensure_renderer_graph();
             let jobs = self.job_adapters.borrow();
+            let renderers = self.renderer_graph.borrow();
             for owner in self.entries.values() {
                 if !owner.production || owner.local || owner.dynamic || owner.opaque {
                     continue;
@@ -13366,7 +13732,10 @@ impl Inventory {
                     (owner.ecs || owner.bundle_derive.is_some() || owner.query_derive.is_some())
                         && self.used(owner)
                         || matches!(owner.kind, Kind::Function) && self.registered(owner)
-                        || jobs.as_ref().is_some_and(|keys| keys.contains(&owner.key));
+                        || jobs.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || renderers.as_ref().is_some_and(|(roots, helpers)| {
+                            roots.contains(&owner.key) || helpers.contains(&owner.key)
+                        });
                 if !valid_root {
                     continue;
                 }
@@ -13405,6 +13774,7 @@ impl Inventory {
                 }
             }
             drop(jobs);
+            drop(renderers);
             while let Some(owner_key) = queue.pop() {
                 let owner = &self.entries[&owner_key];
                 let owner_crate = owner.namespace.split("::").next();
@@ -14506,6 +14876,12 @@ impl Inventory {
             return true;
         }
         if self.automatic_error_type(entry) && !shape.component && !self.enum_job(entry) {
+            return true;
+        }
+        if entry.contract && !shape.component && !self.enum_job(entry) {
+            return true;
+        }
+        if shape.payloads == 0 && entry.ecs && self.used(entry) && !self.enum_job(entry) {
             return true;
         }
         if self.real_routable_enum(entry) {
@@ -18410,6 +18786,8 @@ impl Inventory {
         *self.error_types.get_mut() = None;
         *self.stateless_adapters.get_mut() = None;
         *self.value_handles.get_mut() = None;
+        *self.drop_guards.get_mut() = None;
+        *self.cef_ffi.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -23870,6 +24248,60 @@ fn wave5_copy_handles_borrowed_parsers_and_renderer_contract_impls_prove_safely(
         assert!(
             !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
             "expected rejected Wave 5 entry: {key}"
+        );
+    }
+}
+
+#[test]
+fn wave6_drop_guards_cef_ffi_and_contract_enums_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_macro/src/lib.rs",
+        "#[proc_macro_attribute] pub fn contract() {}",
+    );
+    inventory.source(
+        "crates/util/vmux_api/src/lib.rs",
+        "pub use vmux_macro::contract;",
+    );
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; struct Lease(u32); impl Drop for Lease { fn drop(&mut self) {} } struct DeadLease(u32); impl Drop for DeadLease { fn drop(&mut self) {} } #[vmux_api::contract] enum ToolChoice { First(String), Second } #[derive(Component)] enum Mode { Idle, Active } fn run(modes: Query<&Mode>) { let _ = (modes, Lease(1), ToolChoice::Second); } struct DemoPlugin; impl Plugin for DemoPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, run); } }",
+    );
+    inventory.source(
+        "patches/bevy_cef_core-0.5.2/src/handler.rs",
+        "use cef::ImplLoadHandler; const MAGIC: u32 = 1; struct LoadBuilder; impl ImplLoadHandler for LoadBuilder { fn on_load(&self) { let _ = helper(); } } fn helper() -> u32 { MAGIC } struct Unrelated(u32);",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/feature/demo/src/lib.rs||struct:Lease",
+        "crates/feature/demo/src/lib.rs||impl:Drop for Lease",
+        "patches/bevy_cef_core-0.5.2/src/handler.rs||struct:LoadBuilder",
+        "patches/bevy_cef_core-0.5.2/src/handler.rs||impl:ImplLoadHandler for LoadBuilder",
+        "patches/bevy_cef_core-0.5.2/src/handler.rs||fn:helper",
+        "patches/bevy_cef_core-0.5.2/src/handler.rs||const:MAGIC",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved Wave 6 entry: {key}"
+        );
+    }
+    for key in [
+        "crates/feature/demo/src/lib.rs||enum:ToolChoice",
+        "crates/feature/demo/src/lib.rs||enum:Mode",
+    ] {
+        assert!(
+            inventory.automatic_enum_purpose(&inventory.entries[key], &policy),
+            "expected proved Wave 6 enum purpose: {key}"
+        );
+    }
+    for key in [
+        "crates/feature/demo/src/lib.rs||struct:DeadLease",
+        "patches/bevy_cef_core-0.5.2/src/handler.rs||struct:Unrelated",
+    ] {
+        assert!(
+            !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected rejected Wave 6 entry: {key}"
         );
     }
 }

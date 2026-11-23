@@ -50,6 +50,7 @@ impl<'tcx> Ownership<'tcx> {
                 ("dioxus_router" | "dioxus_router_core", "Routable") => "routable",
                 ("serde" | "serde_core", "Serialize" | "Deserialize") => "serde",
                 ("core" | "std", "Error") => "error",
+                ("core" | "std", "Drop") => "drop",
                 _ => continue,
             };
             for implementation in implementations {
@@ -410,6 +411,14 @@ impl<'tcx> Ownership<'tcx> {
                     && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
                 || self.has_role(definition, "serde")
                 || self.has_role(definition, "error")
+                || self.has_role(definition, "drop")
+                    && !self.has_role(definition, "component")
+                    && !self.has_role(definition, "resource")
+                    && !self.has_role(definition, "message")
+                    && !self.has_role(definition, "bundle")
+                    && !self.has_role(definition, "query")
+                    && !self.has_role(definition, "parameter")
+                    && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
                 || self.has_role(definition, "contract")
                 || self.stateless_unit_adapter(cx, definition)
                 || self.stack_local_or_copy_value(cx, definition)
