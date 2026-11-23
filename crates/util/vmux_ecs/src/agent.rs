@@ -408,6 +408,13 @@ pub struct McpServerConfig {
     pub cwd: Option<PathBuf>,
 }
 
+impl McpServerConfig {
+    pub fn apply_to_spawn(self, spawn: &mut vmux_api::protocol::AcpSpawnWithMcp) {
+        spawn.mcp_command = Some(self.command);
+        spawn.mcp_args = self.args;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StackSessionHandoff {
     pub source_agent: String,

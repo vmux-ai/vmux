@@ -401,6 +401,7 @@ impl StoreAppExt for App {
         {
             return self;
         }
+        self.world_mut().register_event_key::<StoreDirty>();
         self.add_systems(Update, detect_change::<T>)
     }
 }

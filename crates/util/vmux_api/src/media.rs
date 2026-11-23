@@ -8,7 +8,7 @@ pub enum MediaKind {
 
 impl MediaKind {
     pub fn from_path(path: &str) -> Option<Self> {
-        Some(match MediaPath::extension(path).as_str() {
+        Some(match Self::extension(path).as_str() {
             "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" | "ico" | "svg" => Self::Image,
             "mp4" | "m4v" | "mov" | "webm" | "ogv" => Self::Video,
             "mp3" | "m4a" | "aac" | "wav" | "flac" | "ogg" | "opus" => Self::Audio,
@@ -18,7 +18,7 @@ impl MediaKind {
     }
 
     pub fn mime(path: &str) -> Option<&'static str> {
-        Some(match MediaPath::extension(path).as_str() {
+        Some(match Self::extension(path).as_str() {
             "png" => "image/png",
             "jpg" | "jpeg" => "image/jpeg",
             "gif" => "image/gif",
@@ -48,13 +48,9 @@ impl MediaKind {
     }
 
     pub fn requires_native_video(path: &str) -> bool {
-        matches!(MediaPath::extension(path).as_str(), "mp4" | "m4v" | "mov")
+        matches!(Self::extension(path).as_str(), "mp4" | "m4v" | "mov")
     }
-}
 
-struct MediaPath;
-
-impl MediaPath {
     fn extension(path: &str) -> String {
         let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
         match name.rsplit_once('.') {

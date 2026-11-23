@@ -12,6 +12,9 @@ pub trait AppExt {
 
 impl AppExt for App {
     fn register_types<S: Schema>(&mut self) -> &mut Self {
+        if !self.is_plugin_added::<crate::PrimitivesPlugin>() {
+            self.add_plugins(crate::PrimitivesPlugin);
+        }
         self.init_resource::<AppTypeRegistry>();
         {
             let mut registry = self.world().resource::<AppTypeRegistry>().write();

@@ -5,18 +5,24 @@ pub struct AvatarSpec {
     pub initials: String,
     pub color: String,
 }
+
 impl AvatarSpec {
+    const USER_COLOR: &'static str = "#3b82f6";
+    const PALETTE: [&'static str; 8] = [
+        "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899",
+    ];
+
     pub fn for_user() -> Self {
         Self {
             initials: "You".into(),
-            color: USER_COLOR.into(),
+            color: Self::USER_COLOR.into(),
         }
     }
 
     pub fn for_user_named(name: &str) -> Self {
         Self {
             initials: Self::initials(name),
-            color: USER_COLOR.into(),
+            color: Self::USER_COLOR.into(),
         }
     }
 
@@ -64,27 +70,14 @@ impl AvatarSpec {
     }
 
     pub fn color(seed: &str) -> String {
-        const PALETTE: [&str; 8] = [
-            "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899",
-        ];
         let mut hash: u64 = 0xcbf29ce484222325;
         for byte in seed.as_bytes() {
             hash ^= *byte as u64;
             hash = hash.wrapping_mul(0x100000001b3);
         }
-        PALETTE[(hash % PALETTE.len() as u64) as usize].to_string()
+        Self::PALETTE[(hash % Self::PALETTE.len() as u64) as usize].to_string()
     }
 }
-const USER_COLOR: &str = "#3b82f6";
-
-const IDENTICON_PALETTES: [[&str; 5]; 6] = [
-    ["#fff1f2", "#e11d48", "#fb7185", "#be123c", "#fecdd3"],
-    ["#fff7ed", "#ea580c", "#fb923c", "#c2410c", "#fed7aa"],
-    ["#fefce8", "#ca8a04", "#facc15", "#a16207", "#fef08a"],
-    ["#f0fdf4", "#16a34a", "#4ade80", "#15803d", "#bbf7d0"],
-    ["#ecfeff", "#0891b2", "#22d3ee", "#0e7490", "#a5f3fc"],
-    ["#f5f3ff", "#7c3aed", "#a78bfa", "#6d28d9", "#ddd6fe"],
-];
 
 #[vmux_api::contract(Copy, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -112,9 +105,18 @@ pub struct IdenticonShape {
 }
 
 impl IdenticonSpec {
+    const PALETTES: [[&'static str; 5]; 6] = [
+        ["#fff1f2", "#e11d48", "#fb7185", "#be123c", "#fecdd3"],
+        ["#fff7ed", "#ea580c", "#fb923c", "#c2410c", "#fed7aa"],
+        ["#fefce8", "#ca8a04", "#facc15", "#a16207", "#fef08a"],
+        ["#f0fdf4", "#16a34a", "#4ade80", "#15803d", "#bbf7d0"],
+        ["#ecfeff", "#0891b2", "#22d3ee", "#0e7490", "#a5f3fc"],
+        ["#f5f3ff", "#7c3aed", "#a78bfa", "#6d28d9", "#ddd6fe"],
+    ];
+
     pub fn from_seed(seed: &str) -> Self {
         let hash = IdenticonHash::of(seed);
-        let colors = IDENTICON_PALETTES[hash.modulus(IDENTICON_PALETTES.len() as u32) as usize];
+        let colors = Self::PALETTES[hash.modulus(Self::PALETTES.len() as u32) as usize];
         let shape = |index: u32| IdenticonShape {
             color: colors[hash.offset(index).modulus(colors.len() as u32) as usize],
             translate_x: hash.scaled(index + 1).unit(23 - index as i32, Some(1)),
