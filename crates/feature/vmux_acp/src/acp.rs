@@ -47,21 +47,19 @@ impl bevy::prelude::Plugin for AcpRuntimePlugin {
                     ApplyDeferred,
                     AcpProjectionSet,
                     ApplyDeferred,
-                    project_info,
-                    project_config_state,
-                    project_selected_config,
-                    project_status,
-                    project_approval_requested,
-                    project_approval_resolved,
-                    snapshot_selection,
+                    (
+                        project_info,
+                        project_config_state,
+                        project_selected_config,
+                        project_status,
+                        project_approval_requested,
+                        project_approval_resolved,
+                        snapshot_selection,
+                    )
+                        .chain(),
                     route_input,
                     ApplyDeferred,
-                    subscribe,
-                    read,
-                    list,
-                    rebind,
-                    close,
-                    reap,
+                    (subscribe, read, list, rebind, close, reap).chain(),
                 )
                     .chain(),
             )
@@ -314,8 +312,7 @@ fn spawn(
     for (request_entity, mut request) in &mut requests {
         if !session_ids.contains(&request.sid) {
             let (input_tx, input_rx) = mpsc::unbounded_channel();
-            let (projection, transcript_inboxes, state_inboxes) =
-                AcpProjectionSenders::open(wake.0.clone());
+            let (projection, projection_inboxes) = AcpProjectionSenders::open(wake.0.clone());
             let (stream_tx, _) = broadcast::channel(256);
             let shared = Arc::new(AcpShared::with_projection(
                 request.sid.clone(),
@@ -341,8 +338,7 @@ fn spawn(
                 AcpSessionInput(input_tx),
                 AcpSessionShared(shared),
                 AcpProjectionOrder::default(),
-                transcript_inboxes,
-                state_inboxes,
+                projection_inboxes,
                 AcpAgentName::default(),
                 AcpSessionConfigs::default(),
                 AcpRunState(AgentRunStatus::Idle),

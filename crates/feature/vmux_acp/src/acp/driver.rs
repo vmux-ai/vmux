@@ -228,20 +228,22 @@ impl AcpProjectionSenders {
     ) -> (
         Self,
         (
-            AcpReplayBeginInbox,
-            AcpSessionUpdateInbox,
-            AcpReplayFinishInbox,
-            AcpSnapshotRequestInbox,
-            AcpApprovalDetailsInbox,
-        ),
-        (
-            AcpAgentInfoInbox,
-            AcpConfigStateInbox,
-            AcpSelectedConfigInbox,
-            AcpStatusInbox,
-            AcpApprovalRequestedInbox,
-            AcpApprovalResolvedInbox,
-            AcpSelectionSnapshotInbox,
+            (
+                AcpReplayBeginInbox,
+                AcpSessionUpdateInbox,
+                AcpReplayFinishInbox,
+                AcpSnapshotRequestInbox,
+                AcpApprovalDetailsInbox,
+            ),
+            (
+                AcpAgentInfoInbox,
+                AcpConfigStateInbox,
+                AcpSelectedConfigInbox,
+                AcpStatusInbox,
+                AcpApprovalRequestedInbox,
+                AcpApprovalResolvedInbox,
+                AcpSelectionSnapshotInbox,
+            ),
         ),
     ) {
         let (replay_begin, replay_begin_inbox) = mpsc::unbounded_channel();
@@ -274,20 +276,22 @@ impl AcpProjectionSenders {
                 wake,
             },
             (
-                AcpReplayBeginInbox(replay_begin_inbox),
-                AcpSessionUpdateInbox(session_update_inbox),
-                AcpReplayFinishInbox(replay_finish_inbox),
-                AcpSnapshotRequestInbox(snapshot_request_inbox),
-                AcpApprovalDetailsInbox(approval_details_inbox),
-            ),
-            (
-                AcpAgentInfoInbox(agent_info_inbox),
-                AcpConfigStateInbox(config_state_inbox),
-                AcpSelectedConfigInbox(selected_config_inbox),
-                AcpStatusInbox(status_inbox),
-                AcpApprovalRequestedInbox(approval_requested_inbox),
-                AcpApprovalResolvedInbox(approval_resolved_inbox),
-                AcpSelectionSnapshotInbox(selection_snapshot_inbox),
+                (
+                    AcpReplayBeginInbox(replay_begin_inbox),
+                    AcpSessionUpdateInbox(session_update_inbox),
+                    AcpReplayFinishInbox(replay_finish_inbox),
+                    AcpSnapshotRequestInbox(snapshot_request_inbox),
+                    AcpApprovalDetailsInbox(approval_details_inbox),
+                ),
+                (
+                    AcpAgentInfoInbox(agent_info_inbox),
+                    AcpConfigStateInbox(config_state_inbox),
+                    AcpSelectedConfigInbox(selected_config_inbox),
+                    AcpStatusInbox(status_inbox),
+                    AcpApprovalRequestedInbox(approval_requested_inbox),
+                    AcpApprovalResolvedInbox(approval_resolved_inbox),
+                    AcpSelectionSnapshotInbox(selection_snapshot_inbox),
+                ),
             ),
         )
     }
@@ -1917,7 +1921,7 @@ mod tests {
         fn new(capacity: usize) -> Self {
             let (stream_tx, stream) = broadcast::channel(capacity);
             let (wake, _) = mpsc::unbounded_channel();
-            let (projection, transcript_inboxes, state_inboxes) = AcpProjectionSenders::open(wake);
+            let (projection, projection_inboxes) = AcpProjectionSenders::open(wake);
             let shared = Arc::new(AcpShared::with_projection(
                 "s1".into(),
                 PathBuf::from("/tmp"),
@@ -1934,8 +1938,7 @@ mod tests {
                     vmux_session::SessionId("s1".into()),
                     super::super::AcpSessionShared(Arc::clone(&shared)),
                     super::super::projection::AcpProjectionOrder::default(),
-                    transcript_inboxes,
-                    state_inboxes,
+                    projection_inboxes,
                     super::super::AcpAgentName::default(),
                     super::super::AcpSessionConfigs::default(),
                     super::super::AcpRunState(AgentRunStatus::Idle),

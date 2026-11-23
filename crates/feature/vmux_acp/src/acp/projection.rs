@@ -62,7 +62,7 @@ pub(super) struct AcpMessage(pub(super) Message);
 struct AcpHiddenToolCall;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-struct AcpToolCallId(String);
+pub(super) struct AcpToolCallId(String);
 
 impl AcpToolCallId {
     pub(super) fn is_conversation_title(title: &str) -> bool {
@@ -1518,7 +1518,7 @@ mod tests {
     struct ProjectionFixture {
         app: App,
         session: Entity,
-        shared: Arc<AcpShared>,
+        projection: AcpProjectionSenders,
         stream: broadcast::Receiver<ServiceMessage>,
     }
 
@@ -1527,13 +1527,12 @@ mod tests {
             let (stream_tx, stream) = broadcast::channel(64);
             let (wake, _) = mpsc::unbounded_channel();
             let (projection, projection_inboxes) = AcpProjectionSenders::open(wake);
-            let shared = Arc::new(AcpShared::with_projection(
+            let shared = Arc::new(AcpShared::new(
                 "s1".into(),
                 PathBuf::from("/tmp"),
                 ProcessId::new(),
                 stream_tx,
                 Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-                projection,
             ));
             let mut app = App::new();
             app.add_plugins(AcpProjectionPlugin);
@@ -1541,7 +1540,8 @@ mod tests {
                 .world_mut()
                 .spawn((
                     SessionId("s1".into()),
-                    AcpSessionShared(Arc::clone(&shared)),
+                    AcpSessionShared(shared),
+                    AcpProjectionOrder::default(),
                     projection_inboxes,
                     AcpSessionConfigs::default(),
                     AcpHistoryReplay::default(),
@@ -1550,13 +1550,13 @@ mod tests {
             Self {
                 app,
                 session,
-                shared,
+                projection,
                 stream,
             }
         }
 
         fn apply(&mut self, update: SessionUpdate) -> Vec<ServiceMessage> {
-            self.shared.projection.session_update(update);
+            self.projection.session_update(update);
             self.app.update();
             let mut emitted = Vec::new();
             while let Ok(message) = self.stream.try_recv() {
@@ -1584,7 +1584,7 @@ mod tests {
 
         fn approval_details(&mut self, query: ApprovalDetailsQuery) -> Option<(String, String)> {
             let (response, mut receiver) = oneshot::channel();
-            self.shared.projection.approval_details(query, response);
+            self.projection.approval_details(query, response);
             self.app.update();
             receiver.try_recv().unwrap()
         }
@@ -1624,7 +1624,7 @@ mod tests {
             let mut touches = Vec::new();
             for message in messages {
                 if let ServiceMessage::AgentRequest { request, .. } = message
-                    && let Ok(touched) = serde_json::from_str::<AgentFileTouched>(&request.payload)
+                    && let Ok(Some(touched)) = request.decode::<AgentFileTouched>()
                 {
                     touches.push(touched);
                 }
@@ -1689,7 +1689,7 @@ mod tests {
 
         assert!(emitted.iter().any(|message| matches!(
             message,
-            ServiceMessage::AcpWorkspaceChanged { name, branch, cwd, workspace_cwd, .. }
+            ServiceMessage::Shared(SharedEvent::AcpWorkspaceChanged { name, branch, cwd, workspace_cwd, .. })
                 if name == "quiet-amber-wolf"
                     && branch == "vibe/quiet-amber-wolf"
                     && cwd == &working.canonicalize().unwrap().to_string_lossy()
