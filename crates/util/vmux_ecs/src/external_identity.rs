@@ -9,9 +9,10 @@ use bevy_ecs::prelude::*;
 use crate::IdentityLookupError;
 use crate::identity::IdentityMap;
 
-pub struct ExternalIdentityIndexPlugin<P: Component, I: Component, M: Component>(Scope<P, I, M>);
-
-type Scope<P, I, M> = PhantomData<fn() -> (P, I, M)>;
+#[allow(clippy::type_complexity)]
+pub struct ExternalIdentityIndexPlugin<P: Component, I: Component, M: Component>(
+    PhantomData<fn() -> (P, I, M)>,
+);
 
 impl<P: Component, I: Component, M: Component> Default for ExternalIdentityIndexPlugin<P, I, M> {
     fn default() -> Self {
@@ -88,7 +89,8 @@ impl<P: Component + Clone + Eq + Hash, I: Component + Clone + Eq + Hash, M: Comp
 #[derive(Resource)]
 struct Indexed<P: Component, I: Component, M: Component> {
     entities: HashSet<Entity>,
-    marker: Scope<P, I, M>,
+    #[allow(clippy::type_complexity)]
+    marker: PhantomData<fn() -> (P, I, M)>,
 }
 
 impl<P: Component, I: Component, M: Component> Default for Indexed<P, I, M> {

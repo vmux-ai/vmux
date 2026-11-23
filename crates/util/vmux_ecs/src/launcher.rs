@@ -74,11 +74,12 @@ pub struct LauncherDismissRequest;
 #[derive(Component, Clone, Copy, Debug)]
 pub struct HostsLauncher;
 
-#[derive(Component, Clone, Debug)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WorkspaceSelectionState {
+    #[default]
     Ready,
     Pending,
-    Failed(String),
+    Failed,
 }
 
 impl WorkspaceSelectionState {
@@ -86,6 +87,10 @@ impl WorkspaceSelectionState {
         !matches!(self, Self::Ready)
     }
 }
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+#[require(WorkspaceSelectionState)]
+pub struct WorkspaceSelectionError(pub String);
 
 #[derive(Message, Clone, Copy, Debug)]
 pub struct InlineTransitionRequested {

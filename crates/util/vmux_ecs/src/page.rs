@@ -336,6 +336,7 @@ pub struct BindsEditingChords;
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct PrewarmPage {
     scope: PrewarmScope,
+    host: Option<&'static str>,
     pub url: &'static str,
     pub title: String,
     pub pool_size: usize,
@@ -344,7 +345,7 @@ pub struct PrewarmPage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PrewarmScope {
     Exact,
-    Host(&'static str),
+    Host,
     Renderer,
 }
 
@@ -352,6 +353,7 @@ impl PrewarmPage {
     pub fn renderer(url: &'static str, title: impl Into<String>, pool_size: usize) -> Self {
         Self {
             scope: PrewarmScope::Renderer,
+            host: None,
             url,
             title: title.into(),
             pool_size,
@@ -361,6 +363,7 @@ impl PrewarmPage {
     pub fn exact(url: &'static str, title: impl Into<String>, pool_size: usize) -> Self {
         Self {
             scope: PrewarmScope::Exact,
+            host: None,
             url,
             title: title.into(),
             pool_size,
@@ -374,7 +377,8 @@ impl PrewarmPage {
         pool_size: usize,
     ) -> Self {
         Self {
-            scope: PrewarmScope::Host(host),
+            scope: PrewarmScope::Host,
+            host: Some(host),
             url,
             title: title.into(),
             pool_size,
@@ -388,7 +392,10 @@ impl PrewarmPage {
         if self.url == url {
             return true;
         }
-        let PrewarmScope::Host(host) = self.scope else {
+        if self.scope != PrewarmScope::Host {
+            return false;
+        }
+        let Some(host) = self.host else {
             return false;
         };
         let Some((scheme, rest)) = url.split_once("://") else {

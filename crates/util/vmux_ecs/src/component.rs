@@ -177,6 +177,7 @@ pub struct ActivateRequest {
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component)]
+#[require(TransitionType)]
 #[type_path = "vmux_history"]
 pub struct Visit;
 

@@ -8,8 +8,6 @@ use web_time::Instant;
 
 use crate::Uuid;
 
-const RETENTION: Duration = Duration::from_secs(300);
-
 pub struct OperationPlugin;
 
 impl Plugin for OperationPlugin {
@@ -194,6 +192,10 @@ struct OperationExpiresAt(Instant);
 #[derive(Resource, Default)]
 struct OperationExpiry(Option<Instant>);
 
+impl OperationExpiry {
+    const RETENTION: Duration = Duration::from_secs(300);
+}
+
 type ChangedOperations<'w, 's> =
     Query<'w, 's, (Entity, &'static OperationState), (With<Operation>, Changed<OperationState>)>;
 
@@ -206,7 +208,7 @@ fn finish(
         if matches!(state, OperationState::Pending | OperationState::Running) {
             commands.entity(entity).try_remove::<OperationExpiresAt>();
         } else {
-            let deadline = Instant::now() + RETENTION;
+            let deadline = Instant::now() + OperationExpiry::RETENTION;
             if expiry.0.is_none_or(|current| deadline < current) {
                 expiry.0 = Some(deadline);
             }

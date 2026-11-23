@@ -8,6 +8,8 @@ pub struct AgentRequest {
 }
 
 impl AgentRequest {
+    pub const REQUEST_TIMEOUT: std::time::Duration = AGENT_REQUEST_TIMEOUT;
+    pub const QUERY_TIMEOUT: std::time::Duration = AGENT_QUERY_TIMEOUT;
     pub fn encode<T>(payload: &T) -> Result<Self, String>
     where
         T: crate::AgentRequestContract + serde::Serialize,
@@ -182,8 +184,6 @@ pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 
 pub const AGENT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
-pub const AGENT_TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
 #[vmux_api::contract]
 pub enum AgentCommandResult {
     Ok,
@@ -248,17 +248,17 @@ impl<'a> AgentDelegationEnvelope<'a> {
     }
 }
 
-const PRIVATE_CONTEXT_PREFIX: &str = "<vmux_handoff_context>";
-const PRIVATE_CONTEXT_PROMPT_MARKER: &str = "\n\nCurrent user prompt:\n";
-const PRIVATE_CONTEXT_LENGTH_PREFIX: &str = "Context bytes: ";
-const PRIVATE_CONTEXT_CLOSING_TAG: &str = "\n</vmux_handoff_context>";
-
 impl AgentPromptEnvelope<'static> {
     pub fn compose(display_text: &str, context: Option<&str>) -> String {
         match context {
             Some(context) => format!(
-                "{PRIVATE_CONTEXT_PREFIX}\n{PRIVATE_CONTEXT_LENGTH_PREFIX}{}\n{context}{PRIVATE_CONTEXT_CLOSING_TAG}{PRIVATE_CONTEXT_PROMPT_MARKER}{display_text}",
-                context.len()
+                "{}\n{}{}\n{}{}{}{display_text}",
+                Self::PRIVATE_CONTEXT_PREFIX,
+                Self::PRIVATE_CONTEXT_LENGTH_PREFIX,
+                context.len(),
+                context,
+                Self::PRIVATE_CONTEXT_CLOSING_TAG,
+                Self::PRIVATE_CONTEXT_PROMPT_MARKER,
             ),
             None => display_text.to_string(),
         }
@@ -266,6 +266,11 @@ impl AgentPromptEnvelope<'static> {
 }
 
 impl<'a> AgentPromptEnvelope<'a> {
+    const PRIVATE_CONTEXT_PREFIX: &'static str = "<vmux_handoff_context>";
+    const PRIVATE_CONTEXT_PROMPT_MARKER: &'static str = "\n\nCurrent user prompt:\n";
+    const PRIVATE_CONTEXT_LENGTH_PREFIX: &'static str = "Context bytes: ";
+    const PRIVATE_CONTEXT_CLOSING_TAG: &'static str = "\n</vmux_handoff_context>";
+
     pub fn new(prompt: &'a str) -> Self {
         Self(prompt)
     }
@@ -277,20 +282,24 @@ impl<'a> AgentPromptEnvelope<'a> {
     pub fn split(self) -> Option<(&'a str, &'a str)> {
         self.split_length_delimited().or_else(|| {
             let body = self.body()?;
-            let separator = format!("{PRIVATE_CONTEXT_CLOSING_TAG}{PRIVATE_CONTEXT_PROMPT_MARKER}");
+            let separator = format!(
+                "{}{}",
+                Self::PRIVATE_CONTEXT_CLOSING_TAG,
+                Self::PRIVATE_CONTEXT_PROMPT_MARKER
+            );
             body.rsplit_once(&separator)
         })
     }
 
     pub fn has_private_context(self) -> bool {
         self.body()
-            .is_some_and(|body| body.contains(PRIVATE_CONTEXT_CLOSING_TAG))
+            .is_some_and(|body| body.contains(Self::PRIVATE_CONTEXT_CLOSING_TAG))
     }
 
     fn body(self) -> Option<&'a str> {
         self.0
-            .find(PRIVATE_CONTEXT_PREFIX)
-            .and_then(|start| self.0.get(start + PRIVATE_CONTEXT_PREFIX.len()..))?
+            .find(Self::PRIVATE_CONTEXT_PREFIX)
+            .and_then(|start| self.0.get(start + Self::PRIVATE_CONTEXT_PREFIX.len()..))?
             .strip_prefix('\n')
     }
 
@@ -298,14 +307,14 @@ impl<'a> AgentPromptEnvelope<'a> {
         let body = self.body()?;
         let (length, body) = body.split_once('\n')?;
         let context_len = length
-            .strip_prefix(PRIVATE_CONTEXT_LENGTH_PREFIX)?
+            .strip_prefix(Self::PRIVATE_CONTEXT_LENGTH_PREFIX)?
             .parse::<usize>()
             .ok()?;
         let context = body.get(..context_len)?;
         let display = body
             .get(context_len..)?
-            .strip_prefix(PRIVATE_CONTEXT_CLOSING_TAG)?
-            .strip_prefix(PRIVATE_CONTEXT_PROMPT_MARKER)?;
+            .strip_prefix(Self::PRIVATE_CONTEXT_CLOSING_TAG)?
+            .strip_prefix(Self::PRIVATE_CONTEXT_PROMPT_MARKER)?;
         Some((context, display))
     }
 }

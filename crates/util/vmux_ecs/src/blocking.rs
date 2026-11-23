@@ -9,11 +9,6 @@ use bevy_ecs::prelude::Resource;
 
 type Work = Box<dyn FnOnce() + Send + 'static>;
 
-thread_local! {
-    static CANCELLATION: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
-    static CANCELLATION_GROUP: RefCell<Option<CancellationGroup>> = const { RefCell::new(None) };
-}
-
 #[derive(Resource)]
 pub struct BlockingRuntime {
     short: BlockingPool,
@@ -174,8 +169,7 @@ impl BlockingPool {
                 drop(run);
                 return;
             }
-            let previous = CANCELLATION
-                .with(|current| current.borrow_mut().replace(Arc::clone(&worker_canceled)));
+            let previous = BlockingCancellation::replace_slot(Some(Arc::clone(&worker_canceled)));
             let scope = CancellationScope { previous };
             let result = catch_unwind(AssertUnwindSafe(run));
             drop(scope);
@@ -289,26 +283,36 @@ impl Drop for TaskCompletion {
 pub struct BlockingCancellation;
 
 impl BlockingCancellation {
+    fn with_slot<R>(f: impl FnOnce(&mut Option<Arc<AtomicBool>>) -> R) -> R {
+        thread_local! {
+            static CANCELLATION: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
+        }
+        CANCELLATION.with(|current| f(&mut current.borrow_mut()))
+    }
+
+    fn replace_slot(next: Option<Arc<AtomicBool>>) -> Option<Arc<AtomicBool>> {
+        Self::with_slot(|slot| match next {
+            Some(value) => slot.replace(value),
+            None => slot.take(),
+        })
+    }
+
     pub fn canceled() -> bool {
-        let canceled = CANCELLATION.with(|current| {
+        let canceled = Self::with_slot(|current| {
             current
-                .borrow()
                 .as_ref()
                 .is_some_and(|canceled| canceled.load(Ordering::Acquire))
         });
         if !canceled {
             return false;
         }
-        CANCELLATION_GROUP.with(|current| {
-            current
-                .borrow()
-                .as_ref()
-                .is_none_or(CancellationGroup::all_canceled)
+        CancellationGroup::with_slot(|current| {
+            current.as_ref().is_none_or(CancellationGroup::all_canceled)
         })
     }
 
     pub fn without<T>(run: impl FnOnce() -> T) -> T {
-        let previous = CANCELLATION.with(|current| current.borrow_mut().take());
+        let previous = Self::replace_slot(None);
         let scope = CancellationScope { previous };
         let output = run();
         drop(scope);
@@ -320,8 +324,16 @@ impl BlockingCancellation {
 pub struct CancellationGroup(Arc<Mutex<Vec<Weak<AtomicBool>>>>);
 
 impl CancellationGroup {
+    fn with_slot<R>(f: impl FnOnce(&mut Option<CancellationGroup>) -> R) -> R {
+        thread_local! {
+            static CANCELLATION_GROUP: RefCell<Option<CancellationGroup>> =
+                const { RefCell::new(None) };
+        }
+        CANCELLATION_GROUP.with(|current| f(&mut current.borrow_mut()))
+    }
+
     pub fn join(&self) -> CancellationParticipant {
-        let canceled = CANCELLATION.with(|current| current.borrow().clone());
+        let canceled = BlockingCancellation::with_slot(|current| current.clone());
         let member = canceled.as_ref().map(Arc::downgrade);
         if let Some(member) = &member
             && let Ok(mut members) = self.0.lock()
@@ -354,8 +366,7 @@ pub struct CancellationParticipant {
 
 impl CancellationParticipant {
     pub fn run<T>(&self, run: impl FnOnce() -> T) -> T {
-        let previous =
-            CANCELLATION_GROUP.with(|current| current.borrow_mut().replace(self.group.clone()));
+        let previous = CancellationGroup::with_slot(|current| current.replace(self.group.clone()));
         let scope = CancellationGroupScope { previous };
         let output = run();
         drop(scope);
@@ -384,8 +395,8 @@ struct CancellationGroupScope {
 
 impl Drop for CancellationGroupScope {
     fn drop(&mut self) {
-        CANCELLATION_GROUP.with(|current| {
-            *current.borrow_mut() = self.previous.take();
+        CancellationGroup::with_slot(|current| {
+            *current = self.previous.take();
         });
     }
 }
@@ -396,8 +407,8 @@ struct CancellationScope {
 
 impl Drop for CancellationScope {
     fn drop(&mut self) {
-        CANCELLATION.with(|current| {
-            *current.borrow_mut() = self.previous.take();
+        BlockingCancellation::with_slot(|current| {
+            *current = self.previous.take();
         });
     }
 }
@@ -440,15 +451,13 @@ mod tests {
     fn dropping_one_of_two_participants_keeps_the_uncanceled_task_in_the_group() {
         let group = CancellationGroup::default();
         let active = Arc::new(AtomicBool::new(false));
-        let previous =
-            CANCELLATION.with(|current| current.borrow_mut().replace(Arc::clone(&active)));
+        let previous = BlockingCancellation::replace_slot(Some(Arc::clone(&active)));
         let scope = CancellationScope { previous };
         let first = group.join();
         let second = group.join();
         drop(scope);
         let canceled = Arc::new(AtomicBool::new(true));
-        let previous =
-            CANCELLATION.with(|current| current.borrow_mut().replace(Arc::clone(&canceled)));
+        let previous = BlockingCancellation::replace_slot(Some(Arc::clone(&canceled)));
         let scope = CancellationScope { previous };
         let peer = group.join();
         drop(first);

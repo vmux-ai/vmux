@@ -1041,13 +1041,17 @@ pub enum ChatItem {
         context: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<ChatAttachment>,
-        #[serde(default, skip_serializing_if = "is_zero")]
+        #[serde(default, skip_serializing_if = "ChatItem::is_zero")]
         created_at_ms: u64,
     },
     Turn(ChatTurn),
 }
 
 impl ChatItem {
+    fn is_zero(value: &u64) -> bool {
+        *value == 0
+    }
+
     pub fn identity_keys(&self) -> Vec<String> {
         match self {
             Self::User { event_id, .. } if !event_id.is_empty() => vec![event_id.clone()],
@@ -1093,12 +1097,12 @@ pub struct ChatTurn {
     pub running: bool,
     pub duration_secs: Option<u32>,
     pub step_count: u32,
-    #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "ChatItem::is_zero")]
     pub created_at_ms: u64,
 }
 
-fn is_zero(value: &u64) -> bool {
-    *value == 0
+impl ChatTurn {
+    pub const WORKING_VERB_IDS: &'static [&'static str] = WORKING_VERB_IDS;
 }
 
 pub const WORKING_VERB_IDS: &[&str] = &[

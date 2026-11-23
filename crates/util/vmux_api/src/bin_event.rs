@@ -45,14 +45,17 @@ mod tests {
 
     #[test]
     fn event_id_includes_its_protocol_version() {
-        assert_eq!(TestEvent::id(), "test@3");
+        let id = TestEvent::id();
+        assert_eq!(id, "test@3");
     }
 
     #[test]
     fn complete_event_names_do_not_collide() {
-        assert_eq!(FirstEvent::id(), "first@1");
-        assert_eq!(SecondEvent::id(), "second@1");
-        assert_ne!(FirstEvent::id(), SecondEvent::id());
+        let first = FirstEvent::id();
+        let second = SecondEvent::id();
+        assert_eq!(first, "first@1");
+        assert_eq!(second, "second@1");
+        assert_ne!(first, second);
     }
 
     #[test]

@@ -8,7 +8,7 @@ use vmux_api::command_bar::{
     CommandBarUiState, CommandBarWorkspaceSelection, StartGoToBranch, StartSelectWorkspace,
 };
 use vmux_command::CommandBarWorkDirectory;
-use vmux_ecs::launcher::{HostsLauncher, WorkspaceSelectionState};
+use vmux_ecs::launcher::{HostsLauncher, WorkspaceSelectionError, WorkspaceSelectionState};
 use vmux_ecs::{
     Cwd, Operation, OperationState, OperationTarget, OperationTargetRevision, PageMetadata,
     UiStateWrite,
@@ -133,10 +133,10 @@ struct Chosen {
 
 fn project_selection(
     event: On<Insert, WorkspaceSelectionState>,
-    states: Query<&WorkspaceSelectionState>,
+    states: Query<(&WorkspaceSelectionState, Option<&WorkspaceSelectionError>)>,
     mut commands: Commands,
 ) {
-    let Ok(state) = states.get(event.entity) else {
+    let Ok((state, error)) = states.get(event.entity) else {
         return;
     };
     let projection = match state {
@@ -145,9 +145,9 @@ fn project_selection(
             pending: true,
             error: String::new(),
         },
-        WorkspaceSelectionState::Failed(error) => CommandBarWorkspaceSelection {
+        WorkspaceSelectionState::Failed => CommandBarWorkspaceSelection {
             pending: false,
-            error: error.clone(),
+            error: error.map(|error| error.0.clone()).unwrap_or_default(),
         },
     };
     commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
@@ -232,6 +232,7 @@ fn release(
                 CommandBarWorkDirectory,
                 Selection,
                 WorkspaceSelectionState,
+                WorkspaceSelectionError,
                 Applied,
             )>();
         }
@@ -288,7 +289,7 @@ fn pick(
                 PickerRevision(next_picker),
                 WorkspaceSelectionState::Pending,
             ))
-            .remove::<Applied>();
+            .remove::<(Applied, WorkspaceSelectionError)>();
         requests.write(SelectBranchCheckout {
             operation,
             directory: PathBuf::from(request.project.trim()),
@@ -340,16 +341,17 @@ fn apply(
                     Pinned,
                     CommandBarWorkDirectory(path.to_string_lossy().into_owned()),
                 ))
-                .remove::<Selection>()
+                .remove::<(Selection, WorkspaceSelectionError)>()
                 .insert(WorkspaceSelectionState::Ready);
         }
         _ => {
             commands
                 .entity(request.webview)
                 .remove::<Selection>()
-                .insert(WorkspaceSelectionState::Failed(translate(
-                    "project-directory-unavailable",
-                )));
+                .insert((
+                    WorkspaceSelectionError(translate("project-directory-unavailable")),
+                    WorkspaceSelectionState::Failed,
+                ));
         }
     }
 }
@@ -368,9 +370,12 @@ fn retire(
         cancels.write(CancelCheckout {
             operation: selection.operation,
         });
-        commands
-            .entity(page)
-            .remove::<(Selection, Applied, WorkspaceSelectionState)>();
+        commands.entity(page).remove::<(
+            Selection,
+            Applied,
+            WorkspaceSelectionState,
+            WorkspaceSelectionError,
+        )>();
     }
     for page in removed.read() {
         for (operation, target, state) in &operations {
@@ -454,7 +459,10 @@ fn failed(
             commands
                 .entity(page)
                 .remove::<(Selection, Applied)>()
-                .insert(WorkspaceSelectionState::Failed(failure.error.clone()));
+                .insert((
+                    WorkspaceSelectionError(failure.error.clone()),
+                    WorkspaceSelectionState::Failed,
+                ));
         }
     }
     for (page, selection) in &selections {
@@ -464,15 +472,18 @@ fn failed(
         {
             commands
                 .entity(page)
-                .remove::<(Selection, Applied)>()
+                .remove::<(Selection, Applied, WorkspaceSelectionError)>()
                 .insert(WorkspaceSelectionState::Ready);
         } else if states
             .get(selection.operation)
             .is_ok_and(|state| *state == OperationState::Canceled)
         {
-            commands
-                .entity(page)
-                .remove::<(Selection, Applied, WorkspaceSelectionState)>();
+            commands.entity(page).remove::<(
+                Selection,
+                Applied,
+                WorkspaceSelectionState,
+                WorkspaceSelectionError,
+            )>();
         }
     }
 }
@@ -579,19 +590,17 @@ fn folder_picked(
         return;
     }
     let Ok(path) = event.path.canonicalize() else {
-        commands
-            .entity(event.webview)
-            .insert(WorkspaceSelectionState::Failed(translate(
-                "project-directory-unavailable",
-            )));
+        commands.entity(event.webview).insert((
+            WorkspaceSelectionError(translate("project-directory-unavailable")),
+            WorkspaceSelectionState::Failed,
+        ));
         return;
     };
     if !path.is_dir() {
-        commands
-            .entity(event.webview)
-            .insert(WorkspaceSelectionState::Failed(translate(
-                "project-directory-unavailable",
-            )));
+        commands.entity(event.webview).insert((
+            WorkspaceSelectionError(translate("project-directory-unavailable")),
+            WorkspaceSelectionState::Failed,
+        ));
         return;
     }
     if path.join(".git").exists() {
@@ -680,15 +689,15 @@ fn initialize_git(
             .map(|_| ())
             .map_err(|error| error.0)
     }) else {
-        commands
-            .entity(event.webview)
-            .insert(WorkspaceSelectionState::Failed(
-                "git operation queue is full".to_string(),
-            ));
+        commands.entity(event.webview).insert((
+            WorkspaceSelectionError("git operation queue is full".to_string()),
+            WorkspaceSelectionState::Failed,
+        ));
         return;
     };
     commands
         .entity(event.webview)
+        .remove::<WorkspaceSelectionError>()
         .insert(WorkspaceSelectionState::Pending);
     commands.spawn(InitializeGitTask {
         webview: event.webview,
@@ -721,16 +730,16 @@ fn finish_initialize_git(
                 path: init.path.clone(),
             }),
             Ok(Err(error)) => {
-                commands
-                    .entity(init.webview)
-                    .insert(WorkspaceSelectionState::Failed(error));
+                commands.entity(init.webview).insert((
+                    WorkspaceSelectionError(error),
+                    WorkspaceSelectionState::Failed,
+                ));
             }
             Err(_) => {
-                commands
-                    .entity(init.webview)
-                    .insert(WorkspaceSelectionState::Failed(
-                        "git initialization worker failed".to_string(),
-                    ));
+                commands.entity(init.webview).insert((
+                    WorkspaceSelectionError("git initialization worker failed".to_string()),
+                    WorkspaceSelectionState::Failed,
+                ));
             }
         }
     }
