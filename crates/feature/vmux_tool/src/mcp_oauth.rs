@@ -214,6 +214,7 @@ impl McpOauthFlow {
             resource_url,
         )?;
         let credentials = ZeroizedCredentials(McpOauthCredentials {
+            account: None,
             token_endpoint: authorization.token_endpoint,
             client_id: registration.client_id,
             client_secret: registration.client_secret,
@@ -665,6 +666,7 @@ mod tests {
             flow.store_credentials(
                 id,
                 &McpOauthCredentials {
+                    account: None,
                     token_endpoint: format!("{base}/token"),
                     client_id: format!("cid-{id}"),
                     client_secret: None,

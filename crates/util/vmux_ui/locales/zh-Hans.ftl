@@ -1452,3 +1452,23 @@ common-resume = 继续
 onboarding-connection-choice = 您想如何连接？
 onboarding-connect-description = 在打开的页面上登录。
 onboarding-use-key-description = 或者输入 API 密钥。
+connectors-title = 连接器
+connectors-description = 管理已登录账号，并在对话中选择要使用的连接器。
+connectors-empty = 没有可用的连接器
+connectors-sign-in-required = 需要登录
+connectors-open-sign-in = 打开登录
+
+connectors-command-description = 选择此对话使用的连接器
+connectors-use = 在聊天中使用
+connectors-selected = 已选择 · 移除
+connectors-manage = 管理连接器
+connectors-manage-access = 管理仓库访问权限
+
+connectors-agent-configuration = 代理配置
+connectors-configured = 已配置
+connectors-open-in-app = 在 Vmux 中打开
+connectors-open-external = 在外部浏览器中打开
+connectors-verification-code-help = 复制此代码并在 { $service } 中输入，以完成登录。
+
+connectors-setup-intro = 将 { $service } 连接到此个人资料。我会引导你登录，之后你可以在对话中选择使用。
+connectors-setup-connected = { $service } 已连接。现在可以在对话中选择使用。

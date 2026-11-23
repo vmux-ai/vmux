@@ -1452,3 +1452,23 @@ common-resume = 재개
 onboarding-connection-choice = 어떻게 연결하시겠어요?
 onboarding-connect-description = 열리는 페이지에서 로그인합니다.
 onboarding-use-key-description = 대신 API 키를 입력합니다.
+connectors-title = 커넥터
+connectors-description = 연결된 계정을 관리하고 대화에서 사용할 커넥터를 선택하세요.
+connectors-empty = 사용 가능한 커넥터가 없습니다
+connectors-sign-in-required = 로그인이 필요합니다
+connectors-open-sign-in = 로그인 열기
+
+connectors-command-description = 이 대화에서 사용할 커넥터 선택
+connectors-use = 대화에서 사용
+connectors-selected = 선택됨 · 제거
+connectors-manage = 커넥터 관리
+connectors-manage-access = 저장소 접근 관리
+
+connectors-agent-configuration = 에이전트 설정
+connectors-configured = 설정됨
+connectors-open-in-app = Vmux에서 열기
+connectors-open-external = 외부 브라우저에서 열기
+connectors-verification-code-help = 이 코드를 복사하여 { $service }에 입력하고 로그인을 완료하세요.
+
+connectors-setup-intro = 이 프로필에 { $service }을 연결합니다. 로그인을 안내해 드립니다. 연결 후 대화에서 선택하여 사용할 수 있습니다.
+connectors-setup-connected = { $service }이 연결되었습니다. 이제 대화에서 선택하여 사용할 수 있습니다.

@@ -290,8 +290,17 @@ fn publish(
         let Ok(manifest) = manifests.get(parent.parent()) else {
             continue;
         };
+        let catalog = vmux_feature::manifest::FeatureManifest::parse(
+            <crate::Feature as vmux_feature::manifest::FeatureManifestSource>::SOURCE,
+        );
+        let mut legacy_mcp = manifest.desired.mcp.clone();
+        legacy_mcp.servers.retain(|name, definition| {
+            !catalog.mcp_servers.iter().any(|server| {
+                server.id == *name && definition == &McpServerManifest::http(&server.url)
+            })
+        });
         let layer = McpLayerInput {
-            legacy: McpConfigFile::from_legacy(&manifest.desired.mcp),
+            legacy: McpConfigFile::from_legacy(&legacy_mcp),
             global: global.map(|config| config.0.clone()).unwrap_or_default(),
             ..Default::default()
         };

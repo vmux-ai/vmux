@@ -127,7 +127,8 @@ fn ready(
     let Ok(page) = pages.get(entity) else {
         return;
     };
-    let Some(route) = ToolRoute::parse(&page.url) else {
+    let url = page.url.split(['?', '#']).next().unwrap_or_default();
+    let Some(route) = ToolRoute::parse(url) else {
         return;
     };
     if let Ok(mut state) = states.get_mut(entity) {
@@ -165,7 +166,8 @@ fn navigate(
     let Ok(mut page) = pages.get_mut(entity) else {
         return;
     };
-    if ToolRoute::parse(&page.url).is_none() {
+    let url = page.url.split(['?', '#']).next().unwrap_or_default();
+    if ToolRoute::parse(url).is_none() {
         return;
     }
     if let Ok(mut state) = states.get_mut(entity) {
@@ -184,7 +186,8 @@ fn refresh(
     let Ok(page) = pages.get(trigger.event().webview) else {
         return;
     };
-    let Some(route) = ToolRoute::parse(&page.url) else {
+    let url = page.url.split(['?', '#']).next().unwrap_or_default();
+    let Some(route) = ToolRoute::parse(url) else {
         return;
     };
     let Ok((registry, store, mut sequence)) = registry.single_mut() else {

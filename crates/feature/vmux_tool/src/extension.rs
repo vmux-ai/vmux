@@ -7,8 +7,9 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
 use vmux_ui::components::manager::{
-    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerList, ManagerRow,
-    ManagerSkeleton, ManagerThumbnail, ManagerTone, ManagerToolbar,
+    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerCollection, ManagerEmpty,
+    ManagerItem, ManagerList, ManagerSkeleton, ManagerThumbnail, ManagerTone, ManagerToolbar,
+    ManagerView,
 };
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -37,7 +38,7 @@ impl From<&ExtRow> for Approval {
 }
 
 #[component]
-pub(crate) fn ExtensionManager(state: ExtensionsUiState) -> Element {
+pub(crate) fn ExtensionManager(state: ExtensionsUiState, view: ManagerView) -> Element {
     let installing = &state.installing;
 
     rsx! {
@@ -79,15 +80,17 @@ pub(crate) fn ExtensionManager(state: ExtensionsUiState) -> Element {
                     },
                 }
             }
-            for extension in state.visible.iter() {
-                ExtensionRow { extension: extension.clone() }
+            ManagerCollection { view,
+                for extension in state.visible.iter() {
+                    ExtensionRow { key: "{extension.id}", extension: extension.clone(), view }
+                }
             }
         }
     }
 }
 
 #[component]
-fn ExtensionRow(extension: ExtRow) -> Element {
+fn ExtensionRow(extension: ExtRow, view: ManagerView) -> Element {
     let item = extension;
     let toggle_id = item.id.clone();
     let toggle_enabled = item.enabled;
@@ -135,7 +138,8 @@ fn ExtensionRow(extension: ExtRow) -> Element {
                 }
             }
         }
-        ManagerRow {
+        ManagerItem {
+            view,
             icon: rsx! { ManagerThumbnail { src: icon, fallback: "EXT".to_string() } },
             title: item.name.clone(),
             subtitle: format!("v{}", item.version),

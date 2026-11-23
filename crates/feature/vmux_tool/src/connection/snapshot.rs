@@ -467,10 +467,26 @@ fn drain(
             && !refused
             && owned
             && result.0.as_ref().is_ok_and(|secret| {
-                secret
-                    .as_ref()
-                    .is_some_and(|secret| server.authorizes(&secret.0.resource))
+                secret.as_ref().is_some_and(|secret| {
+                    server.authorizes(&secret.0.resource)
+                        && (!secret.0.expires_soon()
+                            || secret
+                                .0
+                                .refresh_token
+                                .as_ref()
+                                .is_some_and(|token| !token.is_empty()))
+                })
             });
+        let account = if current && !refused {
+            result
+                .0
+                .as_ref()
+                .ok()
+                .and_then(|secret| secret.as_ref())
+                .and_then(|secret| secret.0.account.clone())
+        } else {
+            None
+        };
         commands.entity(entity).insert(SnapshotServerFacts {
             source_tick: server.last_changed(),
             facts: McpServerFacts {
@@ -478,6 +494,7 @@ fn drain(
                 owned,
                 authenticated,
                 readable: current && !refused && result.0.is_ok(),
+                account,
             },
         });
     }
@@ -739,6 +756,10 @@ mod tests {
                 .spawn((
                     Name::new("Linear"),
                     McpCatalogServer {
+                        setup_url: None,
+                        client_id: None,
+                        client_id_env: None,
+                        account_endpoint: None,
                         id: "linear".into(),
                         url: "https://mcp.linear.app/mcp".into(),
                         scopes: Vec::new(),
@@ -830,6 +851,7 @@ mod tests {
                     CredentialReadTask(IoTaskPool::get().spawn(async move {
                         let _guard = held.acquire_arc().await;
                         Ok(Some(SecretHandle(McpOauthCredentials {
+                            account: None,
                             resource,
                             client_secret: Some("test-client-secret".into()),
                             access_token: "test-access-token".into(),
@@ -883,6 +905,10 @@ mod tests {
             .spawn((
                 Name::new("Other"),
                 McpCatalogServer {
+                    setup_url: None,
+                    client_id: None,
+                    client_id_env: None,
+                    account_endpoint: None,
                     id: "other".into(),
                     url: "https://other.example/mcp".into(),
                     scopes: Vec::new(),
@@ -1072,6 +1098,7 @@ mod tests {
                     owned: false,
                     authenticated: false,
                     readable: false,
+                    account: None,
                 });
             match retirement {
                 "owner" => {
@@ -1118,6 +1145,10 @@ mod tests {
                 }
                 "catalog-add" => {
                     fixture.app.world_mut().spawn(McpCatalogServer {
+                        setup_url: None,
+                        client_id: None,
+                        client_id_env: None,
+                        account_endpoint: None,
                         id: "additional".into(),
                         url: "https://additional.example/mcp".into(),
                         scopes: Vec::new(),
@@ -1139,6 +1170,10 @@ mod tests {
                         .world_mut()
                         .entity_mut(fixture.server)
                         .insert(McpCatalogServer {
+                            setup_url: None,
+                            client_id: None,
+                            client_id_env: None,
+                            account_endpoint: None,
                             id: "replacement".into(),
                             url: "https://other.example/mcp".into(),
                             scopes: Vec::new(),

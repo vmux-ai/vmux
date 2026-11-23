@@ -606,6 +606,10 @@ mod tests {
             directory.path().join("home"),
         );
         let server = McpCatalogServer {
+            setup_url: None,
+            client_id: None,
+            client_id_env: None,
+            account_endpoint: None,
             id: "linear".into(),
             url: "https://mcp.linear.app/mcp".into(),
             scopes: Vec::new(),
@@ -723,6 +727,10 @@ mod tests {
         let catalog = app
             .world_mut()
             .spawn(McpCatalogServer {
+                setup_url: None,
+                client_id: None,
+                client_id_env: None,
+                account_endpoint: None,
                 id: "linear".into(),
                 url: "https://mcp.linear.app/mcp".into(),
                 scopes: Vec::new(),

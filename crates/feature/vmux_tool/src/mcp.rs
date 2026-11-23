@@ -63,6 +63,20 @@ pub struct McpServerManifest {
 }
 
 impl McpServerManifest {
+    pub(crate) fn http(url: &str) -> Self {
+        Self {
+            transport: McpTransport::Http,
+            command: None,
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            cwd: None,
+            url: Some(url.to_string()),
+            headers: BTreeMap::new(),
+            header_env: BTreeMap::new(),
+            bearer_token_env_var: None,
+        }
+    }
+
     pub(crate) fn description(&self, sources: &str, managed: bool, conflict: bool) -> String {
         let transport = format!("{:?}", self.transport).to_ascii_lowercase();
         if conflict {

@@ -14,6 +14,7 @@ impl Http {
     pub(super) fn new() -> Result<Self, String> {
         Client::builder()
             .timeout(Duration::from_secs(30))
+            .user_agent("Vmux")
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map(Self)
@@ -80,6 +81,59 @@ impl Http {
         }
         let endpoint = Self::https_url(endpoint, "OAuth token endpoint")?;
         Self::json(self.0.post(endpoint).form(&form).send())
+    }
+
+    pub(super) fn device_authorize(
+        &self,
+        endpoint: &str,
+        client_id: &str,
+        scope: &str,
+    ) -> Result<DeviceAuthorization, String> {
+        let endpoint = Self::https_url(endpoint, "device authorization endpoint")?;
+        Self::json(
+            self.0
+                .post(endpoint)
+                .header("Accept", "application/json")
+                .form(&[("client_id", client_id), ("scope", scope)])
+                .send(),
+        )
+    }
+
+    pub(super) fn device_token(
+        &self,
+        endpoint: &str,
+        client_id: &str,
+        device_code: &str,
+    ) -> Result<DeviceToken, String> {
+        let endpoint = Self::https_url(endpoint, "token endpoint")?;
+        let response = self
+            .0
+            .post(endpoint)
+            .header("Accept", "application/json")
+            .form(&[
+                ("client_id", client_id),
+                ("device_code", device_code),
+                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+            ])
+            .send()
+            .map_err(|error| error.to_string())?;
+        response.json().map_err(|error| error.to_string())
+    }
+
+    pub(super) fn account(
+        &self,
+        endpoint: &str,
+        access_token: &str,
+    ) -> Result<Option<String>, String> {
+        let endpoint = Self::https_url(endpoint, "account endpoint")?;
+        let value: serde_json::Value =
+            Self::json(self.0.get(endpoint).bearer_auth(access_token).send())?;
+        Ok(value
+            .get("preferred_username")
+            .or_else(|| value.get("login"))
+            .or_else(|| value.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string))
     }
 
     fn json<T: for<'de> Deserialize<'de>>(
@@ -219,9 +273,55 @@ pub(super) struct ProtectedResource {
 
 #[derive(Component, Clone, Deserialize)]
 pub(super) struct AuthorizationServer {
+    #[serde(default)]
+    pub(super) device_authorization_endpoint: Option<String>,
     pub(super) authorization_endpoint: String,
     pub(super) token_endpoint: String,
     pub(super) registration_endpoint: Option<String>,
+}
+
+#[derive(Component, Clone, Deserialize)]
+pub(super) struct DeviceAuthorization {
+    pub(super) device_code: String,
+    pub(super) user_code: String,
+    pub(super) verification_uri: String,
+    pub(super) expires_in: u64,
+    pub(super) interval: Option<u64>,
+}
+
+#[derive(Component, Clone, Deserialize)]
+pub(super) struct DeviceToken {
+    pub(super) access_token: Option<String>,
+    pub(super) refresh_token: Option<String>,
+    pub(super) expires_in: Option<u64>,
+    pub(super) scope: Option<String>,
+    pub(super) error: Option<String>,
+}
+
+impl DeviceToken {
+    pub(super) fn poll(self, interval: &mut u64) -> Result<Option<TokenResponse>, String> {
+        if let Some(access_token) = self.access_token {
+            if access_token.is_empty() {
+                return Err("Authentication returned an empty token".to_string());
+            }
+            return Ok(Some(TokenResponse {
+                access_token,
+                refresh_token: self.refresh_token,
+                expires_in: self.expires_in,
+                scope: self.scope,
+            }));
+        }
+        match self.error.as_deref() {
+            Some("authorization_pending") => Ok(None),
+            Some("slow_down") => {
+                *interval = interval.saturating_add(5);
+                Ok(None)
+            }
+            Some("access_denied") => Err("Authentication was denied".to_string()),
+            Some("expired_token") => Err("Authentication timed out".to_string()),
+            _ => Err("Authentication failed".to_string()),
+        }
+    }
 }
 
 #[derive(Serialize)]

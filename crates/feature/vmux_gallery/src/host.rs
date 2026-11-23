@@ -358,6 +358,8 @@ impl Preview {
             ("calendar", McpServerStatus::AuthenticationRequired),
         ] {
             examples.mcp.servers.push(McpServerEntry {
+                setup_url: None,
+                account: None,
                 id: id.into(),
                 name: id.into(),
                 description: format!("Example MCP server: {id}"),

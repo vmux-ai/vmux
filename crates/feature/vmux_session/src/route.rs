@@ -18,7 +18,9 @@ impl Route {
             let segments = route.path_segments().collect::<Vec<_>>();
             return match segments.as_slice() {
                 ["onboarding", "agent"]
-                    if route.query().is_none() && route.fragment().is_none() =>
+                    if route.fragment().is_none()
+                        && (route.query().is_none()
+                            || vmux_api::session::AgentSetupRoute::parse(url).is_some()) =>
                 {
                     Some(Self::Setup)
                 }

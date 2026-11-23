@@ -9,8 +9,8 @@ use vmux_ecs::agent::{
     AgentRequestRouteSet, CommandOrigin,
 };
 use vmux_ecs::browser::{
-    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
-    BrowserSnapshotRequest, BrowserSnapshotResponse,
+    BrowserNavigationSnapshotResponse, BrowserOpenRequest, BrowserScrollRequest,
+    BrowserScrollResponse, BrowserSnapshotRequest, BrowserSnapshotResponse,
 };
 use vmux_ecs::profile::Projects;
 use vmux_ecs::service::ServiceRequest;
@@ -78,13 +78,15 @@ impl Plugin for BrowserOpenPlugin {
         app.add_plugins(super::authentication::AuthenticationPlugin)
             .add_agent_request::<AgentOpenBrowser>()
             .add_message::<PageOpenRequest>()
+            .add_message::<BrowserOpenRequest>()
             .add_message::<OpenBesideRequest>()
             .add_message::<AgentCommandResponse>()
             .add_plugins(UiEventPlugin::<(OpenExternalBrowserRequest,)>::default())
             .add_observer(open_external)
             .add_systems(
                 Update,
-                open.in_set(vmux_ecs::agent::AgentRequestApplySet)
+                (open, open_from_page)
+                    .in_set(vmux_ecs::agent::AgentRequestApplySet)
                     .after(AgentRequestRouteSet),
             );
     }
@@ -503,6 +505,24 @@ impl OpenResolver<'_, '_> {
             self.focused.stack
         }
         .ok_or("browser source conversation is unavailable")?;
+        self.pane(stack)
+    }
+
+    fn page(&self, source: Entity) -> Result<(Entity, bool), String> {
+        let mut ancestor = source;
+        loop {
+            if self.stacks.contains(ancestor) {
+                return self.pane(ancestor);
+            }
+            ancestor = self
+                .parents
+                .get(ancestor)
+                .map_err(|_| "browser source page is unavailable")?
+                .parent();
+        }
+    }
+
+    fn pane(&self, stack: Entity) -> Result<(Entity, bool), String> {
         let pane = self
             .parents
             .get(stack)
@@ -636,6 +656,59 @@ fn open(
             }
             Err(error) => {
                 responses.write(request.reply.response(AgentCommandResult::Error(error)));
+            }
+        }
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct BrowserOpening<'w, 's> {
+    beside: MessageWriter<'w, OpenBesideRequest>,
+    pages: MessageWriter<'w, PageOpenRequest>,
+    commands: Commands<'w, 's>,
+}
+
+impl BrowserOpening<'_, '_> {
+    fn open(&mut self, target: (Entity, bool), url: String, request_id: [u8; 16]) {
+        let (pane, wide) = target;
+        if wide {
+            self.beside.write(OpenBesideRequest {
+                pane,
+                direction: Some(PaneDirection::Right),
+                url,
+                request_id,
+                focus: true,
+            });
+        } else {
+            let stack = self
+                .commands
+                .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                .id();
+            self.pages.write(PageOpenRequest {
+                target: PageOpenTarget::Stack(stack),
+                url,
+                request_id: None,
+            });
+            self.commands
+                .trigger(vmux_ecs::ActivateRequest { entity: stack });
+        }
+    }
+}
+
+fn open_from_page(
+    mut requests: MessageReader<BrowserOpenRequest>,
+    target: OpenResolver,
+    mut opening: BrowserOpening,
+) {
+    for request in requests.read() {
+        if let Err(error) = Url::parse(&request.url) {
+            bevy::log::warn!("browser page request refused: {error}");
+            continue;
+        }
+        match target.page(request.source) {
+            Ok(target) => opening.open(target, request.url.clone(), AgentRequestId::new().0),
+            Err(error) => {
+                bevy::log::warn!("browser page request refused: {error}");
             }
         }
     }
@@ -1089,10 +1162,13 @@ mod opening_tests {
 
     #[test]
     fn account_pages_preserve_the_source_and_choose_layout_from_logical_width() {
-        for (physical_width, inverse_scale, wide) in [
-            (2400.0, 0.5, true),
-            (1200.0, 0.5, false),
-            (600.0, 1.0, false),
+        for (physical_width, inverse_scale, wide, connector) in [
+            (2400.0, 0.5, true, false),
+            (1200.0, 0.5, false, false),
+            (600.0, 1.0, false, false),
+            (2400.0, 0.5, true, true),
+            (1200.0, 0.5, false, true),
+            (600.0, 1.0, false, true),
         ] {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_ecs::PrimitivesPlugin))
@@ -1114,7 +1190,11 @@ mod opening_tests {
                 })
                 .id();
             let source = "sign-in/source?draft#1";
-            let source_url = "vmux://start/onboarding/agent";
+            let source_url = if connector {
+                "vmux://tools/connectors/github/setup"
+            } else {
+                "vmux://start/onboarding/agent"
+            };
             let session = app
                 .world_mut()
                 .spawn((
@@ -1149,17 +1229,25 @@ mod opening_tests {
                 .local_bundle(),
             );
             let url = "https://example.test/auth?state=%2B%2F&challenge=a+b";
-            app.world_mut().write_message(AgentRequestMessage {
-                reply: AgentReply::new(AgentRequestId::new()),
-                origin: CommandOrigin::Agent {
-                    sid: None,
-                    anchor: None,
-                },
-                payload: AgentOpenBrowser {
+            if connector {
+                let view = app.world_mut().spawn(ChildOf(stack)).id();
+                app.world_mut().write_message(BrowserOpenRequest {
+                    source: view,
                     url: url.into(),
-                    source: Some(source.into()),
-                },
-            });
+                });
+            } else {
+                app.world_mut().write_message(AgentRequestMessage {
+                    reply: AgentReply::new(AgentRequestId::new()),
+                    origin: CommandOrigin::Agent {
+                        sid: None,
+                        anchor: None,
+                    },
+                    payload: AgentOpenBrowser {
+                        url: url.into(),
+                        source: Some(source.into()),
+                    },
+                });
+            }
             app.update();
             assert_eq!(
                 app.world()

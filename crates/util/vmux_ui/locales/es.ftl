@@ -1455,3 +1455,23 @@ common-resume = Reanudar
 onboarding-connection-choice = ¿Cómo quieres conectarte?
 onboarding-connect-description = Inicia sesión en la página que se abre.
 onboarding-use-key-description = Introduce una clave API en su lugar.
+connectors-title = Conectores
+connectors-description = Gestiona las cuentas conectadas y elige conectores desde una conversación.
+connectors-empty = No hay conectores disponibles
+connectors-sign-in-required = Se requiere iniciar sesión
+connectors-open-sign-in = Abrir inicio de sesión
+
+connectors-command-description = Elegir conectores para esta conversación
+connectors-use = Usar en el chat
+connectors-selected = Seleccionado · quitar
+connectors-manage = Gestionar conectores
+connectors-manage-access = Gestionar acceso a repositorios
+
+connectors-agent-configuration = Configuración del agente
+connectors-configured = Configurado
+connectors-open-in-app = Abrir en Vmux
+connectors-open-external = Abrir en navegador externo
+connectors-verification-code-help = Copia este código e introdúcelo en { $service } para completar el inicio de sesión.
+
+connectors-setup-intro = Conecta { $service } a este perfil. Te guiaré durante el inicio de sesión; después podrás elegirlo en tus conversaciones.
+connectors-setup-connected = { $service } está conectado. Ahora puedes elegirlo en una conversación.

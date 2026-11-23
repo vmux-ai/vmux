@@ -169,7 +169,7 @@ fn publish_state(trigger: On<ChatModelStateChanged>, mut commands: Commands) {
         },
         SlashCommandEntry {
             command: SlashCommand::Mcp,
-            description: vmux_ui::i18n::translate("mcp-command-description"),
+            description: vmux_ui::i18n::translate("connectors-command-description"),
             delegated: true,
         },
     ];

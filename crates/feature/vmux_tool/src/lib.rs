@@ -10,7 +10,9 @@ use bevy_ecs::system::Commands;
 #[cfg(host)]
 pub use cli::ToolCliPlugin;
 #[cfg(not(target_os = "ios"))]
-pub use connection::McpConnectionPlugin;
+pub use connection::{ConnectionSet, ConnectorConnectionCompleted, McpConnectionPlugin};
+#[cfg(all(host, not(target_os = "ios")))]
+pub use connector_tools::{ConnectorAccess, ConnectorToolPlugin};
 pub use dotfiles::*;
 pub use homebrew::*;
 pub use manifest::*;
@@ -53,6 +55,8 @@ pub mod __private {
 
 extern crate self as vmux_tool;
 
+pub const CONNECTORS_URL: &str = "vmux://tools/connectors";
+
 pub const EXTENSIONS_URL: &str = "vmux://tools/extensions";
 
 pub(crate) struct Feature;
@@ -71,6 +75,10 @@ mod cli;
 mod command_bar;
 #[cfg(not(target_os = "ios"))]
 mod connection;
+#[cfg(all(host, not(target_os = "ios")))]
+mod connector_tools;
+#[cfg(ui)]
+mod connectors;
 #[cfg(host)]
 mod dotfile_inventory;
 #[cfg(host)]
@@ -158,6 +166,8 @@ impl Plugin for ToolPlugin {
 
         #[cfg(all(host, ui))]
         app.add_plugins(host::ToolHostPlugin);
+        #[cfg(all(host, not(target_os = "ios")))]
+        app.add_plugins(ConnectorToolPlugin);
     }
 }
 

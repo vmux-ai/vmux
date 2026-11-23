@@ -698,6 +698,7 @@ mod tests {
             .store_credentials(
                 "linear-vmx",
                 &McpOauthCredentials {
+                    account: None,
                     token_endpoint: format!("{base}/token"),
                     client_id: "cid".into(),
                     client_secret: None,
@@ -820,6 +821,7 @@ mod tests {
             .store_credentials(
                 "sse-srv",
                 &McpOauthCredentials {
+                    account: None,
                     token_endpoint: format!("{base}/token"),
                     client_id: "cid".into(),
                     client_secret: None,

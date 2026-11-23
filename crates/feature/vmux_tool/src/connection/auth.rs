@@ -1,6 +1,6 @@
 use super::transport::{
-    AuthorizationServer, ClientRegistration, Http, McpCallback as CallbackListener,
-    ProtectedResource, TokenResponse,
+    AuthorizationServer, ClientRegistration, DeviceAuthorization, DeviceToken, Http,
+    McpCallback as CallbackListener, ProtectedResource, TokenResponse,
 };
 use super::{McpAuthorizationUrl, McpCatalogServer, McpCompletion, PendingMcpOperation};
 use crate::storage::{ReadRequest, ReadResult, StoreLease, WriteRequest, WriteResult};
@@ -12,6 +12,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
+use vmux_api::mcp::McpAuthorization;
 use vmux_ecs::profile::McpCredentials;
 use vmux_ecs::{EntityTarget, OperationCompleted};
 use vmux_profile::mcp_credentials::{McpCredentialTransaction, McpOauthCredentials};
@@ -29,6 +30,9 @@ impl Plugin for AuthPlugin {
                     poll::<ProtectedResource>,
                     poll::<AuthorizationServer>,
                     poll::<ClientRegistration>,
+                    poll::<DeviceAuthorization>,
+                    poll::<DeviceToken>,
+                    poll::<Account>,
                     poll::<Code>,
                     poll::<TokenResponse>,
                     poll::<StoreLease>,
@@ -41,24 +45,34 @@ impl Plugin for AuthPlugin {
             .add_systems(
                 Update,
                 (
-                    inspect,
-                    bind,
-                    client,
-                    protected,
-                    authorization,
-                    register,
-                    consent,
-                    callback,
-                    exchange,
-                    store_lock,
-                    credential_lock,
-                    original_manifest,
-                    original_credential,
-                    prepare_commit,
-                    credential_write,
-                    manifest_write,
-                    rollback,
-                    finish,
+                    (
+                        cancel_active,
+                        inspect,
+                        bind,
+                        client,
+                        protected,
+                        authorization,
+                        register,
+                        device_start,
+                        consent,
+                        callback,
+                        device_poll,
+                    )
+                        .chain(),
+                    (
+                        exchange,
+                        account,
+                        store_lock,
+                        credential_lock,
+                        original_manifest,
+                        original_credential,
+                        prepare_commit,
+                        credential_write,
+                        manifest_write,
+                        rollback,
+                        finish,
+                    )
+                        .chain(),
                 )
                     .chain()
                     .in_set(AuthSet),
@@ -71,6 +85,9 @@ pub(super) struct AuthSet;
 
 #[derive(Component)]
 pub(super) struct Active;
+
+#[derive(Component)]
+pub(super) struct Canceled;
 
 #[derive(Component, Clone)]
 pub(super) struct Credentials(pub(super) McpCredentials);
@@ -93,9 +110,12 @@ enum Phase {
     Protected,
     Authorization,
     Register,
+    DeviceStart,
     Consent,
     Callback,
+    DevicePoll,
     Exchange,
+    Account,
     StoreLock,
     CredentialLock,
     OriginalManifest,
@@ -106,6 +126,40 @@ enum Phase {
     CredentialRollback,
     ManifestRollback,
     Complete,
+}
+
+#[derive(Component)]
+struct DeviceState {
+    client_id: String,
+    device_code: String,
+    deadline: Instant,
+    interval: u64,
+    next_poll: Instant,
+}
+
+#[derive(Component, Clone)]
+struct Account(Option<String>);
+
+fn cancel_active(
+    requests: Query<(Entity, &PhaseState), (With<Active>, With<Canceled>, Without<Busy>)>,
+    mut commands: Commands,
+) {
+    for (entity, phase) in &requests {
+        if matches!(
+            phase.0,
+            Phase::CredentialWrite
+                | Phase::ManifestWrite
+                | Phase::CredentialRollback
+                | Phase::ManifestRollback
+                | Phase::Complete
+        ) {
+            continue;
+        }
+        commands.entity(entity).insert((
+            PrimaryFailure("Authentication cancelled".into()),
+            PhaseState(Phase::Complete),
+        ));
+    }
 }
 
 #[derive(Component)]
@@ -395,8 +449,13 @@ fn authorization(requests: AuthorizationRequests<'_, '_>, mut commands: Commands
                 .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
             continue;
         }
-        if result.is_some() {
-            commands.entity(entity).insert(PhaseState(Phase::Register));
+        if let Some(authorization) = result {
+            let next = if authorization.registration_endpoint.is_some() {
+                Phase::Register
+            } else {
+                Phase::DeviceStart
+            };
+            commands.entity(entity).insert(PhaseState(next));
             continue;
         }
         let Some(issuer) = protected.authorization_servers.first() else {
@@ -536,10 +595,173 @@ fn consent(requests: ConsentRequests<'_, '_>, mut commands: Commands) {
             CallbackState(state),
             McpAuthorizationUrl {
                 generation: source.generation,
-                url: url.to_string(),
+                authorization: McpAuthorization {
+                    url: url.to_string(),
+                    code: None,
+                },
             },
             PhaseState(Phase::Callback),
         ));
+    }
+}
+
+type DeviceStartRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static PhaseState,
+        &'static Source,
+        &'static Http,
+        &'static McpCatalogServer,
+        &'static AuthorizationServer,
+        Option<&'static DeviceAuthorization>,
+        Option<&'static Failed<DeviceAuthorization>>,
+    ),
+    (With<Active>, Without<Busy>),
+>;
+
+fn device_start(requests: DeviceStartRequests<'_, '_>, mut commands: Commands) {
+    for (entity, phase, source, http, server, authorization, result, error) in &requests {
+        if !matches!(phase.0, Phase::DeviceStart) {
+            continue;
+        }
+        if let Some(error) = error {
+            commands
+                .entity(entity)
+                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
+            continue;
+        }
+        let client_id = server
+            .client_id_env
+            .as_deref()
+            .and_then(|key| std::env::var(key).ok())
+            .or_else(|| server.client_id.clone())
+            .filter(|id| !id.trim().is_empty());
+        let Some(client_id) = client_id else {
+            commands.entity(entity).insert((
+                PrimaryFailure(
+                    "This connector has no registered OAuth client ID in this build".into(),
+                ),
+                PhaseState(Phase::Complete),
+            ));
+            continue;
+        };
+        if let Some(response) = result {
+            let url = match Http::https_url(&response.verification_uri, "verification URI") {
+                Ok(url) => url.to_string(),
+                Err(error) => {
+                    commands
+                        .entity(entity)
+                        .insert((PrimaryFailure(error), PhaseState(Phase::Complete)));
+                    continue;
+                }
+            };
+            let interval = response.interval.unwrap_or(5).max(1);
+            commands.entity(entity).insert((
+                ClientRegistration {
+                    client_id: client_id.clone(),
+                    client_secret: None,
+                },
+                DeviceState {
+                    client_id,
+                    device_code: response.device_code.clone(),
+                    deadline: Instant::now() + Duration::from_secs(response.expires_in.min(900)),
+                    interval,
+                    next_poll: Instant::now() + Duration::from_secs(interval),
+                },
+                McpAuthorizationUrl {
+                    generation: source.generation,
+                    authorization: McpAuthorization {
+                        url,
+                        code: Some(response.user_code.clone()),
+                    },
+                },
+                PhaseState(Phase::DevicePoll),
+            ));
+            continue;
+        }
+        let Some(endpoint) = authorization.device_authorization_endpoint.as_deref() else {
+            commands.entity(entity).insert((
+                PrimaryFailure("Authorization server does not support device flow".into()),
+                PhaseState(Phase::Complete),
+            ));
+            continue;
+        };
+        let http = http.clone();
+        let endpoint = endpoint.to_string();
+        let scope = server.scopes.join(" ");
+        let task = IoTaskPool::get()
+            .spawn(async move { http.device_authorize(&endpoint, &client_id, &scope) });
+        commands.entity(entity).insert((Busy, IoTask(task)));
+    }
+}
+
+type DevicePollRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static PhaseState,
+        &'static Http,
+        &'static AuthorizationServer,
+        &'static mut DeviceState,
+        Option<&'static DeviceToken>,
+        Option<&'static Failed<DeviceToken>>,
+    ),
+    (With<Active>, Without<Busy>),
+>;
+
+fn device_poll(mut requests: DevicePollRequests<'_, '_>, mut commands: Commands) {
+    for (entity, phase, http, authorization, mut device, result, error) in &mut requests {
+        if !matches!(phase.0, Phase::DevicePoll) {
+            continue;
+        }
+        if Instant::now() >= device.deadline {
+            commands.entity(entity).insert((
+                PrimaryFailure("Authentication timed out".into()),
+                PhaseState(Phase::Complete),
+            ));
+            continue;
+        }
+        if let Some(error) = error {
+            commands
+                .entity(entity)
+                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
+            continue;
+        }
+        if let Some(result) = result {
+            let mut interval = device.interval;
+            let polled = result.clone().poll(&mut interval);
+            commands.entity(entity).remove::<DeviceToken>();
+            match polled {
+                Ok(Some(token)) => {
+                    commands
+                        .entity(entity)
+                        .insert((token, PhaseState(Phase::Account)));
+                }
+                Ok(None) => {
+                    device.interval = interval;
+                    device.next_poll = Instant::now() + Duration::from_secs(interval);
+                }
+                Err(error) => {
+                    commands
+                        .entity(entity)
+                        .insert((PrimaryFailure(error), PhaseState(Phase::Complete)));
+                }
+            }
+            continue;
+        }
+        if Instant::now() < device.next_poll {
+            continue;
+        }
+        let http = http.clone();
+        let endpoint = authorization.token_endpoint.clone();
+        let client_id = device.client_id.clone();
+        let device_code = device.device_code.clone();
+        let task = IoTaskPool::get()
+            .spawn(async move { http.device_token(&endpoint, &client_id, &device_code) });
+        commands.entity(entity).insert((Busy, IoTask(task)));
     }
 }
 
@@ -650,7 +872,7 @@ fn exchange(requests: ExchangeRequests<'_, '_>, mut commands: Commands) {
                 .entity(entity)
                 .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
         } else if result.is_some() {
-            commands.entity(entity).insert(PhaseState(Phase::StoreLock));
+            commands.entity(entity).insert(PhaseState(Phase::Account));
         } else {
             let http = http.clone();
             let authorization = authorization.clone();
@@ -671,6 +893,51 @@ fn exchange(requests: ExchangeRequests<'_, '_>, mut commands: Commands) {
             });
             commands.entity(entity).insert((Busy, IoTask(task)));
         }
+    }
+}
+
+type AccountRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static PhaseState,
+        &'static Http,
+        &'static McpCatalogServer,
+        &'static TokenResponse,
+        Option<&'static Account>,
+        Option<&'static Failed<Account>>,
+    ),
+    (With<Active>, Without<Busy>),
+>;
+
+fn account(requests: AccountRequests<'_, '_>, mut commands: Commands) {
+    for (entity, phase, http, server, token, result, error) in &requests {
+        if !matches!(phase.0, Phase::Account) {
+            continue;
+        }
+        if let Some(error) = error {
+            warn!("Connector account lookup failed: {}", error.0);
+            commands
+                .entity(entity)
+                .insert((Account(None), PhaseState(Phase::StoreLock)));
+            continue;
+        }
+        if result.is_some() {
+            commands.entity(entity).insert(PhaseState(Phase::StoreLock));
+            continue;
+        }
+        let Some(endpoint) = server.account_endpoint.clone() else {
+            commands
+                .entity(entity)
+                .insert((Account(None), PhaseState(Phase::StoreLock)));
+            continue;
+        };
+        let http = http.clone();
+        let access_token = token.access_token.clone();
+        let task = IoTaskPool::get()
+            .spawn(async move { http.account(&endpoint, &access_token).map(Account) });
+        commands.entity(entity).insert((Busy, IoTask(task)));
     }
 }
 
@@ -853,6 +1120,7 @@ type PrepareCommitRequests<'w, 's> = Query<
         Option<&'static AuthorizationServer>,
         Option<&'static ClientRegistration>,
         Option<&'static TokenResponse>,
+        Option<&'static Account>,
     ),
     (With<Active>, Without<Busy>),
 >;
@@ -862,7 +1130,9 @@ fn prepare_commit(
     current: Query<Entity, With<McpCredentials>>,
     mut commands: Commands,
 ) {
-    for (entity, phase, source, server, original, authorization, registration, token) in &requests {
+    for (entity, phase, source, server, original, authorization, registration, token, account) in
+        &requests
+    {
         if !matches!(phase.0, Phase::Prepare) {
             continue;
         }
@@ -896,6 +1166,7 @@ fn prepare_commit(
         };
         commands.entity(entity).insert((
             ProposedCredential(McpOauthCredentials {
+                account: account.and_then(|account| account.0.clone()),
                 token_endpoint: authorization.token_endpoint.clone(),
                 client_id: registration.client_id.clone(),
                 client_secret: registration.client_secret.clone(),
@@ -1213,6 +1484,10 @@ mod tests {
             let server = app
                 .world_mut()
                 .spawn(McpCatalogServer {
+                    setup_url: None,
+                    client_id: None,
+                    client_id_env: None,
+                    account_endpoint: None,
                     id: "linear".into(),
                     url: "https://mcp.linear.app/mcp".into(),
                     scopes: Vec::new(),
@@ -1284,6 +1559,10 @@ mod tests {
         };
         let owner = app.world_mut().spawn(credentials.clone()).id();
         let server = McpCatalogServer {
+            setup_url: None,
+            client_id: None,
+            client_id_env: None,
+            account_endpoint: None,
             id: "linear".into(),
             url: "https://mcp.linear.app/mcp".into(),
             scopes: Vec::new(),
@@ -1313,6 +1592,7 @@ mod tests {
                 ),
                 OriginalManifest(Some(ToolsManifest::default())),
                 AuthorizationServer {
+                    device_authorization_endpoint: None,
                     authorization_endpoint: "https://auth.example/authorize".into(),
                     token_endpoint: "https://auth.example/token".into(),
                     registration_endpoint: None,
@@ -1357,6 +1637,10 @@ mod tests {
         let server = app
             .world_mut()
             .spawn(McpCatalogServer {
+                setup_url: None,
+                client_id: None,
+                client_id_env: None,
+                account_endpoint: None,
                 id: "linear".into(),
                 url: "https://mcp.linear.app/mcp".into(),
                 scopes: Vec::new(),
@@ -1434,6 +1718,10 @@ mod tests {
         let server = app
             .world_mut()
             .spawn(McpCatalogServer {
+                setup_url: None,
+                client_id: None,
+                client_id_env: None,
+                account_endpoint: None,
                 id: "linear".into(),
                 url: "https://mcp.linear.app/mcp".into(),
                 scopes: Vec::new(),
@@ -1515,6 +1803,10 @@ mod tests {
         let server = app
             .world_mut()
             .spawn(McpCatalogServer {
+                setup_url: None,
+                client_id: None,
+                client_id_env: None,
+                account_endpoint: None,
                 id: "linear".into(),
                 url: "https://mcp.linear.app/mcp".into(),
                 scopes: Vec::new(),
@@ -1569,7 +1861,7 @@ mod tests {
         original.mcp.servers.insert(
             "preserved".into(),
             super::super::McpServerManifest {
-                transport: super::super::McpTransport::Http,
+                transport: crate::McpTransport::Http,
                 command: None,
                 args: Vec::new(),
                 env: Default::default(),
@@ -1598,6 +1890,10 @@ mod tests {
         let server = app
             .world_mut()
             .spawn(McpCatalogServer {
+                setup_url: None,
+                client_id: None,
+                client_id_env: None,
+                account_endpoint: None,
                 id: "linear".into(),
                 url: "https://mcp.linear.app/mcp".into(),
                 scopes: Vec::new(),

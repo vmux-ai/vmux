@@ -16,7 +16,7 @@ mod format;
 
 #[vmux_page::page(
     component = Page,
-    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::state::ChatUiState, crate::state::SessionCatalogUiState, crate::state::SessionDetailUiState, crate::onboarding::OnboardingUiState, crate::onboarding::KeyEntryUiState, vmux_api::input::KeyClaimsUiState],
+    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::state::ChatUiState, crate::state::SessionCatalogUiState, crate::state::SessionDetailUiState, crate::onboarding::OnboardingUiState, crate::onboarding::KeyEntryUiState, vmux_api::input::KeyClaimsUiState, vmux_api::mcp::McpServersUiState],
     subtree,
     dom_group = "agent-conversation",
     preserve_title,
@@ -29,7 +29,7 @@ pub(crate) struct ChatPage;
 #[vmux_page::page(
     page = "agent-onboarding",
     component = Page,
-    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::state::ChatUiState, crate::state::SessionCatalogUiState, crate::state::SessionDetailUiState, crate::onboarding::OnboardingUiState, crate::onboarding::KeyEntryUiState, vmux_api::input::KeyClaimsUiState],
+    states = [vmux_api::address::PageAddressUiState, vmux_ui::theme::ThemeUiState, crate::state::ChatUiState, crate::state::SessionCatalogUiState, crate::state::SessionDetailUiState, crate::onboarding::OnboardingUiState, crate::onboarding::KeyEntryUiState, vmux_api::input::KeyClaimsUiState, vmux_api::mcp::McpServersUiState],
     document_url = "vmux://start/",
     dom_group = "agent-conversation",
     preserve_title,
@@ -41,6 +41,7 @@ pub(crate) struct AgentOnboardingPage;
 #[component]
 pub fn Page() -> Element {
     vmux_ui::hooks::use_theme();
+    vmux_ui::hooks::use_ui_state::<vmux_api::mcp::McpServersUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::ChatUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::SessionCatalogUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();

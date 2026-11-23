@@ -63,6 +63,9 @@ fn routes(
         }
     }
     categories
+        .entry("connectors".to_string())
+        .or_insert((translate("connectors-title"), 45));
+    categories
         .entry("extensions".to_string())
         .or_insert((translate("extensions-title"), 100));
     for (route, (label, rank)) in categories {
@@ -190,6 +193,7 @@ mod tests {
                 "lsp",
                 "homebrew",
                 "npm",
+                "connectors",
                 "mcp",
                 "dotfiles",
                 "extensions"
@@ -320,7 +324,10 @@ struct McpCommandBar(String);
 
 impl McpCommandBar {
     fn parse(query: &str) -> Option<&str> {
-        let rest = query.trim().strip_prefix("/mcp")?;
+        let query = query.trim();
+        let rest = query
+            .strip_prefix("/connectors")
+            .or_else(|| query.strip_prefix("/mcp"))?;
         if rest.is_empty() {
             return Some("");
         }
