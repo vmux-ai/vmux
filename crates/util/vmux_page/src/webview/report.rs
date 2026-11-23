@@ -311,22 +311,20 @@ mod tests {
         format!("1:1:{payload}")
     }
 
-    impl PageReport<'_> {
-        fn described(body: &str) -> String {
-            match PageReport::from(body) {
-                PageReport::Console { level, text } => format!("console {level} {text}"),
-                PageReport::Measured { token, measured } => match measured {
-                    Some([a, b, c, d]) => format!("measured {token} {a},{b},{c},{d}"),
-                    None => format!("measured {token} gone"),
-                },
-                PageReport::Link(href) => format!("link {href}"),
-                PageReport::Title(title) => format!("title {title}"),
-                PageReport::Favicon(href) => format!("favicon {href}"),
-                PageReport::Interaction => "interaction".to_string(),
-                PageReport::History(direction) => format!("history {direction:?}"),
-                PageReport::Emitted(payload) => format!("emitted {payload}"),
-                PageReport::Presented(revision) => format!("presented {revision}"),
-            }
+    fn described(body: &str) -> String {
+        match PageReport::from(body) {
+            PageReport::Console { level, text } => format!("console {level} {text}"),
+            PageReport::Measured { token, measured } => match measured {
+                Some([a, b, c, d]) => format!("measured {token} {a},{b},{c},{d}"),
+                None => format!("measured {token} gone"),
+            },
+            PageReport::Link(href) => format!("link {href}"),
+            PageReport::Title(title) => format!("title {title}"),
+            PageReport::Favicon(href) => format!("favicon {href}"),
+            PageReport::Interaction => "interaction".to_string(),
+            PageReport::History(direction) => format!("history {direction:?}"),
+            PageReport::Emitted(payload) => format!("emitted {payload}"),
+            PageReport::Presented(revision) => format!("presented {revision}"),
         }
     }
 
@@ -345,7 +343,7 @@ mod tests {
             "AAAA",
         ]
         .iter()
-        .map(|body| PageReport::described(body))
+        .map(|body| described(body))
         .collect();
 
         assert_eq!(

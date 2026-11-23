@@ -305,14 +305,14 @@ mod pool {
 
     impl SharedPool {
         pub fn attach_to(config: &WKWebViewConfiguration, marker: MainThreadMarker) {
+            thread_local! {
+                static POOL: OnceCell<Retained<WKProcessPool>> = const { OnceCell::new() };
+            }
+
             POOL.with(|pool| {
                 let shared = pool.get_or_init(|| unsafe { WKProcessPool::new(marker) });
                 unsafe { config.setProcessPool(shared) };
             });
         }
-    }
-
-    thread_local! {
-        static POOL: OnceCell<Retained<WKProcessPool>> = const { OnceCell::new() };
     }
 }

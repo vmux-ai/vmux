@@ -158,8 +158,7 @@ impl PagePlugin {
     fn track_reactive_dependency<C: Component>(app: &mut App) {
         Self::track_dependency::<C>(app);
         if !app.world().contains_resource::<ReactivePageDependency<C>>() {
-            app.insert_resource(ReactivePageDependency::<C>(std::marker::PhantomData))
-                .add_systems(First, mark_dependency_changed::<C>);
+            app.insert_resource(ReactivePageDependency::<C>(std::marker::PhantomData));
         }
     }
 
@@ -184,7 +183,11 @@ impl PagePlugin {
 impl<C: Component> Plugin for PageDependencyPlugin<C> {
     fn build(&self, app: &mut App) {
         app.add_observer(mark_dependency_added::<C>)
-            .add_observer(mark_dependency_removed::<C>);
+            .add_observer(mark_dependency_removed::<C>)
+            .add_systems(
+                First,
+                mark_dependency_changed::<C>.run_if(resource_exists::<ReactivePageDependency<C>>),
+            );
     }
 }
 
@@ -197,6 +200,7 @@ fn mark_dependency_removed<C: Component>(event: On<Remove, C>, mut commands: Com
 }
 
 fn mark_dependency_changed<C: Component>(
+    _reactive: Res<ReactivePageDependency<C>>,
     changed: Query<Entity, Changed<C>>,
     mut commands: Commands,
 ) {
@@ -222,10 +226,11 @@ mod tests {
         dioxus_core::VNode::empty()
     }
 
+    static TEST_PAGE: Page = Page::pane("vmux://test/", page);
+
     #[test]
     fn reactive_takes_tracks_context_changes_without_a_manual_revision() {
-        static PAGE: Page = Page::pane("vmux://test/", page);
-        let registration = PagePlugin::in_pane(&PAGE)
+        let registration = PagePlugin::in_pane(&TEST_PAGE)
             .takes_reactive::<Context>()
             .registration;
         let mut world = World::new();
@@ -250,21 +255,19 @@ mod tests {
 
     #[test]
     fn only_contextual_registrations_depend_on_archetype_changes() {
-        static PAGE: Page = Page::pane("vmux://test/", page);
-
         assert!(
-            !PagePlugin::in_pane(&PAGE)
+            !PagePlugin::in_pane(&TEST_PAGE)
                 .registration
                 .archetype_sensitive()
         );
         assert!(
-            PagePlugin::in_pane(&PAGE)
+            PagePlugin::in_pane(&TEST_PAGE)
                 .takes::<Context>()
                 .registration
                 .archetype_sensitive()
         );
         assert!(
-            PagePlugin::in_pane(&PAGE)
+            PagePlugin::in_pane(&TEST_PAGE)
                 .claims::<Claimed>()
                 .registration
                 .archetype_sensitive()
@@ -273,9 +276,8 @@ mod tests {
 
     #[test]
     fn reactive_dependency_marks_only_changed_entities_for_rediscovery() {
-        static PAGE: Page = Page::pane("vmux://test/", page);
         let mut app = App::new();
-        app.add_plugins(PagePlugin::in_pane(&PAGE).takes_reactive::<Context>());
+        app.add_plugins(PagePlugin::in_pane(&TEST_PAGE).takes_reactive::<Context>());
         let entity = app.world_mut().spawn(Context(1)).id();
 
         app.update();
@@ -292,11 +294,10 @@ mod tests {
 
     #[test]
     fn instance_and_claim_dependencies_are_both_installed() {
-        static PAGE: Page = Page::pane("vmux://test/", page);
         let mut app = App::new();
 
         app.add_plugins(
-            PagePlugin::in_pane(&PAGE)
+            PagePlugin::in_pane(&TEST_PAGE)
                 .takes_reactive::<Context>()
                 .claims::<Claimed>(),
         );
