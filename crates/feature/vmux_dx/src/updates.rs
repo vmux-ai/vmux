@@ -18,8 +18,54 @@ pub struct UpdatesPlugin;
 
 impl bevy_app::Plugin for UpdatesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<Receipt>()
-            .add_systems(Update, (accept, receive, collect, select, start).chain());
+        app.add_message::<StepFailed>()
+            .add_message::<Inspected>()
+            .add_message::<Saved>()
+            .add_message::<CheckedManifest>()
+            .add_message::<Downloaded>()
+            .add_message::<PublishedArtifact>()
+            .add_message::<HandedOffProcess>()
+            .add_systems(
+                Update,
+                (
+                    accept,
+                    (
+                        receive_inspect,
+                        receive_save,
+                        receive_check,
+                        receive_download,
+                        receive_publish,
+                        receive_handoff,
+                    ),
+                    (
+                        apply_failed,
+                        apply_inspected,
+                        apply_saved,
+                        apply_checked,
+                        apply_downloaded,
+                        apply_published,
+                        apply_handed_off,
+                    )
+                        .chain(),
+                    select,
+                    select_release,
+                    (
+                        start_inspect,
+                        ApplyDeferred,
+                        start_save,
+                        ApplyDeferred,
+                        start_check,
+                        ApplyDeferred,
+                        start_download,
+                        ApplyDeferred,
+                        start_publish,
+                        ApplyDeferred,
+                        start_handoff,
+                    )
+                        .chain(),
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -187,74 +233,137 @@ struct Attempt(u64);
 #[derive(Component)]
 struct HandedOff(u8);
 
-#[derive(Component, Clone)]
-enum Step {
-    Inspect(bool),
-    Save(Preferences),
-    Check(Channel),
-    Download(String, Download),
-    Publish(Verified),
-    Handoff(Published),
-}
+#[derive(Component)]
+struct ActiveStep;
 
-impl Step {
-    fn execute(&self, installation: &Installation) -> Result<Completion> {
-        Signals::check()?;
-        match self {
-            Self::Inspect(nonblocking) => {
-                let Some(lease) = installation.lock(*nonblocking)? else {
-                    return Ok(Completion::Busy);
-                };
-                let lease = Arc::new(lease);
-                let preferences = installation.load()?;
-                Ok(Completion::Inspected(preferences, lease))
-            }
-            Self::Save(preferences) => {
-                installation.save(preferences)?;
-                Ok(Completion::Saved)
-            }
-            Self::Check(channel) => Ok(Completion::Checked(installation.check(*channel)?)),
-            Self::Download(version, download) => Ok(Completion::Downloaded(
-                installation.download(version, download)?,
-            )),
-            Self::Publish(verified) => Ok(Completion::Published(installation.publish(verified)?)),
-            Self::Handoff(published) => Ok(Completion::HandedOff(installation.handoff(published)?)),
-        }
-    }
-
-    fn bundle(self, parent: Entity) -> impl Bundle {
+impl ActiveStep {
+    fn bundle<S: Component>(parent: Entity, step: S) -> impl Bundle {
         (
             ChildOf(parent),
             Name::new("CLI update step"),
             CreatedAt::now(),
             OperationState::Running,
             Attempt(0),
-            self,
+            ActiveStep,
+            step,
         )
     }
 }
 
-enum Completion {
-    Busy,
-    Inspected(Preferences, Arc<Guard>),
-    Saved,
-    Checked(Manifest),
-    Downloaded(Verified),
-    Published(Published),
-    HandedOff(u8),
+#[derive(Component)]
+struct ActiveRunning;
+
+#[derive(Component, Clone)]
+struct InspectStep(bool);
+
+#[derive(Component, Clone)]
+struct SaveStep(Preferences);
+
+#[derive(Component, Clone)]
+struct CheckStep(Channel);
+
+#[derive(Component, Clone)]
+struct DownloadStep {
+    version: String,
+    download: Download,
 }
 
+#[derive(Component, Clone)]
+struct PublishStep(Verified);
+
+#[derive(Component, Clone)]
+struct HandoffStep(Published);
+
 #[derive(Component)]
-struct Running {
+struct Running<T: Send + 'static> {
     attempt: u64,
-    receiver: Mutex<mpsc::Receiver<std::result::Result<Completion, Failure>>>,
+    receiver: Mutex<mpsc::Receiver<std::result::Result<T, Failure>>>,
+}
+
+impl<T: Send + 'static> Running<T> {
+    fn spawn(
+        attempt: u64,
+        lease: Option<Arc<Guard>>,
+        work: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> (Self, ActiveRunning) {
+        let wake = thread::current();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        thread::spawn(move || {
+            let _lease = lease;
+            let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)) {
+                Ok(result) => result.map_err(Failure::from_error),
+                Err(_) => Err(Failure::message("CLI update worker panicked")),
+            };
+            let _ = sender.send(result);
+            wake.unpark();
+        });
+        (
+            Self {
+                attempt,
+                receiver: Mutex::new(receiver),
+            },
+            ActiveRunning,
+        )
+    }
+
+    fn poll(&self) -> Option<std::result::Result<T, Failure>> {
+        let receiver = self.receiver.lock().unwrap();
+        match receiver.try_recv() {
+            Ok(result) => Some(result),
+            Err(mpsc::TryRecvError::Disconnected) => {
+                Some(Err(Failure::message("CLI update worker disconnected")))
+            }
+            Err(mpsc::TryRecvError::Empty) => None,
+        }
+    }
 }
 
 #[derive(Message)]
-struct Receipt {
+struct StepFailed {
     entity: Entity,
     attempt: u64,
-    result: std::result::Result<Completion, Failure>,
+    error: Failure,
+}
+
+#[derive(Message)]
+struct Inspected {
+    entity: Entity,
+    attempt: u64,
+    outcome: Option<(Preferences, Arc<Guard>)>,
+}
+
+#[derive(Message)]
+struct Saved {
+    entity: Entity,
+    attempt: u64,
+}
+
+#[derive(Message)]
+struct CheckedManifest {
+    entity: Entity,
+    attempt: u64,
+    manifest: Manifest,
+}
+
+#[derive(Message)]
+struct Downloaded {
+    entity: Entity,
+    attempt: u64,
+    verified: Verified,
+}
+
+#[derive(Message)]
+struct PublishedArtifact {
+    entity: Entity,
+    attempt: u64,
+    published: Published,
+}
+
+#[derive(Message)]
+struct HandedOffProcess {
+    entity: Entity,
+    attempt: u64,
+    code: u8,
 }
 
 type Incoming<'w, 's> =
@@ -276,6 +385,23 @@ type Selection<'w, 's> = Query<
         Option<&'static Children>,
         Option<&'static Checked>,
         Option<&'static Release>,
+    ),
+    Without<CliResult>,
+>;
+type ActiveSteps<'w, 's> = Query<'w, 's, (&'static ChildOf, &'static Attempt), With<ActiveRunning>>;
+type ActiveInstallations<'w, 's> =
+    Query<'w, 's, (&'static Installation, Option<&'static Lease>), Without<CliResult>>;
+type InspectRunning<'w, 's> =
+    Query<'w, 's, (Entity, &'static Running<Option<(Preferences, Arc<Guard>)>>)>;
+type ReleaseSelection<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Request,
+        &'static Installation,
+        &'static Release,
+        Option<&'static Children>,
     ),
     Without<CliResult>,
 >;
@@ -336,14 +462,14 @@ fn accept(
             CreatedAt::now(),
             installation,
         ));
-        commands.spawn(Step::Inspect(request.automatic).bundle(entity));
+        commands.spawn(ActiveStep::bundle(entity, InspectStep(request.automatic)));
     }
 }
 
-fn start(
-    pending: Query<(Entity, &Step, &ChildOf, &Attempt), Without<Running>>,
-    installations: Query<(&Installation, Option<&Lease>), Without<CliResult>>,
-    running: Query<Entity, With<Running>>,
+fn start_inspect(
+    pending: Query<(Entity, &InspectStep, &ChildOf, &Attempt), Without<ActiveRunning>>,
+    installations: ActiveInstallations,
+    running: Query<Entity, With<ActiveRunning>>,
     mut commands: Commands,
 ) {
     if !running.is_empty() {
@@ -355,55 +481,312 @@ fn start(
         };
         let installation = installation.clone();
         let lease = lease.map(|lease| lease.0.clone());
-        let step = step.clone();
-        let wake = thread::current();
-        let (sender, receiver) = mpsc::sync_channel(1);
-        commands.entity(entity).insert(Running {
-            attempt: attempt.0,
-            receiver: Mutex::new(receiver),
-        });
-        thread::spawn(move || {
-            let _lease = lease;
-            let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                step.execute(&installation)
-            })) {
-                Ok(result) => result.map_err(Failure::from_error),
-                Err(_) => Err(Failure::message("CLI update worker panicked")),
-            };
-            let _ = sender.send(result);
-            wake.unpark();
-        });
+        let nonblocking = step.0;
+        commands
+            .entity(entity)
+            .insert(Running::spawn(attempt.0, lease, move || {
+                Signals::check()?;
+                let Some(lease) = installation.lock(nonblocking)? else {
+                    return Ok(None);
+                };
+                let lease = Arc::new(lease);
+                let preferences = installation.load()?;
+                Ok(Some((preferences, lease)))
+            }));
         break;
     }
 }
 
-fn receive(running: Query<(Entity, &Running)>, mut receipts: MessageWriter<Receipt>) {
+fn start_save(
+    pending: Query<(Entity, &SaveStep, &ChildOf, &Attempt), Without<ActiveRunning>>,
+    installations: ActiveInstallations,
+    running: Query<Entity, With<ActiveRunning>>,
+    mut commands: Commands,
+) {
+    if !running.is_empty() {
+        return;
+    }
+    for (entity, step, parent, attempt) in &pending {
+        let Ok((installation, lease)) = installations.get(parent.parent()) else {
+            continue;
+        };
+        let installation = installation.clone();
+        let lease = lease.map(|lease| lease.0.clone());
+        let preferences = step.0.clone();
+        commands
+            .entity(entity)
+            .insert(Running::spawn(attempt.0, lease, move || {
+                Signals::check()?;
+                installation.save(&preferences)
+            }));
+        break;
+    }
+}
+
+fn start_check(
+    pending: Query<(Entity, &CheckStep, &ChildOf, &Attempt), Without<ActiveRunning>>,
+    installations: ActiveInstallations,
+    running: Query<Entity, With<ActiveRunning>>,
+    mut commands: Commands,
+) {
+    if !running.is_empty() {
+        return;
+    }
+    for (entity, step, parent, attempt) in &pending {
+        let Ok((installation, lease)) = installations.get(parent.parent()) else {
+            continue;
+        };
+        let installation = installation.clone();
+        let lease = lease.map(|lease| lease.0.clone());
+        let channel = step.0;
+        commands
+            .entity(entity)
+            .insert(Running::spawn(attempt.0, lease, move || {
+                Signals::check()?;
+                installation.check(channel)
+            }));
+        break;
+    }
+}
+
+fn start_download(
+    pending: Query<(Entity, &DownloadStep, &ChildOf, &Attempt), Without<ActiveRunning>>,
+    installations: ActiveInstallations,
+    running: Query<Entity, With<ActiveRunning>>,
+    mut commands: Commands,
+) {
+    if !running.is_empty() {
+        return;
+    }
+    for (entity, step, parent, attempt) in &pending {
+        let Ok((installation, lease)) = installations.get(parent.parent()) else {
+            continue;
+        };
+        let installation = installation.clone();
+        let lease = lease.map(|lease| lease.0.clone());
+        let version = step.version.clone();
+        let download = step.download.clone();
+        commands
+            .entity(entity)
+            .insert(Running::spawn(attempt.0, lease, move || {
+                Signals::check()?;
+                installation.download(&version, &download)
+            }));
+        break;
+    }
+}
+
+fn start_publish(
+    pending: Query<(Entity, &PublishStep, &ChildOf, &Attempt), Without<ActiveRunning>>,
+    installations: ActiveInstallations,
+    running: Query<Entity, With<ActiveRunning>>,
+    mut commands: Commands,
+) {
+    if !running.is_empty() {
+        return;
+    }
+    for (entity, step, parent, attempt) in &pending {
+        let Ok((installation, lease)) = installations.get(parent.parent()) else {
+            continue;
+        };
+        let installation = installation.clone();
+        let lease = lease.map(|lease| lease.0.clone());
+        let verified = step.0.clone();
+        commands
+            .entity(entity)
+            .insert(Running::spawn(attempt.0, lease, move || {
+                Signals::check()?;
+                installation.publish(&verified)
+            }));
+        break;
+    }
+}
+
+fn start_handoff(
+    pending: Query<(Entity, &HandoffStep, &ChildOf, &Attempt), Without<ActiveRunning>>,
+    installations: ActiveInstallations,
+    running: Query<Entity, With<ActiveRunning>>,
+    mut commands: Commands,
+) {
+    if !running.is_empty() {
+        return;
+    }
+    for (entity, step, parent, attempt) in &pending {
+        let Ok((installation, lease)) = installations.get(parent.parent()) else {
+            continue;
+        };
+        let installation = installation.clone();
+        let lease = lease.map(|lease| lease.0.clone());
+        let published = step.0.clone();
+        commands
+            .entity(entity)
+            .insert(Running::spawn(attempt.0, lease, move || {
+                Signals::check()?;
+                installation.handoff(&published)
+            }));
+        break;
+    }
+}
+
+fn receive_inspect(
+    running: InspectRunning,
+    mut ok: MessageWriter<Inspected>,
+    mut failed: MessageWriter<StepFailed>,
+) {
     for (entity, running) in &running {
-        let receiver = running.receiver.lock().unwrap();
-        match receiver.try_recv() {
-            Ok(result) => {
-                receipts.write(Receipt {
+        match running.poll() {
+            Some(Ok(outcome)) => {
+                ok.write(Inspected {
                     entity,
                     attempt: running.attempt,
-                    result,
+                    outcome,
                 });
             }
-            Err(mpsc::TryRecvError::Disconnected) => {
-                receipts.write(Receipt {
+            Some(Err(error)) => {
+                failed.write(StepFailed {
                     entity,
                     attempt: running.attempt,
-                    result: Err(Failure::message("CLI update worker disconnected")),
+                    error,
                 });
             }
-            Err(mpsc::TryRecvError::Empty) => {}
+            None => {}
         }
     }
 }
 
-fn collect(
-    mut receipts: MessageReader<Receipt>,
-    steps: Query<(&ChildOf, &Attempt), With<Running>>,
-    operations: Query<(&Request, &Installation, Option<&CheckAfterSave>), Without<CliResult>>,
+fn receive_save(
+    running: Query<(Entity, &Running<()>)>,
+    mut ok: MessageWriter<Saved>,
+    mut failed: MessageWriter<StepFailed>,
+) {
+    for (entity, running) in &running {
+        match running.poll() {
+            Some(Ok(())) => {
+                ok.write(Saved {
+                    entity,
+                    attempt: running.attempt,
+                });
+            }
+            Some(Err(error)) => {
+                failed.write(StepFailed {
+                    entity,
+                    attempt: running.attempt,
+                    error,
+                });
+            }
+            None => {}
+        }
+    }
+}
+
+fn receive_check(
+    running: Query<(Entity, &Running<Manifest>)>,
+    mut ok: MessageWriter<CheckedManifest>,
+    mut failed: MessageWriter<StepFailed>,
+) {
+    for (entity, running) in &running {
+        match running.poll() {
+            Some(Ok(manifest)) => {
+                ok.write(CheckedManifest {
+                    entity,
+                    attempt: running.attempt,
+                    manifest,
+                });
+            }
+            Some(Err(error)) => {
+                failed.write(StepFailed {
+                    entity,
+                    attempt: running.attempt,
+                    error,
+                });
+            }
+            None => {}
+        }
+    }
+}
+
+fn receive_download(
+    running: Query<(Entity, &Running<Verified>)>,
+    mut ok: MessageWriter<Downloaded>,
+    mut failed: MessageWriter<StepFailed>,
+) {
+    for (entity, running) in &running {
+        match running.poll() {
+            Some(Ok(verified)) => {
+                ok.write(Downloaded {
+                    entity,
+                    attempt: running.attempt,
+                    verified,
+                });
+            }
+            Some(Err(error)) => {
+                failed.write(StepFailed {
+                    entity,
+                    attempt: running.attempt,
+                    error,
+                });
+            }
+            None => {}
+        }
+    }
+}
+
+fn receive_publish(
+    running: Query<(Entity, &Running<Published>)>,
+    mut ok: MessageWriter<PublishedArtifact>,
+    mut failed: MessageWriter<StepFailed>,
+) {
+    for (entity, running) in &running {
+        match running.poll() {
+            Some(Ok(published)) => {
+                ok.write(PublishedArtifact {
+                    entity,
+                    attempt: running.attempt,
+                    published,
+                });
+            }
+            Some(Err(error)) => {
+                failed.write(StepFailed {
+                    entity,
+                    attempt: running.attempt,
+                    error,
+                });
+            }
+            None => {}
+        }
+    }
+}
+
+fn receive_handoff(
+    running: Query<(Entity, &Running<u8>)>,
+    mut ok: MessageWriter<HandedOffProcess>,
+    mut failed: MessageWriter<StepFailed>,
+) {
+    for (entity, running) in &running {
+        match running.poll() {
+            Some(Ok(code)) => {
+                ok.write(HandedOffProcess {
+                    entity,
+                    attempt: running.attempt,
+                    code,
+                });
+            }
+            Some(Err(error)) => {
+                failed.write(StepFailed {
+                    entity,
+                    attempt: running.attempt,
+                    error,
+                });
+            }
+            None => {}
+        }
+    }
+}
+
+fn apply_failed(
+    mut receipts: MessageReader<StepFailed>,
+    steps: ActiveSteps,
+    operations: Query<Entity, (With<Request>, Without<CliResult>)>,
     mut commands: Commands,
 ) {
     for receipt in receipts.read() {
@@ -414,178 +797,307 @@ fn collect(
             continue;
         }
         let entity = parent.parent();
-        let Ok((request, _installation, next)) = operations.get(entity) else {
+        if !operations.contains(entity) {
+            continue;
+        }
+        commands.entity(receipt.entity).despawn();
+        eprintln!("CLI update failed: {}", receipt.error);
+        let state = if Signals::pending().is_some() {
+            OperationState::Canceled
+        } else {
+            OperationState::Failed
+        };
+        commands
+            .entity(entity)
+            .insert((state, CliResult(Ok(receipt.error.code() as u8))))
+            .remove::<Lease>();
+    }
+}
+
+fn apply_inspected(
+    mut receipts: MessageReader<Inspected>,
+    steps: ActiveSteps,
+    operations: Query<Entity, (With<Request>, Without<CliResult>)>,
+    mut commands: Commands,
+) {
+    for receipt in receipts.read() {
+        let Ok((parent, attempt)) = steps.get(receipt.entity) else {
             continue;
         };
+        if attempt.0 != receipt.attempt {
+            continue;
+        }
+        let entity = parent.parent();
+        if !operations.contains(entity) {
+            continue;
+        }
         commands.entity(receipt.entity).despawn();
-        match &receipt.result {
-            Err(error) => {
-                eprintln!("CLI update failed: {error}");
-                let state = if Signals::pending().is_some() {
-                    OperationState::Canceled
-                } else {
-                    OperationState::Failed
-                };
-                commands
-                    .entity(entity)
-                    .insert((state, CliResult(Ok(error.code() as u8))))
-                    .remove::<Lease>();
-            }
-            Ok(Completion::Busy) => {
+        match &receipt.outcome {
+            None => {
                 commands
                     .entity(entity)
                     .insert((OperationState::Succeeded, CliResult::default()));
             }
-            Ok(Completion::Inspected(preferences, lease)) => {
+            Some((preferences, lease)) => {
                 commands
                     .entity(entity)
                     .insert((preferences.clone(), Lease(lease.clone())));
-            }
-            Ok(Completion::Saved) => {
-                if next.is_some() {
-                    commands
-                        .entity(entity)
-                        .remove::<CheckAfterSave>()
-                        .insert(Checked);
-                } else {
-                    println!("CLI update preferences saved");
-                    commands
-                        .entity(entity)
-                        .insert((OperationState::Succeeded, CliResult::default()))
-                        .remove::<Lease>();
-                }
-            }
-            Ok(Completion::Checked(manifest)) => {
-                commands.entity(entity).insert(Release {
-                    version: manifest.version.clone(),
-                });
-                for (platform, download) in &manifest.cli {
-                    commands.spawn((
-                        ChildOf(entity),
-                        Name::new(platform.clone()),
-                        CreatedAt::now(),
-                        download.clone(),
-                    ));
-                }
-            }
-            Ok(Completion::Downloaded(verified)) => {
-                commands.spawn(Step::Publish(verified.clone()).bundle(entity));
-            }
-            Ok(Completion::Published(published)) => {
-                if request.automatic {
-                    eprintln!("CLI {} installed", published.version());
-                } else {
-                    println!("CLI {} installed", published.version());
-                }
-                if request.automatic {
-                    commands.entity(entity).remove::<Lease>();
-                    commands.spawn(Step::Handoff(published.clone()).bundle(entity));
-                } else {
-                    if let Err(error) = published.complete() {
-                        eprintln!("CLI update backup retained: {error}");
-                    }
-                    commands
-                        .entity(entity)
-                        .insert((OperationState::Succeeded, CliResult::default()))
-                        .remove::<Lease>();
-                    commands.spawn((
-                        ChildOf(entity),
-                        Name::new("Standalone CLI"),
-                        CreatedAt::now(),
-                        crate::Artifact(published.executable().to_path_buf()),
-                        vmux_ecs::Ready,
-                    ));
-                }
-            }
-            Ok(Completion::HandedOff(code)) => {
-                commands.entity(entity).insert((
-                    HandedOff(*code),
-                    if *code == 0 {
-                        OperationState::Succeeded
-                    } else {
-                        OperationState::Failed
-                    },
-                    CliResult(Ok(*code)),
-                ));
             }
         }
     }
 }
 
-fn select(
-    operations: Selection,
-    steps: Query<Entity, With<Step>>,
+fn apply_saved(
+    mut receipts: MessageReader<Saved>,
+    steps: ActiveSteps,
+    operations: Query<Option<&CheckAfterSave>, (With<Request>, Without<CliResult>)>,
+    mut commands: Commands,
+) {
+    for receipt in receipts.read() {
+        let Ok((parent, attempt)) = steps.get(receipt.entity) else {
+            continue;
+        };
+        if attempt.0 != receipt.attempt {
+            continue;
+        }
+        let entity = parent.parent();
+        let Ok(next) = operations.get(entity) else {
+            continue;
+        };
+        commands.entity(receipt.entity).despawn();
+        if next.is_some() {
+            commands
+                .entity(entity)
+                .remove::<CheckAfterSave>()
+                .insert(Checked);
+        } else {
+            println!("CLI update preferences saved");
+            commands
+                .entity(entity)
+                .insert((OperationState::Succeeded, CliResult::default()))
+                .remove::<Lease>();
+        }
+    }
+}
+
+fn apply_checked(
+    mut receipts: MessageReader<CheckedManifest>,
+    steps: ActiveSteps,
+    operations: Query<Entity, (With<Request>, Without<CliResult>)>,
+    mut commands: Commands,
+) {
+    for receipt in receipts.read() {
+        let Ok((parent, attempt)) = steps.get(receipt.entity) else {
+            continue;
+        };
+        if attempt.0 != receipt.attempt {
+            continue;
+        }
+        let entity = parent.parent();
+        if !operations.contains(entity) {
+            continue;
+        }
+        commands.entity(receipt.entity).despawn();
+        commands.entity(entity).insert(Release {
+            version: receipt.manifest.version.clone(),
+        });
+        for (platform, download) in &receipt.manifest.cli {
+            commands.spawn((
+                ChildOf(entity),
+                Name::new(platform.clone()),
+                CreatedAt::now(),
+                download.clone(),
+            ));
+        }
+    }
+}
+
+fn apply_downloaded(
+    mut receipts: MessageReader<Downloaded>,
+    steps: ActiveSteps,
+    operations: Query<Entity, (With<Request>, Without<CliResult>)>,
+    mut commands: Commands,
+) {
+    for receipt in receipts.read() {
+        let Ok((parent, attempt)) = steps.get(receipt.entity) else {
+            continue;
+        };
+        if attempt.0 != receipt.attempt {
+            continue;
+        }
+        let entity = parent.parent();
+        if !operations.contains(entity) {
+            continue;
+        }
+        commands.entity(receipt.entity).despawn();
+        commands.spawn(ActiveStep::bundle(
+            entity,
+            PublishStep(receipt.verified.clone()),
+        ));
+    }
+}
+
+fn apply_published(
+    mut receipts: MessageReader<PublishedArtifact>,
+    steps: ActiveSteps,
+    operations: Query<&Request, Without<CliResult>>,
+    mut commands: Commands,
+) {
+    for receipt in receipts.read() {
+        let Ok((parent, attempt)) = steps.get(receipt.entity) else {
+            continue;
+        };
+        if attempt.0 != receipt.attempt {
+            continue;
+        }
+        let entity = parent.parent();
+        let Ok(request) = operations.get(entity) else {
+            continue;
+        };
+        commands.entity(receipt.entity).despawn();
+        if request.automatic {
+            eprintln!("CLI {} installed", receipt.published.version());
+            commands.entity(entity).remove::<Lease>();
+            commands.spawn(ActiveStep::bundle(
+                entity,
+                HandoffStep(receipt.published.clone()),
+            ));
+        } else {
+            println!("CLI {} installed", receipt.published.version());
+            if let Err(error) = receipt.published.complete() {
+                eprintln!("CLI update backup retained: {error}");
+            }
+            commands
+                .entity(entity)
+                .insert((OperationState::Succeeded, CliResult::default()))
+                .remove::<Lease>();
+            commands.spawn((
+                ChildOf(entity),
+                Name::new("Standalone CLI"),
+                CreatedAt::now(),
+                crate::Artifact(receipt.published.executable().to_path_buf()),
+                vmux_ecs::Ready,
+            ));
+        }
+    }
+}
+
+fn apply_handed_off(
+    mut receipts: MessageReader<HandedOffProcess>,
+    steps: ActiveSteps,
+    operations: Query<Entity, (With<Request>, Without<CliResult>)>,
+    mut commands: Commands,
+) {
+    for receipt in receipts.read() {
+        let Ok((parent, attempt)) = steps.get(receipt.entity) else {
+            continue;
+        };
+        if attempt.0 != receipt.attempt {
+            continue;
+        }
+        let entity = parent.parent();
+        if !operations.contains(entity) {
+            continue;
+        }
+        commands.entity(receipt.entity).despawn();
+        commands.entity(entity).insert((
+            HandedOff(receipt.code),
+            if receipt.code == 0 {
+                OperationState::Succeeded
+            } else {
+                OperationState::Failed
+            },
+            CliResult(Ok(receipt.code)),
+        ));
+    }
+}
+
+fn select_release(
+    operations: ReleaseSelection,
+    steps: Query<Entity, With<ActiveStep>>,
     downloads: Query<(&Name, &Download, &ChildOf)>,
     mut commands: Commands,
 ) {
-    for (entity, request, installation, preferences, children, checked, release) in &operations {
+    for (entity, request, installation, release, children) in &operations {
         if children.is_some_and(|children| children.iter().any(|child| steps.contains(child))) {
             continue;
         }
-        if let Some(release) = release {
-            let available =
-                match release.available(&installation.version, request.channel.is_some()) {
-                    Ok(available) => available,
-                    Err(error) => {
-                        commands
-                            .entity(entity)
-                            .insert((OperationState::Failed, CliResult(Err(error.to_string()))))
-                            .remove::<Lease>();
-                        continue;
-                    }
-                };
-            if request.check || !available {
-                if request.automatic {
-                    eprintln!(
-                        "CLI release: {} (installed {})",
-                        release.version, installation.version
-                    );
-                } else {
-                    println!(
-                        "CLI release: {} (installed {})",
-                        release.version, installation.version
-                    );
-                }
+        let available = match release.available(&installation.version, request.channel.is_some()) {
+            Ok(available) => available,
+            Err(error) => {
                 commands
                     .entity(entity)
-                    .insert((OperationState::Succeeded, CliResult::default()))
+                    .insert((OperationState::Failed, CliResult(Err(error.to_string()))))
                     .remove::<Lease>();
-            } else if !installation.standalone() {
-                commands.entity(entity).insert((OperationState::Failed, CliResult(Err("Standalone release updates require the DX-only CLI; runtime, build-cache, and app-bundled executables retain their existing update owner".into())))).remove::<Lease>();
-            } else {
-                let mut selected = None;
-                for (name, download, parent) in &downloads {
-                    if parent.parent() == entity && name.as_str() == installation.platform {
-                        selected = Some(download.clone());
-                        break;
-                    }
-                }
-                match selected {
-                    Some(download) => {
-                        commands.spawn(
-                            Step::Download(release.version.clone(), download).bundle(entity),
-                        );
-                        commands.entity(entity).remove::<Release>();
-                    }
-                    None => {
-                        commands
-                            .entity(entity)
-                            .insert((
-                                OperationState::Failed,
-                                CliResult(Err(format!(
-                                    "No standalone CLI release for {}",
-                                    installation.platform
-                                ))),
-                            ))
-                            .remove::<Lease>();
-                    }
-                }
+                continue;
             }
+        };
+        if request.check || !available {
+            if request.automatic {
+                eprintln!(
+                    "CLI release: {} (installed {})",
+                    release.version, installation.version
+                );
+            } else {
+                println!(
+                    "CLI release: {} (installed {})",
+                    release.version, installation.version
+                );
+            }
+            commands
+                .entity(entity)
+                .insert((OperationState::Succeeded, CliResult::default()))
+                .remove::<Lease>();
+            continue;
+        }
+        if !installation.standalone() {
+            commands.entity(entity).insert((OperationState::Failed, CliResult(Err("Standalone release updates require the DX-only CLI; runtime, build-cache, and app-bundled executables retain their existing update owner".into())))).remove::<Lease>();
+            continue;
+        }
+        let mut selected = None;
+        for (name, download, parent) in &downloads {
+            if parent.parent() == entity && name.as_str() == installation.platform {
+                selected = Some(download.clone());
+                break;
+            }
+        }
+        match selected {
+            Some(download) => {
+                commands.spawn(ActiveStep::bundle(
+                    entity,
+                    DownloadStep {
+                        version: release.version.clone(),
+                        download,
+                    },
+                ));
+                commands.entity(entity).remove::<Release>();
+            }
+            None => {
+                commands
+                    .entity(entity)
+                    .insert((
+                        OperationState::Failed,
+                        CliResult(Err(format!(
+                            "No standalone CLI release for {}",
+                            installation.platform
+                        ))),
+                    ))
+                    .remove::<Lease>();
+            }
+        }
+    }
+}
+
+fn select(operations: Selection, steps: Query<Entity, With<ActiveStep>>, mut commands: Commands) {
+    for (entity, request, _installation, preferences, children, checked, release) in &operations {
+        if release.is_some()
+            || children.is_some_and(|children| children.iter().any(|child| steps.contains(child)))
+        {
             continue;
         }
         if checked.is_some() {
             commands.entity(entity).remove::<Checked>();
-            commands.spawn(Step::Check(preferences.channel).bundle(entity));
+            commands.spawn(ActiveStep::bundle(entity, CheckStep(preferences.channel)));
             continue;
         }
         let mut updated = preferences.clone();
@@ -614,7 +1126,7 @@ fn select(
             commands.entity(entity).insert(CheckAfterSave);
         }
         commands.entity(entity).insert(updated.clone());
-        commands.spawn(Step::Save(updated).bundle(entity));
+        commands.spawn(ActiveStep::bundle(entity, SaveStep(updated)));
     }
 }
 

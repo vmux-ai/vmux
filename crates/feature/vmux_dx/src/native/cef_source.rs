@@ -10,6 +10,38 @@ use crate::temporary::Temporary;
 
 impl Native {
     pub fn build_cef(&mut self) -> Result<()> {
+        let (build, dist, cef_commit, chromium_version, depot_commit, expected) =
+            self.prepare_cef_build()?;
+        let (automate, depot, old_path) =
+            self.bootstrap_depot_tools(&build, &cef_commit, &depot_commit)?;
+        let (cef, mut common) =
+            self.sync_cef_sources(&build, &automate, &depot, &cef_commit, &chromium_version)?;
+        self.environment.set("GN_DEFINES", "is_official_build=true");
+        self.environment.set("CEF_ARCHIVE_FORMAT", "tar.bz2");
+        common.extend(
+            [
+                "--no-update",
+                "--force-build",
+                "--force-distrib",
+                "--minimal-distrib-only",
+                "--no-debug-build",
+                "--build-target=cefclient",
+            ]
+            .map(Into::into),
+        );
+        self.tool(OsStr::new("python3"), &common)?;
+        self.package_cef_distribution(
+            &cef,
+            &dist,
+            &old_path,
+            &cef_commit,
+            &chromium_version,
+            &depot_commit,
+            &expected,
+        )
+    }
+
+    fn prepare_cef_build(&self) -> Result<(PathBuf, PathBuf, String, String, String, String)> {
         if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
             return Err("CEF sources require macOS ARM64".into());
         }
@@ -57,6 +89,22 @@ impl Native {
         {
             return Err("Invalid CEF archive checksum".into());
         }
+        Ok((
+            build,
+            dist,
+            cef_commit,
+            chromium_version,
+            depot_commit,
+            expected,
+        ))
+    }
+
+    fn bootstrap_depot_tools(
+        &mut self,
+        build: &Path,
+        cef_commit: &str,
+        depot_commit: &str,
+    ) -> Result<(PathBuf, PathBuf, std::ffi::OsString)> {
         let automate = build.join("automate-git.py");
         let depot = build.join("depot_tools");
         self.download(&format!("https://raw.githubusercontent.com/chromiumembedded/cef/{cef_commit}/tools/automate/automate-git.py"), &automate)?;
@@ -71,8 +119,8 @@ impl Native {
                 ],
             )?;
         }
-        self.git_at(&depot, &["fetch", "origin", &depot_commit])?;
-        self.git_at(&depot, &["checkout", "--force", &depot_commit])?;
+        self.git_at(&depot, &["fetch", "origin", depot_commit])?;
+        self.git_at(&depot, &["checkout", "--force", depot_commit])?;
         let manifest = depot.join(if depot.join(".bleeding_edge").exists() {
             "bootstrap/manifest_bleeding_edge.txt"
         } else {
@@ -123,9 +171,20 @@ impl Native {
             "manually managed python not supported by chrome operations",
         );
         self.environment.set("DEPOT_TOOLS_UPDATE", "0");
+        Ok((automate, depot, old_path))
+    }
+
+    fn sync_cef_sources(
+        &self,
+        build: &Path,
+        automate: &Path,
+        depot: &Path,
+        cef_commit: &str,
+        chromium_version: &str,
+    ) -> Result<(PathBuf, Vec<std::ffi::OsString>)> {
         let source = build.join("chromium/src");
         let cef = source.join("cef");
-        let mut common = vec![
+        let common = vec![
             automate.as_os_str().to_owned(),
             format!("--download-dir={}", build.display()).into(),
             format!("--depot-tools-dir={}", depot.display()).into(),
@@ -194,6 +253,26 @@ impl Native {
             Execution::new(command).run()?;
             fs::write(hooks_marker, "")?;
         }
+        self.apply_cef_patches(
+            &source,
+            &cef,
+            depot,
+            chromium_version,
+            &cef_patch,
+            &chromium_patch,
+        )?;
+        Ok((cef, common))
+    }
+
+    fn apply_cef_patches(
+        &self,
+        source: &Path,
+        cef: &Path,
+        depot: &Path,
+        chromium_version: &str,
+        cef_patch: &Path,
+        chromium_patch: &Path,
+    ) -> Result<()> {
         self.tool(
             OsStr::new("python3"),
             &[
@@ -220,7 +299,7 @@ impl Native {
                     .into_os_string(),
                 "download".into(),
                 "--depot-tools".into(),
-                depot.clone().into_os_string(),
+                depot.as_os_str().to_owned(),
                 "--check-v8-revision".into(),
             ],
         )?;
@@ -231,10 +310,10 @@ impl Native {
         }) {
             return Err("CEF and Chromium source revisions disagree".into());
         }
-        self.patch(&cef, &cef_patch, false)?;
-        self.patch(&source, &chromium_patch, false)?;
+        self.patch(cef, cef_patch, false)?;
+        self.patch(source, chromium_patch, false)?;
         self.git_at(
-            &cef,
+            cef,
             &[
                 "diff",
                 "--check",
@@ -244,7 +323,7 @@ impl Native {
             ],
         )?;
         self.git_at(
-            &source,
+            source,
             &[
                 "diff",
                 "--check",
@@ -253,21 +332,20 @@ impl Native {
                 "components/os_crypt/async/browser/keychain_key_provider.h",
                 "components/os_crypt/async/browser/keychain_key_provider.mm",
             ],
-        )?;
-        self.environment.set("GN_DEFINES", "is_official_build=true");
-        self.environment.set("CEF_ARCHIVE_FORMAT", "tar.bz2");
-        common.extend(
-            [
-                "--no-update",
-                "--force-build",
-                "--force-distrib",
-                "--minimal-distrib-only",
-                "--no-debug-build",
-                "--build-target=cefclient",
-            ]
-            .map(Into::into),
-        );
-        self.tool(OsStr::new("python3"), &common)?;
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn package_cef_distribution(
+        &mut self,
+        cef: &Path,
+        dist: &Path,
+        old_path: &OsStr,
+        cef_commit: &str,
+        chromium_version: &str,
+        depot_commit: &str,
+        expected: &str,
+    ) -> Result<()> {
         let mut archives = Vec::new();
         for entry in fs::read_dir(cef.join("binary_distrib"))? {
             let path = entry?.path();
