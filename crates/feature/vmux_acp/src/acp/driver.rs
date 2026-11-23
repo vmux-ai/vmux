@@ -40,6 +40,8 @@ use super::{
     AcpSelectedConfigInbox, AcpSelectionSnapshot, AcpSelectionSnapshotInbox, AcpSessionUpdateInbox,
     AcpSnapshotRequestInbox, AcpStartupInbox, AcpStatusInbox,
 };
+#[cfg(test)]
+use bevy::prelude::{MinimalPlugins, Name};
 use vmux_api::protocol::{
     AgentAttachment, AgentPromptEnvelope, AgentRunStatus, ApprovalDecision, ManagedMcpServer,
     ManagedMcpTransport, ServiceMessage, SharedEvent,
@@ -48,8 +50,8 @@ use vmux_api::protocol::{
 use vmux_api::session::AssistantBlock;
 use vmux_api::session::{Message, RemoteApproval};
 #[cfg(test)]
-use vmux_process::{Process, ProcessManager};
-use vmux_process::{ProcessCreated, ProcessLaunch, ProcessRuntime, ProcessUpdate};
+use vmux_process::ProcessPlugin;
+use vmux_process::{ProcessLaunch, ProcessRuntime, ProcessUpdate};
 
 use agent_client_protocol::schema::v1::PermissionOptionKind as Kind;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -653,107 +655,7 @@ impl AcpStderrTail {
     }
 }
 
-#[derive(Clone)]
-pub(super) enum AcpProcesses {
-    Runtime(ProcessRuntime),
-    #[cfg(test)]
-    Direct(Arc<tokio::sync::Mutex<ProcessManager>>),
-}
-
-impl From<ProcessRuntime> for AcpProcesses {
-    fn from(runtime: ProcessRuntime) -> Self {
-        Self::Runtime(runtime)
-    }
-}
-
-#[cfg(test)]
-impl From<Arc<tokio::sync::Mutex<ProcessManager>>> for AcpProcesses {
-    fn from(manager: Arc<tokio::sync::Mutex<ProcessManager>>) -> Self {
-        Self::Direct(manager)
-    }
-}
-
-impl AcpProcesses {
-    async fn create(&self, launch: ProcessLaunch) -> Result<ProcessCreated, String> {
-        match self {
-            Self::Runtime(runtime) => runtime.create(launch).await,
-            #[cfg(test)]
-            Self::Direct(manager) => {
-                let mut manager = manager.lock().await;
-                let (id, pid) = manager.create_process_keep_alive(
-                    launch.id,
-                    launch.command,
-                    launch.args,
-                    launch.cwd,
-                    launch.env,
-                    launch.cols,
-                    launch.rows,
-                )?;
-                let updates = manager
-                    .processes
-                    .get(&id)
-                    .map(Process::subscribe)
-                    .ok_or_else(|| format!("process not found after creation: {id}"))?;
-                Ok(ProcessCreated { id, pid, updates })
-            }
-        }
-    }
-
-    async fn exit_code(&self, process_id: ProcessId) -> Result<Option<i32>, String> {
-        match self {
-            Self::Runtime(runtime) => runtime.exit_code(process_id).await,
-            #[cfg(test)]
-            Self::Direct(manager) => manager
-                .lock()
-                .await
-                .processes
-                .get(&process_id)
-                .map(Process::process_exit)
-                .ok_or_else(|| format!("process not found: {process_id}")),
-        }
-    }
-
-    async fn transcript(&self, process_id: ProcessId) -> Result<String, String> {
-        match self {
-            Self::Runtime(runtime) => runtime.transcript(process_id).await,
-            #[cfg(test)]
-            Self::Direct(manager) => manager
-                .lock()
-                .await
-                .processes
-                .get(&process_id)
-                .map(Process::full_text)
-                .ok_or_else(|| format!("process not found: {process_id}")),
-        }
-    }
-
-    async fn kill(&self, process_id: ProcessId) -> Result<(), String> {
-        match self {
-            Self::Runtime(runtime) => runtime.kill(process_id).await,
-            #[cfg(test)]
-            Self::Direct(manager) => {
-                let mut manager = manager.lock().await;
-                let process = manager
-                    .processes
-                    .get_mut(&process_id)
-                    .ok_or_else(|| format!("process not found: {process_id}"))?;
-                process.kill();
-                Ok(())
-            }
-        }
-    }
-
-    async fn remove(&self, process_id: ProcessId) -> Result<(), String> {
-        match self {
-            Self::Runtime(runtime) => runtime.remove(process_id).await,
-            #[cfg(test)]
-            Self::Direct(manager) => {
-                manager.lock().await.remove_process(&process_id);
-                Ok(())
-            }
-        }
-    }
-}
+pub(super) type AcpProcesses = ProcessRuntime;
 
 pub(super) struct AcpShared {
     pub sid: String,
@@ -1963,13 +1865,14 @@ mod tests {
         fn new(capacity: usize) -> Self {
             let (stream_tx, stream) = broadcast::channel(capacity);
             let (wake, _) = mpsc::unbounded_channel();
+            let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
             let (projection, projection_inboxes) = AcpProjectionSenders::open(wake);
             let shared = Arc::new(AcpShared::with_projection(
                 "s1".into(),
                 PathBuf::from("/tmp"),
                 ProcessId::new(),
                 stream_tx,
-                Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+                processes,
                 projection,
             ));
             let mut app = App::new();
@@ -2258,12 +2161,14 @@ mod tests {
     #[test]
     fn config_selection_result_publishes_request_identity() {
         let (stream_tx, mut stream_rx) = broadcast::channel(2);
+        let (wake, _) = mpsc::unbounded_channel();
+        let (processes, _process_runtime) = ProcessRuntime::new(wake);
         let shared = AcpShared::new(
             "s1".into(),
             PathBuf::from("/tmp"),
             ProcessId::new(),
             stream_tx,
-            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            processes,
         );
         shared.publish_config_selection_result(9, Some("approval"), "auto", true);
 
@@ -2822,31 +2727,96 @@ mod tests {
         assert_eq!(text.slice(Some(10), Some(2)), "");
     }
 
-    fn test_shared_at(
-        cwd: PathBuf,
-        manager: Arc<tokio::sync::Mutex<ProcessManager>>,
-    ) -> (Arc<AcpShared>, broadcast::Receiver<ServiceMessage>) {
-        let (stream_tx, stream_rx) = broadcast::channel(64);
-        let shared = Arc::new(AcpShared::new(
-            "s1".to_string(),
-            cwd,
-            ProcessId::new(),
-            stream_tx,
-            manager,
-        ));
-        (shared, stream_rx)
+    struct ProcessHarness {
+        runtime: ProcessRuntime,
+        rt: tokio::runtime::Runtime,
+        stop: Option<std::sync::mpsc::Sender<()>>,
+        thread: Option<std::thread::JoinHandle<()>>,
     }
 
-    fn test_shared(
-        manager: Arc<tokio::sync::Mutex<ProcessManager>>,
-    ) -> (Arc<AcpShared>, broadcast::Receiver<ServiceMessage>) {
-        test_shared_at(std::env::temp_dir(), manager)
+    impl ProcessHarness {
+        fn start() -> Self {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio test runtime");
+            let (wake, wake_rx) = mpsc::unbounded_channel();
+            let (runtime, inboxes) = ProcessRuntime::new(wake);
+            let (stop, stop_rx) = std::sync::mpsc::channel();
+            let thread = std::thread::spawn(move || {
+                let mut wake_rx = wake_rx;
+                let mut app = App::new();
+                app.add_plugins((MinimalPlugins, ProcessPlugin));
+                app.world_mut()
+                    .spawn((Name::new("vmux acp process test runtime"), inboxes));
+                loop {
+                    while wake_rx.try_recv().is_ok() {}
+                    app.update();
+                    match stop_rx.recv_timeout(std::time::Duration::from_millis(2)) {
+                        Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    }
+                }
+                app.world_mut()
+                    .run_schedule(vmux_ecs::service::ShutdownComplete);
+                app.update();
+            });
+            Self {
+                runtime,
+                rt,
+                stop: Some(stop),
+                thread: Some(thread),
+            }
+        }
+
+        fn block_on<T>(&self, future: impl std::future::Future<Output = T>) -> T {
+            self.rt.block_on(future)
+        }
+
+        fn inactive() -> ProcessRuntime {
+            let (wake, _) = mpsc::unbounded_channel();
+            ProcessRuntime::new(wake).0
+        }
+
+        fn shared_at(&self, cwd: PathBuf) -> (Arc<AcpShared>, broadcast::Receiver<ServiceMessage>) {
+            let (stream_tx, stream_rx) = broadcast::channel(64);
+            let shared = Arc::new(AcpShared::new(
+                "s1".to_string(),
+                cwd,
+                ProcessId::new(),
+                stream_tx,
+                self.runtime.clone(),
+            ));
+            (shared, stream_rx)
+        }
+
+        fn shared(&self) -> (Arc<AcpShared>, broadcast::Receiver<ServiceMessage>) {
+            self.shared_at(std::env::temp_dir())
+        }
+    }
+
+    impl Drop for ProcessHarness {
+        fn drop(&mut self) {
+            if let Some(stop) = self.stop.take() {
+                let _ = stop.send(());
+            }
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
     }
 
     #[test]
     fn explicit_workspace_rebind_updates_host_file_scope() {
         let target = tempfile::tempdir().unwrap();
-        let (shared, _) = test_shared(Arc::new(tokio::sync::Mutex::new(ProcessManager::default())));
+        let (stream_tx, _stream_rx) = broadcast::channel(4);
+        let shared = Arc::new(AcpShared::new(
+            "s1".to_string(),
+            std::env::temp_dir(),
+            ProcessId::new(),
+            stream_tx,
+            ProcessHarness::inactive(),
+        ));
 
         shared.rebind_cwd(target.path().to_path_buf()).unwrap();
 
@@ -2904,7 +2874,7 @@ mod tests {
             original.path().canonicalize().unwrap(),
             ProcessId::new(),
             stream_tx,
-            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            ProcessHarness::inactive(),
         );
 
         let workspace = WorkspaceLocation::new(
@@ -2946,243 +2916,234 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn acp_terminal_create_wait_output_release() {
-        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
-        let (shared, mut stream_rx) = test_shared(manager.clone());
+    #[test]
+    fn acp_terminal_create_wait_output_release() {
+        let harness = ProcessHarness::start();
+        let (shared, mut stream_rx) = harness.shared();
+        harness.block_on(async move {
+            let req = CreateTerminalRequest::new("s1", "/bin/sh").args(vec![
+                "-c".to_string(),
+                "printf hi; sleep 0.1; exit 7".to_string(),
+            ]);
+            let created = create_terminal(&shared, req).await.expect("create");
+            let tid = created.terminal_id.0.to_string();
+            assert!(shared.terminals.contains(&tid));
 
-        let poll_mgr = manager.clone();
-        let poll = tokio::spawn(async move {
-            loop {
-                poll_mgr.lock().await.poll_all();
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-            }
-        });
+            let (emitted_id, emitted_pid) = loop {
+                match stream_rx.recv().await.expect("stream open") {
+                    ServiceMessage::AcpTerminalCreated {
+                        terminal_id,
+                        process_id,
+                        ..
+                    } => break (terminal_id, process_id),
+                    _ => continue,
+                }
+            };
+            assert_eq!(emitted_id, tid);
+            assert_eq!(emitted_pid.to_string(), tid);
 
-        let req = CreateTerminalRequest::new("s1", "/bin/sh").args(vec![
-            "-c".to_string(),
-            "printf hi; sleep 0.1; exit 7".to_string(),
-        ]);
-        let created = create_terminal(&shared, req).await.expect("create");
-        let tid = created.terminal_id.0.to_string();
-        assert!(shared.terminals.contains(&tid));
+            let wait = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                wait_for_terminal_exit(
+                    &shared,
+                    WaitForTerminalExitRequest::new("s1", TerminalId::new(tid.clone())),
+                ),
+            )
+            .await
+            .expect("wait_for_exit timed out")
+            .expect("wait_for_exit");
+            assert_eq!(wait.exit_status.exit_code, Some(7));
 
-        let (emitted_id, emitted_pid) = loop {
-            match stream_rx.recv().await.expect("stream open") {
-                ServiceMessage::AcpTerminalCreated {
-                    terminal_id,
-                    process_id,
-                    ..
-                } => break (terminal_id, process_id),
-                _ => continue,
-            }
-        };
-        assert_eq!(emitted_id, tid);
-        assert_eq!(emitted_pid.to_string(), tid);
-
-        let wait = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            wait_for_terminal_exit(
+            let out = terminal_output(
                 &shared,
-                WaitForTerminalExitRequest::new("s1", TerminalId::new(tid.clone())),
-            ),
-        )
-        .await
-        .expect("wait_for_exit timed out")
-        .expect("wait_for_exit");
-        assert_eq!(wait.exit_status.exit_code, Some(7));
+                TerminalOutputRequest::new("s1", TerminalId::new(tid.clone())),
+            )
+            .await
+            .expect("output");
+            assert!(out.output.contains("hi"), "output was {:?}", out.output);
+            assert_eq!(out.exit_status.and_then(|status| status.exit_code), Some(7));
 
-        let out = terminal_output(
-            &shared,
-            TerminalOutputRequest::new("s1", TerminalId::new(tid.clone())),
-        )
-        .await
-        .expect("output");
-        assert!(out.output.contains("hi"), "output was {:?}", out.output);
-        assert_eq!(out.exit_status.and_then(|status| status.exit_code), Some(7));
-
-        release_terminal(
-            &shared,
-            ReleaseTerminalRequest::new("s1", TerminalId::new(tid.clone())),
-        )
-        .await
-        .expect("release");
-        assert!(!shared.terminals.contains(&tid));
-
-        poll.abort();
+            release_terminal(
+                &shared,
+                ReleaseTerminalRequest::new("s1", TerminalId::new(tid.clone())),
+            )
+            .await
+            .expect("release");
+            assert!(!shared.terminals.contains(&tid));
+        });
     }
 
-    #[tokio::test]
-    async fn terminal_output_unknown_terminal_errors() {
-        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
-        let (shared, _rx) = test_shared(manager);
-        let result =
-            terminal_output(&shared, TerminalOutputRequest::new("s1", "does-not-exist")).await;
+    #[test]
+    fn terminal_output_unknown_terminal_errors() {
+        let harness = ProcessHarness::start();
+        let (shared, _rx) = harness.shared();
+        let result = harness.block_on(terminal_output(
+            &shared,
+            TerminalOutputRequest::new("s1", "does-not-exist"),
+        ));
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn create_terminal_rejects_nonexistent_cwd() {
-        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
-        let (shared, _rx) = test_shared(manager.clone());
+    #[test]
+    fn create_terminal_rejects_nonexistent_cwd() {
+        let harness = ProcessHarness::start();
+        let (shared, _rx) = harness.shared();
         let cwd = std::env::temp_dir().join(format!(
             "vmux-acp-missing-cwd-{}-{}",
             std::process::id(),
             ProcessId::new()
         ));
 
-        let result = create_terminal(
+        let result = harness.block_on(create_terminal(
             &shared,
             CreateTerminalRequest::new("s1", "/bin/sh").cwd(cwd),
-        )
-        .await;
+        ));
 
         assert!(result.is_err());
-        assert!(manager.lock().await.processes.is_empty());
+        assert_eq!(harness.block_on(harness.runtime.count()), Ok(0));
     }
 
-    #[tokio::test]
-    async fn create_terminal_rejects_relative_cwd() {
-        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
-        let (shared, _rx) = test_shared(manager.clone());
+    #[test]
+    fn create_terminal_rejects_relative_cwd() {
+        let harness = ProcessHarness::start();
+        let (shared, _rx) = harness.shared();
 
-        let result = create_terminal(
+        let result = harness.block_on(create_terminal(
             &shared,
             CreateTerminalRequest::new("s1", "/bin/sh").cwd("."),
-        )
-        .await;
+        ));
 
         assert!(result.is_err());
-        assert!(manager.lock().await.processes.is_empty());
+        assert_eq!(harness.block_on(harness.runtime.count()), Ok(0));
     }
 
-    #[tokio::test]
-    async fn create_terminal_rejects_cwd_outside_session() {
+    #[test]
+    fn create_terminal_rejects_cwd_outside_session() {
         let session = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
-        let (shared, _rx) = test_shared_at(session.path().to_path_buf(), manager.clone());
+        let harness = ProcessHarness::start();
+        let (shared, _rx) = harness.shared_at(session.path().to_path_buf());
 
-        let result = create_terminal(
+        let result = harness.block_on(create_terminal(
             &shared,
             CreateTerminalRequest::new("s1", "/bin/sh").cwd(outside.path()),
-        )
-        .await;
+        ));
 
         assert!(matches!(result, Err(message) if message.contains("outside session cwd")));
-        assert!(manager.lock().await.processes.is_empty());
+        assert_eq!(harness.block_on(harness.runtime.count()), Ok(0));
     }
 
-    #[tokio::test]
-    async fn removed_terminal_errors_for_wait_and_output() {
-        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
-        let (shared, _rx) = test_shared(manager.clone());
-        let created = create_terminal(
-            &shared,
-            CreateTerminalRequest::new("s1", "/bin/sh")
-                .args(vec!["-c".to_string(), "sleep 30".to_string()]),
-        )
-        .await
-        .expect("create");
-        let terminal_id = created.terminal_id.0.to_string();
-        let process_id = terminal_id.parse().expect("process id");
-        manager.lock().await.remove_process(&process_id);
-
-        let wait = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            wait_for_terminal_exit(
+    #[test]
+    fn removed_terminal_errors_for_wait_and_output() {
+        let harness = ProcessHarness::start();
+        let (shared, _rx) = harness.shared();
+        let runtime = harness.runtime.clone();
+        harness.block_on(async move {
+            let created = create_terminal(
                 &shared,
-                WaitForTerminalExitRequest::new("s1", TerminalId::new(terminal_id.clone())),
-            ),
-        )
-        .await
-        .expect("wait timeout");
-        assert!(wait.is_err());
+                CreateTerminalRequest::new("s1", "/bin/sh")
+                    .args(vec!["-c".to_string(), "sleep 30".to_string()]),
+            )
+            .await
+            .expect("create");
+            let terminal_id = created.terminal_id.0.to_string();
+            let process_id = terminal_id.parse().expect("process id");
+            runtime.remove(process_id).await.expect("remove");
 
-        let output = terminal_output(
-            &shared,
-            TerminalOutputRequest::new("s1", TerminalId::new(terminal_id.clone())),
-        )
-        .await;
-        assert!(output.is_err());
-        shared
-            .terminals
-            .remove(&TerminalId::new(terminal_id))
-            .unwrap();
-    }
+            let wait = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                wait_for_terminal_exit(
+                    &shared,
+                    WaitForTerminalExitRequest::new("s1", TerminalId::new(terminal_id.clone())),
+                ),
+            )
+            .await
+            .expect("wait timeout");
+            assert!(wait.is_err());
 
-    #[tokio::test]
-    async fn release_terminal_removes_running_command() {
-        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
-        let (shared, _rx) = test_shared(manager.clone());
-        let created = create_terminal(
-            &shared,
-            CreateTerminalRequest::new("s1", "/bin/sh")
-                .args(vec!["-c".to_string(), "sleep 30".to_string()]),
-        )
-        .await
-        .expect("create");
-        let terminal_id = created.terminal_id.0.to_string();
-        let process_id = terminal_id.parse().expect("process id");
-
-        release_terminal(
-            &shared,
-            ReleaseTerminalRequest::new("s1", TerminalId::new(terminal_id)),
-        )
-        .await
-        .expect("release");
-
-        assert!(!manager.lock().await.processes.contains_key(&process_id));
-    }
-
-    #[tokio::test]
-    async fn terminal_output_respects_byte_limit_at_char_boundary() {
-        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
-        let (shared, _rx) = test_shared(manager.clone());
-        let poll_manager = manager.clone();
-        let poll = tokio::spawn(async move {
-            loop {
-                poll_manager.lock().await.poll_all();
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-            }
+            let output = terminal_output(
+                &shared,
+                TerminalOutputRequest::new("s1", TerminalId::new(terminal_id.clone())),
+            )
+            .await;
+            assert!(output.is_err());
+            shared
+                .terminals
+                .remove(&TerminalId::new(terminal_id))
+                .unwrap();
         });
-        let created = create_terminal(
-            &shared,
-            CreateTerminalRequest::new("s1", "/bin/sh")
-                .args(vec!["-c".to_string(), "printf 'abécd'".to_string()])
-                .output_byte_limit(3),
-        )
-        .await
-        .expect("create");
-        let terminal_id = created.terminal_id.0.to_string();
+    }
 
-        tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            wait_for_terminal_exit(
+    #[test]
+    fn release_terminal_removes_running_command() {
+        let harness = ProcessHarness::start();
+        let (shared, _rx) = harness.shared();
+        let runtime = harness.runtime.clone();
+        harness.block_on(async move {
+            let created = create_terminal(
                 &shared,
-                WaitForTerminalExitRequest::new("s1", TerminalId::new(terminal_id.clone())),
-            ),
-        )
-        .await
-        .expect("wait timeout")
-        .expect("wait");
-        let output = terminal_output(
-            &shared,
-            TerminalOutputRequest::new("s1", TerminalId::new(terminal_id.clone())),
-        )
-        .await
-        .expect("output");
+                CreateTerminalRequest::new("s1", "/bin/sh")
+                    .args(vec!["-c".to_string(), "sleep 30".to_string()]),
+            )
+            .await
+            .expect("create");
+            let terminal_id = created.terminal_id.0.to_string();
+            let process_id = terminal_id.parse().expect("process id");
 
-        assert_eq!(output.output, "cd");
-        assert!(output.truncated);
+            release_terminal(
+                &shared,
+                ReleaseTerminalRequest::new("s1", TerminalId::new(terminal_id)),
+            )
+            .await
+            .expect("release");
 
-        release_terminal(
-            &shared,
-            ReleaseTerminalRequest::new("s1", TerminalId::new(terminal_id)),
-        )
-        .await
-        .expect("release");
-        poll.abort();
+            assert!(runtime.exit_code(process_id).await.is_err());
+            assert_eq!(runtime.count().await, Ok(0));
+        });
+    }
+
+    #[test]
+    fn terminal_output_respects_byte_limit_at_char_boundary() {
+        let harness = ProcessHarness::start();
+        let (shared, _rx) = harness.shared();
+        harness.block_on(async move {
+            let created = create_terminal(
+                &shared,
+                CreateTerminalRequest::new("s1", "/bin/sh")
+                    .args(vec!["-c".to_string(), "printf 'abécd'".to_string()])
+                    .output_byte_limit(3),
+            )
+            .await
+            .expect("create");
+            let terminal_id = created.terminal_id.0.to_string();
+
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                wait_for_terminal_exit(
+                    &shared,
+                    WaitForTerminalExitRequest::new("s1", TerminalId::new(terminal_id.clone())),
+                ),
+            )
+            .await
+            .expect("wait timeout")
+            .expect("wait");
+            let output = terminal_output(
+                &shared,
+                TerminalOutputRequest::new("s1", TerminalId::new(terminal_id.clone())),
+            )
+            .await
+            .expect("output");
+
+            assert_eq!(output.output, "cd");
+            assert!(output.truncated);
+
+            release_terminal(
+                &shared,
+                ReleaseTerminalRequest::new("s1", TerminalId::new(terminal_id)),
+            )
+            .await
+            .expect("release");
+        });
     }
 
     #[test]

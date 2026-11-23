@@ -1213,14 +1213,14 @@ mod tests {
 
         fn session(&mut self) {
             let (stream, _stream_rx) = broadcast::channel(4);
+            let (wake, _wake_rx) = mpsc::unbounded_channel();
+            let (processes, _process_runtime) = ProcessRuntime::new(wake);
             let shared = Arc::new(AcpShared::new(
                 "remote-session".into(),
                 PathBuf::from("/tmp"),
                 ProcessId::new(),
                 stream,
-                Arc::new(tokio::sync::Mutex::new(
-                    vmux_process::ProcessManager::default(),
-                )),
+                processes,
             ));
             let (prompt_tx, _prompt_rx) = mpsc::unbounded_channel();
             let (approval_tx, _approval_rx) = mpsc::unbounded_channel();
@@ -1517,14 +1517,16 @@ mod tests {
 
     #[test]
     fn subscriptions_receive_no_empty_snapshot_while_history_is_replaying() {
-        let runtime_handle = tokio::runtime::Builder::new_current_thread()
+        let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
+        let _entered = runtime.enter();
         let mut app = App::new();
         app.add_plugins(crate::service::AcpServicePlugin);
         let (wake, _wake_rx) = mpsc::unbounded_channel();
-        let (_sessions, runtime) = AcpSessions::new(runtime_handle.handle().clone(), wake);
+        let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
+        let (_sessions, runtime) = AcpSessions::new(Handle::current(), wake);
         app.world_mut().spawn(runtime);
         let (stream, _receiver) = broadcast::channel(4);
         let shared = Arc::new(AcpShared::new(
@@ -1532,9 +1534,7 @@ mod tests {
             PathBuf::from("/tmp"),
             ProcessId::new(),
             stream,
-            Arc::new(tokio::sync::Mutex::new(
-                vmux_process::ProcessManager::default(),
-            )),
+            processes,
         ));
         let session = app
             .world_mut()
@@ -1581,14 +1581,14 @@ mod tests {
         app.add_plugins(AcpRuntimePlugin);
         let (prompt_tx, mut prompt_rx) = mpsc::unbounded_channel();
         let (stream_tx, mut stream_rx) = broadcast::channel(4);
+        let (wake, _wake_rx) = mpsc::unbounded_channel();
+        let (processes, _process_runtime) = ProcessRuntime::new(wake);
         let shared = Arc::new(AcpShared::new(
             "s1".into(),
             PathBuf::from("/tmp"),
             ProcessId::new(),
             stream_tx,
-            Arc::new(tokio::sync::Mutex::new(
-                vmux_process::ProcessManager::default(),
-            )),
+            processes,
         ));
         let session = app
             .world_mut()

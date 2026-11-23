@@ -7,7 +7,6 @@ publish = false
 
 [features]
 default = []
-test-support = []
 
 [dependencies]
 alacritty_terminal = { workspace = true }

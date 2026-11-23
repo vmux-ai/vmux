@@ -27,6 +27,7 @@ pub struct ProcessCreated {
 #[derive(Component, Clone)]
 pub struct ProcessRuntime {
     requests: Arc<ProcessRequestSenders>,
+    queries: Arc<ProcessQuerySenders>,
     wake: mpsc::UnboundedSender<()>,
 }
 
@@ -45,6 +46,9 @@ struct ProcessRequestSenders {
     set_selection: mpsc::UnboundedSender<SetSelectionRequest>,
     extend_selection: mpsc::UnboundedSender<ExtendSelectionRequest>,
     select_word: mpsc::UnboundedSender<SelectWordRequest>,
+}
+
+struct ProcessQuerySenders {
     select_line: mpsc::UnboundedSender<SelectLineRequest>,
     selection_text: mpsc::UnboundedSender<SelectionTextRequest>,
     enter_copy_mode: mpsc::UnboundedSender<EnterCopyModeRequest>,
@@ -57,40 +61,14 @@ struct ProcessRequestSenders {
     command_exit: mpsc::UnboundedSender<CommandExitRequest>,
     run_completion: mpsc::UnboundedSender<RunCompletionRequest>,
     exit_code: mpsc::UnboundedSender<ExitCodeRequest>,
+    #[cfg(any(test, debug_assertions))]
+    feed_output: mpsc::UnboundedSender<FeedOutputRequest>,
+    #[cfg(any(test, debug_assertions))]
+    is_copy_mode: mpsc::UnboundedSender<IsCopyModeRequest>,
 }
 
-#[derive(Bundle)]
-struct ProcessRequestInboxes {
-    create: RuntimeInbox<CreateRequest>,
-    subscribe: RuntimeInbox<SubscribeRequest>,
-    input: RuntimeInbox<InputRequest>,
-    directory: RuntimeInbox<DirectoryRequest>,
-    mouse_wheel: RuntimeInbox<MouseWheelRequest>,
-    scroll_window: RuntimeInbox<ScrollWindowRequest>,
-    resize: RuntimeInbox<ResizeRequest>,
-    list: RuntimeInbox<ListRequest>,
-    remove: RuntimeInbox<RemoveRequest>,
-    kill: RuntimeInbox<KillRequest>,
-    snapshot: RuntimeInbox<SnapshotRequest>,
-    set_selection: RuntimeInbox<SetSelectionRequest>,
-    extend_selection: RuntimeInbox<ExtendSelectionRequest>,
-    select_word: RuntimeInbox<SelectWordRequest>,
-    select_line: RuntimeInbox<SelectLineRequest>,
-    selection_text: RuntimeInbox<SelectionTextRequest>,
-    enter_copy_mode: RuntimeInbox<EnterCopyModeRequest>,
-    exit_copy_mode: RuntimeInbox<ExitCopyModeRequest>,
-    copy_mode: RuntimeInbox<CopyModeRequest>,
-    shutdown: RuntimeInbox<ShutdownRequest>,
-    count: RuntimeInbox<CountRequest>,
-    output: RuntimeInbox<OutputRequest>,
-    transcript: RuntimeInbox<TranscriptRequest>,
-    command_exit: RuntimeInbox<CommandExitRequest>,
-    run_completion: RuntimeInbox<RunCompletionRequest>,
-    exit_code: RuntimeInbox<ExitCodeRequest>,
-}
-
-impl ProcessRuntime {
-    pub fn new(wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
+impl ProcessRequestSenders {
+    fn open() -> (Self, impl Bundle) {
         let (create, create_inbox) = RuntimeInbox::channel();
         let (subscribe, subscribe_inbox) = RuntimeInbox::channel();
         let (input, input_inbox) = RuntimeInbox::channel();
@@ -105,6 +83,45 @@ impl ProcessRuntime {
         let (set_selection, set_selection_inbox) = RuntimeInbox::channel();
         let (extend_selection, extend_selection_inbox) = RuntimeInbox::channel();
         let (select_word, select_word_inbox) = RuntimeInbox::channel();
+        (
+            Self {
+                create,
+                subscribe,
+                input,
+                directory,
+                mouse_wheel,
+                scroll_window,
+                resize,
+                list,
+                remove,
+                kill,
+                snapshot,
+                set_selection,
+                extend_selection,
+                select_word,
+            },
+            (
+                create_inbox,
+                subscribe_inbox,
+                input_inbox,
+                directory_inbox,
+                mouse_wheel_inbox,
+                scroll_window_inbox,
+                resize_inbox,
+                list_inbox,
+                remove_inbox,
+                kill_inbox,
+                snapshot_inbox,
+                set_selection_inbox,
+                extend_selection_inbox,
+                select_word_inbox,
+            ),
+        )
+    }
+}
+
+impl ProcessQuerySenders {
+    fn open() -> (Self, impl Bundle) {
         let (select_line, select_line_inbox) = RuntimeInbox::channel();
         let (selection_text, selection_text_inbox) = RuntimeInbox::channel();
         let (enter_copy_mode, enter_copy_mode_inbox) = RuntimeInbox::channel();
@@ -117,69 +134,75 @@ impl ProcessRuntime {
         let (command_exit, command_exit_inbox) = RuntimeInbox::channel();
         let (run_completion, run_completion_inbox) = RuntimeInbox::channel();
         let (exit_code, exit_code_inbox) = RuntimeInbox::channel();
+        #[cfg(any(test, debug_assertions))]
+        let (feed_output, feed_output_inbox) = RuntimeInbox::channel();
+        #[cfg(any(test, debug_assertions))]
+        let (is_copy_mode, is_copy_mode_inbox) = RuntimeInbox::channel();
+        let senders = Self {
+            select_line,
+            selection_text,
+            enter_copy_mode,
+            exit_copy_mode,
+            copy_mode,
+            shutdown,
+            count,
+            output,
+            transcript,
+            command_exit,
+            run_completion,
+            exit_code,
+            #[cfg(any(test, debug_assertions))]
+            feed_output,
+            #[cfg(any(test, debug_assertions))]
+            is_copy_mode,
+        };
+        #[cfg(any(test, debug_assertions))]
+        let inboxes = (
+            select_line_inbox,
+            selection_text_inbox,
+            enter_copy_mode_inbox,
+            exit_copy_mode_inbox,
+            copy_mode_inbox,
+            shutdown_inbox,
+            count_inbox,
+            output_inbox,
+            transcript_inbox,
+            command_exit_inbox,
+            run_completion_inbox,
+            exit_code_inbox,
+            feed_output_inbox,
+            is_copy_mode_inbox,
+        );
+        #[cfg(not(any(test, debug_assertions)))]
+        let inboxes = (
+            select_line_inbox,
+            selection_text_inbox,
+            enter_copy_mode_inbox,
+            exit_copy_mode_inbox,
+            copy_mode_inbox,
+            shutdown_inbox,
+            count_inbox,
+            output_inbox,
+            transcript_inbox,
+            command_exit_inbox,
+            run_completion_inbox,
+            exit_code_inbox,
+        );
+        (senders, inboxes)
+    }
+}
+
+impl ProcessRuntime {
+    pub fn new(wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
+        let (requests, request_inboxes) = ProcessRequestSenders::open();
+        let (queries, query_inboxes) = ProcessQuerySenders::open();
         (
             Self {
-                requests: Arc::new(ProcessRequestSenders {
-                    create,
-                    subscribe,
-                    input,
-                    directory,
-                    mouse_wheel,
-                    scroll_window,
-                    resize,
-                    list,
-                    remove,
-                    kill,
-                    snapshot,
-                    set_selection,
-                    extend_selection,
-                    select_word,
-                    select_line,
-                    selection_text,
-                    enter_copy_mode,
-                    exit_copy_mode,
-                    copy_mode,
-                    shutdown,
-                    count,
-                    output,
-                    transcript,
-                    command_exit,
-                    run_completion,
-                    exit_code,
-                }),
+                requests: Arc::new(requests),
+                queries: Arc::new(queries),
                 wake: wake.clone(),
             },
-            (
-                ProcessWake(wake),
-                ProcessRequestInboxes {
-                    create: create_inbox,
-                    subscribe: subscribe_inbox,
-                    input: input_inbox,
-                    directory: directory_inbox,
-                    mouse_wheel: mouse_wheel_inbox,
-                    scroll_window: scroll_window_inbox,
-                    resize: resize_inbox,
-                    list: list_inbox,
-                    remove: remove_inbox,
-                    kill: kill_inbox,
-                    snapshot: snapshot_inbox,
-                    set_selection: set_selection_inbox,
-                    extend_selection: extend_selection_inbox,
-                    select_word: select_word_inbox,
-                    select_line: select_line_inbox,
-                    selection_text: selection_text_inbox,
-                    enter_copy_mode: enter_copy_mode_inbox,
-                    exit_copy_mode: exit_copy_mode_inbox,
-                    copy_mode: copy_mode_inbox,
-                    shutdown: shutdown_inbox,
-                    count: count_inbox,
-                    output: output_inbox,
-                    transcript: transcript_inbox,
-                    command_exit: command_exit_inbox,
-                    run_completion: run_completion_inbox,
-                    exit_code: exit_code_inbox,
-                },
-            ),
+            (ProcessWake(wake), request_inboxes, query_inboxes),
         )
     }
 
@@ -345,7 +368,7 @@ impl ProcessRuntime {
     }
 
     pub async fn select_line(&self, process_id: ProcessId, row: u16) -> Result<(), String> {
-        self.request(&self.requests.select_line, |reply| SelectLineRequest {
+        self.request(&self.queries.select_line, |reply| SelectLineRequest {
             process_id,
             row,
             reply,
@@ -354,21 +377,22 @@ impl ProcessRuntime {
     }
 
     pub async fn selection_text(&self, process_id: ProcessId) -> Result<String, String> {
-        self.request(&self.requests.selection_text, |reply| {
-            SelectionTextRequest { process_id, reply }
+        self.request(&self.queries.selection_text, |reply| SelectionTextRequest {
+            process_id,
+            reply,
         })
         .await?
     }
 
     pub async fn enter_copy_mode(&self, process_id: ProcessId) -> Result<(), String> {
-        self.request(&self.requests.enter_copy_mode, |reply| {
+        self.request(&self.queries.enter_copy_mode, |reply| {
             EnterCopyModeRequest { process_id, reply }
         })
         .await?
     }
 
     pub async fn exit_copy_mode(&self, process_id: ProcessId) -> Result<(), String> {
-        self.request(&self.requests.exit_copy_mode, |reply| ExitCopyModeRequest {
+        self.request(&self.queries.exit_copy_mode, |reply| ExitCopyModeRequest {
             process_id,
             reply,
         })
@@ -380,7 +404,7 @@ impl ProcessRuntime {
         process_id: ProcessId,
         key: CopyModeKey,
     ) -> Result<Option<String>, String> {
-        self.request(&self.requests.copy_mode, |reply| CopyModeRequest {
+        self.request(&self.queries.copy_mode, |reply| CopyModeRequest {
             process_id,
             key,
             reply,
@@ -389,17 +413,17 @@ impl ProcessRuntime {
     }
 
     pub async fn shutdown(&self) -> Result<(), String> {
-        self.request(&self.requests.shutdown, |reply| ShutdownRequest { reply })
+        self.request(&self.queries.shutdown, |reply| ShutdownRequest { reply })
             .await
     }
 
     pub async fn count(&self) -> Result<u32, String> {
-        self.request(&self.requests.count, |reply| CountRequest { reply })
+        self.request(&self.queries.count, |reply| CountRequest { reply })
             .await
     }
 
     pub async fn output(&self, process_id: ProcessId) -> Result<String, String> {
-        self.request(&self.requests.output, |reply| OutputRequest {
+        self.request(&self.queries.output, |reply| OutputRequest {
             process_id,
             reply,
         })
@@ -407,7 +431,7 @@ impl ProcessRuntime {
     }
 
     pub async fn transcript(&self, process_id: ProcessId) -> Result<String, String> {
-        self.request(&self.requests.transcript, |reply| TranscriptRequest {
+        self.request(&self.queries.transcript, |reply| TranscriptRequest {
             process_id,
             reply,
         })
@@ -415,7 +439,7 @@ impl ProcessRuntime {
     }
 
     pub async fn command_exit(&self, process_id: ProcessId) -> Result<AgentCommandExit, String> {
-        self.request(&self.requests.command_exit, |reply| CommandExitRequest {
+        self.request(&self.queries.command_exit, |reply| CommandExitRequest {
             process_id,
             reply,
         })
@@ -426,14 +450,36 @@ impl ProcessRuntime {
         &self,
         process_id: ProcessId,
     ) -> Result<AgentRunCompletion, String> {
-        self.request(&self.requests.run_completion, |reply| {
-            RunCompletionRequest { process_id, reply }
+        self.request(&self.queries.run_completion, |reply| RunCompletionRequest {
+            process_id,
+            reply,
         })
         .await?
     }
 
     pub async fn exit_code(&self, process_id: ProcessId) -> Result<Option<i32>, String> {
-        self.request(&self.requests.exit_code, |reply| ExitCodeRequest {
+        self.request(&self.queries.exit_code, |reply| ExitCodeRequest {
+            process_id,
+            reply,
+        })
+        .await?
+    }
+
+    #[cfg(any(test, debug_assertions))]
+    #[doc(hidden)]
+    pub async fn feed_output(&self, process_id: ProcessId, data: Vec<u8>) -> Result<(), String> {
+        self.request(&self.queries.feed_output, |reply| FeedOutputRequest {
+            process_id,
+            data,
+            reply,
+        })
+        .await?
+    }
+
+    #[cfg(any(test, debug_assertions))]
+    #[doc(hidden)]
+    pub async fn is_copy_mode(&self, process_id: ProcessId) -> Result<bool, String> {
+        self.request(&self.queries.is_copy_mode, |reply| IsCopyModeRequest {
             process_id,
             reply,
         })
@@ -614,4 +660,17 @@ pub(crate) struct DirectoryRequest {
     pub(crate) cwd: String,
     pub(crate) path: String,
     pub(crate) reply: oneshot::Sender<Result<(), String>>,
+}
+
+#[cfg(any(test, debug_assertions))]
+pub(crate) struct FeedOutputRequest {
+    pub(crate) process_id: ProcessId,
+    pub(crate) data: Vec<u8>,
+    pub(crate) reply: oneshot::Sender<Result<(), String>>,
+}
+
+#[cfg(any(test, debug_assertions))]
+pub(crate) struct IsCopyModeRequest {
+    pub(crate) process_id: ProcessId,
+    pub(crate) reply: oneshot::Sender<Result<bool, String>>,
 }

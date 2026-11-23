@@ -134,7 +134,6 @@ dioxus = { workspace = true, optional = true }
 mockito = "1"
 serial_test = "3"
 tokio = { workspace = true, features = ["rt", "macros"] }
-vmux_process = { path = "../../util/vmux_process", features = ["test-support"] }
 
 [lints]
 workspace = true

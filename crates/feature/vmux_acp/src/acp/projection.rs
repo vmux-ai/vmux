@@ -1538,7 +1538,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use tokio::sync::{broadcast, mpsc};
     use vmux_ecs::ProcessId;
-    use vmux_process::ProcessManager;
+    use vmux_process::ProcessRuntime;
 
     use super::super::driver::{AcpProjectionSenders, AcpShared};
     use super::*;
@@ -1554,13 +1554,14 @@ mod tests {
         fn new() -> Self {
             let (stream_tx, stream) = broadcast::channel(64);
             let (wake, _) = mpsc::unbounded_channel();
+            let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
             let (projection, projection_inboxes) = AcpProjectionSenders::open(wake);
             let shared = Arc::new(AcpShared::new(
                 "s1".into(),
                 PathBuf::from("/tmp"),
                 ProcessId::new(),
                 stream_tx,
-                Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+                processes,
             ));
             let mut app = App::new();
             app.add_plugins(AcpProjectionPlugin);
