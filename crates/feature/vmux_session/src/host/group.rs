@@ -101,6 +101,42 @@ impl<'a> ChatMessages<'a> {
         self.page(PageRange::new(start, end, self.item_count()))
     }
 
+    #[cfg(test)]
+    fn assistant(blocks: Vec<AssistantBlock>) -> Message {
+        Message::Assistant { blocks }
+    }
+
+    #[cfg(test)]
+    fn tool(id: &str) -> AssistantBlock {
+        AssistantBlock::ToolUse {
+            call_id: id.into(),
+            name: "run".into(),
+            args: "{}".into(),
+            parent_call_id: None,
+            kind: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn subagent(id: &str) -> AssistantBlock {
+        AssistantBlock::Subagent(Box::new(SubagentBlock {
+            call_id: id.into(),
+            provider: "Claude".into(),
+            title: "Inspect ACP support".into(),
+            status: "in_progress".into(),
+            activity: "delegate".into(),
+            agent_name: Some("Explore".into()),
+            thread_id: None,
+            parent_thread_id: None,
+            child_thread_ids: Vec::new(),
+            parent_call_id: None,
+            prompt: Some("Trace metadata".into()),
+            model: Some("sonnet".into()),
+            reasoning_effort: None,
+            raw_input: "{}".into(),
+        }))
+    }
+
     fn page(&self, range: PageRange) -> ChatItemPage {
         let mut builder = PageBuilder::new(range.start, range.end, self.durations);
 
@@ -415,40 +451,6 @@ mod tests {
     use super::*;
     use vmux_api::chat::{ChatToolChild, ChatTurnRow};
 
-    fn assistant(blocks: Vec<AssistantBlock>) -> Message {
-        Message::Assistant { blocks }
-    }
-
-    fn tool(id: &str) -> AssistantBlock {
-        AssistantBlock::ToolUse {
-            call_id: id.into(),
-            name: "run".into(),
-            args: "{}".into(),
-            parent_call_id: None,
-
-            kind: None,
-        }
-    }
-
-    fn subagent(id: &str) -> AssistantBlock {
-        AssistantBlock::Subagent(Box::new(SubagentBlock {
-            call_id: id.into(),
-            provider: "Claude".into(),
-            title: "Inspect ACP support".into(),
-            status: "in_progress".into(),
-            activity: "delegate".into(),
-            agent_name: Some("Explore".into()),
-            thread_id: None,
-            parent_thread_id: None,
-            child_thread_ids: Vec::new(),
-            parent_call_id: None,
-            prompt: Some("Trace metadata".into()),
-            model: Some("sonnet".into()),
-            reasoning_effort: None,
-            raw_input: "{}".into(),
-        }))
-    }
-
     #[test]
     fn inter_agent_requests_remain_agent_activity_without_creating_user_prompts() {
         let content = "<codex_delegation><source_thread_id>peer</source_thread_id><input>Review the next PR</input></codex_delegation>";
@@ -459,7 +461,7 @@ mod tests {
                 content: content.into(),
                 is_error: false,
             },
-            assistant(vec![AssistantBlock::Text("Reviewing it".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("Reviewing it".into())]),
         ];
         let ids = vec![
             vmux_api::session::EventId::new("human"),
@@ -492,13 +494,16 @@ mod tests {
     fn splits_steps_and_answer_folds_tool_result() {
         let msgs = vec![
             Message::user("hi"),
-            assistant(vec![AssistantBlock::Thinking("t".into()), tool("c1")]),
+            ChatMessages::assistant(vec![
+                AssistantBlock::Thinking("t".into()),
+                ChatMessages::tool("c1"),
+            ]),
             Message::ToolResult {
                 call_id: "c1".into(),
                 content: "ok".into(),
                 is_error: false,
             },
-            assistant(vec![AssistantBlock::Text("done".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("done".into())]),
         ];
         let items = ChatMessages::new(&[], &msgs, &[], &[], false).all();
         assert_eq!(items.len(), 2);
@@ -542,9 +547,9 @@ mod tests {
     fn one_turn_per_user_durations_by_ordinal() {
         let msgs = vec![
             Message::user("a"),
-            assistant(vec![AssistantBlock::Text("1".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("1".into())]),
             Message::user("b"),
-            assistant(vec![AssistantBlock::Text("2".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("2".into())]),
         ];
         let items = ChatMessages::new(&[], &msgs, &[], &[5, 9], false).all();
         assert_eq!(items.len(), 4);
@@ -562,11 +567,11 @@ mod tests {
     fn recent_window_retains_the_prompt_for_its_leading_assistant_turn() {
         let messages = vec![
             Message::user("a"),
-            assistant(vec![AssistantBlock::Text("one".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("one".into())]),
             Message::user("b"),
-            assistant(vec![AssistantBlock::Text("two".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("two".into())]),
             Message::user("c"),
-            assistant(vec![AssistantBlock::Text("three".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("three".into())]),
         ];
         let page = ChatMessages::new(&[], &messages, &[], &[], false).tail_with_prompt(3);
         assert_eq!((page.start, page.end, page.total), (2, 6, 6));
@@ -581,11 +586,11 @@ mod tests {
     fn tail_page_only_clones_recent_items() {
         let messages = vec![
             Message::user("a"),
-            assistant(vec![AssistantBlock::Text("one".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("one".into())]),
             Message::user("b"),
-            assistant(vec![AssistantBlock::Text("two".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("two".into())]),
             Message::user("c"),
-            assistant(vec![AssistantBlock::Text("three".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("three".into())]),
         ];
 
         let page = ChatMessages::new(&[], &messages, &[], &[1, 2, 3], false).tail(3);
@@ -600,7 +605,7 @@ mod tests {
     fn grouped_items_keep_their_message_timestamps() {
         let messages = vec![
             Message::user("question"),
-            assistant(vec![AssistantBlock::Text("answer".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("answer".into())]),
         ];
 
         let items = ChatMessages::new(&[], &messages, &[10, 20], &[], false)
@@ -627,13 +632,13 @@ mod tests {
     fn a_turn_keeps_its_first_agent_event_timestamp() {
         let messages = vec![
             Message::user("question"),
-            assistant(vec![AssistantBlock::Thinking("thinking".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Thinking("thinking".into())]),
             Message::ToolResult {
                 call_id: "call-1".into(),
                 content: "output".into(),
                 is_error: false,
             },
-            assistant(vec![AssistantBlock::Text("answer".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("answer".into())]),
         ];
 
         let items = ChatMessages::new(&[], &messages, &[10, 20, 30, 40], &[], false)
@@ -653,9 +658,9 @@ mod tests {
     fn older_page_ends_at_requested_cursor() {
         let messages = vec![
             Message::user("a"),
-            assistant(vec![AssistantBlock::Text("one".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("one".into())]),
             Message::user("b"),
-            assistant(vec![AssistantBlock::Text("two".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("two".into())]),
         ];
 
         let page = ChatMessages::new(&[], &messages, &[], &[1, 2], false).before(3, 2);
@@ -673,9 +678,9 @@ mod tests {
         );
         let messages = vec![
             Message::user("fix it"),
-            assistant(vec![AssistantBlock::Text("Choose a project.".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("Choose a project.".into())]),
             Message::user(private),
-            assistant(vec![AssistantBlock::Text("Which branch?".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("Which branch?".into())]),
         ];
 
         let items = ChatMessages::new(&[], &messages, &[], &[], false).all();
@@ -713,9 +718,9 @@ mod tests {
     fn missing_duration_is_none() {
         let msgs = vec![
             Message::user("a"),
-            assistant(vec![AssistantBlock::Text("1".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("1".into())]),
             Message::user("b"),
-            assistant(vec![AssistantBlock::Text("2".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("2".into())]),
         ];
         let items = ChatMessages::new(&[], &msgs, &[], &[5], false).all();
         let ChatItem::Turn(t1) = &items[3] else {
@@ -728,7 +733,7 @@ mod tests {
     fn running_marks_and_nulls_last_turn() {
         let msgs = vec![
             Message::user("a"),
-            assistant(vec![AssistantBlock::Text("1".into())]),
+            ChatMessages::assistant(vec![AssistantBlock::Text("1".into())]),
         ];
         let items = ChatMessages::new(&[], &msgs, &[], &[5], true).all();
         let ChatItem::Turn(t) = &items[1] else {
@@ -755,9 +760,9 @@ mod tests {
     fn preserves_step_and_prose_order() {
         let msgs = vec![
             Message::user("a"),
-            assistant(vec![
+            ChatMessages::assistant(vec![
                 AssistantBlock::Text("before".into()),
-                tool("c1"),
+                ChatMessages::tool("c1"),
                 AssistantBlock::Text("after".into()),
             ]),
         ];
@@ -791,7 +796,7 @@ mod tests {
     fn guardian_and_results_count_as_one_tool_step() {
         let msgs = vec![
             Message::user("a"),
-            assistant(vec![
+            ChatMessages::assistant(vec![
                 AssistantBlock::ToolUse {
                     call_id: "read-1".into(),
                     name: "read_file".into(),
@@ -826,8 +831,8 @@ mod tests {
     fn subagent_children_and_results_fold_into_one_visible_step() {
         let msgs = vec![
             Message::user("a"),
-            assistant(vec![
-                subagent("agent-1"),
+            ChatMessages::assistant(vec![
+                ChatMessages::subagent("agent-1"),
                 AssistantBlock::ToolUse {
                     call_id: "read-1".into(),
                     name: "read_file".into(),
@@ -867,7 +872,7 @@ mod tests {
     fn collapses_consecutive_reconnect_updates() {
         let msgs = vec![
             Message::user("a"),
-            assistant(vec![AssistantBlock::Text(
+            ChatMessages::assistant(vec![AssistantBlock::Text(
                 "Reconnecting... 1/5\n\nReconnecting… 2/5\nReconnecting 3/5".into(),
             )]),
         ];
@@ -890,7 +895,7 @@ mod tests {
     fn reconnect_updates_do_not_swallow_prose() {
         let msgs = vec![
             Message::user("a"),
-            assistant(vec![AssistantBlock::Text(
+            ChatMessages::assistant(vec![AssistantBlock::Text(
                 "before\nReconnecting... 2/5\nafter".into(),
             )]),
         ];

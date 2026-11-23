@@ -55,6 +55,8 @@ impl Plugin for ConversationPlugin {
         .register_stored::<MessageContent>()
         .register_stored::<MaterializedEvent>()
         .register_stored::<SnapshotEvent>()
+        .register_type::<MessageDelivery>()
+        .register_type::<NativeFileAlias>()
         .register_stored::<NativeAlias>()
         .register_stored::<FileHistory>()
         .register_stored::<ReplayAlias>()
@@ -97,7 +99,7 @@ pub struct Member;
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
-#[require(Save)]
+#[require(Save, MessageDelivery)]
 #[type_path = "vmux_session"]
 pub struct ConversationEvent;
 
@@ -199,11 +201,14 @@ impl MessageContent {
     }
 }
 
-#[derive(Component, Clone, Debug, Eq, PartialEq)]
+#[derive(Component, Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
+#[reflect(Component)]
+#[type_path = "vmux_session"]
 pub enum MessageDelivery {
-    Pending(ClientOpId),
+    Pending,
+    #[default]
     Committed,
-    Failed(String),
+    Failed,
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
@@ -216,17 +221,37 @@ pub struct MaterializedEvent;
 #[type_path = "vmux_session"]
 pub(super) struct SnapshotEvent;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Reflect, Serialize, Deserialize)]
+#[reflect(Serialize, Deserialize)]
+#[type_path = "vmux_session"]
+pub(super) struct NativeFileAlias {
+    pub(super) generation: u64,
+    pub(super) offset: u64,
+    pub(super) subrecord: usize,
+}
+
 #[derive(Component, Clone, Copy, Debug, Eq, PartialEq, Hash, Reflect, Serialize, Deserialize)]
 #[reflect(Component, Serialize, Deserialize)]
 #[require(Save)]
 #[type_path = "vmux_session"]
-pub(super) enum NativeAlias {
-    External,
-    File {
-        generation: u64,
-        offset: u64,
-        subrecord: usize,
-    },
+pub(super) struct NativeAlias {
+    pub(super) file: Option<NativeFileAlias>,
+}
+
+impl NativeAlias {
+    pub(super) fn external() -> Self {
+        Self { file: None }
+    }
+
+    pub(super) fn file(generation: u64, offset: u64, subrecord: usize) -> Self {
+        Self {
+            file: Some(NativeFileAlias {
+                generation,
+                offset,
+                subrecord,
+            }),
+        }
+    }
 }
 
 #[derive(Component, Clone, Debug, Eq, PartialEq, Reflect, Serialize, Deserialize)]
@@ -353,7 +378,7 @@ pub(super) struct Retired;
 
 #[derive(Component, Clone, Debug, Default, Eq, PartialEq, Reflect)]
 #[reflect(Component)]
-#[require(Save)]
+#[require(Save, DocumentKind)]
 #[type_path = "vmux_session"]
 pub struct Document;
 
@@ -443,16 +468,16 @@ impl NativeBatch {
             if *owner != session || source != &read.source {
                 continue;
             }
-            let NativeAlias::File {
+            let Some(NativeFileAlias {
                 generation,
                 offset,
                 subrecord,
-            } = alias
+            }) = alias.file
             else {
                 continue;
             };
-            let position = (*offset, *subrecord);
-            if *generation != state.generation
+            let position = (offset, subrecord);
+            if generation != state.generation
                 || position < (page.before.byte, page.before.message)
                 || first.is_some_and(|first| first < position)
             {
@@ -537,7 +562,7 @@ impl AcceptedReads<'_, '_> {
         {
             return None;
         }
-        if read.failed && !matches!(state, Some(RunState::Errored(_))) {
+        if read.failed && !matches!(state, Some(RunState::Errored)) {
             return None;
         }
         Some((entity, read.clone(), page.copied()))
@@ -1018,15 +1043,11 @@ fn begin_native(
     let mut entries = Vec::with_capacity(request.entries.len());
     for (position, (external, message)) in request.entries.iter().enumerate() {
         let identity = if let Some(external) = external {
-            Some((NativeAlias::External, external.clone()))
+            Some((NativeAlias::external(), external.clone()))
         } else if let (Some(facts), Some((_, state))) = (&request.file, &file) {
             let (offset, subrecord) = facts.positions[position];
             Some((
-                NativeAlias::File {
-                    generation: state.generation,
-                    offset,
-                    subrecord,
-                },
+                NativeAlias::file(state.generation, offset, subrecord),
                 "file".into(),
             ))
         } else {
@@ -3121,7 +3142,7 @@ mod tests {
                 },
                 CreatedAt(1),
                 MessageContent(Message::user("draft")),
-                MessageDelivery::Pending(client_op_id.clone()),
+                MessageDelivery::Pending,
                 ChildOf(session),
             ))
             .id();

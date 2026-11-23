@@ -108,10 +108,10 @@ impl AttachWorld<'_, '_> {
         ));
         self.commands.queue(vmux_session::mutation::Request::local(
             SessionId(sid.to_string()),
-            vmux_session::mutation::Mutation::BindAgent {
-                agent: vmux_session::AgentId(agent_id.to_string()),
-                cwd: cwd.to_path_buf(),
-            },
+            vmux_session::mutation::Mutation::bind_agent(
+                vmux_session::AgentId(agent_id.to_string()),
+                cwd.to_path_buf(),
+            ),
         ));
         self.commands
             .entity(session_entity)

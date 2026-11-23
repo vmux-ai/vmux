@@ -472,7 +472,8 @@ mod tests {
                     SessionId::new("canonical"),
                     ProviderKind("acp:example".into()),
                     ProviderSessionId("provider".into()),
-                    RunState::Errored("active writer".into()),
+                    RunState::Errored,
+                    crate::RunError("active writer".into()),
                 ))
                 .id();
             app.world_mut().write_message(SnapshotReceived {

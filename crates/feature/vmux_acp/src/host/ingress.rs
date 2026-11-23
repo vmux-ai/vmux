@@ -136,20 +136,22 @@ fn route_requests(
 
 fn route_approval_requests(
     mut inbound: MessageReader<InboundAgentAwaitingApproval>,
-    mut sessions: Query<(&SessionId, &mut RunState), With<Session>>,
+    mut sessions: Query<(Entity, &SessionId, &mut RunState), With<Session>>,
+    mut commands: Commands,
 ) {
     for inbound in inbound.read() {
         let args = serde_json::Value::try_from(&inbound.args)
             .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
-        for (session_id, mut state) in &mut sessions {
+        for (session, session_id, mut state) in &mut sessions {
             if session_id.0 != inbound.sid {
                 continue;
             }
-            *state = RunState::AwaitingApproval {
+            *state = RunState::AwaitingApproval;
+            commands.entity(session).insert(vmux_session::RunApproval {
                 call_id: inbound.call_id.clone(),
                 name: inbound.name.clone(),
                 args: args.clone(),
-            };
+            });
         }
     }
 }
@@ -197,10 +199,23 @@ fn project_statuses(
                 continue;
             }
             match &inbound.status {
-                AgentRunStatus::Idle => *state = RunState::Idle,
-                AgentRunStatus::Streaming => *state = RunState::Streaming,
+                AgentRunStatus::Idle => {
+                    *state = RunState::Idle;
+                    commands
+                        .entity(session)
+                        .remove::<(vmux_session::RunApproval, vmux_session::RunError)>();
+                }
+                AgentRunStatus::Streaming => {
+                    *state = RunState::Streaming;
+                    commands
+                        .entity(session)
+                        .remove::<(vmux_session::RunApproval, vmux_session::RunError)>();
+                }
                 AgentRunStatus::Interrupted => {
                     *state = RunState::Idle;
+                    commands
+                        .entity(session)
+                        .remove::<(vmux_session::RunApproval, vmux_session::RunError)>();
                     if !queue.flush_pending() {
                         queue.paused = true;
                     }
@@ -208,11 +223,15 @@ fn project_statuses(
                 AgentRunStatus::Errored(message) => {
                     commands
                         .entity(session)
-                        .remove::<vmux_session::TranscriptLoading>();
+                        .remove::<(vmux_session::TranscriptLoading, vmux_session::RunApproval)>();
                     if queue.flush_pending() {
                         *state = RunState::Idle;
+                        commands.entity(session).remove::<vmux_session::RunError>();
                     } else {
-                        *state = RunState::Errored(message.clone());
+                        *state = RunState::Errored;
+                        commands
+                            .entity(session)
+                            .insert(vmux_session::RunError(message.clone()));
                     }
                 }
             }
@@ -222,17 +241,27 @@ fn project_statuses(
 
 fn project_approval_resolutions(
     mut inbound: MessageReader<AgentApprovalResolved>,
-    mut sessions: Query<(&SessionId, &mut RunState), With<Session>>,
+    mut sessions: Query<
+        (
+            Entity,
+            &SessionId,
+            &mut RunState,
+            Option<&vmux_session::RunApproval>,
+        ),
+        With<Session>,
+    >,
+    mut commands: Commands,
 ) {
     for inbound in inbound.read() {
-        for (session_id, mut state) in &mut sessions {
+        for (session, session_id, mut state, approval) in &mut sessions {
             if session_id.0 == inbound.sid
-                && matches!(
-                    &*state,
-                    RunState::AwaitingApproval { call_id, .. } if call_id == &inbound.call_id
-                )
+                && matches!(*state, RunState::AwaitingApproval)
+                && approval.is_some_and(|approval| approval.call_id == inbound.call_id)
             {
                 *state = RunState::Streaming;
+                commands
+                    .entity(session)
+                    .remove::<vmux_session::RunApproval>();
             }
         }
     }
@@ -377,8 +406,15 @@ mod tests {
                 .entity(session)
                 .contains::<vmux_session::TranscriptLoading>()
         );
-        assert!(
-            matches!(app.world().get::<RunState>(session), Some(RunState::Errored(error)) if error == "history unavailable")
+        assert_eq!(
+            app.world().get::<RunState>(session),
+            Some(&RunState::Errored)
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_session::RunError>(session)
+                .map(|error| error.0.as_str()),
+            Some("history unavailable")
         );
     }
 }

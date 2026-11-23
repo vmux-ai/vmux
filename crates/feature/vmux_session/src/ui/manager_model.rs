@@ -219,8 +219,30 @@ impl SessionPresentation {
             title: summary.title,
             preview: summary.preview,
             compact_id: SessionIdentity::new(&session.sid).compact(),
-            updated: RelativeTime(summary.age).label(),
+            updated: Self::relative_time(summary.age),
         }
+    }
+
+    fn relative_time(age: SessionAge) -> String {
+        let (id, count) = if age.0 < SessionAge::MINUTE {
+            ("resume-age-now", 0)
+        } else if age.0 < SessionAge::HOUR {
+            ("resume-age-minutes", age.0 / SessionAge::MINUTE)
+        } else if age.0 < SessionAge::DAY {
+            ("resume-age-hours", age.0 / SessionAge::HOUR)
+        } else if age.0 < SessionAge::WEEK {
+            ("resume-age-days", age.0 / SessionAge::DAY)
+        } else if age.0 < SessionAge::MONTH {
+            ("resume-age-weeks", age.0 / SessionAge::WEEK)
+        } else if age.0 < SessionAge::YEAR {
+            ("resume-age-months", age.0 / SessionAge::MONTH)
+        } else {
+            ("resume-age-years", age.0 / SessionAge::YEAR)
+        };
+        if count == 0 {
+            return translate(id);
+        }
+        translate_with(id, &[("count", TranslationValue::Number(count as i64))])
     }
 }
 
@@ -261,32 +283,6 @@ impl RuntimeVisual {
         };
         let visible = matches!(id, "streaming" | "awaiting" | "installing" | "errored");
         Self { dot, visible }
-    }
-}
-
-pub(super) struct RelativeTime(pub SessionAge);
-
-impl RelativeTime {
-    pub fn label(self) -> String {
-        let (id, count) = if self.0.0 < SessionAge::MINUTE {
-            ("resume-age-now", 0)
-        } else if self.0.0 < SessionAge::HOUR {
-            ("resume-age-minutes", self.0.0 / SessionAge::MINUTE)
-        } else if self.0.0 < SessionAge::DAY {
-            ("resume-age-hours", self.0.0 / SessionAge::HOUR)
-        } else if self.0.0 < SessionAge::WEEK {
-            ("resume-age-days", self.0.0 / SessionAge::DAY)
-        } else if self.0.0 < SessionAge::MONTH {
-            ("resume-age-weeks", self.0.0 / SessionAge::WEEK)
-        } else if self.0.0 < SessionAge::YEAR {
-            ("resume-age-months", self.0.0 / SessionAge::MONTH)
-        } else {
-            ("resume-age-years", self.0.0 / SessionAge::YEAR)
-        };
-        if count == 0 {
-            return translate(id);
-        }
-        translate_with(id, &[("count", TranslationValue::Number(count as i64))])
     }
 }
 

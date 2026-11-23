@@ -103,7 +103,11 @@ fn submit(
         (&ChildOf, &mut ChatAttachmentProjection, &mut ComposerState),
         With<SessionView>,
     >,
-    mut sessions: Query<(&mut RunState, Option<&AgentConversationTitle>)>,
+    mut sessions: Query<(
+        &mut RunState,
+        Option<&vmux_session::RunError>,
+        Option<&AgentConversationTitle>,
+    )>,
     mut queues: QueuedPrompts,
     mut commands: Commands,
 ) {
@@ -130,12 +134,10 @@ fn submit(
     let Some(session) = targets.session(webview) else {
         return;
     };
-    let Ok((mut state, title)) = sessions.get_mut(session) else {
+    let Ok((mut state, error, title)) = sessions.get_mut(session) else {
         return;
     };
-    if let RunState::Errored(error) = &*state
-        && vmux_session::Failure(error).in_use()
-    {
+    if matches!(*state, RunState::Errored) && error.is_some_and(vmux_session::RunError::in_use) {
         return;
     }
     if title.is_none()
@@ -146,8 +148,9 @@ fn submit(
             .insert((title, vmux_session::TitlePending));
     }
     queues.enqueue(session, text, attachments, false);
-    if matches!(*state, RunState::Errored(_)) {
+    if matches!(*state, RunState::Errored) {
         *state = RunState::Idle;
+        commands.entity(session).remove::<vmux_session::RunError>();
     }
     let effect = composer.effect(String::new(), true);
     commands
@@ -184,13 +187,10 @@ fn stop(
         control.cancel(session);
         return;
     }
-    if queues.request_flush(session_entity) && matches!(*state, RunState::Errored(_)) {
+    if queues.request_flush(session_entity) && matches!(*state, RunState::Errored) {
         *state = RunState::Idle;
     }
-    if matches!(
-        *state,
-        RunState::Streaming | RunState::AwaitingApproval { .. }
-    ) {
+    if matches!(*state, RunState::Streaming | RunState::AwaitingApproval) {
         control.cancel(session);
     }
 }
@@ -232,10 +232,7 @@ fn escape(
     let Ok((mut state, session)) = sessions.get_mut(session_entity) else {
         return;
     };
-    let running = matches!(
-        *state,
-        RunState::Streaming | RunState::AwaitingApproval { .. }
-    );
+    let running = matches!(*state, RunState::Streaming | RunState::AwaitingApproval);
     let flush = if queues.empty(session_entity) {
         if queues.flush_pending(session_entity) {
             queues.cancel_flush(session_entity);
@@ -244,8 +241,11 @@ fn escape(
     } else {
         queues.request_flush(session_entity)
     };
-    if flush && matches!(*state, RunState::Errored(_)) {
+    if flush && matches!(*state, RunState::Errored) {
         *state = RunState::Idle;
+        commands
+            .entity(session_entity)
+            .remove::<vmux_session::RunError>();
     }
     if running {
         control.cancel(session);
@@ -695,9 +695,14 @@ mod tests {
     #[cfg(host)]
     #[test]
     fn owned_conversation_rejects_submit_without_spending_the_draft_or_attachments() {
-        let mut fixture = InputFixture::new(RunState::Errored(
-            "thread already has an active writer".into(),
-        ));
+        let mut fixture = InputFixture::new(RunState::Errored);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .insert(crate::RunError(
+                "thread already has an active writer".into(),
+            ));
         fixture
             .app
             .world_mut()
@@ -716,8 +721,16 @@ mod tests {
             });
         fixture.submit("keep this draft");
         assert!(fixture.queued().is_empty());
+        assert_eq!(
+            fixture.app.world().get::<RunState>(fixture.session),
+            Some(&RunState::Errored)
+        );
         assert!(
-            matches!(fixture.app.world().get::<RunState>(fixture.session), Some(RunState::Errored(error)) if crate::Failure(error).in_use())
+            fixture
+                .app
+                .world()
+                .get::<crate::RunError>(fixture.session)
+                .is_some_and(crate::RunError::in_use)
         );
         assert!(
             fixture
@@ -750,7 +763,12 @@ mod tests {
     #[cfg(host)]
     #[test]
     fn submitting_after_error_rearms_prompt_dispatch() {
-        let mut fixture = InputFixture::new(RunState::Errored("failed".into()));
+        let mut fixture = InputFixture::new(RunState::Errored);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .insert(crate::RunError("failed".into()));
         fixture.submit("retry");
         assert!(matches!(
             fixture.app.world().get::<RunState>(fixture.session),
@@ -799,7 +817,12 @@ mod tests {
     #[cfg(host)]
     #[test]
     fn stop_with_queued_work_flushes_and_rearms_the_session() {
-        let mut fixture = InputFixture::new(RunState::Errored("failed".into()));
+        let mut fixture = InputFixture::new(RunState::Errored);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .insert(crate::RunError("failed".into()));
         fixture.enqueue("retry");
         fixture
             .app

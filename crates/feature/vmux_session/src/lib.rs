@@ -25,8 +25,8 @@ pub use host::SessionClientPlugin as SessionPlugin;
 #[cfg(host)]
 pub use model::ProviderSessionTombstones;
 pub use model::{
-    AgentFamily, AgentId, ArchiveRequest, Cleanup, CleanupRequest, CleanupTarget, CreateRequest,
-    Created, DescriptionUpdateRequest, InitialPromptSubmitted, LocalTask, ProviderArchive,
+    AgentFamily, AgentId, ArchiveRequest, Cleanup, CleanupRequest, CreateRequest, Created,
+    DescriptionUpdateRequest, InitialPromptSubmitted, LocalTask, ProviderArchive,
     ProviderArchiveCompleted, ProviderArchiveRequest, ProviderArchiveWriteRequest, ProviderKind,
     ProviderSessionId, ProviderSessionKey, ProviderSessionRestoreRequest, ProviderSessionTombstone,
     ProviderStage, ProviderStageChangeRequest, RenameRequest, Session, SessionDuplicate,
@@ -36,7 +36,7 @@ pub use queue::{
     PromptQueue, QueuePlugin, QueuedPrompt, QueuedPromptId, QueuedPromptReads, QueuedPrompts,
 };
 pub use route::Route;
-pub use run_state::{AgentTurnMeta, Failure, FailureKind, RunState};
+pub use run_state::{AgentTurnMeta, Failure, FailureKind, RunApproval, RunError, RunState};
 #[cfg(host)]
 pub use runtime::SessionHostPlugin;
 #[cfg(host)]
