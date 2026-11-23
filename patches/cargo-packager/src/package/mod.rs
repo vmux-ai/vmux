@@ -64,24 +64,10 @@ impl PackageOutput {
 /// Package an app using the specified config.
 #[tracing::instrument(level = "trace", skip(config))]
 pub fn package(config: &Config) -> crate::Result<Vec<PackageOutput>> {
-    let mut formats = config
-        .formats
-        .clone()
-        .unwrap_or_else(|| PackageFormat::platform_default().to_vec());
-
+    let formats = resolve_formats(config);
     if formats.is_empty() {
         return Ok(Vec::new());
     }
-
-    if formats.contains(&PackageFormat::Default) {
-        formats = PackageFormat::platform_default().to_vec();
-    }
-
-    if formats.contains(&PackageFormat::All) {
-        formats = PackageFormat::platform_all().to_vec();
-    }
-
-    formats.sort_by_key(|f| f.priority());
 
     let formats_comma_separated = formats
         .iter()
@@ -102,69 +88,9 @@ pub fn package(config: &Config) -> crate::Result<Vec<PackageOutput>> {
             format.short_name(),
         )?;
 
-        let paths = match format {
-            PackageFormat::App => app::package(&ctx),
-            #[cfg(target_os = "macos")]
-            PackageFormat::Dmg => {
-                // PackageFormat::App is required for the DMG bundle
-                if !packages
-                    .iter()
-                    .any(|b: &PackageOutput| b.format == PackageFormat::App)
-                {
-                    // Patched: if a pre-built .app already exists at the expected
-                    // path (produced by an earlier `cargo packager --formats app`
-                    // run plus an external sign/notarize/staple step), reuse it
-                    // instead of rebuilding. We deliberately do NOT push this
-                    // into `packages` so the post-loop cleanup (which removes
-                    // the .app when only dmg was requested) leaves the
-                    // externally-managed bundle intact. dmg::package reads the
-                    // .app via config, not via the packages list.
-                    let app_bundle_path = config
-                        .out_dir()
-                        .join(format!("{}.app", config.product_name));
-                    if !app_bundle_path.exists() {
-                        let paths = app::package(&ctx)?;
-                        packages.push(PackageOutput {
-                            format: PackageFormat::App,
-                            paths,
-                        });
-                    }
-                }
-                dmg::package(&ctx)
-            }
-            #[cfg(target_os = "windows")]
-            PackageFormat::Wix => wix::package(&ctx),
-            PackageFormat::Nsis => nsis::package(&ctx),
-            #[cfg(any(
-                target_os = "linux",
-                target_os = "dragonfly",
-                target_os = "freebsd",
-                target_os = "netbsd",
-                target_os = "openbsd"
-            ))]
-            PackageFormat::Deb => deb::package(&ctx),
-            #[cfg(any(
-                target_os = "linux",
-                target_os = "dragonfly",
-                target_os = "freebsd",
-                target_os = "netbsd",
-                target_os = "openbsd"
-            ))]
-            PackageFormat::AppImage => appimage::package(&ctx),
-            #[cfg(any(
-                target_os = "linux",
-                target_os = "dragonfly",
-                target_os = "freebsd",
-                target_os = "netbsd",
-                target_os = "openbsd"
-            ))]
-            PackageFormat::Pacman => pacman::package(&ctx),
-
-            _ => {
-                tracing::warn!("ignoring {}", format.short_name());
-                continue;
-            }
-        }?;
+        let Some(paths) = package_format(&ctx, config, *format, &mut packages)? else {
+            continue;
+        };
 
         packages.push(PackageOutput {
             format: *format,
@@ -173,32 +99,132 @@ pub fn package(config: &Config) -> crate::Result<Vec<PackageOutput>> {
     }
 
     #[cfg(target_os = "macos")]
-    {
-        // Clean up .app if only building dmg
-        if !formats.contains(&PackageFormat::App) {
-            if let Some(app_bundle_paths) = packages
-                .iter()
-                .position(|b| b.format == PackageFormat::App)
-                .map(|i| packages.remove(i))
-                .map(|b| b.paths)
-            {
-                for p in &app_bundle_paths {
-                    use crate::Error;
-                    use std::fs;
-
-                    tracing::debug!("Cleaning {}", p.display());
-                    match p.is_dir() {
-                        true => {
-                            fs::remove_dir_all(p).map_err(|e| Error::IoWithPath(p.clone(), e))?
-                        }
-                        false => fs::remove_file(p).map_err(|e| Error::IoWithPath(p.clone(), e))?,
-                    };
-                }
-            }
-        }
-    }
+    cleanup_temporary_app_bundles(&formats, &mut packages)?;
 
     Ok(packages)
+}
+
+fn resolve_formats(config: &Config) -> Vec<PackageFormat> {
+    let mut formats = config
+        .formats
+        .clone()
+        .unwrap_or_else(|| PackageFormat::platform_default().to_vec());
+
+    if formats.is_empty() {
+        return formats;
+    }
+
+    if formats.contains(&PackageFormat::Default) {
+        formats = PackageFormat::platform_default().to_vec();
+    }
+
+    if formats.contains(&PackageFormat::All) {
+        formats = PackageFormat::platform_all().to_vec();
+    }
+
+    formats.sort_by_key(|f| f.priority());
+    formats
+}
+
+fn package_format(
+    ctx: &Context,
+    config: &Config,
+    format: PackageFormat,
+    packages: &mut Vec<PackageOutput>,
+) -> crate::Result<Option<Vec<PathBuf>>> {
+    let paths = match format {
+        PackageFormat::App => app::package(ctx),
+        #[cfg(target_os = "macos")]
+        PackageFormat::Dmg => {
+            // PackageFormat::App is required for the DMG bundle
+            if !packages
+                .iter()
+                .any(|b: &PackageOutput| b.format == PackageFormat::App)
+            {
+                // Patched: if a pre-built .app already exists at the expected
+                // path (produced by an earlier `cargo packager --formats app`
+                // run plus an external sign/notarize/staple step), reuse it
+                // instead of rebuilding. We deliberately do NOT push this
+                // into `packages` so the post-loop cleanup (which removes
+                // the .app when only dmg was requested) leaves the
+                // externally-managed bundle intact. dmg::package reads the
+                // .app via config, not via the packages list.
+                let app_bundle_path = config
+                    .out_dir()
+                    .join(format!("{}.app", config.product_name));
+                if !app_bundle_path.exists() {
+                    let paths = app::package(ctx)?;
+                    packages.push(PackageOutput {
+                        format: PackageFormat::App,
+                        paths,
+                    });
+                }
+            }
+            dmg::package(ctx)
+        }
+        #[cfg(target_os = "windows")]
+        PackageFormat::Wix => wix::package(ctx),
+        PackageFormat::Nsis => nsis::package(ctx),
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ))]
+        PackageFormat::Deb => deb::package(ctx),
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ))]
+        PackageFormat::AppImage => appimage::package(ctx),
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ))]
+        PackageFormat::Pacman => pacman::package(ctx),
+        _ => {
+            tracing::warn!("ignoring {}", format.short_name());
+            return Ok(None);
+        }
+    }?;
+    Ok(Some(paths))
+}
+
+#[cfg(target_os = "macos")]
+fn cleanup_temporary_app_bundles(
+    formats: &[PackageFormat],
+    packages: &mut Vec<PackageOutput>,
+) -> crate::Result<()> {
+    // Clean up .app if only building dmg
+    if formats.contains(&PackageFormat::App) {
+        return Ok(());
+    }
+    let Some(app_bundle_paths) = packages
+        .iter()
+        .position(|b| b.format == PackageFormat::App)
+        .map(|i| packages.remove(i))
+        .map(|b| b.paths)
+    else {
+        return Ok(());
+    };
+    for p in &app_bundle_paths {
+        use crate::Error;
+        use std::fs;
+
+        tracing::debug!("Cleaning {}", p.display());
+        match p.is_dir() {
+            true => fs::remove_dir_all(p).map_err(|e| Error::IoWithPath(p.clone(), e))?,
+            false => fs::remove_file(p).map_err(|e| Error::IoWithPath(p.clone(), e))?,
+        };
+    }
+    Ok(())
 }
 
 fn run_before_each_packaging_command_hook(
