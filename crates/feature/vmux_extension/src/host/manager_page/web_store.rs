@@ -56,11 +56,6 @@ struct AddExtensionRequest {
     nonce: String,
 }
 
-const ADD_CHANNEL: &str = "vmux-add-extension";
-const MANAGE_CHANNEL: &str = "vmux-manage-extension";
-const WEB_STORE_URL: &str = "https://chromewebstore.google.com/category/extensions";
-const INJECTOR_JS: &str = include_str!("../add_to_vmux.js");
-
 #[derive(bevy::ecs::system::SystemParam)]
 struct WebStoreInjection<'w, 's> {
     browsers: NonSend<'w, Browsers>,
@@ -72,6 +67,10 @@ struct WebStoreInjection<'w, 's> {
 }
 
 impl WebStoreInjection<'_, '_> {
+    const ADD_CHANNEL: &'static str = "vmux-add-extension";
+    const MANAGE_CHANNEL: &'static str = "vmux-manage-extension";
+    const INJECTOR_JS: &'static str = include_str!("../add_to_vmux.js");
+
     fn inject(&mut self, webview: Entity, url: &str) {
         if !WebStoreUrl::matches(url) {
             self.commands.entity(webview).remove::<WebStoreInjector>();
@@ -108,7 +107,7 @@ impl WebStoreInjection<'_, '_> {
                 serde_json::to_string(&injector.nonce).expect("serializable web store nonce"),
             ),
         ];
-        if let Ok(script) = Template::new(INJECTOR_JS).render(&replacements) {
+        if let Ok(script) = Template::new(Self::INJECTOR_JS).render(&replacements) {
             self.browsers.execute_js(&webview, &script);
         }
         self.commands.entity(webview).insert(injector);
@@ -119,25 +118,23 @@ fn browse_request(
     trigger: On<UiInput<ExtBrowseStoreRequest>>,
     mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
-    let query = trigger.event().payload.query.trim();
-    let url = if query.is_empty() {
-        WEB_STORE_URL.to_string()
-    } else {
-        format!(
-            "https://chromewebstore.google.com/search/{}",
-            EncodedQuery::from(query)
-        )
-    };
     requests.write(vmux_layout::stack::OpenRequest {
-        url: Some(url),
+        url: Some(WebStoreUrl::browse_url(
+            trigger.event().payload.query.trim(),
+        )),
         policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
     });
 }
 
-struct EncodedQuery(String);
+struct WebStoreUrl;
 
-impl From<&str> for EncodedQuery {
-    fn from(query: &str) -> Self {
+impl WebStoreUrl {
+    const HOME: &str = "https://chromewebstore.google.com/category/extensions";
+
+    fn browse_url(query: &str) -> String {
+        if query.is_empty() {
+            return Self::HOME.to_string();
+        }
         let mut encoded = String::with_capacity(query.len());
         for byte in query.bytes() {
             match byte {
@@ -147,19 +144,9 @@ impl From<&str> for EncodedQuery {
                 _ => encoded.push_str(&format!("%{byte:02X}")),
             }
         }
-        Self(encoded)
+        format!("https://chromewebstore.google.com/search/{encoded}")
     }
-}
 
-impl std::fmt::Display for EncodedQuery {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-struct WebStoreUrl;
-
-impl WebStoreUrl {
     fn matches(url: &str) -> bool {
         url.strip_prefix("https://")
             .and_then(|rest| rest.split(['/', '?', '#']).next())
@@ -209,13 +196,13 @@ fn add(
         return;
     }
     match request.channel.as_str() {
-        ADD_CHANNEL => {
+        WebStoreInjection::ADD_CHANNEL => {
             installs.write(ExtensionInstallRequest {
                 source: id,
                 requester: Some(trigger.event().webview),
             });
         }
-        MANAGE_CHANNEL => {
+        WebStoreInjection::MANAGE_CHANNEL => {
             manager.write(OpenManagerRequest);
         }
         _ => {}
@@ -244,7 +231,7 @@ mod tests {
 
     #[test]
     fn web_store_injector_renders_without_page_globals() {
-        let source = Template::new(INJECTOR_JS)
+        let source = Template::new(WebStoreInjection::INJECTOR_JS)
             .render(&[
                 ("__VMUX_WEBSTORE_INSTALLED__", "[]".into()),
                 ("__VMUX_WEBSTORE_NONCE__", "\"nonce\"".into()),

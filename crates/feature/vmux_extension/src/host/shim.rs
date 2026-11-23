@@ -4,17 +4,17 @@ use std::path::{Component, Path};
 
 use super::template::Template;
 
-const PATCH_TEMPLATE: &str = include_str!("shim.js");
-const PATCH_FILE: &str = "vmux_patch.js";
-const WORKER_LOADER_FILE: &str = "vmux_sw.js";
-const PAGE_LOADER: &str =
-    r#"<script src="/vmux_runtime.js"></script><script src="/vmux_patch.js"></script>"#;
-
 pub(crate) struct ExtensionShim;
 
 impl ExtensionShim {
+    const PATCH_TEMPLATE: &str = include_str!("shim.js");
+    const PATCH_FILE: &str = "vmux_patch.js";
+    const WORKER_LOADER_FILE: &str = "vmux_sw.js";
+    const PAGE_LOADER: &str =
+        r#"<script src="/vmux_runtime.js"></script><script src="/vmux_patch.js"></script>"#;
+
     pub(crate) fn patch_source() -> Result<String, String> {
-        Template::new(PATCH_TEMPLATE).render(&[
+        Template::new(Self::PATCH_TEMPLATE).render(&[
             (
                 "__VMUX_BRIDGE_CHANNEL__",
                 serde_json::to_string(BRIDGE_CHANNEL).map_err(|error| error.to_string())?,
@@ -42,22 +42,27 @@ impl ExtensionShim {
             .and_then(Value::as_str)
             .ok_or("manifest has no background service worker")?
             .to_string();
-        if original == WORKER_LOADER_FILE || original == PATCH_FILE || original == runtime_file {
+        if original == Self::WORKER_LOADER_FILE
+            || original == Self::PATCH_FILE
+            || original == runtime_file
+        {
             return Err("manifest service worker is already generated".into());
         }
         let is_module = background.get("type").and_then(Value::as_str) == Some("module");
         let patch_source = Self::patch_source()?;
-        let loader_file = WORKER_LOADER_FILE.to_string();
+        let loader_file = Self::WORKER_LOADER_FILE.to_string();
         let loader = if is_module {
             format!(
-                "import \"./{runtime_file}\";\nimport \"./{PATCH_FILE}\";\nimport \"./{original}\";\n"
+                "import \"./{runtime_file}\";\nimport \"./{}\";\nimport \"./{original}\";\n",
+                Self::PATCH_FILE,
             )
         } else {
             format!(
-                "importScripts(\"{runtime_file}\");\nimportScripts(\"{PATCH_FILE}\");\nimportScripts(\"{original}\");\n"
+                "importScripts(\"{runtime_file}\");\nimportScripts(\"{}\");\nimportScripts(\"{original}\");\n",
+                Self::PATCH_FILE
             )
         };
-        std::fs::write(directory.join(PATCH_FILE), patch_source)
+        std::fs::write(directory.join(Self::PATCH_FILE), patch_source)
             .map_err(|error| error.to_string())?;
         std::fs::write(directory.join(&loader_file), loader).map_err(|error| error.to_string())?;
         background.insert("service_worker".into(), Value::String(loader_file.clone()));
@@ -79,14 +84,14 @@ impl ExtensionShim {
         }
         let path = directory.join(popup);
         let html = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
-        if html.contains(PAGE_LOADER) {
+        if html.contains(Self::PAGE_LOADER) {
             return Ok(());
         }
         let patched = if let Some(index) = html.find("<head>") {
             let index = index + "<head>".len();
-            format!("{}{}{}", &html[..index], PAGE_LOADER, &html[index..])
+            format!("{}{}{}", &html[..index], Self::PAGE_LOADER, &html[index..])
         } else {
-            format!("{PAGE_LOADER}{html}")
+            format!("{}{html}", Self::PAGE_LOADER)
         };
         std::fs::write(path, patched).map_err(|error| error.to_string())
     }
@@ -97,42 +102,44 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn write_manifest(dir: &Path, background: Value) {
-        let manifest = json!({
-            "manifest_version": 3,
-            "name": "t",
-            "version": "1.0",
-            "background": background,
-        });
-        std::fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
-        std::fs::write(dir.join("vmux_runtime.js"), "runtime").unwrap();
-    }
+    impl ExtensionShim {
+        fn write_manifest(dir: &Path, background: Value) {
+            let manifest = json!({
+                "manifest_version": 3,
+                "name": "t",
+                "version": "1.0",
+                "background": background,
+            });
+            std::fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
+            std::fs::write(dir.join("vmux_runtime.js"), "runtime").unwrap();
+        }
 
-    fn worker(dir: &Path) -> String {
-        let raw = std::fs::read_to_string(dir.join("manifest.json")).unwrap();
-        let manifest: Value = serde_json::from_str(&raw).unwrap();
-        manifest["background"]["service_worker"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        fn worker(dir: &Path) -> String {
+            let raw = std::fs::read_to_string(dir.join("manifest.json")).unwrap();
+            let manifest: Value = serde_json::from_str(&raw).unwrap();
+            manifest["background"]["service_worker"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
     }
 
     #[test]
     fn classic_worker_loads_runtime_patch_and_original() {
         let dir = tempfile::tempdir().unwrap();
-        write_manifest(dir.path(), json!({ "service_worker": "background.js" }));
+        ExtensionShim::write_manifest(dir.path(), json!({ "service_worker": "background.js" }));
 
         let loader_file =
             ExtensionShim::install_worker_loader(dir.path(), "vmux_runtime.js").unwrap();
 
-        assert_eq!(worker(dir.path()), loader_file);
-        assert_eq!(loader_file, WORKER_LOADER_FILE);
+        assert_eq!(ExtensionShim::worker(dir.path()), loader_file);
+        assert_eq!(loader_file, ExtensionShim::WORKER_LOADER_FILE);
         let loader = std::fs::read_to_string(dir.path().join(loader_file)).unwrap();
         assert!(loader.contains("importScripts(\"vmux_runtime.js\")"));
         assert!(loader.contains("importScripts(\"vmux_patch.js\")"));
         assert!(loader.contains("importScripts(\"background.js\")"));
-        assert!(dir.path().join(PATCH_FILE).exists());
-        let patch = std::fs::read_to_string(dir.path().join(PATCH_FILE)).unwrap();
+        assert!(dir.path().join(ExtensionShim::PATCH_FILE).exists());
+        let patch = std::fs::read_to_string(dir.path().join(ExtensionShim::PATCH_FILE)).unwrap();
         assert!(patch.contains("message.channel === BRIDGE_CHANNEL"));
         assert!(patch.contains("capture(message, sender)"));
         for method in [
@@ -193,7 +200,7 @@ mod tests {
     #[test]
     fn module_worker_uses_ordered_static_imports() {
         let dir = tempfile::tempdir().unwrap();
-        write_manifest(
+        ExtensionShim::write_manifest(
             dir.path(),
             json!({ "service_worker": "sw/main.js", "type": "module" }),
         );
@@ -212,10 +219,10 @@ mod tests {
     #[test]
     fn rejects_extension_without_service_worker() {
         let dir = tempfile::tempdir().unwrap();
-        write_manifest(dir.path(), json!({ "scripts": ["bg.js"] }));
+        ExtensionShim::write_manifest(dir.path(), json!({ "scripts": ["bg.js"] }));
 
         assert!(ExtensionShim::install_worker_loader(dir.path(), "vmux_runtime.js").is_err());
-        assert!(!dir.path().join(PATCH_FILE).exists());
+        assert!(!dir.path().join(ExtensionShim::PATCH_FILE).exists());
     }
 
     #[test]
@@ -233,9 +240,9 @@ mod tests {
         ExtensionShim::install_page_loader(dir.path(), "popup/index.html").unwrap();
 
         let html = std::fs::read_to_string(path).unwrap();
-        assert!(html.find(PAGE_LOADER).unwrap() < html.find("main.js").unwrap());
+        assert!(html.find(ExtensionShim::PAGE_LOADER).unwrap() < html.find("main.js").unwrap());
         assert!(html.find("vmux_runtime.js").unwrap() < html.find("vmux_patch.js").unwrap());
-        assert_eq!(html.matches(PAGE_LOADER).count(), 1);
+        assert_eq!(html.matches(ExtensionShim::PAGE_LOADER).count(), 1);
     }
 
     #[test]

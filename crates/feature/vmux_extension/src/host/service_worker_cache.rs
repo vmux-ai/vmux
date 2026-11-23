@@ -2,10 +2,6 @@ use std::path::{Path, PathBuf};
 
 use super::runtime::PreparedRuntime;
 
-const RUNTIME_FINGERPRINT: &str = ".extension-runtime-v2";
-const LEGACY_RUNTIME_MARKER: &str = ".stable-runtime-v1";
-const SERVICE_WORKER_DIR: &str = "Service Worker";
-
 pub(crate) struct ServiceWorkerCache {
     default_dir: PathBuf,
 }
@@ -19,18 +15,27 @@ impl From<&Path> for ServiceWorkerCache {
 }
 
 impl ServiceWorkerCache {
+    const RUNTIME_FINGERPRINT: &str = ".extension-runtime-v2";
+    const LEGACY_RUNTIME_MARKER: &str = ".stable-runtime-v1";
+    const SERVICE_WORKER_DIR: &str = "Service Worker";
+
     pub(crate) fn reconcile(&self, prepared: &[PreparedRuntime]) -> Result<(), String> {
         if prepared.is_empty() {
             return Ok(());
         }
         let fingerprint = Self::fingerprint(prepared);
-        let marker = self.default_dir.join(RUNTIME_FINGERPRINT);
+        let marker = self
+            .default_dir
+            .join(ServiceWorkerCache::RUNTIME_FINGERPRINT);
         if std::fs::read_to_string(&marker).ok().as_deref() == Some(fingerprint.as_str()) {
             return Ok(());
         }
         self.clear()?;
         std::fs::create_dir_all(&self.default_dir).map_err(|error| error.to_string())?;
-        let _ = std::fs::remove_file(self.default_dir.join(LEGACY_RUNTIME_MARKER));
+        let _ = std::fs::remove_file(
+            self.default_dir
+                .join(ServiceWorkerCache::LEGACY_RUNTIME_MARKER),
+        );
         std::fs::write(&marker, fingerprint).map_err(|error| error.to_string())
     }
 
@@ -44,12 +49,15 @@ impl ServiceWorkerCache {
     }
 
     fn clear(&self) -> Result<(), String> {
-        let service_workers = self.default_dir.join(SERVICE_WORKER_DIR);
+        let service_workers = self
+            .default_dir
+            .join(ServiceWorkerCache::SERVICE_WORKER_DIR);
         if !service_workers.exists() {
             return Ok(());
         }
         let stale = service_workers.with_file_name(format!(
-            "{SERVICE_WORKER_DIR}.vmux-stale-{}",
+            "{}.vmux-stale-{}",
+            Self::SERVICE_WORKER_DIR,
             uuid::Uuid::new_v4()
         ));
         std::fs::rename(&service_workers, &stale).map_err(|error| error.to_string())?;
@@ -83,17 +91,24 @@ mod tests {
             ServiceWorkerCache::from(self.dir.path())
         }
 
+        fn reconcile(&self, prepared: &[PreparedRuntime]) -> Result<(), String> {
+            self.cache().reconcile(prepared)
+        }
+
         fn script_cache(&self) -> PathBuf {
             self.dir
                 .path()
                 .join("Default")
-                .join(SERVICE_WORKER_DIR)
+                .join(ServiceWorkerCache::SERVICE_WORKER_DIR)
                 .join("ScriptCache")
                 .join("entry_0")
         }
 
         fn legacy_marker(&self) -> PathBuf {
-            self.dir.path().join("Default").join(LEGACY_RUNTIME_MARKER)
+            self.dir
+                .path()
+                .join("Default")
+                .join(ServiceWorkerCache::LEGACY_RUNTIME_MARKER)
         }
     }
 
@@ -103,7 +118,6 @@ mod tests {
         std::fs::write(profile.legacy_marker(), "nngceckbapebfimnlniiiahkandclblb").unwrap();
 
         profile
-            .cache()
             .reconcile(&[PreparedRuntime::fixture(
                 "nngceckbapebfimnlniiiahkandclblb",
                 "runtime-hash",

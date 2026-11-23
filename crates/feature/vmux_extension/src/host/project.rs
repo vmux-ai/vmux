@@ -41,25 +41,33 @@ impl Plugin for ExtensionProjectPlugin {
     }
 }
 
-type HierarchyData = (
-    Option<&'static Children>,
-    Option<&'static ChildOf>,
-    Option<&'static Order>,
-    Has<Tab>,
-    Has<Stack>,
-    Option<&'static HostWindow>,
-    Has<Loading>,
-);
+type HierarchyQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Option<&'static Children>,
+        Option<&'static ChildOf>,
+        Option<&'static Order>,
+        Has<Tab>,
+        Has<Stack>,
+        Option<&'static HostWindow>,
+        Has<Loading>,
+    ),
+>;
 
-type PageData = (
-    Entity,
-    &'static PageMetadata,
-    &'static ExtensionTabId,
-    Option<&'static LastActivatedAt>,
-    Option<&'static vmux_ecs::PageIdentity>,
-    Has<ExtensionBridgeWebview>,
-    Has<Loading>,
-);
+type PageQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static PageMetadata,
+        &'static ExtensionTabId,
+        Option<&'static LastActivatedAt>,
+        Option<&'static vmux_ecs::PageIdentity>,
+        Has<ExtensionBridgeWebview>,
+        Has<Loading>,
+    ),
+>;
 
 #[derive(SystemParam)]
 struct ProjectionData<'w, 's> {
@@ -74,8 +82,8 @@ struct ProjectionData<'w, 's> {
         ),
     >,
     spaces: Query<'w, 's, (Entity, Option<&'static Order>), With<Space>>,
-    hierarchy: Query<'w, 's, HierarchyData>,
-    pages: Query<'w, 's, PageData>,
+    hierarchy: HierarchyQuery<'w, 's>,
+    pages: PageQuery<'w, 's>,
     popups: Query<
         'w,
         's,
@@ -97,6 +105,23 @@ struct WindowCandidate {
     top: i32,
     width: i32,
     height: i32,
+}
+
+impl WindowCandidate {
+    fn snapshot(&self, id: i32) -> ExtensionWindowSnapshot {
+        ExtensionWindowSnapshot {
+            id,
+            focused: self.focused,
+            left: self.left,
+            top: self.top,
+            width: self.width,
+            height: self.height,
+            incognito: false,
+            window_type: "normal".into(),
+            state: "normal".into(),
+            always_on_top: false,
+        }
+    }
 }
 
 struct PageCandidate {
@@ -163,18 +188,7 @@ fn rebuild_model(
             .collect::<HashMap<_, _>>();
         let projected_windows = windows
             .iter()
-            .map(|window| ExtensionWindowSnapshot {
-                id: window_ids[&window.entity],
-                focused: window.focused,
-                left: window.left,
-                top: window.top,
-                width: window.width,
-                height: window.height,
-                incognito: false,
-                window_type: "normal".into(),
-                state: "normal".into(),
-                always_on_top: false,
-            })
+            .map(|window| window.snapshot(window_ids[&window.entity]))
             .collect::<Vec<_>>();
         let mut indices = HashMap::<i32, u32>::new();
         let projected_tabs = pages
@@ -186,23 +200,9 @@ fn rebuild_model(
                     .or(primary_window)?;
                 let window_id = window_ids[&window_entity];
                 let index = indices.entry(window_id).or_default();
-                let tab = ExtensionTabSnapshot {
-                    id: page.id,
-                    window_id,
-                    index: *index,
-                    active: false,
-                    highlighted: false,
-                    pinned: false,
-                    url: page.url,
-                    title: page.title,
-                    status: page.status,
-                };
+                let projected = page.into_projected(window_id, *index);
                 *index += 1;
-                Some(ProjectedTab {
-                    entity: page.entity,
-                    activated_at: page.activated_at,
-                    tab,
-                })
+                Some(projected)
             })
             .collect::<Vec<_>>();
         (projected_windows, projected_tabs)
@@ -387,6 +387,24 @@ impl ProjectionData<'_, '_> {
 }
 
 impl PageCandidate {
+    fn into_projected(self, window_id: i32, index: u32) -> ProjectedTab {
+        ProjectedTab {
+            entity: self.entity,
+            activated_at: self.activated_at,
+            tab: ExtensionTabSnapshot {
+                id: self.id,
+                window_id,
+                index,
+                active: false,
+                highlighted: false,
+                pinned: false,
+                url: self.url,
+                title: self.title,
+                status: self.status,
+            },
+        }
+    }
+
     fn visible_url(url: &str) -> bool {
         url.starts_with("http://")
             || url.starts_with("https://")

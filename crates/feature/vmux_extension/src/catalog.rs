@@ -53,7 +53,7 @@ pub struct OpenManagerRequest;
 
 #[derive(Component, Default)]
 pub(crate) struct ExtensionCatalog {
-    snapshot: ExtensionsUiState,
+    installing: Vec<ExtInstallProgress>,
     revision: u64,
     root_revision: Option<Revision>,
     root_generation: Option<u64>,
@@ -62,16 +62,12 @@ pub(crate) struct ExtensionCatalog {
 }
 
 impl ExtensionCatalog {
-    pub(crate) fn replace(&mut self, mut snapshot: ExtensionsUiState) {
-        snapshot.loaded = true;
-        snapshot.installing = std::mem::take(&mut self.snapshot.installing);
-        self.snapshot = snapshot;
-        self.revision = self.revision.wrapping_add(1);
+    fn mark_changed(&mut self) {
+        self.revision = self.revision.wrapping_add(1).max(1);
     }
 
     pub(crate) fn update_progress(&mut self, progress: ExtInstallProgress) {
         let current = self
-            .snapshot
             .installing
             .iter()
             .position(|item| item.key == progress.key);
@@ -80,14 +76,14 @@ impl ExtensionCatalog {
             ExtInstallPhase::Done | ExtInstallPhase::Failed
         ) {
             if let Some(index) = current {
-                self.snapshot.installing.remove(index);
+                self.installing.remove(index);
             }
         } else if let Some(index) = current {
-            self.snapshot.installing[index] = progress;
+            self.installing[index] = progress;
         } else {
-            self.snapshot.installing.push(progress);
+            self.installing.push(progress);
         }
-        self.revision = self.revision.wrapping_add(1);
+        self.mark_changed();
     }
 }
 
@@ -96,16 +92,15 @@ struct ExtensionSubscriber {
     catalog_revision: u64,
     revision: u64,
     emitted_revision: u64,
-    state: ExtensionsUiState,
+    query: String,
 }
 
 impl ExtensionSubscriber {
     fn filter(&mut self, query: &str) {
-        if self.state.query == query {
+        if self.query == query {
             return;
         }
-        self.state.query = query.to_string();
-        self.project();
+        self.query = query.to_string();
         self.touch();
     }
 
@@ -114,17 +109,14 @@ impl ExtensionSubscriber {
             return;
         }
         self.catalog_revision = catalog.revision;
-        let query = std::mem::take(&mut self.state.query);
-        self.state = catalog.snapshot.clone();
-        self.state.query = query;
-        self.project();
         self.touch();
     }
 
-    fn project(&mut self) {
-        let query = self.state.query.trim().to_ascii_lowercase();
-        self.state.visible = self
-            .state
+    fn project(&self, base: &ExtensionsUiState) -> ExtensionsUiState {
+        let mut state = base.clone();
+        state.query = self.query.clone();
+        let query = self.query.trim().to_ascii_lowercase();
+        state.visible = state
             .extensions
             .iter()
             .filter(|extension| {
@@ -135,6 +127,7 @@ impl ExtensionSubscriber {
             })
             .cloned()
             .collect();
+        state
     }
 
     fn touch(&mut self) {
@@ -283,18 +276,7 @@ fn finish(
 }
 
 fn project(
-    roots: Query<
-        (
-            Entity,
-            &Revision,
-            &RuntimeIds,
-            &crate::host::RuntimeGeneration,
-            Has<crate::Loaded>,
-        ),
-        With<Binding>,
-    >,
-    prepared: Query<&crate::host::PreparedExtensions>,
-    bindings: Query<(&crate::Id, &ChildOf), With<crate::host::RuntimeBinding>>,
+    roots: Query<(Entity, &Revision, Has<crate::Loaded>), With<Binding>>,
     source: Catalog,
     profile: vmux_ecs::profile::CurrentProfile,
     mut catalog: Single<&mut ExtensionCatalog>,
@@ -303,7 +285,7 @@ fn project(
         return;
     };
     let profile = profile.clone().into_id();
-    let Ok((root, revision, runtime, runtime_generation, loaded)) = roots.single() else {
+    let Ok((root, revision, loaded)) = roots.single() else {
         return;
     };
     let generation = source.ticket(root).map(|ticket| ticket.generation);
@@ -314,40 +296,11 @@ fn project(
     {
         return;
     }
-    let snapshot = match source.snapshot(root) {
-        Ok(index) => {
-            let mut snapshot = match prepared.single() {
-                Ok(prepared) => prepared.snapshot(&index, &profile, &runtime.0),
-                Err(_) => Catalog::project_ui_state(&index, &profile, &runtime.0),
-            };
-            for entry in &index.entries {
-                if !entry.enabled_for(&profile) {
-                    continue;
-                }
-                let association = source.association(root, &entry.id, &profile);
-                if generation != Some(runtime_generation.0)
-                    || !bindings.iter().any(|(id, parent)| {
-                        id.0 == entry.id && Some(parent.parent()) == association
-                    })
-                {
-                    snapshot.pending = true;
-                }
-            }
-            snapshot
-        }
-        Err(error) => {
-            warn!("extension catalog unavailable: {error}");
-            ExtensionsUiState {
-                loaded: true,
-                ..Default::default()
-            }
-        }
-    };
-    catalog.replace(snapshot);
     catalog.root_revision = Some(*revision);
     catalog.root_generation = generation;
     catalog.root_loaded = loaded;
     catalog.profile = profile;
+    catalog.mark_changed();
 }
 
 fn open_manager(
@@ -380,8 +333,79 @@ fn open_page(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct PublishSources<'w, 's> {
+    roots: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static RuntimeIds,
+            &'static crate::host::RuntimeGeneration,
+        ),
+        With<Binding>,
+    >,
+    prepared: Query<'w, 's, &'static crate::host::PreparedExtensions>,
+    bindings:
+        Query<'w, 's, (&'static crate::Id, &'static ChildOf), With<crate::host::RuntimeBinding>>,
+    source: Catalog<'w, 's>,
+    profile: vmux_ecs::profile::CurrentProfile<'w, 's>,
+}
+
+impl PublishSources<'_, '_> {
+    fn snapshot(&self, catalog: &ExtensionCatalog) -> ExtensionsUiState {
+        let Some(profile) = self.profile.profile() else {
+            return ExtensionsUiState {
+                installing: catalog.installing.clone(),
+                ..Default::default()
+            };
+        };
+        let profile = profile.clone().into_id();
+        let Ok((root, runtime, runtime_generation)) = self.roots.single() else {
+            return ExtensionsUiState {
+                installing: catalog.installing.clone(),
+                ..Default::default()
+            };
+        };
+        let generation = self.source.ticket(root).map(|ticket| ticket.generation);
+        let mut snapshot = match self.source.snapshot(root) {
+            Ok(index) => {
+                let mut snapshot = match self.prepared.single() {
+                    Ok(prepared) => prepared.snapshot(&index, &profile, &runtime.0),
+                    Err(_) => Catalog::project_ui_state(&index, &profile, &runtime.0),
+                };
+                for entry in &index.entries {
+                    if !entry.enabled_for(&profile) {
+                        continue;
+                    }
+                    let association = self.source.association(root, &entry.id, &profile);
+                    if generation != Some(runtime_generation.0)
+                        || !self.bindings.iter().any(|(id, parent)| {
+                            id.0 == entry.id && Some(parent.parent()) == association
+                        })
+                    {
+                        snapshot.pending = true;
+                    }
+                }
+                snapshot
+            }
+            Err(error) => {
+                warn!("extension catalog unavailable: {error}");
+                ExtensionsUiState {
+                    loaded: true,
+                    ..Default::default()
+                }
+            }
+        };
+        snapshot.loaded = true;
+        snapshot.installing = catalog.installing.clone();
+        snapshot
+    }
+}
+
 fn publish(
     catalog: Query<&ExtensionCatalog>,
+    sources: PublishSources,
     mut subscribers: Query<(Entity, &mut ExtensionSubscriber)>,
     layout_ui: Query<(), With<LayoutUiStateUpdates>>,
     mut commands: Commands,
@@ -389,21 +413,20 @@ fn publish(
     let Ok(catalog) = catalog.single() else {
         return;
     };
+    let mut base = None;
     for (entity, mut subscriber) in &mut subscribers {
         subscriber.synchronize(catalog);
         if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
+        let base = base.get_or_insert_with(|| sources.snapshot(catalog));
+        let state = subscriber.project(base);
         commands.trigger(UiStateWrite::<ExtensionsUiState>::from_event(
-            entity,
-            &subscriber.state,
+            entity, &state,
         ));
         if layout_ui.contains(entity) {
             commands.trigger(
-                UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
-                    entity,
-                    &catalog.snapshot,
-                ),
+                UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(entity, base),
             );
         }
         subscriber.emitted_revision = subscriber.revision;
