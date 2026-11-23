@@ -322,7 +322,7 @@ impl AcpServiceConnection {
         self.catalog_tasks.insert(request_id, task);
     }
 
-    async fn dispatch_shared(&mut self, message: SharedMessage) -> Result<(), SharedMessage> {
+    async fn dispatch_shared(&mut self, message: SharedMessage) {
         match message {
             SharedMessage::ListSessions
             | SharedMessage::AgentNewChat { .. }
@@ -357,9 +357,7 @@ impl AcpServiceConnection {
             } => {
                 self.service.sessions.approve(sid, call_id, decision).await;
             }
-            other => return Err(other),
         }
-        Ok(())
     }
 
     async fn rebind_acp_workspace(&self, sid: String, cwd: String) {
@@ -389,11 +387,7 @@ impl AcpServiceConnection {
             ClientMessage::AgentCommandResponse { request_id, result } => {
                 self.resolve_command_response(request_id, result).await;
             }
-            ClientMessage::Shared(shared) => {
-                self.dispatch_shared(shared)
-                    .await
-                    .map_err(ClientMessage::Shared)?;
-            }
+            ClientMessage::Shared(shared) => self.dispatch_shared(shared).await,
             ClientMessage::DetachAgentSession { sid } => self.detach(&sid),
             ClientMessage::RebindAcpWorkspace { sid, cwd } => {
                 self.rebind_acp_workspace(sid, cwd).await;
