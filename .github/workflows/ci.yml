@@ -648,6 +648,10 @@ jobs:
           dependency-cache-key: ${{ matrix.dependencies }}
           desktop: ${{ matrix.native }}
           cef-version: ${{ needs.plan.outputs.cef }}
+          fast-rust: ${{ matrix.dependencies == 'test' && 'false' || 'auto' }}
+          test-profile: ${{ matrix.dependencies == 'test' && 'true' || 'false' }}
+          branch-cache: "auto"
+          save-dependency-cache: ${{ (matrix.key != 'test-rust' || needs.changes.outputs.args == '' || contains(needs.changes.outputs.args, '--workspace')) && 'auto' || 'false' }}
       - name: Rust
         if: matrix.reuse == '' && matrix.key == 'test-rust'
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ needs.changes.outputs.args }}

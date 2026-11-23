@@ -19,6 +19,22 @@ inputs:
     description: Shared dependency cache partition, independent of workspace artifacts
     required: false
     default: ""
+  fast-rust:
+    description: Apply the CI-only Rust compile settings (auto, true or false)
+    required: false
+    default: "auto"
+  test-profile:
+    description: Use unoptimized debug-free test compilation flags for faster CI builds
+    required: false
+    default: "false"
+  branch-cache:
+    description: Publish successful same-repository PR workspace caches (auto, true or false)
+    required: false
+    default: "false"
+  save-dependency-cache:
+    description: Allow saving the shared dependency cache on main (auto or false)
+    required: false
+    default: "auto"
 runs:
   using: composite
   steps:
@@ -81,17 +97,33 @@ runs:
     - uses: ./.github/actions/setup-rust
       with:
         components: ${{ inputs.components }}
+        fast-rust: ${{ inputs.fast-rust }}
+
+    - name: Configure CI Rust test compilation
+      if: inputs.test-profile == 'true'
+      shell: bash
+      run: |
+        flags="-C opt-level=0 -C codegen-units=16"
+        if [ -n "${RUSTFLAGS:-}" ]; then
+          flags="${RUSTFLAGS} ${flags}"
+        fi
+        {
+          echo 'CARGO_PROFILE_DEV_LTO=off'
+          echo 'CARGO_PROFILE_DEV_DEBUG=0'
+          echo "RUSTFLAGS=${flags}"
+        } >> "$GITHUB_ENV"
 
     - uses: Swatinem/rust-cache@v2
       with:
         shared-key: ${{ inputs.dependency-cache-key || inputs.cache-key }}
         cache-workspace-crates: "false"
         cache-on-failure: "true"
-        save-if: ${{ github.ref == 'refs/heads/main' && (inputs.dependency-cache-key == '' || inputs.dependency-cache-key == inputs.cache-key) }}
+        save-if: ${{ inputs.save-dependency-cache != 'false' && github.ref == 'refs/heads/main' && (inputs.dependency-cache-key == '' || inputs.dependency-cache-key == inputs.cache-key) }}
 
     - uses: ./.github/actions/cache-workspace
       with:
         cache-key: ${{ inputs.cache-key }}
+        branch-cache: ${{ inputs.branch-cache }}
 
     - name: Use a shared Linux CEF SDK
       if: inputs.desktop == 'true'
