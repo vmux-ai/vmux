@@ -8,28 +8,28 @@ use super::text_style::StyledSpanStyle;
 pub(super) struct PreviewDom;
 
 impl PreviewDom {
+    const VIDEO_HOST_ID: &str = "vmux-video-host";
+
     pub(super) fn toggle_video() {
         MediaElement::with_id("preview-video").toggle_playback();
     }
-}
 
-fn format_size(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    let b = bytes as f64;
-    if b >= GB {
-        format!("{:.1} GB", b / GB)
-    } else if b >= MB {
-        format!("{:.1} MB", b / MB)
-    } else if b >= KB {
-        format!("{:.1} KB", b / KB)
-    } else {
-        format!("{bytes} B")
+    fn format_size(bytes: u64) -> String {
+        let kb = 1024.0;
+        let mb = kb * 1024.0;
+        let gb = mb * 1024.0;
+        let b = bytes as f64;
+        if b >= gb {
+            format!("{:.1} GB", b / gb)
+        } else if b >= mb {
+            format!("{:.1} MB", b / mb)
+        } else if b >= kb {
+            format!("{:.1} KB", b / kb)
+        } else {
+            format!("{bytes} B")
+        }
     }
 }
-
-const VIDEO_HOST_ID: &str = "vmux-video-host";
 
 #[component]
 pub(super) fn PreviewPane(preview: Option<FilePreviewItem>) -> Element {
@@ -49,7 +49,7 @@ pub(super) fn PreviewPane(preview: Option<FilePreviewItem>) -> Element {
                 rsx! {
                     div {
                         key: "{path}",
-                        id: VIDEO_HOST_ID,
+                        id: PreviewDom::VIDEO_HOST_ID,
                         class: "h-full w-full rounded-xl bg-background/70 ring-1 ring-primary/20",
                     }
                 }
@@ -91,7 +91,7 @@ pub(super) fn PreviewPane(preview: Option<FilePreviewItem>) -> Element {
                         _ => kind.clone(),
                     }}
                 }
-                div { "{format_size(*size)}" }
+                div { "{PreviewDom::format_size(*size)}" }
                 if !modified.is_empty() {
                     div { class: "opacity-70", "{modified}" }
                 }

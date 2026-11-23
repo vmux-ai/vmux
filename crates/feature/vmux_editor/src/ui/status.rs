@@ -166,12 +166,14 @@ mod tests {
     use super::*;
     use vmux_api::media::MediaKind;
 
-    fn text(view: FileViewMode, markdown: bool, has_diff: bool) -> FileStatusScope {
-        FileStatusScope {
-            mode: Mode::Text,
-            view,
-            markdown,
-            has_diff,
+    impl FileStatusScope {
+        fn text(view: FileViewMode, markdown: bool, has_diff: bool) -> Self {
+            Self {
+                mode: Mode::Text,
+                view,
+                markdown,
+                has_diff,
+            }
         }
     }
 
@@ -193,7 +195,7 @@ mod tests {
 
     #[test]
     fn the_source_editor_answers_every_item() {
-        let scope = text(FileViewMode::Editor, false, false);
+        let scope = FileStatusScope::text(FileViewMode::Editor, false, false);
 
         assert!(scope.shows_anything());
         assert!(scope.shows_caret());
@@ -202,25 +204,25 @@ mod tests {
 
     #[test]
     fn a_rendered_note_keeps_the_caret_and_drops_the_indent() {
-        let scope = text(FileViewMode::Note, true, false);
+        let scope = FileStatusScope::text(FileViewMode::Note, true, false);
 
         assert!(scope.shows_caret());
         assert!(!scope.shows_indent());
         assert!(
-            text(FileViewMode::Note, false, false).shows_indent(),
+            FileStatusScope::text(FileViewMode::Note, false, false).shows_indent(),
             "a non-markdown file shows the source editor whatever the shared view mode says"
         );
     }
 
     #[test]
     fn a_diff_drops_the_caret_and_the_indent_but_still_describes_the_file() {
-        let scope = text(FileViewMode::Diff, false, true);
+        let scope = FileStatusScope::text(FileViewMode::Diff, false, true);
 
         assert!(scope.shows_anything());
         assert!(!scope.shows_caret());
         assert!(!scope.shows_indent());
         assert!(
-            text(FileViewMode::Diff, false, false).shows_caret(),
+            FileStatusScope::text(FileViewMode::Diff, false, false).shows_caret(),
             "a file with nothing to diff falls back to the editor, caret and all"
         );
     }

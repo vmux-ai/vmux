@@ -9,7 +9,7 @@ use super::explorer::SidebarView;
 use super::input::{EditorFocus, EditorInput, PreeditField};
 use super::key::use_file_keys;
 use super::menu::{CodeActionMenu, EditorContextMenu, ReferencesPanel, RenameInput};
-use super::note::{NoteBlankLine, NoteBlockView, NoteBlocks, NoteCursor, NoteProperties};
+use super::note::{NoteBlankLine, NoteBlockView, NoteCursor, NoteProperties};
 use super::project::ProjectPage;
 use super::sidebar::{ExplorerPane, ExplorerSidebar, ExplorerToggleButton, PaneWidth};
 use super::state::FileUi;
@@ -652,10 +652,10 @@ fn EditorWorkspace() -> Element {
             }
             let note_mode = *file_view_mode.peek() == FileViewMode::Note && *is_markdown.peek();
             if note_mode {
-                let active = note_blocks
-                    .peek()
-                    .as_slice()
-                    .block_index_for_line(c.source_primary.line);
+                let active = NoteCursor::block_index_for_line(
+                    note_blocks.peek().as_slice(),
+                    c.source_primary.line,
+                );
                 if *keymap.peek() == KeymapKind::Vim
                     && !note_cursor.editing()
                     && let Some(index) = active
@@ -705,7 +705,9 @@ fn EditorWorkspace() -> Element {
             match event.mode {
                 FileViewMode::Note if is_markdown() => {
                     let line = source_cursor().line;
-                    if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
+                    if let Some(index) =
+                        NoteCursor::block_index_for_line(note_blocks.read().as_slice(), line)
+                    {
                         note_cursor.activate_centered(index, line);
                     }
                     if note_cursor.editing() {
@@ -734,7 +736,9 @@ fn EditorWorkspace() -> Element {
                 && is_markdown()
             {
                 let line = source_cursor().line;
-                if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
+                if let Some(index) =
+                    NoteCursor::block_index_for_line(note_blocks.read().as_slice(), line)
+                {
                     note_cursor.activate_centered(index, line);
                 }
             }
@@ -771,9 +775,7 @@ fn EditorWorkspace() -> Element {
                     NoteCursorActivation::Center(line)
                     | NoteCursorActivation::PreserveViewport(line) => line,
                 };
-                blocks
-                    .as_slice()
-                    .block_index_for_line(line)
+                NoteCursor::block_index_for_line(blocks.as_slice(), line)
                     .map(|index| (activation, index, line))
             });
             if let Some((activation, index, line)) = activation {
@@ -1141,12 +1143,13 @@ fn EditorWorkspace() -> Element {
                             let active = note_cursor.active();
                             let source_position = source_cursor();
                             let block_count = note_blocks.read().len();
-                            let blank_line_slot = note_cursor.editing()
+                            let blank_line_slot = note_cursor
+                                .editing()
                                 .then(|| {
-                                    note_blocks
-                                        .read()
-                                        .as_slice()
-                                        .blank_line_slot(source_position.line)
+                                    NoteCursor::blank_line_slot(
+                                        note_blocks.read().as_slice(),
+                                        source_position.line,
+                                    )
                                 })
                                 .flatten();
                             rsx! {
@@ -1855,92 +1858,113 @@ fn EditorHeader(
                 }
             }
             if mode() == Mode::Text && (is_markdown || git_has_diff) {
-                div { class: "flex shrink-0 items-center gap-0.5 text-[10px] font-medium",
-                    if is_markdown {
-                        button {
-                            class: file_mode_class(view_mode == FileViewMode::Note),
-                            title: translate("editor-rendered-markdown"),
-                            onclick: move |_| {
-                                let _ = send(&FileViewModeSet { mode: FileViewMode::Note });
-                            },
-                            {translate("editor-note")}
-                        }
-                    }
-                    button {
-                        class: file_mode_class(
-                            view_mode == FileViewMode::Editor
-                                || (view_mode == FileViewMode::Note && !is_markdown),
-                        ),
-                        title: translate("editor-source-editor"),
-                        onclick: move |_| {
-                            let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
-                        },
-                        {translate("editor-editor")}
-                    }
-                    if git_has_diff {
-                        button {
-                            class: file_mode_class(view_mode == FileViewMode::Diff),
-                            title: translate("editor-git-diff"),
-                            onclick: move |_| {
-                                let _ = send(&FileViewModeSet { mode: FileViewMode::Diff });
-                            },
-                            {translate("editor-diff")}
-                        }
-                    }
-                }
+                EditorViewModeToggle { is_markdown, git_has_diff, view_mode }
             }
             if mode() == Mode::Text {
-                div {
-                    class: "flex shrink-0 items-center gap-0.5 text-[10px] font-medium",
-                    title: translate("schema-keymap"),
-                    button {
-                        class: file_mode_class(keymap == KeymapKind::Vscode),
-                        onclick: move |_| {
-                            let _ = send(&FileKeymapSet { keymap: KeymapKind::Vscode });
-                        },
-                        {translate("editor-keymap-standard")}
-                    }
-                    button {
-                        class: file_mode_class(keymap == KeymapKind::Vim),
-                        onclick: move |_| {
-                            let _ = send(&FileKeymapSet { keymap: KeymapKind::Vim });
-                        },
-                        {translate("editor-keymap-vim")}
-                    }
-                }
+                EditorKeymapToggle { keymap }
             }
             if let Some(count) = tidy.and_then(|state| state.count) {
-                div {
-                    class: "flex shrink-0 items-center gap-1.5 text-[11px]",
-                    span {
-                        class: "select-none text-primary",
-                        {translate_with(
-                            "editor-unchanged-previews",
-                            &[("count", TranslationValue::Number(count as i64))],
-                        )}
-                    }
-                    button {
-                        class: "rounded-full bg-primary/20 px-2 py-0.5 font-medium text-primary hover:bg-primary/30",
-                        onclick: move |_| {
-                            let _ = send(&FileTidyRequest { choice: TidyChoice::Tidy });
-                        },
-                        {translate("editor-tidy")}
-                    }
-                    button {
-                        class: "rounded-full px-2 py-0.5 text-foreground/60 hover:bg-foreground/10",
-                        onclick: move |_| {
-                            let _ = send(&FileTidyRequest { choice: TidyChoice::Always });
-                        },
-                        {translate("editor-always")}
-                    }
-                    button {
-                        class: "rounded-full px-1.5 py-0.5 text-foreground/40 hover:bg-foreground/10",
-                        onclick: move |_| {
-                            let _ = send(&FileTidyRequest { choice: TidyChoice::Dismiss });
-                        },
-                        "\u{2715}"
-                    }
+                EditorTidyBanner { count }
+            }
+        }
+    }
+}
+
+#[component]
+fn EditorViewModeToggle(is_markdown: bool, git_has_diff: bool, view_mode: FileViewMode) -> Element {
+    rsx! {
+        div { class: "flex shrink-0 items-center gap-0.5 text-[10px] font-medium",
+            if is_markdown {
+                button {
+                    class: Mode::button_class(view_mode == FileViewMode::Note),
+                    title: translate("editor-rendered-markdown"),
+                    onclick: move |_| {
+                        let _ = send(&FileViewModeSet { mode: FileViewMode::Note });
+                    },
+                    {translate("editor-note")}
                 }
+            }
+            button {
+                class: Mode::button_class(
+                    view_mode == FileViewMode::Editor
+                        || (view_mode == FileViewMode::Note && !is_markdown),
+                ),
+                title: translate("editor-source-editor"),
+                onclick: move |_| {
+                    let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
+                },
+                {translate("editor-editor")}
+            }
+            if git_has_diff {
+                button {
+                    class: Mode::button_class(view_mode == FileViewMode::Diff),
+                    title: translate("editor-git-diff"),
+                    onclick: move |_| {
+                        let _ = send(&FileViewModeSet { mode: FileViewMode::Diff });
+                    },
+                    {translate("editor-diff")}
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn EditorKeymapToggle(keymap: KeymapKind) -> Element {
+    rsx! {
+        div {
+            class: "flex shrink-0 items-center gap-0.5 text-[10px] font-medium",
+            title: translate("schema-keymap"),
+            button {
+                class: Mode::button_class(keymap == KeymapKind::Vscode),
+                onclick: move |_| {
+                    let _ = send(&FileKeymapSet { keymap: KeymapKind::Vscode });
+                },
+                {translate("editor-keymap-standard")}
+            }
+            button {
+                class: Mode::button_class(keymap == KeymapKind::Vim),
+                onclick: move |_| {
+                    let _ = send(&FileKeymapSet { keymap: KeymapKind::Vim });
+                },
+                {translate("editor-keymap-vim")}
+            }
+        }
+    }
+}
+
+#[component]
+fn EditorTidyBanner(count: u32) -> Element {
+    rsx! {
+        div {
+            class: "flex shrink-0 items-center gap-1.5 text-[11px]",
+            span {
+                class: "select-none text-primary",
+                {translate_with(
+                    "editor-unchanged-previews",
+                    &[("count", TranslationValue::Number(count as i64))],
+                )}
+            }
+            button {
+                class: "rounded-full bg-primary/20 px-2 py-0.5 font-medium text-primary hover:bg-primary/30",
+                onclick: move |_| {
+                    let _ = send(&FileTidyRequest { choice: TidyChoice::Tidy });
+                },
+                {translate("editor-tidy")}
+            }
+            button {
+                class: "rounded-full px-2 py-0.5 text-foreground/60 hover:bg-foreground/10",
+                onclick: move |_| {
+                    let _ = send(&FileTidyRequest { choice: TidyChoice::Always });
+                },
+                {translate("editor-always")}
+            }
+            button {
+                class: "rounded-full px-1.5 py-0.5 text-foreground/40 hover:bg-foreground/10",
+                onclick: move |_| {
+                    let _ = send(&FileTidyRequest { choice: TidyChoice::Dismiss });
+                },
+                "\u{2715}"
             }
         }
     }
@@ -1955,19 +1979,21 @@ const MEASURE_WIDE_GLYPH: &str = "\u{6f22}";
 pub(crate) const HOVER_DELAY_MS: u32 = 300;
 pub(crate) const SCROLL_ID: &str = "file-scroll";
 
-fn file_mode_class(active: bool) -> &'static str {
-    if active {
-        "rounded-md bg-foreground/[0.07] px-2 py-1 text-foreground transition-colors duration-150"
-    } else {
-        "rounded-md px-2 py-1 text-foreground/45 transition-colors duration-150 hover:bg-foreground/[0.035] hover:text-foreground"
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Dir,
     Text,
     Media(MediaKind),
+}
+
+impl Mode {
+    fn button_class(active: bool) -> &'static str {
+        if active {
+            "rounded-md bg-foreground/[0.07] px-2 py-1 text-foreground transition-colors duration-150"
+        } else {
+            "rounded-md px-2 py-1 text-foreground/45 transition-colors duration-150 hover:bg-foreground/[0.035] hover:text-foreground"
+        }
+    }
 }
 
 #[component]
