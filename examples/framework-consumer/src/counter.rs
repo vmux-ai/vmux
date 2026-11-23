@@ -6,15 +6,10 @@ pub struct NativePlugin;
 
 impl Plugin for NativePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<Native>::default())
+        app.register_required_components::<FeatureManifestOwner<Native>, Count>()
+            .add_plugins(FeaturePlugin::<Native>::default())
             .add_message::<CountRequest>()
             .add_systems(Update, count);
-        let world = app.world_mut();
-        let entity = world
-            .query_filtered::<Entity, With<FeatureManifestOwner<Native>>>()
-            .single(world)
-            .unwrap();
-        world.entity_mut(entity).insert(Count(0));
     }
 }
 
@@ -31,7 +26,7 @@ pub struct CountRequest {
     pub amount: u32,
 }
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct Count(pub u32);
 
 fn count(

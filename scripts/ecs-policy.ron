@@ -1,6 +1,0 @@
-(
-boundaries: [
-    (key: "scripts/hooks/pre-push||script", fingerprint: "e43708aba4f98abb", interface: "Git pre-push transport and Cargo rustfmt process", input: "pre-world: Rust sources in the checkout being pushed", output: "pre-world: formatting diagnostics and formatter exit status", lifetime: "one pre-push invocation before product composition", bounds: "one formatting command; no CLI compilation, tests or product state", teardown: "exec transfers process ownership to Cargo; formatter resources drain before exit", architecture: "ECS ownership boundaries"),
-    (key: "scripts/install.sh||script", fingerprint: "7dc8e69ddc9f7062", interface: "macOS shell installer for Homebrew cask or GitHub release DMG", input: "pre-world: shell environment and remote release metadata", output: "pre-world: installed macOS application bundle in /Applications", lifetime: "one user-invoked installation script before application launch", bounds: "downloads and installs the published Vmux macOS bundle only; no runtime state or product workflow", teardown: "trap removes temporary download and mount directories on exit", architecture: "ECS ownership boundaries"),
-],
-)

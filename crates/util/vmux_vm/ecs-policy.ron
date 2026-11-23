@@ -60,12 +60,6 @@
     (key: "crates/util/vmux_vm/src/ports.rs||struct:PublishedPort", owner: "crates/util/vmux_vm/src/ports.rs||struct:PortForwarder", lifetime: "one guest network lease's external published-port IO projection"),
     (key: "crates/util/vmux_vm/src/ports.rs||struct:Port", owner: "crates/util/vmux_vm/src/ports.rs||struct:Container", lifetime: "one guest network lease's external published-port IO projection"),
     (key: "crates/util/vmux_vm/src/ports.rs||struct:Container", owner: "crates/util/vmux_vm/src/ports.rs||struct:PublishedPort", lifetime: "one guest network lease's external published-port IO projection"),
-    (key: "crates/util/vmux_vm/src/engine.rs||struct:State", owner: "crates/util/vmux_vm/src/engine.rs||struct:Published", lifetime: "last persisted phase projection of the engine entity"),
-    (key: "crates/util/vmux_vm/src/docker.rs||struct:RunState", owner: "crates/util/vmux_vm/src/batch.rs||struct:Observation", lifetime: "current dependency observation of a batch container entity"),
-    (key: "crates/util/vmux_vm/src/docker.rs||struct:Port", owner: "crates/util/vmux_vm/src/docker.rs||struct:Container", lifetime: "bounded Docker protocol value of its enclosing ingress frame or socket operation"),
-    (key: "crates/util/vmux_vm/src/docker.rs||struct:Health", owner: "crates/util/vmux_vm/src/docker.rs||struct:RunState", lifetime: "bounded Docker protocol value of its enclosing ingress frame or socket operation"),
-    (key: "crates/util/vmux_vm/src/docker.rs||struct:Dependency", owner: "crates/util/vmux_vm/src/docker.rs||struct:Container", lifetime: "bounded Docker protocol value of its enclosing ingress frame or socket operation"),
-    (key: "crates/util/vmux_vm/src/docker.rs||enum:Condition", owner: "crates/util/vmux_vm/src/batch.rs||struct:Links", lifetime: "declared readiness condition on a canonical container dependency edge"),
     (key: "crates/util/vmux_vm/src/client.rs||struct:Status", owner: "crates/feature/vmux_container/src/host.rs||struct:Observed", lifetime: "last external engine observation of the EngineView entity"),
 ],
 shape: (
