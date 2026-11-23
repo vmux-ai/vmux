@@ -9982,6 +9982,7 @@ struct Inventory {
     cef_ffi: RefCell<Option<BTreeSet<String>>>,
     parser_visitors: RefCell<Option<BTreeSet<String>>>,
     static_traits: RefCell<Option<BTreeSet<String>>>,
+    native_io_adapters: RefCell<Option<BTreeSet<String>>>,
     enum_owner_candidates: RefCell<Option<BTreeMap<String, Vec<String>>>>,
     owned_values: RefCell<Option<BTreeSet<String>>>,
     test_fixtures: RefCell<Option<BTreeSet<String>>>,
@@ -11164,6 +11165,7 @@ impl Inventory {
         *self.cef_ffi.get_mut() = None;
         *self.parser_visitors.get_mut() = None;
         *self.static_traits.get_mut() = None;
+        *self.native_io_adapters.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -11914,6 +11916,7 @@ impl Inventory {
         *self.cef_ffi.get_mut() = None;
         *self.parser_visitors.get_mut() = None;
         *self.static_traits.get_mut() = None;
+        *self.native_io_adapters.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -11992,6 +11995,7 @@ impl Inventory {
         *self.cef_ffi.get_mut() = None;
         *self.parser_visitors.get_mut() = None;
         *self.static_traits.get_mut() = None;
+        *self.native_io_adapters.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -12207,6 +12211,7 @@ impl Inventory {
                 && !self.automatic_value_handle(declaration)
                 && !self.automatic_drop_guard(declaration)
                 && !self.automatic_serde_dto(declaration)
+                && !self.automatic_native_io_adapter(declaration)
                 && !self.contract_standard_impl(entry, declaration, policy, visiting)
                 && !policy
                     .values
@@ -12484,6 +12489,271 @@ impl Inventory {
             || self.automatic_tuple_event_list(entry)
             || self.automatic_parser_visitor(entry)
             || self.automatic_static_trait(entry)
+            || self.automatic_native_io_adapter(entry)
+    }
+
+    fn is_external_io_handle_path(resolved: &str) -> bool {
+        const PREFIXES: &[&str] = &[
+            "std::fs::",
+            "std::process::",
+            "std::net::",
+            "std::os::unix::net::",
+            "std::os::fd::",
+            "std::os::unix::io::",
+            "std::sync::mpsc::",
+            "std::thread::JoinHandle",
+            "crossbeam_channel::",
+            "async_channel::",
+            "flume::",
+            "tokio::",
+            "quinn::",
+            "rustls::",
+            "rcgen::",
+            "rusqlite::",
+            "reqwest::",
+            "hyper::",
+            "tokio_tungstenite::",
+            "tungstenite::",
+            "taffy::",
+            "syntect::",
+            "portable_pty::",
+            "alacritty_terminal::",
+            "vte::",
+            "objc2::",
+            "objc2_app_kit::",
+            "objc2_foundation::",
+            "objc2_core_foundation::",
+            "objc2_av_foundation::",
+            "objc2_screen_capture_kit::",
+            "objc2_user_notifications::",
+            "core_foundation::",
+            "core_graphics::",
+            "security_framework::",
+            "block2::",
+            "dispatch2::",
+            "tempfile::",
+            "notify::",
+            "arboard::",
+            "ring::",
+            "ed25519_dalek::",
+            "aes_gcm::",
+            "argon2::",
+            "hkdf::",
+            "zip::",
+            "tar::",
+            "flate2::",
+            "cef::",
+            "winit::",
+            "lsp_types::",
+            "ropey::",
+            "git2::",
+            "tree_sitter::",
+            "pulldown_cmark::",
+            "ureq::",
+        ];
+        PREFIXES.iter().any(|prefix| resolved.starts_with(prefix))
+    }
+
+    fn automatic_native_io_adapter(&self, entry: &Declaration) -> bool {
+        if !entry.production {
+            return false;
+        }
+        self.ensure_native_io_adapters();
+        self.native_io_adapters
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn native_io_adapter_candidate(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || !matches!(entry.kind, Kind::Struct)
+            || entry.ecs
+            || entry.plugin
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.projection
+            || entry.bundle_derive.is_some()
+            || entry.query_derive.is_some()
+            || self.has_bevy_runtime_access(entry)
+            || self.manifest_source(entry)
+            || self.typed_page(entry)
+            || self.host_page_marker(entry)
+            || self.store_schema(entry)
+        {
+            return false;
+        }
+        let has_io_field = entry.field_paths.iter().any(|path| {
+            self.external_path(&entry.namespace, path, &mut BTreeSet::new())
+                .is_some_and(|resolved| Self::is_external_io_handle_path(&resolved))
+        });
+        if !has_io_field {
+            return false;
+        }
+        for implementation in self.implementations(entry) {
+            if !implementation.production {
+                continue;
+            }
+            if implementation.plugin
+                || implementation.local
+                || implementation.dynamic
+                || implementation.opaque
+                || self.has_bevy_runtime_access(implementation)
+            {
+                return false;
+            }
+            if let Some(tr) = implementation.implemented_trait.as_deref() {
+                let tail = tr.rsplit("::").next().unwrap_or(tr);
+                if matches!(
+                    tail,
+                    "Plugin" | "FeatureManifestSource" | "LateLintPass" | "Job" | "Command"
+                ) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    #[inline(never)]
+    fn ensure_native_io_adapters(&self) {
+        if self.native_io_adapters.borrow().is_some() {
+            return;
+        }
+        let mut candidates = BTreeSet::new();
+        let mut candidate_names = BTreeSet::new();
+        for entry in self.entries.values() {
+            if self.native_io_adapter_candidate(entry) {
+                candidates.insert(entry.key.clone());
+                candidate_names.insert(entry.name.clone());
+            }
+        }
+        let mut proved = BTreeSet::new();
+        let mut queue = Vec::new();
+        if !candidates.is_empty() {
+            loop {
+                let before = candidate_names.len();
+                for imports in self.imports.values() {
+                    for (alias, target) in &imports.aliases {
+                        if candidate_names.contains(target.rsplit("::").next().unwrap_or(target)) {
+                            candidate_names.insert(alias.clone());
+                        }
+                    }
+                }
+                if candidate_names.len() == before {
+                    break;
+                }
+            }
+            self.ensure_job_adapters();
+            self.ensure_ecs_commands();
+            self.ensure_stateless_adapters();
+            self.ensure_value_handles();
+            self.ensure_drop_guards();
+            let jobs = self.job_adapters.borrow();
+            let cmds = self.ecs_commands.borrow();
+            let adapters = self.stateless_adapters.borrow();
+            let handles = self.value_handles.borrow();
+            let guards = self.drop_guards.borrow();
+            for owner in self.entries.values() {
+                if !owner.production || owner.local || owner.dynamic || owner.opaque {
+                    continue;
+                }
+                let valid_root =
+                    (owner.ecs || owner.bundle_derive.is_some() || owner.query_derive.is_some())
+                        && self.used(owner)
+                        || matches!(owner.kind, Kind::Function) && self.registered(owner)
+                        || jobs.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || cmds.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || adapters
+                            .as_ref()
+                            .is_some_and(|keys| keys.contains(&owner.key))
+                        || handles
+                            .as_ref()
+                            .is_some_and(|keys| keys.contains(&owner.key))
+                        || guards
+                            .as_ref()
+                            .is_some_and(|keys| keys.contains(&owner.key));
+                if !valid_root {
+                    continue;
+                }
+                let mut sources = vec![owner];
+                if matches!(owner.kind, Kind::Struct | Kind::Enum) {
+                    for implementation in self.implementations(owner) {
+                        if implementation.production {
+                            sources.push(implementation);
+                        }
+                    }
+                }
+                for source in sources {
+                    for path in source
+                        .field_paths
+                        .iter()
+                        .chain(source.reference_paths.iter())
+                    {
+                        if !path
+                            .split("::")
+                            .any(|segment| candidate_names.contains(segment))
+                        {
+                            continue;
+                        }
+                        let Some(target) = self.resolve_path_or_prefix(&source.namespace, path)
+                        else {
+                            continue;
+                        };
+                        if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
+                            queue.push(target.key.clone());
+                        }
+                    }
+                }
+            }
+            drop(jobs);
+            drop(cmds);
+            drop(adapters);
+            drop(handles);
+            drop(guards);
+            while let Some(owner_key) = queue.pop() {
+                let owner = &self.entries[&owner_key];
+                let mut sources = vec![owner];
+                for implementation in self.implementations(owner) {
+                    if implementation.production {
+                        sources.push(implementation);
+                    }
+                }
+                for source in sources {
+                    for path in source
+                        .field_paths
+                        .iter()
+                        .chain(source.reference_paths.iter())
+                    {
+                        if !path
+                            .split("::")
+                            .any(|segment| candidate_names.contains(segment))
+                        {
+                            continue;
+                        }
+                        let Some(target) = self.resolve_path_or_prefix(&source.namespace, path)
+                        else {
+                            continue;
+                        };
+                        if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
+                            queue.push(target.key.clone());
+                        }
+                    }
+                }
+            }
+            let mut finalized = proved.clone();
+            for key in &proved {
+                let entry = &self.entries[key];
+                for implementation in self.implementations(entry) {
+                    if implementation.production {
+                        finalized.insert(implementation.key.clone());
+                    }
+                }
+            }
+            proved = finalized;
+        }
+        *self.native_io_adapters.borrow_mut() = Some(proved);
     }
 
     fn automatic_parser_visitor(&self, entry: &Declaration) -> bool {
@@ -19186,6 +19456,7 @@ impl Inventory {
         *self.cef_ffi.get_mut() = None;
         *self.parser_visitors.get_mut() = None;
         *self.static_traits.get_mut() = None;
+        *self.native_io_adapters.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -24776,6 +25047,36 @@ fn closure_parser_visitors_static_traits_and_nested_job_inputs_prove_safely() {
         assert!(
             !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
             "expected rejected closure entry: {key}"
+        );
+    }
+}
+
+#[test]
+fn wave8_native_io_handle_adapters_prove_used_wrappers_and_reject_plain_or_dead_structs() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use std::sync::mpsc::Receiver; use taffy::TaffyTree; struct TaffyCell { tree: TaffyTree<()> } impl TaffyCell { fn clear(&mut self) {} } struct Inbox { rx: Receiver<u32> } struct DeadHandle { rx: Receiver<u32> } struct PlainModel { items: Vec<String> } #[derive(Component)] struct State(u32); fn run(states: Query<&State>) { let _ = (states, std::mem::size_of::<TaffyCell>(), std::mem::size_of::<Inbox>(), PlainModel { items: Vec::new() }); } struct DemoPlugin; impl Plugin for DemoPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, run); } }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/feature/demo/src/lib.rs||struct:TaffyCell",
+        "crates/feature/demo/src/lib.rs||impl:TaffyCell",
+        "crates/feature/demo/src/lib.rs||struct:Inbox",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved Wave 8 native IO handle: {key}"
+        );
+    }
+    for key in [
+        "crates/feature/demo/src/lib.rs||struct:DeadHandle",
+        "crates/feature/demo/src/lib.rs||struct:PlainModel",
+    ] {
+        assert!(
+            !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected rejected Wave 8 entry: {key}"
         );
     }
 }
