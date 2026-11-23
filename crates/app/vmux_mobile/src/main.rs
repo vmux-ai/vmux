@@ -39,9 +39,6 @@ mod tests;
 mod transition;
 
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
-const LIGHT_BACKGROUND: (u8, u8, u8, u8) = (215, 215, 215, 255);
-#[cfg(target_os = "ios")]
-const DARK_BACKGROUND: (u8, u8, u8, u8) = (10, 10, 10, 255);
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct AdmitSet;
@@ -121,6 +118,10 @@ impl Plugin for MobilePlugin {
 struct MobileRunner;
 
 impl MobileRunner {
+    const LIGHT_BACKGROUND: (u8, u8, u8, u8) = (215, 215, 215, 255);
+    #[cfg(target_os = "ios")]
+    const DARK_BACKGROUND: (u8, u8, u8, u8) = (10, 10, 10, 255);
+
     fn run(app: BevyApp) -> AppExit {
         let runtime = RuntimeHandle::from_app(app);
         let _lifecycle = runtime.install_lifecycle();
@@ -151,15 +152,15 @@ impl MobileRunner {
     fn webview_background() -> (u8, u8, u8, u8) {
         let style = unsafe { UITraitCollection::currentTraitCollection().userInterfaceStyle() };
         if style == UIUserInterfaceStyle::Dark {
-            DARK_BACKGROUND
+            Self::DARK_BACKGROUND
         } else {
-            LIGHT_BACKGROUND
+            Self::LIGHT_BACKGROUND
         }
     }
 
     #[cfg(not(target_os = "ios"))]
     fn webview_background() -> (u8, u8, u8, u8) {
-        LIGHT_BACKGROUND
+        Self::LIGHT_BACKGROUND
     }
 }
 

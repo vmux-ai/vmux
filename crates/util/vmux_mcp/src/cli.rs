@@ -32,19 +32,8 @@ impl Plugin for McpCliPlugin {
     }
 }
 
-struct McpCliOptions {
-    anchor: Option<ProcessId>,
-    profile: Option<String>,
-    acp_session: bool,
-    acp_terminals: bool,
-    run_block_timeout: Duration,
-    shell: String,
-}
-
-impl TryFrom<&CliInvocation> for McpCliOptions {
-    type Error = String;
-
-    fn try_from(invocation: &CliInvocation) -> Result<Self, Self::Error> {
+impl McpConfig {
+    fn from_invocation(invocation: &CliInvocation) -> Result<(Self, Option<String>), String> {
         let anchor = invocation
             .value("anchor")
             .and_then(|value| value.parse::<ProcessId>().ok());
@@ -58,21 +47,23 @@ impl TryFrom<&CliInvocation> for McpCliOptions {
             .unwrap_or("50")
             .parse::<u64>()
             .map_err(|error| format!("invalid --run-timeout-secs: {error}"))?;
-        Ok(Self {
-            anchor,
+        Ok((
+            Self {
+                anchor,
+                acp_session: invocation.flag("acp_session"),
+                acp_terminals: invocation.flag("acp_terminals"),
+                run_block_timeout: Duration::from_secs(run_timeout_secs),
+                shell: invocation.value("shell").unwrap_or_default().to_string(),
+            },
             profile,
-            acp_session: invocation.flag("acp_session"),
-            acp_terminals: invocation.flag("acp_terminals"),
-            run_block_timeout: Duration::from_secs(run_timeout_secs),
-            shell: invocation.value("shell").unwrap_or_default().to_string(),
-        })
+        ))
     }
 }
 
 #[derive(Component)]
 struct McpStdio {
     invocation: Entity,
-    receiver: Mutex<Receiver<McpStdin>>,
+    receiver: Mutex<Receiver<Result<Option<serde_json::Value>, String>>>,
     pending: usize,
     eof: bool,
     failed: bool,
@@ -80,12 +71,6 @@ struct McpStdio {
 
 #[derive(Component)]
 struct McpStdinWorker(Option<std::thread::JoinHandle<()>>);
-
-enum McpStdin {
-    Input(serde_json::Value),
-    Eof,
-    Error(String),
-}
 
 fn start_stdio(
     invocations: Query<(Entity, &CliInvocation), Added<CliInvocation>>,
@@ -96,14 +81,14 @@ fn start_stdio(
         if !invocation.is("mcp") {
             continue;
         }
-        let options = match McpCliOptions::try_from(invocation) {
-            Ok(options) => options,
+        let (config, profile) = match McpConfig::from_invocation(invocation) {
+            Ok(parsed) => parsed,
             Err(error) => {
                 commands.entity(entity).insert(CliResult(Err(error)));
                 continue;
             }
         };
-        if let Some(profile) = options.profile {
+        if let Some(profile) = profile {
             unsafe { std::env::set_var("VMUX_PROFILE", profile) };
         }
         let (sender, receiver) = std::sync::mpsc::sync_channel(64);
@@ -116,18 +101,18 @@ fn start_stdio(
                 loop {
                     match McpInput::read(&mut reader) {
                         Ok(Some(McpInput(value))) => {
-                            if sender.send(McpStdin::Input(value)).is_err() {
+                            if sender.send(Ok(Some(value))).is_err() {
                                 return;
                             }
                             wake.wake();
                         }
                         Ok(None) => {
-                            let _ = sender.send(McpStdin::Eof);
+                            let _ = sender.send(Ok(None));
                             wake.wake();
                             return;
                         }
                         Err(error) => {
-                            let _ = sender.send(McpStdin::Error(error.to_string()));
+                            let _ = sender.send(Err(error.to_string()));
                             wake.wake();
                             return;
                         }
@@ -146,13 +131,7 @@ fn start_stdio(
         commands.spawn((
             Name::new("MCP protocol runtime"),
             McpServer::default(),
-            McpConfig {
-                anchor: options.anchor,
-                acp_session: options.acp_session,
-                acp_terminals: options.acp_terminals,
-                run_block_timeout: options.run_block_timeout,
-                shell: options.shell,
-            },
+            config,
             McpStdio {
                 invocation: entity,
                 receiver: Mutex::new(receiver),
@@ -174,17 +153,17 @@ fn receive_stdio(
         loop {
             let received = stdio.receiver.get_mut().unwrap().try_recv();
             match received {
-                Ok(McpStdin::Input(value)) => {
+                Ok(Ok(Some(value))) => {
                     if value.get("id").is_some() {
                         stdio.pending += 1;
                     }
                     input.write(McpInput(value));
                 }
-                Ok(McpStdin::Eof) | Err(TryRecvError::Disconnected) => {
+                Ok(Ok(None)) | Err(TryRecvError::Disconnected) => {
                     stdio.eof = true;
                     break;
                 }
-                Ok(McpStdin::Error(error)) => {
+                Ok(Err(error)) => {
                     stdio.eof = true;
                     stdio.failed = true;
                     commands

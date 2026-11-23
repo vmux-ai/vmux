@@ -7,19 +7,38 @@ use quinn::udp::RecvMeta;
 use vmux_transport::quic::endpoint::{SelfSignedIdentity, Trust};
 use vmux_transport::quic::tunnel::TunnelSocket;
 
-fn relay() -> (SelfSignedIdentity, SocketAddr, quinn::Endpoint) {
-    let identity = SelfSignedIdentity::generate(vec!["localhost".into(), "127.0.0.1".into()])
-        .expect("generate identity");
-    let endpoint = identity
-        .listen((Ipv4Addr::LOCALHOST, 0).into())
-        .expect("bind server");
-    let address = endpoint.local_addr().expect("local addr");
-    (identity, address, endpoint)
+struct TestRelay {
+    identity: SelfSignedIdentity,
+    address: SocketAddr,
+    endpoint: quinn::Endpoint,
+}
+
+impl TestRelay {
+    fn start() -> Self {
+        let identity = SelfSignedIdentity::generate(vec!["localhost".into(), "127.0.0.1".into()])
+            .expect("generate identity");
+        let endpoint = identity
+            .listen((Ipv4Addr::LOCALHOST, 0).into())
+            .expect("bind server");
+        let address = endpoint.local_addr().expect("local addr");
+        Self {
+            identity,
+            address,
+            endpoint,
+        }
+    }
+    fn trust(&self) -> Trust {
+        Trust::Desktop {
+            fingerprint: self.identity.fingerprint.clone(),
+        }
+    }
 }
 
 #[tokio::test]
 async fn a_closed_control_connection_reports_an_error_quinn_will_not_swallow() {
-    let (identity, address, server) = relay();
+    let relay = TestRelay::start();
+    let trust: Trust = relay.trust();
+    let server = relay.endpoint;
     let accepting = tokio::spawn(async move {
         match tokio::time::timeout(Duration::from_secs(5), server.accept()).await {
             Ok(Some(incoming)) => incoming.await.is_ok(),
@@ -27,14 +46,10 @@ async fn a_closed_control_connection_reports_an_error_quinn_will_not_swallow() {
         }
     });
 
-    let client = Trust::Desktop {
-        fingerprint: identity.fingerprint.clone(),
-    }
-    .endpoint(address)
-    .expect("bind client");
+    let client = trust.endpoint(relay.address).expect("bind client");
     let control = tokio::time::timeout(
         Duration::from_secs(5),
-        client.connect(address, "localhost").expect("dial"),
+        client.connect(relay.address, "localhost").expect("dial"),
     )
     .await
     .expect("client did not settle")

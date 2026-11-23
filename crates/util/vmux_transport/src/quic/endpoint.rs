@@ -89,7 +89,7 @@ impl SelfSignedIdentity {
                 .map_err(|error| format!("private key parse failed: {error}"))?
                 .ok_or_else(|| "private key file held no key".to_string())?;
 
-        let mut crypto = rustls::ServerConfig::builder_with_provider(provider())
+        let mut crypto = rustls::ServerConfig::builder_with_provider(Trust::crypto_provider())
             .with_protocol_versions(&[&rustls::version::TLS13])
             .map_err(|error| format!("TLS config failed: {error}"))?
             .with_no_client_auth()
@@ -100,7 +100,7 @@ impl SelfSignedIdentity {
         let quic = QuicServerConfig::try_from(crypto)
             .map_err(|error| format!("QUIC server config failed: {error}"))?;
         let mut config = ServerConfig::with_crypto(Arc::new(quic));
-        config.transport_config(transport_config());
+        config.transport_config(Trust::transport_config());
         Ok(config)
     }
 }
@@ -169,7 +169,7 @@ impl Trust {
     }
 
     fn client_config_offering(&self, alpn: &[u8]) -> Result<ClientConfig, String> {
-        let builder = rustls::ClientConfig::builder_with_provider(provider())
+        let builder = rustls::ClientConfig::builder_with_provider(Self::crypto_provider())
             .with_protocol_versions(&[&rustls::version::TLS13])
             .map_err(|error| format!("TLS config failed: {error}"))?;
 
@@ -192,8 +192,26 @@ impl Trust {
         let quic = QuicClientConfig::try_from(crypto)
             .map_err(|error| format!("QUIC client config failed: {error}"))?;
         let mut config = ClientConfig::new(Arc::new(quic));
-        config.transport_config(transport_config());
+        config.transport_config(Self::transport_config());
         Ok(config)
+    }
+
+    fn crypto_provider() -> Arc<rustls::crypto::CryptoProvider> {
+        Arc::new(rustls::crypto::ring::default_provider())
+    }
+
+    fn transport_config() -> Arc<TransportConfig> {
+        let mut transport = TransportConfig::default();
+        transport.max_idle_timeout(Some(
+            std::time::Duration::from_millis(MAX_IDLE_TIMEOUT_MS as u64)
+                .try_into()
+                .expect("idle timeout fits"),
+        ));
+        transport.keep_alive_interval(Some(std::time::Duration::from_millis(KEEP_ALIVE_MS)));
+        transport.receive_window(RECEIVE_WINDOW.into());
+        transport.max_concurrent_bidi_streams(MAX_CONCURRENT_BIDI_STREAMS.into());
+        transport.max_concurrent_uni_streams(MAX_CONCURRENT_UNI_STREAMS.into());
+        Arc::new(transport)
     }
 }
 
@@ -208,24 +226,6 @@ pub async fn resolve_preferring_ipv4(host: &str, port: u16) -> Result<SocketAddr
         .or_else(|| resolved.first())
         .copied()
         .ok_or_else(|| format!("{host} resolved to nothing"))
-}
-
-fn provider() -> Arc<rustls::crypto::CryptoProvider> {
-    Arc::new(rustls::crypto::ring::default_provider())
-}
-
-fn transport_config() -> Arc<TransportConfig> {
-    let mut transport = TransportConfig::default();
-    transport.max_idle_timeout(Some(
-        std::time::Duration::from_millis(MAX_IDLE_TIMEOUT_MS as u64)
-            .try_into()
-            .expect("idle timeout fits"),
-    ));
-    transport.keep_alive_interval(Some(std::time::Duration::from_millis(KEEP_ALIVE_MS)));
-    transport.receive_window(RECEIVE_WINDOW.into());
-    transport.max_concurrent_bidi_streams(MAX_CONCURRENT_BIDI_STREAMS.into());
-    transport.max_concurrent_uni_streams(MAX_CONCURRENT_UNI_STREAMS.into());
-    Arc::new(transport)
 }
 
 #[derive(Debug)]
@@ -284,12 +284,12 @@ impl ServerCertVerifier for PinnedCertificate {
             message,
             cert,
             dss,
-            &provider().signature_verification_algorithms,
+            &Trust::crypto_provider().signature_verification_algorithms,
         )
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        provider()
+        Trust::crypto_provider()
             .signature_verification_algorithms
             .supported_schemes()
     }
