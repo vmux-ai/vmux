@@ -167,6 +167,127 @@ type Existing<'w, 's> = Query<
     ),
 >;
 
+impl OpenDocument {
+    fn fail(&self, owner: Entity, message: impl Into<String>, commands: &mut Commands) {
+        commands
+            .entity(owner)
+            .remove::<OpenDocument>()
+            .insert(DocumentFailure(message.into()));
+    }
+
+    fn apply_pending(
+        &self,
+        transport: &Transport,
+        uri: &str,
+        pending: &mut [(Entity, PathBuf, Entity, i32, String, String)],
+        commands: &mut Commands,
+    ) -> Result<Option<(Entity, i32)>, &'static str> {
+        for (server, candidate, entity, version, language, text) in pending {
+            if *server != self.server || *candidate != self.path {
+                continue;
+            }
+            if *language != self.language {
+                return Err("document already has another language");
+            }
+            if *text != self.text {
+                let Some(next) = version.checked_add(1) else {
+                    return Err("document version exhausted");
+                };
+                transport.did_change(uri, next, &self.text);
+                *version = next;
+                text.clone_from(&self.text);
+                commands.entity(*entity).insert((
+                    Document { version: next },
+                    Contents {
+                        language: language.clone(),
+                        text: text.clone(),
+                    },
+                ));
+            }
+            return Ok(Some((*entity, *version)));
+        }
+        Ok(None)
+    }
+
+    fn apply_existing(
+        &self,
+        transport: &Transport,
+        uri: &str,
+        documents: &mut Existing,
+        pending: &mut Vec<(Entity, PathBuf, Entity, i32, String, String)>,
+        commands: &mut Commands,
+    ) -> Result<Option<(Entity, i32)>, &'static str> {
+        for (entity, candidate, mut document, parent, connection, closed, contents) in documents {
+            if candidate.0 != self.path
+                || parent.parent() != self.server
+                || connection.0 != Some(transport.identity())
+            {
+                continue;
+            }
+            if !closed && contents.is_some_and(|contents| contents.language != self.language) {
+                return Err("document already has another language");
+            }
+            if closed || contents.is_none_or(|contents| contents.text != self.text) {
+                let Some(version) = document.version.checked_add(1) else {
+                    return Err("document version exhausted");
+                };
+                if closed {
+                    transport.did_open(uri, &self.language, version, &self.text);
+                } else {
+                    transport.did_change(uri, version, &self.text);
+                }
+                document.version = version;
+                commands.entity(entity).remove::<Closed>().insert(Contents {
+                    language: self.language.clone(),
+                    text: self.text.clone(),
+                });
+            }
+            pending.push((
+                self.server,
+                self.path.clone(),
+                entity,
+                document.version,
+                self.language.clone(),
+                self.text.clone(),
+            ));
+            return Ok(Some((entity, document.version)));
+        }
+        Ok(None)
+    }
+
+    fn spawn_new(
+        &self,
+        transport: &Transport,
+        uri: &str,
+        path: DocumentPath,
+        pending: &mut Vec<(Entity, PathBuf, Entity, i32, String, String)>,
+        commands: &mut Commands,
+    ) -> (Entity, i32) {
+        transport.did_open(uri, &self.language, 1, &self.text);
+        let entity = commands
+            .spawn((
+                Name::new(self.path.to_string_lossy().into_owned()),
+                path,
+                Document { version: 1 },
+                Contents {
+                    language: self.language.clone(),
+                    text: self.text.clone(),
+                },
+                ChildOf(self.server),
+            ))
+            .id();
+        pending.push((
+            self.server,
+            self.path.clone(),
+            entity,
+            1,
+            self.language.clone(),
+            self.text.clone(),
+        ));
+        (entity, 1)
+    }
+}
+
 fn open(
     requests: Query<(Entity, &OpenDocument, Option<&DocumentBinding>)>,
     servers: Servers,
@@ -176,135 +297,48 @@ fn open(
     let mut pending = Vec::<(Entity, PathBuf, Entity, i32, String, String)>::new();
     for (owner, request, binding) in &requests {
         let Ok((transport, _, stopped, failed)) = servers.get(request.server) else {
-            commands
-                .entity(owner)
-                .remove::<OpenDocument>()
-                .insert(DocumentFailure("language server no longer exists".into()));
+            request.fail(owner, "language server no longer exists", &mut commands);
             continue;
         };
         if stopped || failed {
-            commands
-                .entity(owner)
-                .remove::<OpenDocument>()
-                .insert(DocumentFailure("language server is unavailable".into()));
+            request.fail(owner, "language server is unavailable", &mut commands);
             continue;
         }
         let Some(transport) = transport else { continue };
         let path = DocumentPath(request.path.clone());
         let Some(uri) = path.uri() else {
-            commands
-                .entity(owner)
-                .remove::<OpenDocument>()
-                .insert(DocumentFailure(
-                    "document path must identify an absolute file URI".into(),
-                ));
+            request.fail(
+                owner,
+                "document path must identify an absolute file URI",
+                &mut commands,
+            );
             continue;
         };
-        let mut target = None;
-        let mut error = None;
-        for (server, candidate, entity, version, language, text) in &mut pending {
-            if *server != request.server || *candidate != request.path {
+        let target = match request.apply_pending(transport, &uri, &mut pending, &mut commands) {
+            Ok(Some(target)) => Some(target),
+            Ok(None) => {
+                match request.apply_existing(
+                    transport,
+                    &uri,
+                    &mut documents,
+                    &mut pending,
+                    &mut commands,
+                ) {
+                    Ok(target) => target,
+                    Err(error) => {
+                        request.fail(owner, error, &mut commands);
+                        continue;
+                    }
+                }
+            }
+            Err(error) => {
+                request.fail(owner, error, &mut commands);
                 continue;
             }
-            if *language != request.language {
-                error = Some("document already has another language");
-                break;
-            }
-            if *text != request.text {
-                let Some(next) = version.checked_add(1) else {
-                    error = Some("document version exhausted");
-                    break;
-                };
-                transport.did_change(&uri, next, &request.text);
-                *version = next;
-                text.clone_from(&request.text);
-                commands.entity(*entity).insert((
-                    Document { version: next },
-                    Contents {
-                        language: language.clone(),
-                        text: text.clone(),
-                    },
-                ));
-            }
-            target = Some((*entity, *version));
-            break;
-        }
-        if target.is_none() && error.is_none() {
-            for (entity, candidate, mut document, parent, connection, closed, contents) in
-                &mut documents
-            {
-                if candidate.0 != request.path
-                    || parent.parent() != request.server
-                    || connection.0 != Some(transport.identity())
-                {
-                    continue;
-                }
-                if !closed && contents.is_some_and(|contents| contents.language != request.language)
-                {
-                    error = Some("document already has another language");
-                    break;
-                }
-                if closed || contents.is_none_or(|contents| contents.text != request.text) {
-                    let Some(version) = document.version.checked_add(1) else {
-                        error = Some("document version exhausted");
-                        break;
-                    };
-                    if closed {
-                        transport.did_open(&uri, &request.language, version, &request.text);
-                    } else {
-                        transport.did_change(&uri, version, &request.text);
-                    }
-                    document.version = version;
-                    commands.entity(entity).remove::<Closed>().insert(Contents {
-                        language: request.language.clone(),
-                        text: request.text.clone(),
-                    });
-                }
-                pending.push((
-                    request.server,
-                    request.path.clone(),
-                    entity,
-                    document.version,
-                    request.language.clone(),
-                    request.text.clone(),
-                ));
-                target = Some((entity, document.version));
-                break;
-            }
-        }
-        if let Some(error) = error {
-            commands
-                .entity(owner)
-                .remove::<OpenDocument>()
-                .insert(DocumentFailure(error.into()));
-            continue;
-        }
+        };
         let (document, version) = match target {
             Some(target) => target,
-            None => {
-                transport.did_open(&uri, &request.language, 1, &request.text);
-                let entity = commands
-                    .spawn((
-                        Name::new(request.path.to_string_lossy().into_owned()),
-                        path,
-                        Document { version: 1 },
-                        Contents {
-                            language: request.language.clone(),
-                            text: request.text.clone(),
-                        },
-                        ChildOf(request.server),
-                    ))
-                    .id();
-                pending.push((
-                    request.server,
-                    request.path.clone(),
-                    entity,
-                    1,
-                    request.language.clone(),
-                    request.text.clone(),
-                ));
-                (entity, 1)
-            }
+            None => request.spawn_new(transport, &uri, path, &mut pending, &mut commands),
         };
         let mut owner = commands.entity(owner);
         if binding.is_none_or(|binding| binding.document() != document) {

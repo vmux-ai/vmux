@@ -494,8 +494,8 @@ mod tests {
     use super::*;
     use crate::Repository;
     use crate::{
-        LoadError, Loaded, Mutation, ProjectId, ProjectSaved, Registered, Registrations, Revision,
-        WriteCompleted, WriteRequest,
+        ArchiveProjectRequest, LoadError, Loaded, ProjectId, ProjectSaved, Registered,
+        Registrations, RemoveProjectRequest, Revision, SaveProjectRequest, WriteCompleted,
     };
 
     struct Store {
@@ -622,12 +622,10 @@ mod tests {
             .single(app.world())
             .unwrap();
         assert_eq!(app.world().get::<Name>(project).unwrap().as_str(), "Ready");
-        app.world_mut().spawn(WriteRequest {
+        app.world_mut().spawn(ArchiveProjectRequest {
             root: directory,
-            mutation: Mutation::Archive {
-                url: url.into(),
-                archived: true,
-            },
+            url: url.into(),
+            archived: true,
         });
         app.update();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
@@ -898,12 +896,10 @@ mod tests {
             assert!(std::time::Instant::now() < deadline);
             std::thread::yield_now();
         }
-        store.app.world_mut().spawn(WriteRequest {
+        store.app.world_mut().spawn(ArchiveProjectRequest {
             root: alias.clone(),
-            mutation: Mutation::Archive {
-                url: "duplicate".into(),
-                archived: true,
-            },
+            url: "duplicate".into(),
+            archived: true,
         });
         assert_eq!(store.complete(1)[0].result, Err(Error::Duplicate));
         assert!(store.snapshot().archived.is_empty());
@@ -918,12 +914,10 @@ mod tests {
         std::fs::write(root.path().join(".archive.ron"), &legacy).unwrap();
         let mut store = Store::at(root.path());
         assert!(store.snapshot().archived.contains(url));
-        store.app.world_mut().spawn(WriteRequest {
+        store.app.world_mut().spawn(ArchiveProjectRequest {
             root: store.root.clone(),
-            mutation: Mutation::Archive {
-                url: url.into(),
-                archived: false,
-            },
+            url: url.into(),
+            archived: false,
         });
         assert!(store.complete(1)[0].result.is_ok());
         drop(store);
@@ -962,18 +956,16 @@ mod tests {
         fn queue(&mut self, url: &str, revision: u64, name: &str, directory: &Path) -> Entity {
             self.app
                 .world_mut()
-                .spawn(WriteRequest {
+                .spawn(SaveProjectRequest {
                     root: self.root.clone(),
-                    mutation: Mutation::Save {
-                        expected: revision,
-                        project: ProjectSaved {
-                            root: self.root.clone(),
-                            id: ProjectId(url.into()),
-                            directory: directory.canonicalize().unwrap(),
-                            name: name.into(),
-                            repository: None,
-                            revision: 0,
-                        },
+                    expected: revision,
+                    project: ProjectSaved {
+                        root: self.root.clone(),
+                        id: ProjectId(url.into()),
+                        directory: directory.canonicalize().unwrap(),
+                        name: name.into(),
+                        repository: None,
+                        revision: 0,
                     },
                 })
                 .id()
@@ -1078,18 +1070,16 @@ mod tests {
         let second_root = second.path().canonicalize().unwrap();
         store.app.world_mut().spawn(Root(second_root.clone()));
         store.queue("vmux://projects/same", 0, "First root", &first_project);
-        store.app.world_mut().spawn(WriteRequest {
+        store.app.world_mut().spawn(SaveProjectRequest {
             root: second_root.clone(),
-            mutation: Mutation::Save {
-                expected: 0,
-                project: ProjectSaved {
-                    root: second_root.clone(),
-                    id: ProjectId("vmux://projects/same".into()),
-                    directory: second_project.canonicalize().unwrap(),
-                    name: "Second root".into(),
-                    repository: None,
-                    revision: 0,
-                },
+            expected: 0,
+            project: ProjectSaved {
+                root: second_root.clone(),
+                id: ProjectId("vmux://projects/same".into()),
+                directory: second_project.canonicalize().unwrap(),
+                name: "Second root".into(),
+                repository: None,
+                revision: 0,
             },
         });
         assert!(
@@ -1291,9 +1281,9 @@ mod tests {
         let url = "vmux://projects/stable";
         let mut store = Store::at(root.path());
         store.save(url, 0, "Project", &project);
-        store.app.world_mut().spawn(WriteRequest {
+        store.app.world_mut().spawn(RemoveProjectRequest {
             root: store.root.clone(),
-            mutation: Mutation::Remove(url.into()),
+            url: url.into(),
         });
         assert!(store.complete(1)[0].result.is_ok());
         drop(store);
@@ -1328,9 +1318,9 @@ mod tests {
         let mut store = Store::at(root.path());
         store.save(url, 0, "Removed", &project);
         store.save(retained, 0, "Retained", &other);
-        store.app.world_mut().spawn(WriteRequest {
+        store.app.world_mut().spawn(RemoveProjectRequest {
             root: store.root.clone(),
-            mutation: Mutation::Remove(url.into()),
+            url: url.into(),
         });
         assert!(store.complete(1)[0].result.is_ok());
         drop(store);
@@ -1376,9 +1366,9 @@ mod tests {
             assert!(std::time::Instant::now() < deadline);
             std::thread::yield_now();
         }
-        store.app.world_mut().spawn(WriteRequest {
+        store.app.world_mut().spawn(RemoveProjectRequest {
             root: store.root.clone(),
-            mutation: Mutation::Remove(url.into()),
+            url: url.into(),
         });
         assert!(store.complete(1)[0].result.is_ok());
         let mut restored = Store::at(root.path());
@@ -1431,9 +1421,9 @@ mod tests {
             .unwrap();
         let requester = app
             .world_mut()
-            .spawn(WriteRequest {
+            .spawn(RemoveProjectRequest {
                 root: directory,
-                mutation: Mutation::Remove(url.into()),
+                url: url.into(),
             })
             .id();
         app.update();

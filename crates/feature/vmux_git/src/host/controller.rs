@@ -969,11 +969,6 @@ impl GitKeyDispatcher<'_, '_> {
     }
 }
 
-type OperationPage<'a> = (
-    &'a GitState,
-    Ref<'a, super::state::GitRepositoryRevision>,
-    &'a mut GitPageControllerState,
-);
 type ChangedOperationPage = Or<(
     Changed<GitState>,
     Changed<super::state::GitRepositoryRevision>,
@@ -982,7 +977,16 @@ type ChangedOperationPage = Or<(
 
 #[derive(SystemParam)]
 struct OperationPages<'w, 's> {
-    values: Query<'w, 's, OperationPage<'static>, ChangedOperationPage>,
+    values: Query<
+        'w,
+        's,
+        (
+            &'static GitState,
+            Ref<'static, super::state::GitRepositoryRevision>,
+            &'static mut GitPageControllerState,
+        ),
+        ChangedOperationPage,
+    >,
 }
 
 type Sources<'w, 's> = Query<

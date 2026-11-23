@@ -567,18 +567,19 @@ impl BrowserCode {
 #[component]
 fn Waiting(route: Option<SimulatorRoute>, status: String, error: String) -> Element {
     let frame = SimulatorFrame::fallback();
-    let target = match route {
-        Some(SimulatorRoute::Pinned {
-            version,
-            device_name: Some(device),
-        }) => translate_with(
+    let target = match route.as_ref().and_then(|route| {
+        route
+            .version()
+            .map(|version| (version, route.device_name()))
+    }) {
+        Some((version, Some(device))) => translate_with(
             "simulator-waiting-device",
             &[
-                ("device", TranslationValue::String(&device)),
+                ("device", TranslationValue::String(device)),
                 ("version", TranslationValue::String(version.as_str())),
             ],
         ),
-        Some(SimulatorRoute::Pinned { version, .. }) => translate_with(
+        Some((version, None)) => translate_with(
             "simulator-waiting-version",
             &[("version", TranslationValue::String(version.as_str()))],
         ),
@@ -778,22 +779,22 @@ impl PointerSession {
         }
         if !self.home {
             if !self.touch_started {
-                return PointerRelease::Touch(Self::touch_at(self.start, SimulatorTouchPhase::Tap));
+                return PointerRelease::touch(Self::touch_at(self.start, SimulatorTouchPhase::Tap));
             }
-            return PointerRelease::Touch(self.touch(SimulatorTouchPhase::Up));
+            return PointerRelease::touch(self.touch(SimulatorTouchPhase::Up));
         }
         if self.completes_home() {
-            PointerRelease::Home
+            PointerRelease::home()
         } else {
-            PointerRelease::None
+            PointerRelease::none()
         }
     }
 
     fn cancel(self) -> PointerRelease {
         if self.home || !self.touch_started {
-            PointerRelease::None
+            PointerRelease::none()
         } else {
-            PointerRelease::Touch(self.touch(SimulatorTouchPhase::Cancel))
+            PointerRelease::touch(self.touch(SimulatorTouchPhase::Cancel))
         }
     }
 
@@ -856,31 +857,51 @@ impl PointerSession {
     }
 }
 
-enum PointerRelease {
-    Touch(SimulatorTouch),
-    Home,
-    None,
+struct PointerRelease {
+    touch: Option<SimulatorTouch>,
+    home: bool,
 }
 
 impl PointerRelease {
-    fn dispatch(self, mut home_progress: Signal<f32>) {
-        match self {
-            Self::Touch(touch) => {
-                home_progress.set(0.0);
-                let _ = send(&touch);
-            }
-            Self::Home => {
-                home_progress.set(1.0);
-                let _ = send(&SimulatorInputHardwareButtonRequest {
-                    button: HardwareButton::Home,
-                });
-                spawn(async move {
-                    Platform::sleep(300).await;
-                    home_progress.set(0.0);
-                });
-            }
-            Self::None => home_progress.set(0.0),
+    fn touch(touch: SimulatorTouch) -> Self {
+        Self {
+            touch: Some(touch),
+            home: false,
         }
+    }
+
+    fn home() -> Self {
+        Self {
+            touch: None,
+            home: true,
+        }
+    }
+
+    fn none() -> Self {
+        Self {
+            touch: None,
+            home: false,
+        }
+    }
+
+    fn dispatch(self, mut home_progress: Signal<f32>) {
+        if let Some(touch) = self.touch {
+            home_progress.set(0.0);
+            let _ = send(&touch);
+            return;
+        }
+        if self.home {
+            home_progress.set(1.0);
+            let _ = send(&SimulatorInputHardwareButtonRequest {
+                button: HardwareButton::Home,
+            });
+            spawn(async move {
+                Platform::sleep(300).await;
+                home_progress.set(0.0);
+            });
+            return;
+        }
+        home_progress.set(0.0);
     }
 }
 
@@ -913,9 +934,10 @@ mod tests {
             touch.map(|touch| touch.phase),
             Some(SimulatorTouchPhase::Down)
         );
+        let release = session.release_at(ClientPoint::new(70.0, 90.0));
         assert!(matches!(
-            session.release_at(ClientPoint::new(70.0, 90.0)),
-            PointerRelease::Touch(SimulatorTouch {
+            release.touch,
+            Some(SimulatorTouch {
                 phase: SimulatorTouchPhase::Up,
                 ..
             })

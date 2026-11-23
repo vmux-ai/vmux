@@ -44,7 +44,7 @@ pub fn Page() -> Element {
         let _ = send(&HistoryLoadMoreRequest);
     };
 
-    let groups = group_by_day(&snapshot.entries, Platform::now());
+    let groups = HistoryTimeline::group_by_day(&snapshot.entries, Platform::now());
     let entry_count = snapshot.entries.len();
 
     rsx! {
@@ -95,7 +95,7 @@ pub fn Page() -> Element {
                                                 span { class: "truncate text-xs text-muted-foreground", "{entry.url}" }
                                             }
                                         }
-                                        span { class: "shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70", "{format_time(entry.visit_created_at)}" }
+                                        span { class: "shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70", "{HistoryTimeline::format_time(entry.visit_created_at)}" }
                                         Tooltip { label: translate("common-remove"),
                                             button {
                                                 class: "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-destructive/10 hover:text-destructive",
@@ -155,36 +155,40 @@ pub fn Page() -> Element {
     }
 }
 
-fn group_by_day(entries: &[HistoryEntry], now_ms: i64) -> Vec<(String, Vec<HistoryEntry>)> {
-    let mut out: Vec<(String, Vec<HistoryEntry>)> = Vec::new();
-    let mut current_day: Option<i64> = None;
-    let now_day = now_ms / 86_400_000;
-    for e in entries {
-        let day = e.visit_created_at / 86_400_000;
-        if current_day != Some(day) {
-            let label = match now_day - day {
-                0 => translate("history-today"),
-                1 => translate("history-yesterday"),
-                d if d < 7 => translate_with(
-                    "history-days-ago",
-                    &[("count", TranslationValue::Number(d))],
-                ),
-                _ => translate_with(
-                    "history-day-offset",
-                    &[("count", TranslationValue::Number(now_day - day))],
-                ),
-            };
-            out.push((label, Vec::new()));
-            current_day = Some(day);
-        }
-        out.last_mut().unwrap().1.push(e.clone());
-    }
-    out
-}
+struct HistoryTimeline;
 
-fn format_time(ms: i64) -> String {
-    let total_sec = ms / 1000;
-    let h = (total_sec % 86400) / 3600;
-    let m = (total_sec % 3600) / 60;
-    format!("{:02}:{:02}", h, m)
+impl HistoryTimeline {
+    fn group_by_day(entries: &[HistoryEntry], now_ms: i64) -> Vec<(String, Vec<HistoryEntry>)> {
+        let mut out: Vec<(String, Vec<HistoryEntry>)> = Vec::new();
+        let mut current_day: Option<i64> = None;
+        let now_day = now_ms / 86_400_000;
+        for e in entries {
+            let day = e.visit_created_at / 86_400_000;
+            if current_day != Some(day) {
+                let label = match now_day - day {
+                    0 => translate("history-today"),
+                    1 => translate("history-yesterday"),
+                    d if d < 7 => translate_with(
+                        "history-days-ago",
+                        &[("count", TranslationValue::Number(d))],
+                    ),
+                    _ => translate_with(
+                        "history-day-offset",
+                        &[("count", TranslationValue::Number(now_day - day))],
+                    ),
+                };
+                out.push((label, Vec::new()));
+                current_day = Some(day);
+            }
+            out.last_mut().unwrap().1.push(e.clone());
+        }
+        out
+    }
+
+    fn format_time(ms: i64) -> String {
+        let total_sec = ms / 1000;
+        let h = (total_sec % 86400) / 3600;
+        let m = (total_sec % 3600) / 60;
+        format!("{:02}:{:02}", h, m)
+    }
 }

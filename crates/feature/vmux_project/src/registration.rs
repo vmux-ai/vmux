@@ -191,23 +191,24 @@ pub struct LoadCompleted {
     pub result: Result<Snapshot, Error>,
 }
 
-#[derive(Component)]
-pub struct WriteRequest {
+#[derive(Component, Clone)]
+pub struct SaveProjectRequest {
     pub root: PathBuf,
-    pub mutation: Mutation,
+    pub project: ProjectSaved,
+    pub expected: u64,
 }
 
-#[derive(Clone)]
-pub enum Mutation {
-    Save {
-        project: ProjectSaved,
-        expected: u64,
-    },
-    Remove(String),
-    Archive {
-        url: String,
-        archived: bool,
-    },
+#[derive(Component, Clone)]
+pub struct RemoveProjectRequest {
+    pub root: PathBuf,
+    pub url: String,
+}
+
+#[derive(Component, Clone)]
+pub struct ArchiveProjectRequest {
+    pub root: PathBuf,
+    pub url: String,
+    pub archived: bool,
 }
 
 #[derive(Message, Clone)]
@@ -473,35 +474,37 @@ impl Registrations<'_, '_> {
         false
     }
 
-    fn validate_request(
+    fn validate_save(
         &self,
         owner: Entity,
         root: &Path,
-        mutation: &Mutation,
+        request: &SaveProjectRequest,
     ) -> Result<Option<Entity>, Error> {
         self.ready(root)?;
-        match mutation {
-            Mutation::Save { project, expected } => self.save_target(owner, project, *expected),
-            Mutation::Remove(url) | Mutation::Archive { url, .. } => self.entity(owner, url),
-        }
+        self.save_target(owner, &request.project, request.expected)
+    }
+
+    fn validate_entity(
+        &self,
+        owner: Entity,
+        root: &Path,
+        url: &str,
+    ) -> Result<Option<Entity>, Error> {
+        self.ready(root)?;
+        self.entity(owner, url)
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn spawn_proposal(
+    fn spawn_proposal_base(
         &self,
         owner: Entity,
-        root: &Path,
         requester: Entity,
         operation: Entity,
         ticket: Ticket,
         target: Option<Entity>,
-        mutation: &Mutation,
+        id: ProjectId,
         commands: &mut WorldCommands,
     ) -> Entity {
-        let id = match mutation {
-            Mutation::Save { project, .. } => project.id.clone(),
-            Mutation::Remove(url) | Mutation::Archive { url, .. } => ProjectId(url.clone()),
-        };
         let mut proposal = commands.spawn((
             Prepared {
                 ticket,
@@ -512,36 +515,140 @@ impl Registrations<'_, '_> {
             RequestedProject(id),
             ChildOf(owner),
         ));
-        let lease = proposal.id();
         if let Some(target) = target {
             proposal.insert(EntityTarget::<Project>::new(target));
         }
-        match mutation {
-            Mutation::Save { project, .. } => {
-                let revision = self
-                    .get(root, &project.id.0)
-                    .map_or(Revision(0), |(_, _, _, revision)| *revision)
-                    .next()
-                    .unwrap();
-                proposal.insert((
-                    SaveIntent,
-                    Name::new(project.name.trim().to_string()),
-                    Cwd(project.directory.clone()),
-                    Repository(project.repository.clone()),
-                    revision,
-                ));
-            }
-            Mutation::Remove(url) => {
-                proposal.insert(RemoveIntent);
-                if let Some((_, directory, _, _)) = self.get(root, url) {
-                    proposal.insert(directory.clone());
-                }
-            }
-            Mutation::Archive { archived, .. } => {
-                proposal.insert(Archive(*archived));
-            }
+        proposal.id()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_save_proposal(
+        &self,
+        owner: Entity,
+        root: &Path,
+        requester: Entity,
+        operation: Entity,
+        ticket: Ticket,
+        target: Option<Entity>,
+        request: &SaveProjectRequest,
+        commands: &mut WorldCommands,
+    ) -> Entity {
+        let lease = self.spawn_proposal_base(
+            owner,
+            requester,
+            operation,
+            ticket,
+            target,
+            request.project.id.clone(),
+            commands,
+        );
+        let revision = self
+            .get(root, &request.project.id.0)
+            .map_or(Revision(0), |(_, _, _, revision)| *revision)
+            .next()
+            .unwrap();
+        commands.entity(lease).insert((
+            SaveIntent,
+            Name::new(request.project.name.trim().to_string()),
+            Cwd(request.project.directory.clone()),
+            Repository(request.project.repository.clone()),
+            revision,
+        ));
+        lease
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_remove_proposal(
+        &self,
+        owner: Entity,
+        root: &Path,
+        requester: Entity,
+        operation: Entity,
+        ticket: Ticket,
+        target: Option<Entity>,
+        url: &str,
+        commands: &mut WorldCommands,
+    ) -> Entity {
+        let lease = self.spawn_proposal_base(
+            owner,
+            requester,
+            operation,
+            ticket,
+            target,
+            ProjectId(url.to_string()),
+            commands,
+        );
+        commands.entity(lease).insert(RemoveIntent);
+        if let Some((_, directory, _, _)) = self.get(root, url) {
+            commands.entity(lease).insert(directory.clone());
         }
         lease
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_archive_proposal(
+        &self,
+        owner: Entity,
+        requester: Entity,
+        operation: Entity,
+        ticket: Ticket,
+        target: Option<Entity>,
+        request: &ArchiveProjectRequest,
+        commands: &mut WorldCommands,
+    ) -> Entity {
+        let lease = self.spawn_proposal_base(
+            owner,
+            requester,
+            operation,
+            ticket,
+            target,
+            ProjectId(request.url.clone()),
+            commands,
+        );
+        commands.entity(lease).insert(Archive(request.archived));
+        lease
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_write_proposal(
+        &self,
+        owner: Entity,
+        root: &Path,
+        requester: Entity,
+        operation: Entity,
+        ticket: Ticket,
+        target: Option<Entity>,
+        save: Option<&SaveProjectRequest>,
+        remove: Option<&RemoveProjectRequest>,
+        archive: Option<&ArchiveProjectRequest>,
+        commands: &mut WorldCommands,
+    ) -> Entity {
+        if let Some(save) = save {
+            self.spawn_save_proposal(
+                owner, root, requester, operation, ticket, target, save, commands,
+            )
+        } else if let Some(remove) = remove {
+            self.spawn_remove_proposal(
+                owner,
+                root,
+                requester,
+                operation,
+                ticket,
+                target,
+                &remove.url,
+                commands,
+            )
+        } else {
+            self.spawn_archive_proposal(
+                owner,
+                requester,
+                operation,
+                ticket,
+                target,
+                archive.unwrap(),
+                commands,
+            )
+        }
     }
 
     fn owns(&self, entity: Entity, root: &Path) -> bool {
@@ -701,9 +808,23 @@ fn restore(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn write(
     roots: IdleRoots,
-    requests: Query<(Entity, &WriteRequest, Has<Operation>)>,
+    requests: Query<
+        (
+            Entity,
+            Option<&SaveProjectRequest>,
+            Option<&RemoveProjectRequest>,
+            Option<&ArchiveProjectRequest>,
+            Has<Operation>,
+        ),
+        Or<(
+            With<SaveProjectRequest>,
+            With<RemoveProjectRequest>,
+            With<ArchiveProjectRequest>,
+        )>,
+    >,
     registrations: Registrations,
     mut clock: ResMut<Clock>,
     mut completed: MessageWriter<WriteCompleted>,
@@ -714,12 +835,30 @@ fn write(
         if !loaded && error.is_none() {
             continue;
         }
-        for (requester, request, operation) in &requests {
-            if request.root != root.0 || !handled.insert(requester) {
+        for (requester, save, remove, archive, operation) in &requests {
+            let Some(request_root) = save
+                .map(|r| &r.root)
+                .or_else(|| remove.map(|r| &r.root))
+                .or_else(|| archive.map(|r| &r.root))
+            else {
+                continue;
+            };
+            if *request_root != root.0 || !handled.insert(requester) {
                 continue;
             }
-            commands.entity(requester).remove::<WriteRequest>();
-            let target = match registrations.validate_request(owner, &root.0, &request.mutation) {
+            commands.entity(requester).remove::<(
+                SaveProjectRequest,
+                RemoveProjectRequest,
+                ArchiveProjectRequest,
+            )>();
+            let validated = if let Some(save) = save {
+                registrations.validate_save(owner, &root.0, save)
+            } else if let Some(remove) = remove {
+                registrations.validate_entity(owner, &root.0, &remove.url)
+            } else {
+                registrations.validate_entity(owner, &root.0, &archive.unwrap().url)
+            };
+            let target = match validated {
                 Ok(target) => target,
                 Err(error) => {
                     commands.trigger(OperationCompleted {
@@ -741,14 +880,16 @@ fn write(
                     ChildOf(owner),
                 ))
                 .id();
-            let lease = registrations.spawn_proposal(
+            let lease = registrations.spawn_write_proposal(
                 owner,
                 &root.0,
                 requester,
                 accepted,
                 ticket.clone(),
                 target,
-                &request.mutation,
+                save,
+                remove,
+                archive,
                 &mut commands,
             );
             commands.entity(requester).insert(Accepted {

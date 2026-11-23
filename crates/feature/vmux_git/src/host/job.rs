@@ -47,12 +47,60 @@ pub(super) struct DiffJob {
     pub(super) content: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum DiffScope {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DiffScopeKind {
     File,
-    Branch(String),
-    Commit(String),
-    Stash(String),
+    Branch,
+    Commit,
+    Stash,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct DiffScope {
+    pub(super) kind: DiffScopeKind,
+    pub(super) reference: String,
+}
+
+impl DiffScope {
+    pub(super) fn file() -> Self {
+        Self {
+            kind: DiffScopeKind::File,
+            reference: String::new(),
+        }
+    }
+
+    pub(super) fn branch(reference: String) -> Self {
+        Self {
+            kind: DiffScopeKind::Branch,
+            reference,
+        }
+    }
+
+    pub(super) fn commit(reference: String) -> Self {
+        Self {
+            kind: DiffScopeKind::Commit,
+            reference,
+        }
+    }
+
+    pub(super) fn stash(reference: String) -> Self {
+        Self {
+            kind: DiffScopeKind::Stash,
+            reference,
+        }
+    }
+
+    pub(super) fn is_file(&self) -> bool {
+        self.kind == DiffScopeKind::File
+    }
+
+    pub(super) fn is_branch(&self) -> bool {
+        self.kind == DiffScopeKind::Branch
+    }
+
+    pub(super) fn branch_reference(&self) -> Option<&str> {
+        self.is_branch().then_some(self.reference.as_str())
+    }
 }
 
 #[derive(Clone, Component)]

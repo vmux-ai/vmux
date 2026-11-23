@@ -38,14 +38,6 @@ impl Plugin for WorkspaceAgentPlugin {
     }
 }
 
-pub(crate) const WORKSPACE_SELECTION_REQUESTED: &str = "Project selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
-
-pub(crate) const WORKSPACE_SELECTION_PENDING: &str = "Project selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
-
-const INITIALIZE_GIT_QUESTION_ID: &str = "space-initialize-git-question";
-
-const INITIALIZE_GIT_OPTION_IDS: [&str; 2] = ["space-initialize-git", "space-not-now"];
-
 #[derive(Component, Clone, Debug)]
 pub struct PendingProject(pub PathBuf);
 
@@ -53,6 +45,11 @@ pub struct PendingProject(pub PathBuf);
 struct InitializeGitAgentChoice {
     pub(crate) tab_entity: Entity,
     pub(crate) workspace: PathBuf,
+}
+
+impl InitializeGitAgentChoice {
+    const QUESTION_ID: &'static str = "space-initialize-git-question";
+    const OPTION_IDS: [&'static str; 2] = ["space-initialize-git", "space-not-now"];
 }
 
 #[derive(Component, Clone, Copy)]
@@ -67,6 +64,10 @@ pub(crate) struct PendingWorkspacePicker {
 }
 
 impl PendingWorkspacePicker {
+    pub(crate) const SELECTION_REQUESTED: &'static str = "Project selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
+
+    pub(crate) const SELECTION_PENDING: &'static str = "Project selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
+
     pub(crate) fn new(
         tab_entity: Entity,
         agent_entity: Entity,
@@ -79,6 +80,40 @@ impl PendingWorkspacePicker {
             session_entity,
             task,
         }
+    }
+
+    fn git_ready_continuation(path: &Path) -> String {
+        format!(
+            "VMUX PROJECT SELECTION COMPLETED: Git project {} is ready for reading and inspection. Continue the original user request in this same conversation. Immediately before the first edit, write, test, build, or other mutation, call create_worktree; if it reports multiple candidates, ask the user whether to create or choose an existing worktree.",
+            path.display()
+        )
+    }
+
+    fn new_git_ready_continuation(path: &Path) -> String {
+        format!(
+            "VMUX NEW PROJECT READY: Git project {} is the dedicated project root. Continue the original user request immediately in this directory. Do not call create_worktree for this project.",
+            path.display()
+        )
+    }
+
+    fn plain_ready_continuation(path: &Path) -> String {
+        format!(
+            "VMUX PROJECT SELECTION COMPLETED: Project {} is ready without Git. Continue the original user request in this same conversation. Do not call create_worktree unless Git is initialized later.",
+            path.display()
+        )
+    }
+
+    fn git_initialization_failed_continuation(path: &Path, error: &str) -> String {
+        format!(
+            "VMUX GIT INITIALIZATION FAILED: {error}. Project {} remains selected and usable without Git. Continue the original user request in this same conversation. Do not call create_worktree.",
+            path.display()
+        )
+    }
+
+    fn failed_continuation(message: &str) -> String {
+        format!(
+            "VMUX PROJECT SELECTION DID NOT COMPLETE: {message}. Do not retry automatically. Wait for the user to request project selection again."
+        )
     }
 }
 
@@ -166,14 +201,17 @@ fn initialize_git_agent_choice(
         return;
     }
     let continuation = if !tabs.contains(initialize.tab_entity) {
-        failed_workspace_continuation("The project tab no longer exists")
+        PendingWorkspacePicker::failed_continuation("The project tab no longer exists")
     } else if event.payload.index == 0 {
         match CheckoutInfo::initialize(&initialize.workspace) {
-            Ok(checkout) => new_git_workspace_ready_continuation(&checkout.root),
-            Err(error) => git_initialization_failed_continuation(&initialize.workspace, &error.0),
+            Ok(checkout) => PendingWorkspacePicker::new_git_ready_continuation(&checkout.root),
+            Err(error) => PendingWorkspacePicker::git_initialization_failed_continuation(
+                &initialize.workspace,
+                &error.0,
+            ),
         }
     } else {
-        plain_workspace_ready_continuation(&initialize.workspace)
+        PendingWorkspacePicker::plain_ready_continuation(&initialize.workspace)
     };
     continuations.write(AgentContinuationRequest {
         session: choice.session_entity,
@@ -183,50 +221,6 @@ fn initialize_git_agent_choice(
         .entity(event.webview)
         .remove::<(PendingAgentChoice, InitializeGitAgentChoice)>()
         .remove::<ChatSynced>();
-}
-
-fn bind_tab_workspace(tab: &mut Tab, project_dir: &Path, execution_dir: &Path) {
-    tab.startup_dir = Some(execution_dir.to_string_lossy().into_owned());
-    if WorktreeName::is_generated(&tab.name)
-        && let Some(name) = project_dir.file_name().and_then(|name| name.to_str())
-        && !name.is_empty()
-    {
-        tab.name = name.to_string();
-    }
-}
-
-fn git_workspace_ready_continuation(path: &Path) -> String {
-    format!(
-        "VMUX PROJECT SELECTION COMPLETED: Git project {} is ready for reading and inspection. Continue the original user request in this same conversation. Immediately before the first edit, write, test, build, or other mutation, call create_worktree; if it reports multiple candidates, ask the user whether to create or choose an existing worktree.",
-        path.display()
-    )
-}
-
-fn new_git_workspace_ready_continuation(path: &Path) -> String {
-    format!(
-        "VMUX NEW PROJECT READY: Git project {} is the dedicated project root. Continue the original user request immediately in this directory. Do not call create_worktree for this project.",
-        path.display()
-    )
-}
-
-fn plain_workspace_ready_continuation(path: &Path) -> String {
-    format!(
-        "VMUX PROJECT SELECTION COMPLETED: Project {} is ready without Git. Continue the original user request in this same conversation. Do not call create_worktree unless Git is initialized later.",
-        path.display()
-    )
-}
-
-fn git_initialization_failed_continuation(path: &Path, error: &str) -> String {
-    format!(
-        "VMUX GIT INITIALIZATION FAILED: {error}. Project {} remains selected and usable without Git. Continue the original user request in this same conversation. Do not call create_worktree.",
-        path.display()
-    )
-}
-
-fn failed_workspace_continuation(message: &str) -> String {
-    format!(
-        "VMUX PROJECT SELECTION DID NOT COMPLETE: {message}. Do not retry automatically. Wait for the user to request project selection again."
-    )
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -318,28 +312,22 @@ impl AgentWorkspaceState<'_, '_> {
         agent_entity: Entity,
         selected: &Path,
         commands: &mut Commands,
-    ) -> Result<(PathBuf, Option<ClientMessage>, SelectedWorkspaceKind), String> {
-        let kind = if selected.join(".git").exists() {
+    ) -> Result<(PathBuf, Option<ClientMessage>, bool), String> {
+        let is_git = selected.join(".git").exists();
+        let needs_worktree = if is_git {
             CheckoutInfo::try_from(selected).map_err(|error| {
                 format!("selected project has invalid Git metadata: {}", error.0)
             })?;
-            SelectedWorkspaceKind::Git {
-                needs_worktree: !CheckoutInfo::is_linked(selected),
-            }
+            !CheckoutInfo::is_linked(selected)
         } else {
-            SelectedWorkspaceKind::Plain
+            false
         };
         let rebind =
             self.activate_directory(tab_entity, agent_entity, selected, selected, commands)?;
-        if matches!(
-            kind,
-            SelectedWorkspaceKind::Git {
-                needs_worktree: true
-            }
-        ) {
+        if needs_worktree {
             commands.entity(tab_entity).insert(RepositoryNeedsWorktree);
         }
-        Ok((selected.to_path_buf(), rebind, kind))
+        Ok((selected.to_path_buf(), rebind, is_git))
     }
 
     fn bind_tab(
@@ -351,7 +339,13 @@ impl AgentWorkspaceState<'_, '_> {
         let Ok(mut tab) = self.tabs.get_mut(tab_entity) else {
             return Err("tab not found".to_string());
         };
-        bind_tab_workspace(&mut tab, project_dir, execution_dir);
+        tab.startup_dir = Some(execution_dir.to_string_lossy().into_owned());
+        if WorktreeName::is_generated(&tab.name)
+            && let Some(name) = project_dir.file_name().and_then(|name| name.to_str())
+            && !name.is_empty()
+        {
+            tab.name = name.to_string();
+        }
         Ok(())
     }
 
@@ -377,12 +371,6 @@ impl AgentWorkspaceState<'_, '_> {
             current = self.child_of.get(current).ok()?.parent();
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SelectedWorkspaceKind {
-    Plain,
-    Git { needs_worktree: bool },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -500,13 +488,13 @@ fn drain_picker_tasks(
             continue;
         };
         let continuation = match selected {
-            None => Some(failed_workspace_continuation(
+            None => Some(PendingWorkspacePicker::failed_continuation(
                 "The user cancelled project selection",
             )),
             Some(selected) => match selected.canonicalize() {
                 Ok(selected) if selected.is_dir() => {
                     if workspace.tabs.get(picker.tab_entity).is_err() {
-                        Some(failed_workspace_continuation(
+                        Some(PendingWorkspacePicker::failed_continuation(
                             "The project tab no longer exists",
                         ))
                     } else {
@@ -516,53 +504,52 @@ fn drain_picker_tasks(
                             &selected,
                             &mut commands,
                         ) {
-                            Ok((execution_dir, rebind, kind)) => {
+                            Ok((execution_dir, rebind, is_git)) => {
                                 if let Some(message) = rebind {
                                     service_requests.write(ServiceRequest(message));
                                 }
-                                match kind {
-                                    SelectedWorkspaceKind::Git { .. } => {
-                                        Some(git_workspace_ready_continuation(&execution_dir))
-                                    }
-                                    SelectedWorkspaceKind::Plain
-                                        if chat_views.contains(picker.agent_entity) =>
-                                    {
-                                        commands
-                                            .entity(picker.agent_entity)
-                                            .insert((
-                                                PendingAgentChoice {
-                                                    session_entity: picker.session_entity,
-                                                    question: locale
-                                                        .translate(INITIALIZE_GIT_QUESTION_ID),
-                                                    options: INITIALIZE_GIT_OPTION_IDS
-                                                        .into_iter()
-                                                        .map(|id| locale.translate(id))
-                                                        .collect(),
-                                                },
-                                                InitializeGitAgentChoice {
-                                                    tab_entity: picker.tab_entity,
-                                                    workspace: execution_dir,
-                                                },
-                                            ))
-                                            .remove::<ChatSynced>();
-                                        None
-                                    }
-                                    SelectedWorkspaceKind::Plain => Some(format!(
+                                if is_git {
+                                    Some(PendingWorkspacePicker::git_ready_continuation(
+                                        &execution_dir,
+                                    ))
+                                } else if chat_views.contains(picker.agent_entity) {
+                                    commands
+                                        .entity(picker.agent_entity)
+                                        .insert((
+                                            PendingAgentChoice {
+                                                session_entity: picker.session_entity,
+                                                question: locale.translate(
+                                                    InitializeGitAgentChoice::QUESTION_ID,
+                                                ),
+                                                options: InitializeGitAgentChoice::OPTION_IDS
+                                                    .into_iter()
+                                                    .map(|id| locale.translate(id))
+                                                    .collect(),
+                                            },
+                                            InitializeGitAgentChoice {
+                                                tab_entity: picker.tab_entity,
+                                                workspace: execution_dir,
+                                            },
+                                        ))
+                                        .remove::<ChatSynced>();
+                                    None
+                                } else {
+                                    Some(format!(
                                         "VMUX PROJECT SELECTION COMPLETED: Project {} is ready without Git. Ask the user: \"Initialize Git repository?\" If yes, initialize Git in this exact project and continue directly in the project root without calling create_worktree. If no, continue the original request without a worktree.",
                                         execution_dir.display()
-                                    )),
+                                    ))
                                 }
                             }
-                            Err(error) => Some(failed_workspace_continuation(&format!(
-                                "The selected project could not be prepared: {error}"
-                            ))),
+                            Err(error) => Some(PendingWorkspacePicker::failed_continuation(
+                                &format!("The selected project could not be prepared: {error}"),
+                            )),
                         }
                     }
                 }
-                Ok(_) => Some(failed_workspace_continuation(
+                Ok(_) => Some(PendingWorkspacePicker::failed_continuation(
                     "The selected project is not a directory",
                 )),
-                Err(error) => Some(failed_workspace_continuation(&format!(
+                Err(error) => Some(PendingWorkspacePicker::failed_continuation(&format!(
                     "The selected project directory is invalid: {error}"
                 ))),
             },
@@ -618,9 +605,10 @@ mod tests {
 
     #[test]
     fn workspace_selection_continuations_resume_original_request() {
-        let ready = git_workspace_ready_continuation(Path::new("/repo/dashboard"));
-        let plain = plain_workspace_ready_continuation(Path::new("/tmp/demo"));
-        let cancelled = failed_workspace_continuation("The user cancelled project selection");
+        let ready = PendingWorkspacePicker::git_ready_continuation(Path::new("/repo/dashboard"));
+        let plain = PendingWorkspacePicker::plain_ready_continuation(Path::new("/tmp/demo"));
+        let cancelled =
+            PendingWorkspacePicker::failed_continuation("The user cancelled project selection");
 
         assert!(ready.contains("same conversation"));
         assert!(ready.contains("Git project /repo/dashboard is ready"));
@@ -651,8 +639,9 @@ mod tests {
             .spawn((
                 PendingAgentChoice {
                     session_entity: session,
-                    question: Locale::from("en-US").translate(INITIALIZE_GIT_QUESTION_ID),
-                    options: INITIALIZE_GIT_OPTION_IDS
+                    question: Locale::from("en-US")
+                        .translate(InitializeGitAgentChoice::QUESTION_ID),
+                    options: InitializeGitAgentChoice::OPTION_IDS
                         .into_iter()
                         .map(|id| Locale::from("en-US").translate(id))
                         .collect(),
@@ -913,7 +902,7 @@ mod tests {
         let agent = app.world_mut().spawn(ChildOf(tab)).id();
         let selected_for_system = selected.clone();
 
-        let (execution_dir, _, kind) = app
+        let (execution_dir, _, is_git) = app
             .world_mut()
             .run_system_once(
                 move |mut workspace: AgentWorkspaceState, mut commands: Commands| {
@@ -924,7 +913,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(execution_dir, selected);
-        assert_eq!(kind, SelectedWorkspaceKind::Plain);
+        assert!(!is_git);
         assert_eq!(
             app.world().get::<TabWorkspace>(tab).unwrap().project_dir,
             selected.to_string_lossy()

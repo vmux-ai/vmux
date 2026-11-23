@@ -7,11 +7,13 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy::{ecs::system::SystemParam, prelude::*};
 
 use super::GitUpdateSet;
+#[cfg(test)]
+use super::job::DiffScope;
 use super::job::{
     AmendJob, BranchFilesJob, CatalogJob, CheckoutCommitJob, CherryPickJob, CommitJob,
-    CreateBranchJob, DeleteBranchJob, DiffJob, DiffScope, DiscardJob, FastForwardJob, FetchJob,
-    HunkJob, MergeJob, PullJob, PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob,
-    StageJob, StashDropJob, StashPopJob, StashPushJob, UnstageJob,
+    CreateBranchJob, DeleteBranchJob, DiffJob, DiscardJob, FastForwardJob, FetchJob, HunkJob,
+    MergeJob, PullJob, PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob,
+    StashDropJob, StashPopJob, StashPushJob, UnstageJob,
 };
 use super::read::{
     PageRepositorySource, ReadPlugin, ReadSet, RepositoryReadRequest, RepositoryRequestIdentity,
@@ -365,7 +367,7 @@ impl DiffOutput {
             Ok(source) => source,
             Err(error) => return Self::failure(&job, error),
         };
-        let window_top = if matches!(job.scope, DiffScope::Branch(_)) {
+        let window_top = if job.scope.is_branch() {
             job.branch_top_line
         } else {
             job.top_line
@@ -376,7 +378,7 @@ impl DiffOutput {
         };
         let (first_line, total_lines, has_more, branch_page_complete) =
             Self::window_bounds(&job, source_total, &lines);
-        let markers = if matches!(job.scope, DiffScope::File) {
+        let markers = if job.scope.is_file() {
             Self::markers_from_lines(&lines)
         } else {
             Vec::new()
@@ -400,25 +402,27 @@ impl DiffOutput {
     }
 
     fn load_source(job: &DiffJob, repository: &GitRepository) -> Result<DiffSource, GitError> {
-        match &job.scope {
-            DiffScope::File => match job.content.as_deref() {
+        match job.scope.kind {
+            super::job::DiffScopeKind::File => match job.content.as_deref() {
                 Some(content) => repository.diff_source_with_content(&job.path, content),
                 None => repository.diff_source(&job.path),
             },
-            DiffScope::Branch(reference) => {
+            super::job::DiffScopeKind::Branch => {
                 if !job.branch_source.as_os_str().is_empty() && !job.branch_merge_base.is_empty() {
                     GitRepository::at(job.branch_source.clone())
                         .branch_diff_source_for_paths_against(
-                            reference,
+                            &job.scope.reference,
                             &job.branch_merge_base,
                             &job.branch_paths,
                         )
                 } else {
-                    repository.branch_diff_source_for_paths(reference, &job.branch_paths)
+                    repository.branch_diff_source_for_paths(&job.scope.reference, &job.branch_paths)
                 }
             }
-            DiffScope::Commit(reference) => repository.commit_diff_source(reference),
-            DiffScope::Stash(reference) => repository.stash_diff_source(reference),
+            super::job::DiffScopeKind::Commit => {
+                repository.commit_diff_source(&job.scope.reference)
+            }
+            super::job::DiffScopeKind::Stash => repository.stash_diff_source(&job.scope.reference),
         }
     }
 
@@ -428,7 +432,7 @@ impl DiffOutput {
         lines: &[DiffLine],
     ) -> (u32, u32, bool, bool) {
         let count = u32::try_from(lines.len()).unwrap_or(u32::MAX);
-        if matches!(job.scope, DiffScope::Branch(_)) {
+        if job.scope.is_branch() {
             let branch_loaded = job.branch_top_line.saturating_add(count);
             let branch_page_complete = branch_loaded >= source_total;
             return (
@@ -2347,7 +2351,7 @@ mod tests {
                 GitRepository::at(repo.path()),
                 DiffJob {
                     path: PathBuf::new(),
-                    scope: DiffScope::File,
+                    scope: DiffScope::file(),
                     branch_paths: Vec::new(),
                     cached_source: None,
                     branch_source: PathBuf::new(),
@@ -2597,7 +2601,7 @@ mod tests {
                 GitRepository::at(repo.path()),
                 DiffJob {
                     path: file,
-                    scope: DiffScope::File,
+                    scope: DiffScope::file(),
                     branch_paths: Vec::new(),
                     cached_source: None,
                     branch_source: PathBuf::new(),
@@ -2628,7 +2632,7 @@ mod tests {
             GitRepository::at(repo.path()),
             DiffJob {
                 path: file,
-                scope: DiffScope::File,
+                scope: DiffScope::file(),
                 branch_paths: Vec::new(),
                 cached_source: None,
                 branch_source: PathBuf::new(),
@@ -2681,7 +2685,7 @@ mod tests {
             GitRepository::at(dir.path()),
             DiffJob {
                 path: file,
-                scope: DiffScope::File,
+                scope: DiffScope::file(),
                 branch_paths: Vec::new(),
                 cached_source: None,
                 branch_source: PathBuf::new(),

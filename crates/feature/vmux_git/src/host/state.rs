@@ -25,8 +25,6 @@ use super::job_runner::GitJob;
 use super::read::{PageRepositorySource, Repositories, SourceIdentity};
 use super::watch::{GitWatch, GitWatchSubscription};
 
-type GitUiStateUpdates = vmux_ecs::UiState<GitUiState>;
-
 pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
@@ -53,7 +51,7 @@ impl Plugin for StatePlugin {
 
 #[derive(Component, Default)]
 #[require(
-    GitUiStateUpdates,
+    vmux_ecs::UiState<GitUiState>,
     GitPageControllerState,
     GitDirectoryNavigation,
     PendingBranchCheckout,
@@ -321,12 +319,12 @@ fn evict_retained_pages(
     }
 }
 
-const MAX_DIFF_REVEAL_RANGES: usize = 256;
-
 #[derive(Component, Clone, Debug, Default)]
 pub(super) struct GitDiffRevealRanges(pub(super) Vec<(usize, usize)>);
 
 impl GitDiffRevealRanges {
+    const MAX_RANGES: usize = 256;
+
     pub(super) fn reveal(
         &mut self,
         viewport: Option<&GitDiffViewport>,
@@ -369,7 +367,7 @@ impl GitDiffRevealRanges {
             }
             merged.push((start, end));
         }
-        if merged == self.0 || merged.len() > MAX_DIFF_REVEAL_RANGES {
+        if merged == self.0 || merged.len() > Self::MAX_RANGES {
             return false;
         }
         self.0 = merged;

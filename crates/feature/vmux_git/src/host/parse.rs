@@ -41,9 +41,7 @@ impl ParsedStatuses {
     pub fn into_file_entries(self) -> Vec<GitFileEntry> {
         self.file_entries
     }
-}
 
-impl ParsedStatuses {
     fn entry_path(record: &[u8], kind_tokens: usize) -> &[u8] {
         record
             .splitn(kind_tokens + 1, |byte| *byte == b' ')
@@ -182,6 +180,11 @@ impl ParsedStatus {
 pub struct DiffParser;
 
 impl DiffParser {
+    const ADD: [u8; 3] = [80, 200, 120];
+    const REM: [u8; 3] = [220, 80, 80];
+    const CTX: [u8; 3] = [200, 200, 200];
+    const HUNK: [u8; 3] = [120, 140, 170];
+
     fn spans(text: &str, fg: [u8; 3]) -> Vec<StyledSpan> {
         vec![StyledSpan {
             text: text.to_string(),
@@ -218,11 +221,6 @@ impl DiffParser {
     }
 
     fn parse_with_file_headers(diff: &str, include_single_file: bool) -> Vec<DiffLine> {
-        const ADD: [u8; 3] = [80, 200, 120];
-        const REM: [u8; 3] = [220, 80, 80];
-        const CTX: [u8; 3] = [200, 200, 200];
-        const HUNK: [u8; 3] = [120, 140, 170];
-
         let mut lines = Vec::new();
         let mut old_no = 0u32;
         let mut new_no = 0u32;
@@ -253,7 +251,7 @@ impl DiffParser {
                         old_no: None,
                         new_no: None,
                         hunk: None,
-                        spans: Self::spans(path, HUNK),
+                        spans: Self::spans(path, Self::HUNK),
                     });
                 }
                 continue;
@@ -272,7 +270,7 @@ impl DiffParser {
                     old_no: None,
                     new_no: None,
                     hunk: None,
-                    spans: Self::spans(raw, HUNK),
+                    spans: Self::spans(raw, Self::HUNK),
                 });
                 continue;
             }
@@ -286,7 +284,7 @@ impl DiffParser {
                         old_no: None,
                         new_no: Some(new_no),
                         hunk: None,
-                        spans: Self::spans(&raw[1..], ADD),
+                        spans: Self::spans(&raw[1..], Self::ADD),
                     });
                     new_no += 1;
                 }
@@ -296,7 +294,7 @@ impl DiffParser {
                         old_no: Some(old_no),
                         new_no: None,
                         hunk: None,
-                        spans: Self::spans(&raw[1..], REM),
+                        spans: Self::spans(&raw[1..], Self::REM),
                     });
                     old_no += 1;
                 }
@@ -307,7 +305,7 @@ impl DiffParser {
                         old_no: Some(old_no),
                         new_no: Some(new_no),
                         hunk: None,
-                        spans: Self::spans(text, CTX),
+                        spans: Self::spans(text, Self::CTX),
                     });
                     old_no += 1;
                     new_no += 1;

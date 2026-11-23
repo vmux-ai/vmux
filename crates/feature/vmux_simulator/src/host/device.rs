@@ -58,16 +58,11 @@ pub struct SimulatorDevice {
 
 impl SimulatorDevice {
     pub(super) fn matches_route(&self, route: &SimulatorRoute) -> bool {
-        match route {
-            SimulatorRoute::Unpinned => true,
-            SimulatorRoute::Pinned {
-                version,
-                device_name,
-            } => {
-                self.version.as_ref() == Some(version)
-                    && device_name.as_deref().is_none_or(|name| name == self.name)
-            }
-        }
+        let Some(version) = route.version() else {
+            return true;
+        };
+        self.version.as_ref() == Some(version)
+            && route.device_name().is_none_or(|name| name == self.name)
     }
 
     pub fn point_size(&self, axe: &Axe) -> Option<(f32, f32)> {

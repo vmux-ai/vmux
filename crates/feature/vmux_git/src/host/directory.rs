@@ -301,6 +301,15 @@ impl DirectoryListing {
             .cloned()
             .collect()
     }
+
+    #[cfg(test)]
+    fn test_entry(name: &str, is_dir: bool) -> FileDirEntry {
+        FileDirEntry {
+            name: name.to_string(),
+            path: format!("/tmp/{name}"),
+            is_dir,
+        }
+    }
 }
 
 #[derive(EntityEvent)]
@@ -619,28 +628,29 @@ fn poll_previews(
 mod tests {
     use super::*;
 
-    fn entry(name: &str, is_dir: bool) -> FileDirEntry {
-        FileDirEntry {
-            name: name.to_string(),
-            path: format!("/tmp/{name}"),
-            is_dir,
-        }
-    }
-
     #[test]
     fn projection_filters_hidden_entries_before_indexing() {
         let navigation = GitDirectoryNavigation {
             current: Some(DirectoryListing {
                 path: "/tmp".into(),
                 parent_path: Some("/".into()),
-                entries: vec![entry(".hidden", true), entry("visible", true)],
-                parent_entries: vec![entry(".parent", true), entry("sibling", true)],
+                entries: vec![
+                    DirectoryListing::test_entry(".hidden", true),
+                    DirectoryListing::test_entry("visible", true),
+                ],
+                parent_entries: vec![
+                    DirectoryListing::test_entry(".parent", true),
+                    DirectoryListing::test_entry("sibling", true),
+                ],
                 repo_root: None,
             }),
             preview: Some(DirectoryListing {
                 path: "/tmp/visible".into(),
                 parent_path: Some("/tmp".into()),
-                entries: vec![entry(".child", false), entry("file", false)],
+                entries: vec![
+                    DirectoryListing::test_entry(".child", false),
+                    DirectoryListing::test_entry("file", false),
+                ],
                 parent_entries: Vec::new(),
                 repo_root: None,
             }),
@@ -652,9 +662,21 @@ mod tests {
 
         let state = navigation.state();
 
-        assert_eq!(state.entries, vec![entry("visible", true)]);
-        assert_eq!(state.parent_entries, vec![entry("sibling", true)]);
-        assert_eq!(state.children, Some(vec![entry("file", false)]));
-        assert_eq!(navigation.selected_entry(), Some(&entry("visible", true)));
+        assert_eq!(
+            state.entries,
+            vec![DirectoryListing::test_entry("visible", true)]
+        );
+        assert_eq!(
+            state.parent_entries,
+            vec![DirectoryListing::test_entry("sibling", true)]
+        );
+        assert_eq!(
+            state.children,
+            Some(vec![DirectoryListing::test_entry("file", false)])
+        );
+        assert_eq!(
+            navigation.selected_entry(),
+            Some(&DirectoryListing::test_entry("visible", true))
+        );
     }
 }

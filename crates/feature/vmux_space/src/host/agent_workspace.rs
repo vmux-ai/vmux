@@ -13,7 +13,7 @@ use vmux_ecs::agent::{
 };
 use vmux_ecs::service::{ServiceConnected, ServiceInbound, ServiceMessageSet, ServiceRequest};
 use vmux_session::host::USER_CHOICE_REQUESTED;
-use vmux_setting::{AppSettings, StartupDir};
+use vmux_setting::AppSettings;
 
 use super::agent::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
@@ -21,21 +21,9 @@ use super::agent::{
 };
 use super::workspace::{
     AgentWorkspacePicker, AgentWorkspaceState, ExistingWorktreeCandidates, PendingWorkspacePicker,
-    WORKSPACE_SELECTION_PENDING, WORKSPACE_SELECTION_REQUESTED,
 };
 
 use vmux_api::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
-
-struct WorkspaceDirectory;
-
-impl WorkspaceDirectory {
-    fn stored(path: Option<&str>) -> Result<Option<PathBuf>, String> {
-        let Some(path) = path else {
-            return Ok(None);
-        };
-        StartupDir::from_tab(path).map(|directory| Some(directory.path))
-    }
-}
 
 pub(super) struct AgentWorkspaceRequestPlugin;
 
@@ -364,7 +352,7 @@ fn choose(
         let result = if picker.choice_pending(agent) {
             AgentCommandResult::Text(USER_CHOICE_REQUESTED.into())
         } else if !pending.insert(tab) {
-            AgentCommandResult::Text(WORKSPACE_SELECTION_PENDING.into())
+            AgentCommandResult::Text(PendingWorkspacePicker::SELECTION_PENDING.into())
         } else {
             let selected = input
                 .0
@@ -377,7 +365,7 @@ fn choose(
                 path => picker.choose(path),
             };
             commands.spawn(PendingWorkspacePicker::new(tab, agent, session, task));
-            AgentCommandResult::Text(WORKSPACE_SELECTION_REQUESTED.into())
+            AgentCommandResult::Text(PendingWorkspacePicker::SELECTION_REQUESTED.into())
         };
         commands
             .entity(operation)
@@ -407,7 +395,7 @@ fn prepare(
             }
         };
         let current = workspace.tabs.get(tab).ok().and_then(|tab| {
-            WorkspaceDirectory::stored(tab.startup_dir.as_deref())
+            super::cwd::WorkspaceCwd::from_tab(tab.startup_dir.as_deref())
                 .ok()
                 .flatten()
         });
@@ -427,7 +415,7 @@ fn prepare(
             .get(tab)
             .ok()
             .and_then(|workspace| {
-                WorkspaceDirectory::stored(Some(&workspace.project_dir))
+                super::cwd::WorkspaceCwd::from_tab(Some(&workspace.project_dir))
                     .ok()
                     .flatten()
             })
@@ -552,7 +540,7 @@ fn create(
             }
         };
         let current = workspace.tabs.get(tab).ok().and_then(|tab| {
-            WorkspaceDirectory::stored(tab.startup_dir.as_deref())
+            super::cwd::WorkspaceCwd::from_tab(tab.startup_dir.as_deref())
                 .ok()
                 .flatten()
         });
@@ -574,7 +562,7 @@ fn create(
         }
         let configured = active.id().and_then(|space| settings.startup_dir(space));
         let selected = workspace.workspaces.get(tab).ok().and_then(|workspace| {
-            WorkspaceDirectory::stored(Some(&workspace.project_dir))
+            super::cwd::WorkspaceCwd::from_tab(Some(&workspace.project_dir))
                 .ok()
                 .flatten()
         });
@@ -657,7 +645,11 @@ fn named(
             .0
             .project
             .as_deref()
-            .and_then(|path| WorkspaceDirectory::stored(Some(path)).ok().flatten())
+            .and_then(|path| {
+                super::cwd::WorkspaceCwd::from_tab(Some(path))
+                    .ok()
+                    .flatten()
+            })
             .or_else(|| {
                 workspace
                     .pending_projects
@@ -667,7 +659,7 @@ fn named(
             })
             .or_else(|| {
                 workspace.workspaces.get(tab).ok().and_then(|workspace| {
-                    WorkspaceDirectory::stored(Some(&workspace.project_dir))
+                    super::cwd::WorkspaceCwd::from_tab(Some(&workspace.project_dir))
                         .ok()
                         .flatten()
                 })

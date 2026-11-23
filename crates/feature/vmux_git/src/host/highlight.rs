@@ -1,5 +1,3 @@
-#[cfg(test)]
-use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -38,17 +36,7 @@ impl Assets {
 
 pub(crate) struct Highlighter;
 
-#[cfg(test)]
-thread_local! {
-    static HIGHLIGHTED_LINES: Cell<usize> = const { Cell::new(0) };
-}
-
 impl Highlighter {
-    #[cfg(test)]
-    pub(super) fn take_line_count() -> usize {
-        HIGHLIGHTED_LINES.with(|count| count.replace(0))
-    }
-
     #[cfg(test)]
     pub(crate) fn file(content: &str, path: &Path) -> Vec<Vec<StyledSpan>> {
         let assets = Assets::shared();
@@ -86,8 +74,6 @@ impl Highlighter {
     }
 
     fn spans(light: Vec<(Style, &str)>, dark: Vec<(Style, &str)>) -> Vec<StyledSpan> {
-        #[cfg(test)]
-        HIGHLIGHTED_LINES.with(|count| count.set(count.get() + 1));
         light
             .into_iter()
             .zip(dark)
@@ -122,6 +108,8 @@ pub(crate) struct FileHighlight {
     offset: usize,
     lines: Vec<Vec<StyledSpan>>,
     state: Option<FileHighlightState>,
+    #[cfg(test)]
+    highlighted_lines: usize,
 }
 
 struct FileHighlightState {
@@ -137,7 +125,14 @@ impl FileHighlight {
             offset: 0,
             lines: Vec::new(),
             state: None,
+            #[cfg(test)]
+            highlighted_lines: 0,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn take_highlighted_lines(&mut self) -> usize {
+        std::mem::take(&mut self.highlighted_lines)
     }
 
     pub(crate) fn line(
@@ -178,6 +173,10 @@ impl FileHighlight {
                 .highlight_line(line, &assets.syntaxes)
                 .unwrap_or_default();
             self.lines.push(Highlighter::spans(light, dark));
+            #[cfg(test)]
+            {
+                self.highlighted_lines += 1;
+            }
             self.offset += length;
         }
         Ok(self.lines.get(number as usize - 1).cloned())
@@ -214,14 +213,13 @@ mod tests {
         let content = "fn main() {\n/*\nlet value = 42;\n*/\nlet answer = 7;\n}\n";
         let expected = Highlighter::file(content, Path::new("main.rs"));
         let mut highlight = FileHighlight::new(content.to_string(), Path::new("main.rs"));
-        Highlighter::take_line_count();
 
         assert_eq!(highlight.line(3).unwrap(), Some(expected[2].clone()));
-        assert_eq!(Highlighter::take_line_count(), 3);
+        assert_eq!(highlight.take_highlighted_lines(), 3);
         assert_eq!(highlight.line(5).unwrap(), Some(expected[4].clone()));
-        assert_eq!(Highlighter::take_line_count(), 2);
+        assert_eq!(highlight.take_highlighted_lines(), 2);
         assert_eq!(highlight.line(1).unwrap(), Some(expected[0].clone()));
-        assert_eq!(Highlighter::take_line_count(), 0);
+        assert_eq!(highlight.take_highlighted_lines(), 0);
     }
 
     #[test]

@@ -42,12 +42,6 @@ pub struct WorktreeInfo {
     pub repo_root: PathBuf,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct WorktreeStatus {
-    pub uncommitted: u32,
-    pub ahead: u32,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckoutInfo {
     pub root: PathBuf,
@@ -869,22 +863,6 @@ impl CheckoutInfo {
     }
 }
 
-impl WorktreeStatus {
-    pub fn read(path: &Path) -> Result<Self, GitError> {
-        let (stdout, stderr, ok) = GitCommand::run(path, &["status", "--porcelain"])?;
-        if !ok {
-            return Err(GitCommand::error(&stdout, &stderr));
-        }
-        let uncommitted = stdout.lines().filter(|l| !l.trim().is_empty()).count() as u32;
-        let ahead = GitCommand::run(path, &["rev-list", "--count", "@{upstream}..HEAD"])
-            .ok()
-            .filter(|(_, _, ok)| *ok)
-            .and_then(|(out, _, _)| out.trim().parse::<u32>().ok())
-            .unwrap_or(0);
-        Ok(Self { uncommitted, ahead })
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RepoInfo {
     pub name: String,
@@ -951,6 +929,7 @@ impl RepoInfo {
         (!name.is_empty()).then(|| name.to_string())
     }
 }
+
 pub struct RepoLabel {
     pub project: String,
     pub branch: String,
@@ -1323,21 +1302,6 @@ mod tests {
         let base = BaseRef::resolve(repo.path()).unwrap();
 
         assert_eq!(base.branch(), "main");
-    }
-
-    #[test]
-    fn status_reports_uncommitted_then_clean() {
-        let repo = test_repo::init();
-        commit_initial(repo.path());
-        let wt = repo.path().join(".worktrees/feat");
-        CheckoutInfo::try_from(repo.path())
-            .unwrap()
-            .add_worktree(&wt, "vmux/feat", "main")
-            .unwrap();
-
-        assert_eq!(WorktreeStatus::read(&wt).unwrap().uncommitted, 0);
-        test_repo::write(&wt, "dirty.txt", "x\n");
-        assert_eq!(WorktreeStatus::read(&wt).unwrap().uncommitted, 1);
     }
 
     #[test]

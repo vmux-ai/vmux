@@ -3,8 +3,6 @@ use std::cmp::Ordering;
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use vmux_api::VmuxRoute;
 
-pub const PLATFORM: &str = "ios";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IosVersion(String);
 
@@ -55,22 +53,35 @@ impl std::fmt::Display for IosVersion {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SimulatorRoute {
-    Unpinned,
-    Pinned {
-        version: IosVersion,
-        device_name: Option<String>,
-    },
+pub struct SimulatorRoute {
+    version: Option<IosVersion>,
+    device_name: Option<String>,
 }
 
 impl SimulatorRoute {
+    pub const PLATFORM: &'static str = "ios";
+
+    pub fn unpinned() -> Self {
+        Self {
+            version: None,
+            device_name: None,
+        }
+    }
+
+    pub fn pinned(version: IosVersion, device_name: Option<String>) -> Self {
+        Self {
+            version: Some(version),
+            device_name,
+        }
+    }
+
     pub fn parse(pathname: &str) -> Option<Self> {
         let mut segments = pathname.split('/').filter(|s| !s.is_empty());
-        if !segments.next()?.eq_ignore_ascii_case(PLATFORM) {
+        if !segments.next()?.eq_ignore_ascii_case(Self::PLATFORM) {
             return None;
         }
         let Some(version) = segments.next() else {
-            return Some(Self::Unpinned);
+            return Some(Self::unpinned());
         };
         let version = IosVersion::parse(version)?;
         let device_name = match segments.next() {
@@ -86,10 +97,7 @@ impl SimulatorRoute {
         if segments.next().is_some() {
             return None;
         }
-        Some(Self::Pinned {
-            version,
-            device_name,
-        })
+        Some(Self::pinned(version, device_name))
     }
 
     fn parse_url(url: &str) -> Option<Self> {
@@ -100,27 +108,21 @@ impl SimulatorRoute {
         }
         let path = route.path();
         if path.trim_matches('/').is_empty() {
-            return Some(Self::Unpinned);
+            return Some(Self::unpinned());
         }
         Self::parse(path)
     }
 
     pub fn version(&self) -> Option<&IosVersion> {
-        match self {
-            Self::Unpinned => None,
-            Self::Pinned { version, .. } => Some(version),
-        }
+        self.version.as_ref()
     }
 
     pub fn device_name(&self) -> Option<&str> {
-        match self {
-            Self::Unpinned => None,
-            Self::Pinned { device_name, .. } => device_name.as_deref(),
-        }
+        self.device_name.as_deref()
     }
 
     pub fn path(version: &IosVersion, device_name: Option<&str>) -> String {
-        let mut path = format!("/{PLATFORM}/{version}");
+        let mut path = format!("/{}/{version}", Self::PLATFORM);
         if let Some(device_name) = device_name {
             path.push('/');
             path.push_str(&utf8_percent_encode(device_name, NON_ALPHANUMERIC).to_string());
@@ -164,15 +166,15 @@ mod tests {
     fn bare_platform_path_is_unpinned() {
         assert_eq!(
             SimulatorRoute::parse("/ios"),
-            Some(SimulatorRoute::Unpinned)
+            Some(SimulatorRoute::unpinned())
         );
         assert_eq!(
             SimulatorRoute::parse("/ios/"),
-            Some(SimulatorRoute::Unpinned)
+            Some(SimulatorRoute::unpinned())
         );
         assert_eq!(
             SimulatorRoute::parse("/iOS"),
-            Some(SimulatorRoute::Unpinned)
+            Some(SimulatorRoute::unpinned())
         );
     }
 
@@ -202,7 +204,7 @@ mod tests {
     fn whole_urls_route_here_only_for_this_host() {
         assert_eq!(
             SimulatorRoute::try_from("vmux://simulator/ios"),
-            Ok(SimulatorRoute::Unpinned)
+            Ok(SimulatorRoute::unpinned())
         );
         assert_eq!(
             SimulatorRoute::try_from("vmux://simulator/ios/27.0")
@@ -217,11 +219,11 @@ mod tests {
     fn bare_simulator_urls_are_unpinned() {
         assert_eq!(
             SimulatorRoute::try_from("vmux://simulator/"),
-            Ok(SimulatorRoute::Unpinned)
+            Ok(SimulatorRoute::unpinned())
         );
         assert_eq!(
             SimulatorRoute::try_from("vmux://simulator"),
-            Ok(SimulatorRoute::Unpinned)
+            Ok(SimulatorRoute::unpinned())
         );
     }
 
@@ -272,13 +274,7 @@ mod tests {
         let path = SimulatorRoute::path(&version, None);
         let route = SimulatorRoute::parse(&path).expect("route");
 
-        assert_eq!(
-            route,
-            SimulatorRoute::Pinned {
-                version: version.clone(),
-                device_name: None,
-            }
-        );
+        assert_eq!(route, SimulatorRoute::pinned(version.clone(), None));
         assert_eq!(
             SimulatorRoute::url(&version, None),
             "vmux://simulator/ios/27.0"

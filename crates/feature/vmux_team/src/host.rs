@@ -799,17 +799,17 @@ mod tests {
                     .id(),
             )
         }
-    }
 
-    fn lookup(app: &mut App, space: Entity) -> Option<Entity> {
-        app.world_mut()
-            .run_system_once(
-                move |stacks: Query<(Entity, &PageMetadata), With<Stack>>,
-                      hierarchy: SpaceHierarchy| {
-                    open_team_stack_in_space(space, &stacks, &hierarchy)
-                },
-            )
-            .unwrap()
+        fn lookup(app: &mut App, space: Entity) -> Option<Entity> {
+            app.world_mut()
+                .run_system_once(
+                    move |stacks: Query<(Entity, &PageMetadata), With<Stack>>,
+                          hierarchy: SpaceHierarchy| {
+                        open_team_stack_in_space(space, &stacks, &hierarchy)
+                    },
+                )
+                .unwrap()
+        }
     }
 
     #[test]
@@ -960,7 +960,7 @@ mod tests {
         let mut app = App::new();
         let space = app.world_mut().spawn(Space).id();
         let stack = TeamStackFixture::new(app.world_mut(), space).0;
-        assert_eq!(lookup(&mut app, space), Some(stack));
+        assert_eq!(TeamStackFixture::lookup(&mut app, space), Some(stack));
     }
 
     #[test]
@@ -969,7 +969,7 @@ mod tests {
         let active = app.world_mut().spawn(Space).id();
         let other = app.world_mut().spawn(Space).id();
         TeamStackFixture::new(app.world_mut(), other);
-        assert_eq!(lookup(&mut app, active), None);
+        assert_eq!(TeamStackFixture::lookup(&mut app, active), None);
     }
 
     #[test]
@@ -984,7 +984,7 @@ mod tests {
             },
             ChildOf(space),
         ));
-        assert_eq!(lookup(&mut app, space), None);
+        assert_eq!(TeamStackFixture::lookup(&mut app, space), None);
     }
 
     #[test]
@@ -1058,7 +1058,7 @@ mod tests {
         app.world_mut().flush();
 
         assert!(app.world().get::<LastActivatedAt>(stack).is_some());
-        assert_eq!(lookup(&mut app, space), None);
+        assert_eq!(TeamStackFixture::lookup(&mut app, space), None);
     }
 
     #[test]

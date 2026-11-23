@@ -24,9 +24,7 @@ struct PendingGitRepositoryPicker {
     task: Task<Option<PathBuf>>,
 }
 
-struct GitRepositoryPicker;
-
-impl GitRepositoryPicker {
+impl PendingGitRepositoryPicker {
     fn initial_directory(path: &Path) -> PathBuf {
         let mut current = path.to_path_buf();
         while !current.is_dir() && current.pop() {}
@@ -53,7 +51,7 @@ fn request(
     let path = PathBuf::from(&trigger.event().payload.path);
     let proxy = proxy.as_deref().map(|proxy| (**proxy).clone());
     let task = IoTaskPool::get().spawn(async move {
-        let initial = GitRepositoryPicker::initial_directory(&path);
+        let initial = PendingGitRepositoryPicker::initial_directory(&path);
         let selected = rfd::AsyncFileDialog::new()
             .set_title("Choose Git repository")
             .set_directory(initial)
@@ -99,6 +97,9 @@ mod tests {
         std::fs::create_dir(&existing).unwrap();
         let missing = existing.join("github.com/vmux-ai/vmux");
 
-        assert_eq!(GitRepositoryPicker::initial_directory(&missing), existing);
+        assert_eq!(
+            PendingGitRepositoryPicker::initial_directory(&missing),
+            existing
+        );
     }
 }

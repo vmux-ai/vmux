@@ -37,9 +37,7 @@ impl ProjectEntry {
         }
         &self.name
     }
-}
 
-impl ProjectEntry {
     pub fn matches(&self, needle: &str) -> bool {
         needle.is_empty()
             || self.name.to_ascii_lowercase().contains(needle)

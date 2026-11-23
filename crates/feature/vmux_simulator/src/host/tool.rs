@@ -67,16 +67,6 @@ enum ButtonArg {
     Siri,
 }
 
-impl From<ButtonArg> for SimulatorButton {
-    fn from(value: ButtonArg) -> Self {
-        match value {
-            ButtonArg::Home => Self::Home,
-            ButtonArg::Lock => Self::Lock,
-            ButtonArg::Siri => Self::Siri,
-        }
-    }
-}
-
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -155,12 +145,15 @@ fn button(
     requests: Query<(Entity, &SimulatorButtonInput), AddedTool<SimulatorButtonInput>>,
 ) {
     for (entity, args) in &requests {
+        let button = match args.button {
+            ButtonArg::Home => SimulatorButton::Home,
+            ButtonArg::Lock => SimulatorButton::Lock,
+            ButtonArg::Siri => SimulatorButton::Siri,
+        };
         commands
             .entity(entity)
             .insert(ToolQuery(AgentRequest::encode(
-                &AgentSimulatorButtonPress {
-                    button: args.button.into(),
-                },
+                &AgentSimulatorButtonPress { button },
             )));
     }
 }

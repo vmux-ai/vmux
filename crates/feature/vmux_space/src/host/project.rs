@@ -80,18 +80,16 @@ fn rename(
         vmux_ecs::Operation::bundle("project.save")
             .unwrap()
             .running(),
-        vmux_project::WriteRequest {
+        vmux_project::SaveProjectRequest {
             root: root.to_path_buf(),
-            mutation: vmux_project::Mutation::Save {
-                expected: revision.0,
-                project: vmux_project::ProjectSaved {
-                    root: root.to_path_buf(),
-                    id: vmux_project::ProjectId(request.id.clone()),
-                    directory: cwd.0.clone(),
-                    name: request.name.clone(),
-                    repository: repository.0.clone(),
-                    revision: 0,
-                },
+            expected: revision.0,
+            project: vmux_project::ProjectSaved {
+                root: root.to_path_buf(),
+                id: vmux_project::ProjectId(request.id.clone()),
+                directory: cwd.0.clone(),
+                name: request.name.clone(),
+                repository: repository.0.clone(),
+                revision: 0,
             },
         },
     ));
@@ -118,9 +116,9 @@ fn remove(
         vmux_ecs::Operation::bundle("project.delete")
             .unwrap()
             .running(),
-        vmux_project::WriteRequest {
+        vmux_project::RemoveProjectRequest {
             root: root.to_path_buf(),
-            mutation: vmux_project::Mutation::Remove(id.clone()),
+            url: id.clone(),
         },
     ));
 }
@@ -309,18 +307,16 @@ fn finish_picks(
                         vmux_ecs::Operation::bundle("project.save")
                             .unwrap()
                             .running(),
-                        vmux_project::WriteRequest {
+                        vmux_project::SaveProjectRequest {
                             root: root.to_path_buf(),
-                            mutation: vmux_project::Mutation::Save {
-                                expected: 0,
-                                project: vmux_project::ProjectSaved {
-                                    root: root.to_path_buf(),
-                                    id: vmux_project::ProjectId(id.clone()),
-                                    directory: path.clone(),
-                                    name,
-                                    repository: None,
-                                    revision: 0,
-                                },
+                            expected: 0,
+                            project: vmux_project::ProjectSaved {
+                                root: root.to_path_buf(),
+                                id: vmux_project::ProjectId(id.clone()),
+                                directory: path.clone(),
+                                name,
+                                repository: None,
+                                revision: 0,
                             },
                         },
                     ));
@@ -1620,7 +1616,11 @@ mod tests {
             fixture
                 .app
                 .world_mut()
-                .query::<&vmux_project::WriteRequest>()
+                .query_filtered::<Entity, Or<(
+                    With<vmux_project::SaveProjectRequest>,
+                    With<vmux_project::RemoveProjectRequest>,
+                    With<vmux_project::ArchiveProjectRequest>,
+                )>>()
                 .iter(fixture.app.world())
                 .count(),
             0
