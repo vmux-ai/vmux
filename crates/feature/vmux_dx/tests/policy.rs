@@ -12492,7 +12492,7 @@ impl Inventory {
         let is_projection_trait = self
             .resolve(&entry.namespace, interface, &mut BTreeSet::new())
             .is_some_and(|resolved| {
-                resolved.key == "crates/util/vmux_api/src/lib.rs||trait:UiStateProjection"
+                resolved.key == "crates/util/vmux_api/src/ui_state.rs||trait:UiStateProjection"
             });
         if !is_projection_trait {
             return false;
@@ -24415,8 +24415,12 @@ fn wave7_ui_state_projections_tuple_event_lists_and_test_impls_prove_safely() {
         "#[proc_macro_attribute] pub fn ui_state() {} #[proc_macro_attribute] pub fn ui_state_patch() {}",
     );
     inventory.source(
+        "crates/util/vmux_api/src/ui_state.rs",
+        "pub trait UiStateProjection<P> { fn apply(&mut self, patch: P); }",
+    );
+    inventory.source(
         "crates/util/vmux_api/src/lib.rs",
-        "pub use vmux_macro::{ui_state, ui_state_patch}; pub trait UiStateProjection<P> { fn apply(&mut self, patch: P); }",
+        "pub mod ui_state; pub use ui_state::UiStateProjection; pub use vmux_macro::{ui_state, ui_state_patch};",
     );
     inventory.source(
         "crates/feature/demo/src/lib.rs",
