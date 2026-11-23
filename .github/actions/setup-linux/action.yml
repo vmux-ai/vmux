@@ -103,19 +103,16 @@ runs:
       if: inputs.test-profile == 'true'
       shell: bash
       run: |
-        flags="-C opt-level=0 -C codegen-units=16"
-        if [ -n "${RUSTFLAGS:-}" ]; then
-          flags="${RUSTFLAGS} ${flags}"
-        fi
         {
-          echo 'CARGO_PROFILE_DEV_LTO=off'
+          echo 'CARGO_PROFILE_DEV_OPT_LEVEL=0'
           echo 'CARGO_PROFILE_DEV_DEBUG=0'
-          echo "RUSTFLAGS=${flags}"
+          echo 'CARGO_PROFILE_DEV_LTO=off'
+          echo 'CARGO_PROFILE_DEV_CODEGEN_UNITS=16'
         } >> "$GITHUB_ENV"
 
     - uses: Swatinem/rust-cache@v2
       with:
-        shared-key: ${{ inputs.dependency-cache-key || inputs.cache-key }}
+        shared-key: ${{ inputs.test-profile == 'true' && format('{0}-opt0', inputs.dependency-cache-key || inputs.cache-key) || (inputs.dependency-cache-key || inputs.cache-key) }}
         cache-workspace-crates: "false"
         cache-on-failure: "true"
         save-if: ${{ inputs.save-dependency-cache != 'false' && github.ref == 'refs/heads/main' && (inputs.dependency-cache-key == '' || inputs.dependency-cache-key == inputs.cache-key) }}
