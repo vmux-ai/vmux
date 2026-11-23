@@ -15,10 +15,13 @@ impl Plugin for AcpPlugin {
             super::acp::ConfigPlugin,
             super::runtime::RuntimePlugin,
             super::command_bar::CommandBarPlugin,
+            super::onboarding::OnboardingPlugin,
             super::approval::ApprovalPlugin,
             super::attach::AttachPlugin,
             super::attention::AttentionPlugin,
             super::command::CommandPlugin,
+        ));
+        app.add_plugins((
             super::continuation::ContinuationPlugin,
             super::external::ExternalPlugin,
             super::follow::FollowPlugin,
@@ -27,14 +30,16 @@ impl Plugin for AcpPlugin {
             super::navigation::NavigationPlugin,
             super::tidy::TidyPlugin,
             super::toast::ToastPlugin,
-        ))
-        .register_stored::<AcpSessionId>()
-        .add_message::<AgentRequestInput>()
-        .add_message::<AgentToolCallRequest>()
-        .add_message::<SwapStackSession>()
-        .add_message::<BellReceived>()
-        .add_message::<AgentAttention>()
-        .add_message::<OsNotify>()
-        .init_resource::<bevy::ecs::message::Messages<PageOpenRequest>>();
+        ));
+        #[cfg(target_os = "macos")]
+        app.add_plugins(super::credentials::CredentialsPlugin);
+        app.register_stored::<AcpSessionId>()
+            .add_message::<AgentRequestInput>()
+            .add_message::<AgentToolCallRequest>()
+            .add_message::<SwapStackSession>()
+            .add_message::<BellReceived>()
+            .add_message::<AgentAttention>()
+            .add_message::<OsNotify>()
+            .init_resource::<bevy::ecs::message::Messages<PageOpenRequest>>();
     }
 }

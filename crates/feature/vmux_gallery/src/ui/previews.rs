@@ -6,10 +6,11 @@ use crate::{
     GalleryRemoveAttachmentRequest, GalleryStatusRequest, GalleryStopRequest, GallerySubmitRequest,
     GalleryTextRequest, GalleryUiState, Story,
 };
-use dioxus::prelude::component;
 use dioxus::prelude::*;
+use dioxus::prelude::{component, rsx};
 use std::collections::HashMap;
 use vmux_api::address::PageAddressUiState;
+use vmux_ui::agent_logo::Logo;
 use vmux_ui::back::{BackButton, PageBack};
 use vmux_ui::components::address::{AddressControls, AddressTrail};
 use vmux_ui::components::agent_menu::AgentMenu;
@@ -103,7 +104,7 @@ pub(crate) fn AuxiliaryPreview(state: GalleryUiState) -> Element {
             match state.story {
                 Story::Favicon => rsx! {
                     div { class: "flex items-center gap-6",
-                        Favicon { favicon_url: "assets/agent-logos/claude.png", url: "", class: "size-8" }
+                        Favicon { favicon_url: Logo::of("claude-acp").map(Logo::source).unwrap_or_default(), url: "", class: "size-8" }
                         Favicon { favicon_url: "", url: "about:blank", class: "size-8", globe_class: "size-8" }
                         GlobeIcon { class: "size-8" }
                     }

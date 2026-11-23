@@ -499,15 +499,13 @@ struct ExternalMemories {
 
 impl ExternalMemories {
     fn from_env(destination: PathBuf) -> Self {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/"));
-        let claude = std::env::var_os("CLAUDE_CONFIG_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".claude"));
-        let codex = std::env::var_os("CODEX_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".codex"));
+        let paths = vmux_ecs::profile::ProfilePaths::current();
+        let claude = paths.agent_config_directory(
+            std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from),
+            ".claude",
+        );
+        let codex = paths
+            .agent_config_directory(std::env::var_os("CODEX_HOME").map(PathBuf::from), ".codex");
         Self {
             destination,
             claude_projects: claude.join("projects"),

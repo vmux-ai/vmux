@@ -1059,12 +1059,27 @@ fn submit(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<ChatSubmitBinding>>,
     composers: Query<&ComposerState, With<SessionView>>,
+    targets: super::session::SessionViews,
+    sessions: Query<(
+        &crate::Preparation,
+        &crate::Authentication,
+        Has<crate::SetupPending>,
+    )>,
     mut commands: Commands,
 ) {
     if !bindings.contains(trigger.event().command()) {
         return;
     }
     let caller = trigger.event().invocation().caller;
+    if let Some(session) = targets.session(caller)
+        && sessions
+            .get(session)
+            .is_ok_and(|(preparation, authentication, setup)| {
+                setup || preparation.active() || authentication.active
+            })
+    {
+        return;
+    }
     let Ok(composer) = composers.get(caller) else {
         return;
     };

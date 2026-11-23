@@ -199,6 +199,10 @@ pub enum ClientMessage {
     CredentialOffer(Box<crate::control::CredentialOffer>),
     CredentialWithdraw(Box<crate::control::CredentialWithdraw>),
     SubscribeRemoteObservations,
+    AuthenticateAcpAgent {
+        sid: String,
+        method_id: String,
+    },
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

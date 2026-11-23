@@ -11,7 +11,7 @@ use vmux_ecs::{
 use vmux_flex::Visibility;
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabWorkspace};
-use vmux_session::host::{SessionManagerView, SessionView};
+use vmux_session::host::{SessionManagerView, SessionView, SetupTarget, SetupView};
 use vmux_session::{AgentConversationTitle, AgentId, QueuedPrompts, Route, Session, SessionId};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::translate;
@@ -54,11 +54,14 @@ pub(super) struct PageOpener<'w, 's> {
         ),
         With<Session>,
     >,
+    setup_targets: Query<'w, 's, &'static EntityTarget<Session>, With<SetupTarget>>,
+    setup_views: Query<'w, 's, (), With<SetupView>>,
     children: Query<'w, 's, &'static Children>,
     child_of: Query<'w, 's, &'static ChildOf>,
     tabs: Query<'w, 's, &'static mut Tab>,
     workspaces: Query<'w, 's, &'static mut TabWorkspace>,
     handoffs: Query<'w, 's, &'static mut vmux_layout::hosted_page::SurfaceHandoff>,
+    renderer_pool: vmux_layout::warm_page::RendererPool<'w, 's>,
     queues: QueuedPrompts<'w, 's>,
     transcripts: vmux_session::Transcripts<'w, 's>,
     pub(super) commands: Commands<'w, 's>,
@@ -145,7 +148,10 @@ impl PageOpener<'_, '_> {
         launches: &Query<&vmux_ecs::terminal::TerminalLaunch>,
         projects: &vmux_ecs::profile::Projects,
     ) -> Result<PathBuf, String> {
-        if matches!(route, Route::Manager | Route::Provider { .. }) {
+        if matches!(
+            route,
+            Route::Manager | Route::Provider { .. } | Route::Setup
+        ) {
             return Ok(PathBuf::new());
         }
         if restoring && let Ok(launch) = launches.get(task.stack) {
@@ -195,6 +201,45 @@ impl PageOpener<'_, '_> {
             }
             Route::Provider { .. } => {
                 self.open_provider(task, transition_webview);
+                Ok(PageOpenCompletion::Complete)
+            }
+            Route::Setup => {
+                let session = self
+                    .setup_targets
+                    .get(task.stack)
+                    .ok()
+                    .map(EntityTarget::entity);
+                if let Some(session) = session {
+                    let id = self
+                        .sessions
+                        .get(session)
+                        .ok()
+                        .map(|(_, id, ..)| id.clone());
+                    if let Some(id) = id {
+                        let view = transition_webview.or_else(|| {
+                            self.children
+                                .get(task.stack)
+                                .ok()?
+                                .iter()
+                                .find(|child| self.setup_views.contains(*child))
+                        });
+                        return self.apply_session(
+                            task_entity,
+                            task,
+                            id,
+                            initial_prompt,
+                            initial_attachments,
+                            view,
+                            default_cwd,
+                        );
+                    }
+                }
+                self.commands
+                    .entity(task.stack)
+                    .remove::<(EntityTarget<Session>, SetupTarget)>();
+                let title = translate("onboarding-setup");
+                let view = self.open_surface(task, transition_webview, &Route::Setup.url(), &title);
+                self.commands.entity(view).insert(SetupView);
                 Ok(PageOpenCompletion::Complete)
             }
             Route::Session(id) => self.apply_session(
@@ -409,8 +454,19 @@ impl PageOpener<'_, '_> {
     }
 
     fn open_manager(&mut self, task: &PageOpenTask, transition_webview: Option<Entity>, url: &str) {
-        let stack = task.stack;
         let title = translate("sessions-title");
+        let view = self.open_surface(task, transition_webview, url, &title);
+        self.commands.entity(view).insert(SessionManagerView);
+    }
+
+    fn open_surface(
+        &mut self,
+        task: &PageOpenTask,
+        transition_webview: Option<Entity>,
+        url: &str,
+        title: &str,
+    ) -> Entity {
+        let stack = task.stack;
         self.retarget_handoff(transition_webview, task.id);
         let view = transition_webview.unwrap_or_else(|| {
             let previous = self.previous_surfaces(stack, None);
@@ -419,25 +475,32 @@ impl PageOpener<'_, '_> {
                     .entity(*surface)
                     .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
             }
+            let handoff = self.new_handoff(previous, task.id);
+            if let Some(view) = self.renderer_pool.take(url, stack) {
+                self.commands
+                    .entity(view)
+                    .insert((handoff, ChildOf(stack), Visibility::Hidden));
+                return view;
+            }
             self.commands
                 .spawn((
-                    vmux_layout::Browser::hosted_page(url, &title),
-                    self.new_handoff(previous, task.id),
-                    SessionManagerView,
+                    vmux_layout::Browser::hosted_page(url, title),
+                    handoff,
                     ChildOf(stack),
                 ))
                 .insert(Visibility::Hidden)
                 .id()
         });
-        self.commands.entity(view).remove::<SessionView>().insert((
-            PageMetadata {
+        self.commands
+            .entity(view)
+            .remove::<(SessionView, SessionManagerView, SetupView)>()
+            .insert(PageMetadata {
                 url: url.to_string(),
-                title,
+                title: title.to_string(),
                 bg_color: None,
                 icon: default(),
-            },
-            SessionManagerView,
-        ));
+            });
+        view
     }
 
     fn open_provider(&mut self, task: &PageOpenTask, transition_webview: Option<Entity>) {
@@ -485,11 +548,30 @@ impl PageOpener<'_, '_> {
     ) {
         let stack = task.stack;
         self.retarget_handoff(transition_webview, task.id);
-        let url = self
-            .sessions
-            .get(session)
-            .map(|(_, id, ..)| Route::Session(id.clone()).url())
-            .unwrap_or_else(|_| Route::Manager.url());
+        let setup = Route::parse(&task.url) == Some(Route::Setup);
+        let title = if setup {
+            let config = self
+                .settings
+                .agent
+                .acp
+                .iter()
+                .find(|config| config.id == agent_id);
+            let agent = self.catalog.profile_name(agent_id, config);
+            vmux_ui::i18n::translate_with(
+                "onboarding-setup-agent",
+                &[("agent", vmux_ui::i18n::TranslationValue::String(&agent))],
+            )
+        } else {
+            name.to_string()
+        };
+        let url = if setup {
+            Route::Setup.url()
+        } else {
+            self.sessions
+                .get(session)
+                .map(|(_, id, ..)| Route::Session(id.clone()).url())
+                .unwrap_or_else(|_| Route::Manager.url())
+        };
         let view = transition_webview.unwrap_or_else(|| {
             let previous = self.previous_surfaces(stack, None);
             for surface in &previous {
@@ -511,7 +593,7 @@ impl PageOpener<'_, '_> {
         self.commands.entity(view).insert((
             PageMetadata {
                 url,
-                title: name.to_string(),
+                title,
                 bg_color: None,
                 icon: self
                     .catalog
@@ -523,6 +605,12 @@ impl PageOpener<'_, '_> {
             anchor,
         ));
         self.commands.entity(view).remove::<SessionManagerView>();
+        if setup {
+            self.commands.entity(view).insert(SetupView);
+        } else {
+            self.commands.entity(view).remove::<SetupView>();
+            self.commands.entity(stack).remove::<SetupTarget>();
+        }
         self.commands
             .entity(stack)
             .insert(EntityTarget::<Session>::new(session));

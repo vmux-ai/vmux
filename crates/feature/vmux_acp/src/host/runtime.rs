@@ -294,7 +294,10 @@ fn session(
     mut reader: MessageReader<AcpSessionCreated>,
     sessions: Query<(Entity, &SessionId), With<Session>>,
     stacks: Query<(&EntityTarget<Session>, &Children)>,
-    mut page_meta: Query<&mut PageMetadata, With<SessionView>>,
+    mut page_meta: Query<
+        (&mut PageMetadata, Has<vmux_session::host::SetupView>),
+        With<SessionView>,
+    >,
     mut commands: Commands,
 ) {
     for ev in reader.read() {
@@ -311,7 +314,8 @@ fn session(
                     continue;
                 }
                 for kid in kids.iter() {
-                    if let Ok(mut meta) = page_meta.get_mut(kid)
+                    if let Ok((mut meta, setup)) = page_meta.get_mut(kid)
+                        && !setup
                         && meta.url != url
                     {
                         meta.url = url.clone();
@@ -359,6 +363,8 @@ fn input(
         Option<&mut PendingHandoff>,
         Option<&mut ImportedConversation>,
         Option<&PreferencesBlocked>,
+        Option<&vmux_session::Preparation>,
+        Option<&vmux_session::Authentication>,
     )>,
     workspace: PromptWorkspace,
     policy: Single<&AcpWorkspacePolicy>,
@@ -377,8 +383,15 @@ fn input(
         mut pending,
         mut imported,
         blocked,
+        preparation,
+        authentication,
     ) in &mut q
     {
+        if preparation.is_some_and(vmux_session::Preparation::active)
+            || authentication.is_some_and(|authentication| authentication.active)
+        {
+            continue;
+        }
         let kind = crate::host::model_selection::Kind::Modes;
         if let Some(blocked) = blocked {
             if modes.file(kind) != Some(blocked.file) {
@@ -553,6 +566,39 @@ mod tests {
                 .resource_mut::<Messages<ServiceRequest>>()
                 .drain()
                 .collect()
+        }
+    }
+
+    #[test]
+    fn queued_work_waits_for_preparation_and_authentication_to_finish() {
+        for stage in 0..3 {
+            let mut fixture = DispatchFixture::new(RunState::Idle);
+            let preparation = match stage {
+                0 => vmux_session::Preparation::starting(),
+                1 => vmux_session::Preparation::installing("Install".into(), None),
+                _ => vmux_session::Preparation::default(),
+            };
+            fixture.app.world_mut().entity_mut(fixture.session).insert((
+                AcpSpawnQueued,
+                preparation,
+                vmux_session::Authentication {
+                    active: stage == 2,
+                    ..Default::default()
+                },
+            ));
+            fixture.enqueue(fixture.session, "queued work", Vec::new());
+            fixture.app.update();
+            assert!(fixture.requests().is_empty());
+            fixture.app.world_mut().entity_mut(fixture.session).insert((
+                vmux_session::Preparation::default(),
+                vmux_session::Authentication::default(),
+            ));
+            fixture.app.update();
+            assert!(
+                matches!(fixture.requests().as_slice(), [ServiceRequest(ClientMessage::Shared(SharedMessage::AgentInput { text, .. }))] if text == "queued work")
+            );
+            fixture.app.update();
+            assert!(fixture.requests().is_empty());
         }
     }
 

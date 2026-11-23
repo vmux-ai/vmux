@@ -66,7 +66,7 @@ impl<'a> CliParser<'a> {
     }
 
     fn argument(manifest: &CliArgumentManifest) -> Arg {
-        let mut argument = Arg::new(manifest.id.clone());
+        let mut argument = Arg::new(manifest.id.clone()).hide(manifest.hidden);
         if let Some(long) = &manifest.long {
             argument = argument.long(long.clone());
         }

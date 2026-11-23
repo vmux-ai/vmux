@@ -1,4 +1,3 @@
-use super::agent::AgentBanner;
 use super::conversation::{Keys, Section, Turn};
 use super::item::UserAttachment;
 use super::state::Chat;
@@ -6,7 +5,6 @@ use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
 use dioxus::prelude::*;
 use std::{cell::RefCell, rc::Rc};
 use vmux_api::prompt_media::ChatAttachment;
-use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -62,6 +60,54 @@ fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
 }
 
 #[component]
+fn SetupReplies(chat: Chat) -> Element {
+    let state = vmux_ui::hooks::use_ui_state::<crate::onboarding::OnboardingUiState>()
+        .state
+        .read()
+        .clone();
+    let visible_count = if state.session_id == chat.transcript.session_id() {
+        state.replies.len()
+    } else {
+        0
+    };
+    use_effect(use_reactive!(|(visible_count, chat)| {
+        if visible_count > 0 && (chat.transcript.at_bottom)() {
+            chat.transcript.follow();
+        }
+    }));
+    if state.session_id != chat.transcript.session_id() {
+        return rsx! {};
+    }
+    rsx! {
+        for (index, reply) in state.replies.into_iter().enumerate() {
+            SetupReplyTurn { key: "setup-reply-{index}", chat, reply }
+        }
+    }
+}
+
+#[component]
+fn SetupReplyTurn(chat: Chat, reply: crate::onboarding::SetupReply) -> Element {
+    let question = translate(if reply.label_key.is_empty() {
+        "onboarding-agent-question"
+    } else {
+        "onboarding-connection-choice"
+    });
+    let text = if reply.label_key.is_empty() {
+        reply.value
+    } else {
+        translate(&reply.label_key)
+    };
+    rsx! {
+        super::setup::Turn { agent_name: chat.header_name(),
+            p { class: "text-sm leading-relaxed", "{question}" }
+        }
+        super::item::UserBubble { avatar_name: chat.user.name(), avatar_color: chat.user.color(), copy_text: text.clone(),
+            "{text}"
+        }
+    }
+}
+
+#[component]
 pub(super) fn ChatTranscript(
     chat: Chat,
     #[props(default)] reserve_details_toggle: bool,
@@ -71,8 +117,10 @@ pub(super) fn ChatTranscript(
     let mut scroll_container = chat.transcript.scroll_container;
     let at_bottom = chat.transcript.at_bottom;
     let transcript = chat.transcript.current();
-    let transcript_loading =
-        chat.status() != "errored" && (chat.transcript_loading() || !chat.transcript.ready());
+    let setup = chat.setup_pending();
+    let transcript_loading = !setup
+        && chat.status() != "errored"
+        && (chat.transcript_loading() || !chat.transcript.ready());
     let loaded_start = transcript.loaded_start;
     let history_loading = transcript.loading;
     let has_older = transcript.has_older;
@@ -81,47 +129,51 @@ pub(super) fn ChatTranscript(
     let placement_pending = !transcript_loading && !items.is_empty() && initial_scroll.is_empty();
     let latest_index = loaded_start as usize + items.len().saturating_sub(1);
     let mut turns = Turn::group(items, loaded_start as usize);
-    let bottom_padding = if chat.in_use() { "pb-12" } else { "pb-20" };
-    let toggle_space = if reserve_details_toggle {
-        "[&_.chat-user-bubble]:pr-10"
-    } else {
-        ""
-    };
+    let setup_prompt = chat.setup_prompt();
+    let user_name = chat.user.name();
+    let user_color = chat.user.color();
     section_keys.borrow_mut().assign(&mut turns);
     rsx! {
-        div {
-            id: "chat-scroll",
-            "data-vmux-sticky-container": "",
-            "data-vmux-initial-scroll": initial_scroll,
-            "data-vmux-presentation-pending": placement_pending.then_some(""),
-            "data-vmux-follow-scroll": at_bottom().to_string(),
-            "data-vmux-preserve-scroll": "auto",
-            onmounted: move |e| {
+        super::surface::Transcript {
+            initial_scroll,
+            placement_pending,
+            at_bottom: at_bottom(),
+            filled: transcript_loading,
+            busy: chat.in_use(),
+            reserve_details_toggle,
+            on_mounted: move |e: MountedEvent| {
                 scroll_container.set(Some(e.data()));
                 if *at_bottom.peek() {
                     chat.transcript.follow();
                 }
             },
-            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain scroll-pt-12 px-3 {bottom_padding} {toggle_space} outline-none sm:px-4 md:px-6",
-            tabindex: "0",
-            onwheel: move |_| chat.transcript.scroll_input(),
-            ontouchmove: move |_| chat.transcript.scroll_input(),
-            onscroll: move |event: Event<ScrollData>| chat.transcript.scrolled(&event),
-            onscrollend: move |event: Event<ScrollData>| chat.transcript.scrolled(&event),
-            div {
-                class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5 pt-3",
-                style: transcript_loading.then_some("height:100%;"),
-                onresize: move |_| {
-                    if *chat.transcript.initial_follow.peek() || *at_bottom.peek() {
-                        chat.transcript.follow();
-                    }
-                },
+            on_wheel: move |_| chat.transcript.scroll_input(),
+            on_touchmove: move |_| chat.transcript.scroll_input(),
+            on_scroll: move |event: ScrollEvent| chat.transcript.scrolled(&event),
+            on_scrollend: move |event: ScrollEvent| chat.transcript.scrolled(&event),
+            on_resize: move |_| {
+                if *chat.transcript.initial_follow.peek() || *at_bottom.peek() { chat.transcript.follow(); }
+            },
+                if setup { super::setup::ConnectedWelcome { chat } }
                 if transcript_loading {
                     TranscriptSkeleton {}
                 } else if loaded_start > 0 || has_older {
                     HistorySentinel { loading: history_loading }
                 }
-                if !transcript_loading && chat.installing_splash() {
+                if !transcript_loading {
+                    if let Some(prompt) = setup_prompt {
+                        super::item::UserBubble { avatar_name: user_name.clone(), avatar_color: user_color.clone(), copy_text: prompt.text.clone(),
+                            "{prompt.text}"
+                            QueuedAttachments { attachments: prompt.attachments }
+                        }
+                    }
+                }
+                SetupReplies { chat }
+                if !transcript_loading && chat.status() == "authentication" {
+                    super::authentication::Authentication { chat }
+                } else if !transcript_loading && chat.status() == "errored" && setup {
+                    super::setup::Turn { p { class: "text-sm leading-relaxed", {translate("onboarding-setup-failed")} } }
+                } else if !transcript_loading && chat.setup_busy() {
                     InstallIntro { chat, detail: chat.install_detail() }
                 } else if !transcript_loading && turns.is_empty() && chat.status() == "idle" {
                     ReadyIntro { chat }
@@ -147,7 +199,6 @@ pub(super) fn ChatTranscript(
                         span { class: "h-px flex-1 bg-foreground/10" }
                     }
                 }
-            }
         }
     }
 }
@@ -199,24 +250,23 @@ pub(super) fn TranscriptSkeleton() -> Element {
 
 #[component]
 fn InstallIntro(chat: Chat, detail: String) -> Element {
-    let accent = AgentAccent::for_agent(&chat.agent());
+    let phase = if chat.installing() || chat.installing_splash() || chat.status() == "installing" {
+        super::setup::Phase::Installation
+    } else {
+        super::setup::Phase::Preparation
+    };
     rsx! {
-        div { class: "my-auto flex flex-col items-center gap-3 py-12 text-center",
-            AgentBanner { chat }
-            div { class: "flex max-w-sm items-center gap-2 text-xs text-muted-foreground",
-                span { class: "h-1.5 w-1.5 shrink-0 rounded-full {accent.accent_bg}" }
-                span { class: "truncate", "{detail}" }
-            }
-        }
+        super::setup::ProgressTurn { phase, agent_name: chat.header_name(), detail, percent: chat.install_percent() }
     }
 }
 
 #[component]
 fn ReadyIntro(chat: Chat) -> Element {
     rsx! {
-        div { class: "flex flex-col items-center gap-3 py-16 text-center",
-            AgentBanner { chat }
-            p { class: "text-sm text-muted-foreground", {translate("agent-ready")} }
+        super::setup::Turn { agent_name: chat.header_name(),
+            p { class: "text-sm leading-relaxed",
+                {translate_with("onboarding-ready", &[("agent", TranslationValue::String(&chat.header_name()))])}
+            }
         }
     }
 }
@@ -242,7 +292,10 @@ pub(super) fn HandoffDivider(source: String, truncated: bool) -> Element {
 
 #[component]
 pub(super) fn QueuedPrompts(chat: Chat) -> Element {
-    let queued = chat.queue.queued();
+    let mut queued = chat.queue.queued();
+    if chat.setup_prompt().is_some() {
+        queued.remove(0);
+    }
     if queued.is_empty() {
         return rsx! {};
     }
@@ -318,8 +371,7 @@ pub(super) fn QueuedPrompts(chat: Chat) -> Element {
                 }
             }
             div { class: "flex items-center gap-2 pr-1 text-[10px] text-foreground/40",
-                kbd { class: "inline-flex h-5 items-center rounded border border-foreground/15 bg-foreground/[0.06] px-1.5 font-mono text-[10px] font-medium text-foreground/60 shadow-sm", "Esc" }
-                span { {translate("agent-send-all-now")} }
+                vmux_ui::components::composer::ShortcutHint { shortcut: "Esc", label: translate("agent-send-all-now") }
             }
         }
     }

@@ -30,13 +30,16 @@ pub use model::{
     ProviderArchiveCompleted, ProviderArchiveRequest, ProviderArchiveWriteRequest, ProviderKind,
     ProviderSessionId, ProviderSessionKey, ProviderSessionRestoreRequest, ProviderSessionTombstone,
     ProviderStage, ProviderStageChangeRequest, RenameRequest, Session, SessionDuplicate,
-    SourceUpdatedAt, Stage, StageChangeRequest, StageChangedAt, StageDefinition, StageId,
+    SetupPending, SourceUpdatedAt, Stage, StageChangeRequest, StageChangedAt, StageDefinition,
+    StageId,
 };
 pub use queue::{
     PromptQueue, QueuePlugin, QueuedPrompt, QueuedPromptId, QueuedPromptReads, QueuedPrompts,
 };
 pub use route::Route;
-pub use run_state::{AgentTurnMeta, Failure, FailureKind, RunState};
+pub use run_state::{
+    AgentTurnMeta, Authentication, Failure, FailureKind, Preparation, PreparationPhase, RunState,
+};
 #[cfg(host)]
 pub use runtime::SessionHostPlugin;
 #[cfg(host)]
@@ -77,6 +80,7 @@ pub mod event;
 pub mod host;
 #[cfg(feature = "app")]
 pub mod manager;
+pub mod onboarding;
 #[cfg(feature = "preferences")]
 pub mod preferences;
 #[cfg(feature = "preferences")]

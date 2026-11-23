@@ -4,8 +4,9 @@ use bevy::prelude::{
 };
 pub(crate) use catalog_driver::{CatalogDriver, CatalogRequest};
 use driver::{
-    AcpApprovalCommand, AcpConfigCommand, AcpConfigStateInput, AcpMcpServers, AcpProjectionSenders,
-    AcpPromptCommand, AcpSelectedConfigInput, AcpShared,
+    AcpApprovalCommand, AcpAuthenticateCommand, AcpConfigCommand, AcpConfigStateInput,
+    AcpDriverInputs, AcpMcpServers, AcpProjectionSenders, AcpPromptCommand, AcpSelectedConfigInput,
+    AcpShared,
 };
 use projection::{
     AcpProjectionOrder, AcpProjectionPlugin, AcpProjectionSet, AcpTranscripts,
@@ -62,7 +63,14 @@ impl bevy::prelude::Plugin for AcpRuntimePlugin {
                         snapshot_selection,
                     )
                         .chain(),
-                    (route_prompts, route_approvals, route_configs, route_cancels).chain(),
+                    (
+                        route_prompts,
+                        route_approvals,
+                        route_configs,
+                        route_authentications,
+                        route_cancels,
+                    )
+                        .chain(),
                     ApplyDeferred,
                     (subscribe, read, list, rebind, close, reap).chain(),
                 )
@@ -88,6 +96,7 @@ pub struct AcpSessions {
     prompts: mpsc::UnboundedSender<SendAcpPrompt>,
     approvals: mpsc::UnboundedSender<ApproveAcpTool>,
     configs: mpsc::UnboundedSender<SetAcpConfig>,
+    authentications: mpsc::UnboundedSender<AuthenticateAcpSession>,
     cancels: mpsc::UnboundedSender<CancelAcpSession>,
     subscriptions: mpsc::UnboundedSender<SubscribeAcpSession>,
     snapshots: mpsc::UnboundedSender<SnapshotAcpSession>,
@@ -106,6 +115,7 @@ struct AcpSessionReceivers {
     prompts: mpsc::UnboundedReceiver<SendAcpPrompt>,
     approvals: mpsc::UnboundedReceiver<ApproveAcpTool>,
     configs: mpsc::UnboundedReceiver<SetAcpConfig>,
+    authentications: mpsc::UnboundedReceiver<AuthenticateAcpSession>,
     cancels: mpsc::UnboundedReceiver<CancelAcpSession>,
     subscriptions: mpsc::UnboundedReceiver<SubscribeAcpSession>,
     snapshots: mpsc::UnboundedReceiver<SnapshotAcpSession>,
@@ -166,6 +176,13 @@ struct SetAcpConfig {
     request_id: u64,
     config_id: Option<String>,
     value: String,
+    response: Option<oneshot::Sender<bool>>,
+}
+
+#[derive(Component)]
+struct AuthenticateAcpSession {
+    sid: String,
+    method_id: String,
     response: Option<oneshot::Sender<bool>>,
 }
 
@@ -237,6 +254,9 @@ struct AcpApprovalInput(mpsc::UnboundedSender<AcpApprovalCommand>);
 
 #[derive(Component)]
 struct AcpConfigInput(mpsc::UnboundedSender<AcpConfigCommand>);
+
+#[derive(Component)]
+struct AcpAuthenticateInput(mpsc::UnboundedSender<AcpAuthenticateCommand>);
 
 #[derive(Component)]
 struct AcpCancelInput(mpsc::UnboundedSender<()>);
@@ -328,6 +348,9 @@ fn receive(mut inbox: Single<&mut AcpSessionInbox>, mut commands: Commands) {
     while let Ok(request) = inbox.0.configs.try_recv() {
         commands.spawn(request);
     }
+    while let Ok(request) = inbox.0.authentications.try_recv() {
+        commands.spawn(request);
+    }
     while let Ok(request) = inbox.0.cancels.try_recv() {
         commands.spawn(request);
     }
@@ -383,6 +406,7 @@ fn spawn(
             let (prompt_tx, prompt_rx) = mpsc::unbounded_channel();
             let (approval_tx, approval_rx) = mpsc::unbounded_channel();
             let (config_tx, config_rx) = mpsc::unbounded_channel();
+            let (authenticate_tx, authenticate_rx) = mpsc::unbounded_channel();
             let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
             let (close_tx, close_rx) = mpsc::unbounded_channel();
             let (projection, projection_inboxes) = AcpProjectionSenders::open(wake.0.clone());
@@ -404,7 +428,14 @@ fn spawn(
                 std::mem::take(&mut request.mcp_servers),
                 request.resume.take(),
                 Arc::clone(&shared),
-                (prompt_rx, approval_rx, config_rx, cancel_rx, close_rx),
+                AcpDriverInputs {
+                    prompts: prompt_rx,
+                    approvals: approval_rx,
+                    configs: config_rx,
+                    authentications: authenticate_rx,
+                    cancels: cancel_rx,
+                    closes: close_rx,
+                },
             ));
             commands.spawn((
                 Name::new(format!("ACP session {}", request.sid)),
@@ -413,6 +444,7 @@ fn spawn(
                     AcpPromptInput(prompt_tx),
                     AcpApprovalInput(approval_tx),
                     AcpConfigInput(config_tx),
+                    AcpAuthenticateInput(authenticate_tx),
                     AcpCancelInput(cancel_tx),
                     AcpCloseInput(close_tx),
                 ),
@@ -422,7 +454,7 @@ fn spawn(
                 projection_inboxes,
                 AcpAgentName::default(),
                 AcpSessionConfigs::default(),
-                AcpRunState(AgentRunStatus::Idle),
+                AcpRunState(AgentRunStatus::Starting),
                 AcpApprovalState::default(),
                 AcpHistoryReplay {
                     active: replay_pending,
@@ -724,6 +756,32 @@ fn route_configs(
                     request_id: request.request_id,
                     config_id: request.config_id.take(),
                     value: std::mem::take(&mut request.value),
+                })
+                .is_ok();
+            break;
+        }
+        if let Some(response) = request.response.take() {
+            let _ = response.send(accepted);
+        }
+        commands.entity(request_entity).despawn();
+    }
+}
+
+fn route_authentications(
+    sessions: Query<(&SessionId, &AcpAuthenticateInput)>,
+    mut requests: Query<(Entity, &mut AuthenticateAcpSession)>,
+    mut commands: Commands,
+) {
+    for (request_entity, mut request) in &mut requests {
+        let mut accepted = false;
+        for (sid, input) in &sessions {
+            if sid.0 != request.sid {
+                continue;
+            }
+            accepted = input
+                .0
+                .send(AcpAuthenticateCommand {
+                    method_id: std::mem::take(&mut request.method_id),
                 })
                 .is_ok();
             break;

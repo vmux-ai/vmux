@@ -59,8 +59,7 @@ impl Plugin for StartPlugin {
 }
 
 fn prewarm(mut commands: Commands) {
-    commands.spawn(vmux_ecs::page::PrewarmPage::host(
-        "start",
+    commands.spawn(vmux_ecs::page::PrewarmPage::exact(
         StartPlugin::url(),
         "Start",
         2,

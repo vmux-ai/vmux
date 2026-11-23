@@ -113,7 +113,7 @@ impl ChatKeyHandler {
 
 impl ChatKeyHandler {
     fn type_into_draft(&self, event: &KeyboardEvent) {
-        if self.0.in_use() {
+        if self.0.in_use() || self.0.setup_pending() {
             return;
         }
         let modifiers = event.modifiers();

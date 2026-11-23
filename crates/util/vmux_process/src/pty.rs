@@ -317,7 +317,14 @@ impl NativePty {
                 .rev()
                 .find(|(name, _)| name == "HOME")
                 .map(|(_, value)| value.clone())
-                .or_else(|| std::env::var("HOME").ok());
+                .or_else(|| {
+                    let paths = vmux_profile::ProfilePaths::current();
+                    if paths.isolated() {
+                        Some(paths.tool_home().to_string_lossy().into_owned())
+                    } else {
+                        std::env::var("HOME").ok()
+                    }
+                });
             let mut cmd = CommandBuilder::new("/bin/sh");
             cmd.arg("-c");
             cmd.arg(
@@ -344,6 +351,7 @@ impl NativePty {
             }
             cmd
         };
+        crate::LoginShellEnvironment::apply_pty_isolation(&mut cmd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("LANG", "en_US.UTF-8");

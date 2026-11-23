@@ -74,12 +74,27 @@ impl AcpLaunch {
                 );
             })
             .ok();
+        let mut env = self.env.clone();
+        if !env.iter().any(|(key, _)| key == "BROWSER")
+            && let Some(mcp) = &mcp
+            && mcp.command != "cargo"
+        {
+            env.push((
+                "BROWSER".into(),
+                vmux_process::BrowserCommand::for_launch(
+                    Path::new(&mcp.command),
+                    &session_id.0,
+                    anchor.0,
+                )
+                .into_string(),
+            ));
+        }
         ClientMessage::SpawnAcpAgentWithMcp(Box::new(AcpSpawnWithMcp {
             sid: session_id.0.clone(),
             agent_id: agent_id.0.clone(),
             command: self.command.clone(),
             args: self.args.clone(),
-            env: self.env.clone(),
+            env,
             cwd: cwd.0.to_string_lossy().into_owned(),
             anchor: anchor.0,
             mcp_command: mcp.as_ref().map(|mcp| mcp.command.clone()),
@@ -95,7 +110,7 @@ impl InstallState {
         if matches!(phase, InstallPhase::Done) {
             Self {
                 pct: None,
-                message: "Starting agent…".to_string(),
+                message: vmux_ui::i18n::translate("agent-starting"),
             }
         } else {
             Self {
@@ -108,7 +123,7 @@ impl InstallState {
     pub(super) fn preparing() -> Self {
         Self {
             pct: None,
-            message: "Preparing agent…".to_string(),
+            message: vmux_ui::i18n::translate("agent-preparing"),
         }
     }
 }

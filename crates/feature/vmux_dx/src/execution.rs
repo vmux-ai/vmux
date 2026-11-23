@@ -23,7 +23,7 @@ impl Execution {
     pub fn run(&mut self) -> Result<()> {
         Signals::check()?;
         self.command.process_group(0);
-        let mut child = self.command.spawn()?;
+        let mut child = self.spawn()?;
         let _group = Signals::track(child.id());
         let status = Self::wait(&mut child);
         Signals::check()?;
@@ -53,7 +53,7 @@ impl Execution {
         if input.is_some() {
             self.command.stdin(Stdio::piped());
         }
-        let mut child = self.command.spawn()?;
+        let mut child = self.spawn()?;
         let _group = Signals::track(child.id());
         let stdout = child.stdout.take().ok_or("Missing command output")?;
         let stderr = child.stderr.take().ok_or("Missing command error output")?;
@@ -85,6 +85,23 @@ impl Execution {
             stdout,
             stderr,
         })
+    }
+
+    fn spawn(&mut self) -> Result<Child> {
+        for attempt in 0..10 {
+            Signals::check()?;
+            if vmux_ecs::blocking::BlockingCancellation::canceled() {
+                return Err("Command launch canceled".into());
+            }
+            match self.command.spawn() {
+                Ok(child) => return Ok(child),
+                Err(error) if error.raw_os_error() == Some(libc::ETXTBSY) && attempt < 9 => {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        unreachable!()
     }
 
     fn wait(child: &mut Child) -> std::io::Result<ExitStatus> {
@@ -186,3 +203,27 @@ impl fmt::Display for Failure {
 }
 
 impl std::error::Error for Failure {}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn a_transient_busy_executable_is_launched_after_its_writer_closes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("command");
+        let mut writer = std::fs::File::create(&path).unwrap();
+        writer.write_all(b"#!/bin/sh\nprintf 'ready\\n'\n").unwrap();
+        writer
+            .set_permissions(std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(40));
+            drop(writer);
+        });
+        let output = Execution::new(Command::new(&path)).output(None).unwrap();
+        release.join().unwrap();
+        assert_eq!(output.stdout, b"ready\n");
+    }
+}

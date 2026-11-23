@@ -3,6 +3,7 @@
 use std::rc::Rc;
 
 use super::LayoutDropdown;
+use super::popup::{PopupLayer, PopupPlacement};
 use dioxus::prelude::*;
 use vmux_api::extension::{
     ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupAnchor,
@@ -31,7 +32,7 @@ impl ToolbarAnchor {
         self.node.set(Some(node));
     }
 
-    async fn measure(self) -> Option<ExtensionPopupAnchor> {
+    pub(super) async fn measure(self) -> Option<ExtensionPopupAnchor> {
         let node = self.node.peek().clone()?;
         let rect = node.get_client_rect().await.ok()?;
         if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
@@ -61,7 +62,7 @@ pub(crate) fn ExtensionPopupModal(
             anchor.set(toolbar.measure().await.unwrap_or(fallback_anchor));
         });
     }));
-    let placement = ExtensionPopupPlacement::from(anchor());
+    let placement = PopupPlacement::new(anchor().right, anchor().bottom);
     let size = if preferred_size.id == current.id {
         preferred_size
     } else {
@@ -108,59 +109,16 @@ pub(crate) fn ExtensionPopupModal(
     });
 
     rsx! {
-        div {
-            class: "pointer-events-auto fixed inset-0 z-[1000]",
-            tabindex: "-1",
-            onmounted: move |event: Event<MountedData>| {
-                let target = event.data();
-                spawn(async move {
-                    let _ = target.set_focus(true).await;
-                });
-            },
-            onkeydown: move |event| {
-                if event.key() == Key::Escape {
-                    event.prevent_default();
-                    state.close();
-                }
-            },
-            onpointerdown: move |_| state.close(),
+        PopupLayer { on_close: move |_| state.close(),
             div {
                 key: "{current.id}",
                 class: "pointer-events-none absolute",
-                style: "{placement.style(&size)}",
+                style: "{placement.style(size.width, size.height)}",
                 onpointerdown: move |event| event.stop_propagation(),
                 onmounted: move |event: Event<MountedData>| mounted.mount(event.data()),
                 onresize: move |_: Event<ResizeData>| resized.publish(),
             }
         }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct ExtensionPopupPlacement {
-    right: i32,
-    top: i32,
-}
-
-impl From<ExtensionPopupAnchor> for ExtensionPopupPlacement {
-    fn from(anchor: ExtensionPopupAnchor) -> Self {
-        Self {
-            right: anchor.right.max(48),
-            top: anchor.bottom.max(40) + 8,
-        }
-    }
-}
-
-impl ExtensionPopupPlacement {
-    fn style(self, size: &ExtensionPopupSizeEvent) -> String {
-        format!(
-            "right:max(8px,calc(100vw - {}px));top:{}px;width:min({:.0}px,calc(100vw - 16px));height:min({:.0}px,calc(100vh - {}px));",
-            self.right,
-            self.top,
-            size.width.clamp(200.0, 360.0),
-            size.height.max(80.0),
-            self.top + 8
-        )
     }
 }
 
@@ -213,6 +171,21 @@ pub(crate) fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
     let open = use_signal(|| false);
     let mut trigger = use_signal(|| None::<Rc<MountedData>>);
     let menu = ExtensionMenuState { open, trigger };
+    let browser =
+        super::state::LayoutUi::current().use_selector(|state| state.browser_modal.clone())();
+    let browser_active = !browser.id.is_empty();
+    let browser_id = browser.id.clone();
+    let browser_title = if browser.title.is_empty() {
+        browser.origin.clone()
+    } else {
+        browser.title.clone()
+    };
+    use_effect(use_reactive!(|browser_active| {
+        if browser_active && *open.peek() {
+            let mut open = open;
+            open.set(false);
+        }
+    }));
     let enabled = extensions
         .into_iter()
         .filter(|extension| extension.enabled)
@@ -227,19 +200,26 @@ pub(crate) fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
                 "data-vmux-dropdown-trigger": "true",
                 r#type: "button",
                 class: "flex h-7 w-7 items-center justify-center rounded-lg text-foreground/80 hover:bg-foreground/[0.08]",
-                title: translate("layout-manage-extensions"),
-                aria_label: translate("extensions-title"),
-                aria_expanded: open(),
+                title: if browser_active { browser_title.clone() } else { translate("layout-manage-extensions") },
+                aria_label: if browser_active { browser_title.clone() } else { translate("extensions-title") },
+                aria_expanded: browser_active || open(),
                 onmounted: move |event| {
                     trigger.set(Some(event.data()));
                     toolbar.mount(event.data());
                 },
-                onclick: move |_| menu.toggle(),
-                Icon { class: "h-4 w-4",
+                onclick: move |_| {
+                    if browser_active {
+                        let _ = send(&vmux_api::browser::BrowserModalCloseRequest { id: browser_id.clone() });
+                    } else { menu.toggle(); }
+                },
+                if browser_active {
+                    if let Some(icon) = browser.icon { img { src: icon, alt: "", class: "size-4 object-contain" } }
+                    else { vmux_ui::icon::LineIconView { icon: vmux_ui::icon::LineIcon::Globe, class: "size-4".to_string() } }
+                } else { Icon { class: "h-4 w-4",
                     path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }
-                }
+                } }
             }
-            if open() {
+            if open() && !browser_active {
                 DropdownPopup { align: DropdownAlign::End, class: "w-72 p-0",
                     div { class: "border-b border-border/70 px-3 py-2 text-xs font-semibold text-foreground",
                         {translate("extensions-title")}

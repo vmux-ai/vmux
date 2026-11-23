@@ -133,10 +133,9 @@ impl LintFormat {
 
 impl LinterSpec {
     pub fn run(&self, path: &Path) -> Vec<FileDiagnostic> {
-        let output = std::process::Command::new(&self.command)
-            .args(&self.args)
-            .arg(path)
-            .output();
+        let mut command = std::process::Command::new(&self.command);
+        vmux_process::LoginShellEnvironment::apply_isolation(&mut command);
+        let output = command.args(&self.args).arg(path).output();
         match output {
             Ok(output) => {
                 let diagnostics = self

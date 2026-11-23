@@ -99,6 +99,12 @@ impl AgentRequestId {
     }
 }
 
+impl std::fmt::Display for AgentRequestId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&uuid::Uuid::from_bytes(self.0), formatter)
+    }
+}
+
 #[vmux_api::contract(Copy, Eq)]
 pub enum FileTouchKind {
     Read,
@@ -205,6 +211,19 @@ pub enum AgentRunStatus {
     Idle,
     Interrupted,
     Errored(String),
+    Starting,
+    AuthenticationRequired {
+        #[allow(clippy::box_collection)]
+        methods: Box<Vec<AuthenticationMethod>>,
+        pending: bool,
+    },
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AuthenticationMethod {
+    pub id: String,
+    pub name: String,
+    pub description: String,
 }
 
 #[vmux_api::contract(Eq)]

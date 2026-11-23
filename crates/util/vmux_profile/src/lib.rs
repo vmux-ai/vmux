@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "macos")]
+pub use credentials::CredentialStore;
 pub use lease::DataLease;
 pub use product::Product;
 pub use relocation::{DirectoryChild, EntryObservation, NativeRelocation};
@@ -7,6 +9,8 @@ pub use service::{RemotePaths, ServicePaths};
 
 #[cfg(target_os = "macos")]
 pub mod account_credentials;
+#[cfg(target_os = "macos")]
+mod credentials;
 mod lease;
 pub mod mcp_credentials;
 mod product;
@@ -113,6 +117,7 @@ pub struct ProfilePaths {
     config: PathBuf,
     home: PathBuf,
     test: bool,
+    isolated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -157,6 +162,7 @@ impl ProfilePaths {
             config,
             home,
             test: false,
+            isolated,
         }
     }
 
@@ -167,7 +173,7 @@ impl ProfilePaths {
         let base = std::env::temp_dir();
         let test = SessionEnvironment::is_test();
         let mut data = base.join(Product::data_name());
-        let mut isolated = false;
+        let mut isolated = test;
         if let Some(override_dir) = std::env::var_os("VMUX_DATA_DIR")
             && !override_dir.is_empty()
         {
@@ -191,6 +197,7 @@ impl ProfilePaths {
             config,
             home,
             test,
+            isolated,
         }
     }
 
@@ -230,6 +237,27 @@ impl ProfilePaths {
 
     pub fn home(&self) -> PathBuf {
         self.home.clone()
+    }
+
+    pub fn tool_home(&self) -> PathBuf {
+        if self.isolated {
+            self.profile().join("home")
+        } else {
+            self.home.clone()
+        }
+    }
+
+    pub fn isolated(&self) -> bool {
+        self.isolated
+    }
+
+    pub fn agent_config_directory(&self, configured: Option<PathBuf>, name: &str) -> PathBuf {
+        if !self.isolated()
+            && let Some(directory) = configured
+        {
+            return directory;
+        }
+        self.tool_home().join(name)
     }
 
     pub fn projects(&self) -> PathBuf {
@@ -405,6 +433,39 @@ impl ProfilePaths {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn isolated_settings_resolve_only_inside_the_fixture_directory() {
+        let fixture = tempfile::tempdir().unwrap();
+        let (config, home) = ProfilePaths::native_paths(fixture.path(), true);
+        let paths = ProfilePaths {
+            build: "dev",
+            profile: Profile::named("onboarding"),
+            data: fixture.path().to_path_buf(),
+            config,
+            home,
+            test: true,
+            isolated: true,
+        };
+        let config = fixture.path().join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        let settings = config.join("settings.ron");
+        std::fs::write(&settings, "(appearance: (locale: \"ja\"))").unwrap();
+        assert_eq!(paths.settings(), settings);
+        let configured = PathBuf::from("/real-user/.codex");
+        let agent = paths.agent_config_directory(Some(configured.clone()), ".codex");
+        assert!(agent.starts_with(fixture.path()));
+        assert_ne!(agent, configured);
+        for path in [
+            paths.projects(),
+            paths.agents(),
+            paths.lsp(),
+            paths.tool_home(),
+            paths.profile(),
+        ] {
+            assert!(path.starts_with(fixture.path()), "{path:?}");
+        }
+    }
 
     #[test]
     fn recording_dir_is_nested_under_profile() {
@@ -627,6 +688,7 @@ mod tests {
                 config,
                 home,
                 test: false,
+                isolated,
             };
             for candidate in paths.settings_candidates() {
                 assert!(candidate.starts_with(paths.config()));

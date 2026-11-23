@@ -30,6 +30,7 @@ struct AttachWorld<'w, 's> {
     titles: Query<'w, 's, (), With<AgentConversationTitle>>,
     transcripts: vmux_session::Transcripts<'w, 's>,
     navigations: Query<'w, 's, &'static PageNavigation>,
+    open_tasks: Query<'w, 's, &'static vmux_ecs::PageOpenTask>,
     child_of: Query<'w, 's, &'static ChildOf>,
     children: Query<'w, 's, &'static Children>,
     tabs: Query<'w, 's, &'static mut Tab>,
@@ -100,7 +101,9 @@ impl AttachWorld<'_, '_> {
         self.commands.entity(session_entity).insert((
             vmux_ecs::agent::AgentSessionRoot,
             ProcessAnchor(anchor),
-            vmux_session::RunState::default(),
+            vmux_session::RunState::Idle,
+            vmux_session::Preparation::starting(),
+            vmux_session::Authentication::default(),
             vmux_ecs::team::Profile::registry(agent_name, agent_id).with_icon(profile_icon),
             vmux_ecs::team::Agent {
                 sid: sid.to_string(),
@@ -151,6 +154,7 @@ impl AttachWorld<'_, '_> {
         icon: &vmux_api::PageIcon,
         page_metadata: PageMetadata,
         anchor: ProcessId,
+        setup: bool,
         webview: Option<&EntityTarget<vmux_session::host::SessionView>>,
         navigation: Option<&PageNavigation>,
     ) {
@@ -196,6 +200,18 @@ impl AttachWorld<'_, '_> {
         self.commands
             .entity(view)
             .insert((page_metadata, anchor, vmux_session::host::SessionView));
+        if setup {
+            self.commands
+                .entity(view)
+                .insert(vmux_session::host::SetupView);
+        } else {
+            self.commands
+                .entity(view)
+                .remove::<vmux_session::host::SetupView>();
+            self.commands
+                .entity(stack)
+                .remove::<vmux_session::host::SetupTarget>();
+        }
         self.commands.entity(view).remove::<(
             vmux_session::host::SessionManagerView,
             vmux_session::host::SessionCatalogView,
@@ -237,10 +253,26 @@ impl AttachWorld<'_, '_> {
             self.commands.entity(operation).despawn();
             return;
         }
-        let url = vmux_session::Route::Session(SessionId(sid.to_string())).url();
+        let setup = open_task
+            .and_then(|task| self.open_tasks.get(task.entity()).ok())
+            .is_some_and(|task| {
+                vmux_session::Route::parse(&task.url) == Some(vmux_session::Route::Setup)
+            });
+        let url = if setup {
+            vmux_session::Route::Setup.url()
+        } else {
+            vmux_session::Route::Session(SessionId(sid.to_string())).url()
+        };
         let page_metadata = PageMetadata {
             url: url.clone(),
-            title: session_name.to_string(),
+            title: if setup {
+                vmux_ui::i18n::translate_with(
+                    "onboarding-setup-agent",
+                    &[("agent", vmux_ui::i18n::TranslationValue::String(agent_name))],
+                )
+            } else {
+                session_name.to_string()
+            },
             bg_color: None,
             icon: icon.clone(),
         };
@@ -281,6 +313,7 @@ impl AttachWorld<'_, '_> {
             icon,
             page_metadata,
             anchor,
+            setup,
             webview,
             navigation,
         );

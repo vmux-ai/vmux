@@ -135,8 +135,14 @@ fn queue(
 }
 
 fn start(
-    requests: Query<
-        (Entity, &SessionId, &AgentId, &AcpInstallRequest),
+    mut requests: Query<
+        (
+            Entity,
+            &SessionId,
+            &AgentId,
+            &AcpInstallRequest,
+            &mut RunState,
+        ),
         (
             Without<AcpLaunchStarted>,
             Without<crate::host::navigation_driver::RetryRequested>,
@@ -149,7 +155,7 @@ fn start(
         .iter()
         .map(|(entity, key, retiring)| (key.clone(), entity, retiring))
         .collect();
-    for (entity, session_id, agent_id, request) in &requests {
+    for (entity, session_id, agent_id, request, mut state) in &mut requests {
         if request.agent_id != agent_id.0 {
             commands.entity(entity).remove::<AcpInstallRequest>();
             continue;
@@ -176,6 +182,7 @@ fn start(
                 job
             }
         };
+        *state = RunState::Idle;
         commands
             .entity(entity)
             .remove::<AcpInstallRequest>()
@@ -186,6 +193,10 @@ fn start(
                     sid: session_id.0.clone(),
                     agent_id: agent_id.0.clone(),
                 },
+                vmux_session::Preparation::installing(
+                    vmux_ui::i18n::translate("agent-preparing"),
+                    None,
+                ),
             ));
     }
 }
@@ -273,11 +284,17 @@ fn environment(
         };
         let agent = ready.0.clone();
         let shell = key.shell.clone();
+        let agent_id = key.agent_id.clone();
+        let data_dir = key.agents.parent().unwrap_or(&key.agents).to_path_buf();
         match workers.spawn_process(
             vmux_ecs::wake::Wake::optional_waker(wake.clone()),
             move || AcpInstallResult {
                 agent,
-                login_env: vmux_process::LoginShellEnvironment::get(&shell).to_vec(),
+                login_env: crate::host::onboarding::AgentCredential::environment(
+                    &agent_id,
+                    vmux_process::LoginShellEnvironment::get(&shell),
+                    &data_dir,
+                ),
             },
         ) {
             Ok(task) => {
@@ -343,11 +360,14 @@ fn poll(
     >,
     packages: Query<(), With<package::Released>>,
     progress: Query<&InstallState, With<package::Request>>,
+    waiters: Query<(&SessionId, &AgentId, &AcpInstallWaiter)>,
     context: InstallContext,
     mut commands: Commands,
 ) {
-    for (entity, key, mut job, mut state, waiters) in &mut jobs {
-        if !context.accepts(key) || waiters.is_none_or(|waiters| waiters.iter().next().is_none()) {
+    for (entity, key, mut job, mut state, related_waiters) in &mut jobs {
+        if !context.accepts(key)
+            || related_waiters.is_none_or(|waiters| waiters.iter().next().is_none())
+        {
             commands.entity(entity).insert(Retiring);
             if let Some(package) = job.package {
                 commands
@@ -376,6 +396,17 @@ fn poll(
             && *state != *progress
         {
             *state = progress.clone();
+            if let Some(related_waiters) = related_waiters {
+                for waiter_entity in related_waiters.snapshot() {
+                    if let Ok((session_id, agent_id, waiter)) = waiters.get(waiter_entity)
+                        && waiter.matches(session_id, agent_id)
+                    {
+                        commands.entity(waiter_entity).insert(
+                            vmux_session::Preparation::installing(state.message.clone(), state.pct),
+                        );
+                    }
+                }
+            }
         }
         if let Some(result) = job.task.as_mut().and_then(|task| task.poll()) {
             job.task.take();
@@ -514,9 +545,7 @@ fn deliver(
         let Some(outcome) = &job.outcome else {
             continue;
         };
-        let related = related
-            .map(|related| related.iter().collect::<Vec<_>>())
-            .unwrap_or_default();
+        let related = related.map(AcpInstallWaiters::snapshot).unwrap_or_default();
         let has_waiters = related.iter().any(|entity| {
             waiters
                 .get(*entity)
@@ -564,11 +593,17 @@ fn deliver(
                     *state = RunState::Idle;
                     commands
                         .entity(entity)
+                        .insert(vmux_session::Preparation::starting());
+                    commands
+                        .entity(entity)
                         .insert(AcpSpawnQueued)
                         .remove::<(AcpInstallWaiter, vmux_tool::McpResolveResult)>();
                 }
                 Err(message) => {
                     *state = RunState::Errored(message.clone());
+                    commands
+                        .entity(entity)
+                        .insert(vmux_session::Preparation::default());
                     commands.entity(entity).remove::<(
                         AcpInstallWaiter,
                         vmux_tool::McpResolveRequest,

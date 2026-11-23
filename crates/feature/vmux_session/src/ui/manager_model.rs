@@ -78,6 +78,18 @@ pub(super) struct ArchiveTarget {
 }
 
 impl ArchiveTarget {
+    pub fn from_sessions(sessions: &[SessionSummary]) -> Vec<Self> {
+        let mut targets = Vec::with_capacity(sessions.len());
+        for session in sessions {
+            targets.push(Self::from_session(session));
+        }
+        targets
+    }
+
+    pub fn all_archived(targets: &[Self]) -> bool {
+        !targets.is_empty() && targets.iter().all(|target| target.archived)
+    }
+
     pub fn from_session(session: &SessionSummary) -> Self {
         Self {
             id: session.id.clone(),
@@ -93,6 +105,14 @@ pub(super) struct DeleteTarget {
 }
 
 impl DeleteTarget {
+    pub fn from_sessions(sessions: &[SessionSummary]) -> Vec<Self> {
+        let mut targets = Vec::with_capacity(sessions.len());
+        for session in sessions {
+            targets.push(Self::from_session(session));
+        }
+        targets
+    }
+
     pub fn from_session(session: &SessionSummary) -> Self {
         let provider = (!session.provider_kind.is_empty() && !session.provider_sid.is_empty())
             .then(|| ProviderSessionTarget {

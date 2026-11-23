@@ -129,9 +129,16 @@ pub struct StartRequest {
     target: PageOpenTarget,
     prompt: String,
     attachments: Vec<vmux_api::protocol::AgentAttachment>,
+    setup: bool,
 }
 
 impl StartRequest {
+    pub fn for_setup(cwd: std::path::PathBuf, agent: AgentId, target: PageOpenTarget) -> Self {
+        let mut request = Self::from_prompt(String::new(), cwd, agent, target, Vec::new());
+        request.setup = true;
+        request
+    }
+
     pub fn from_prompt(
         prompt: impl Into<String>,
         cwd: std::path::PathBuf,
@@ -148,6 +155,7 @@ impl StartRequest {
             target,
             prompt,
             attachments,
+            setup: false,
         }
     }
 
@@ -170,6 +178,7 @@ impl StartRequest {
             target,
             prompt,
             attachments,
+            setup: false,
         }
     }
 
@@ -213,15 +222,30 @@ impl SessionStarter<'_, '_> {
         }
     }
 
-    fn open_target(&mut self, session: Entity, id: &SessionId, target: &PageOpenTarget) {
+    fn open_target(
+        &mut self,
+        session: Entity,
+        id: &SessionId,
+        target: &PageOpenTarget,
+        setup: bool,
+    ) {
         if let PageOpenTarget::Stack(stack) = target {
             self.commands
                 .entity(*stack)
                 .insert(EntityTarget::<Session>::new(session));
+            if setup {
+                self.commands
+                    .entity(*stack)
+                    .insert(super::onboarding::SetupTarget);
+            }
         }
         self.page_opens.write(PageOpenRequest {
             target: target.clone(),
-            url: Route::Session(id.clone()).url(),
+            url: if setup {
+                Route::Setup.url()
+            } else {
+                Route::Session(id.clone()).url()
+            },
             request_id: None,
         });
     }
@@ -277,11 +301,17 @@ fn start(
                     .entity(entity)
                     .insert(vmux_ecs::OperationState::Succeeded);
             }
-            if !prompt_submitted {
+            if request.setup {
+                starter.commands.entity(session).insert((
+                    vmux_session::RunState::default(),
+                    vmux_session::PromptQueue::default(),
+                    vmux_session::SetupPending,
+                ));
+            } else if !prompt_submitted {
                 starter.submit_initial_prompt(session, request.create.id(), request);
                 existing.insert(request.create.id().clone(), (session, true));
             }
-            starter.open_target(session, request.create.id(), &request.target);
+            starter.open_target(session, request.create.id(), &request.target, request.setup);
             continue;
         }
         if let Some(entity) = active.get(request.create.id()) {
@@ -377,10 +407,17 @@ fn open_started(
         return;
     };
     *state = vmux_ecs::OperationState::Succeeded;
-    if !prompt_submitted {
-        starter.submit_initial_prompt(trigger.event().entity, &trigger.event().id, created);
+    let session = trigger.event().entity;
+    if created.setup {
+        starter.commands.entity(session).insert((
+            vmux_session::RunState::default(),
+            vmux_session::PromptQueue::default(),
+            vmux_session::SetupPending,
+        ));
+    } else if !prompt_submitted {
+        starter.submit_initial_prompt(session, &trigger.event().id, created);
     }
-    starter.open_target(trigger.event().entity, &trigger.event().id, &created.target);
+    starter.open_target(session, &trigger.event().id, &created.target, created.setup);
 }
 
 fn submit_from_command_bar(
@@ -732,6 +769,7 @@ fn report_tab_identity(
     ChatListSelection,
     ChatSelectorProjection
 )]
+#[require(crate::onboarding::KeyPending)]
 pub struct SessionView;
 
 #[derive(Component, Default)]
@@ -1493,6 +1531,77 @@ mod tests {
             1
         );
         assert!(matches!(&items[1], ChatItem::Turn(turn) if turn.copy_text == "Started"));
+    }
+
+    #[test]
+    fn setup_opens_a_session_without_creating_user_content() {
+        let mut app = App::new();
+        app.add_plugins(ChatHostPlugin)
+            .add_message::<StartRequest>()
+            .add_message::<CreateRequest>()
+            .add_message::<PageOpenRequest>();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().write_message(StartRequest::for_setup(
+            std::path::PathBuf::new(),
+            AgentId("mock".into()),
+            PageOpenTarget::Stack(stack),
+        ));
+        app.update();
+        let create = app
+            .world_mut()
+            .resource_mut::<Messages<CreateRequest>>()
+            .drain()
+            .next()
+            .unwrap();
+        let id = create.id().clone();
+        let session = app.world_mut().spawn((Session, id.clone())).id();
+        app.world_mut().trigger(Created {
+            entity: session,
+            id: id.clone(),
+        });
+        app.update();
+        assert!(
+            app.world_mut()
+                .run_system_once(move |queues: QueuedPrompts| queues.empty(session))
+                .unwrap()
+        );
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<vmux_session::ConversationAppendReceived>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<vmux_session::SetupPending>(session)
+                .is_some()
+        );
+        assert!(app.world().get::<AgentConversationTitle>(session).is_none());
+        assert!(
+            !app.world()
+                .entity(session)
+                .contains::<vmux_session::TitlePending>()
+        );
+        let opens: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(opens.len(), 1);
+        assert_eq!(opens[0].url, Route::Setup.url());
+        assert_eq!(
+            app.world()
+                .get::<EntityTarget<Session>>(stack)
+                .unwrap()
+                .entity(),
+            session
+        );
+        assert!(
+            app.world()
+                .get::<super::super::onboarding::SetupTarget>(stack)
+                .is_some()
+        );
     }
 
     struct Conversation {

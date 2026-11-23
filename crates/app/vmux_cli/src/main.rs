@@ -1,5 +1,7 @@
 use bevy_app::{App, AppExit};
 
+#[cfg(feature = "runtime")]
+mod browser;
 mod command;
 #[cfg(feature = "runtime")]
 mod plugin;

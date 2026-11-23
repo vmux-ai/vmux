@@ -12,8 +12,9 @@ use super::driver::AcpMcpServers;
 use super::{
     AcpSessionAgentInfo, AcpSessionConfigRequest, AcpSessionInbox, AcpSessionReceivers,
     AcpSessionRuntime, AcpSessionStatusRequest, AcpSessionWake, AcpSessions, ApproveAcpTool,
-    CancelAcpSession, CloseAcpSession, FindAcpSession, ListAcpSessions, RebindAcpSession,
-    SendAcpPrompt, SetAcpConfig, SnapshotAcpSession, SpawnAcpSession, SubscribeAcpSession,
+    AuthenticateAcpSession, CancelAcpSession, CloseAcpSession, FindAcpSession, ListAcpSessions,
+    RebindAcpSession, SendAcpPrompt, SetAcpConfig, SnapshotAcpSession, SpawnAcpSession,
+    SubscribeAcpSession,
 };
 
 impl AcpSessions {
@@ -22,6 +23,7 @@ impl AcpSessions {
         let (prompts, prompt_inbox) = mpsc::unbounded_channel();
         let (approvals, approval_inbox) = mpsc::unbounded_channel();
         let (configs, config_inbox) = mpsc::unbounded_channel();
+        let (authentications, authentication_inbox) = mpsc::unbounded_channel();
         let (cancels, cancel_inbox) = mpsc::unbounded_channel();
         let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
         let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
@@ -38,6 +40,7 @@ impl AcpSessions {
                 prompts,
                 approvals,
                 configs,
+                authentications,
                 cancels,
                 subscriptions,
                 snapshots,
@@ -58,6 +61,7 @@ impl AcpSessions {
                     prompts: prompt_inbox,
                     approvals: approval_inbox,
                     configs: config_inbox,
+                    authentications: authentication_inbox,
                     cancels: cancel_inbox,
                     subscriptions: subscription_inbox,
                     snapshots: snapshot_inbox,
@@ -206,6 +210,23 @@ impl AcpSessions {
                 request_id,
                 config_id,
                 value,
+                response: Some(response),
+            })
+            .is_err()
+            || self.wake.send(()).is_err()
+        {
+            return false;
+        }
+        receiver.await.unwrap_or(false)
+    }
+
+    pub async fn authenticate(&self, sid: String, method_id: String) -> bool {
+        let (response, receiver) = oneshot::channel();
+        if self
+            .authentications
+            .send(AuthenticateAcpSession {
+                sid,
+                method_id,
                 response: Some(response),
             })
             .is_err()

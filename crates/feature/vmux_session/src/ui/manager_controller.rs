@@ -210,6 +210,21 @@ impl SessionMutations {
 pub(super) struct SessionSelection(pub Signal<ManagerUiState>);
 
 impl SessionSelection {
+    pub fn visible(
+        self,
+        presentation: &super::manager_model::ManagerPresentation,
+    ) -> Vec<SessionSummary> {
+        let selected_ids = self.ids();
+        let mut selected = Vec::new();
+        for session in &presentation.snapshot.sessions {
+            if selected_ids.contains(&session.id) && presentation.visible_ids.contains(&session.id)
+            {
+                selected.push(session.clone());
+            }
+        }
+        selected
+    }
+
     pub fn ids(self) -> HashSet<String> {
         self.0.read().selected_ids.clone()
     }

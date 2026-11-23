@@ -1,3 +1,4 @@
+pub use browser_command::BrowserCommand;
 pub use login_shell::LoginShellEnvironment;
 pub use plugin::ProcessPlugin;
 pub use pty::PtyInputWriter;
@@ -6,6 +7,7 @@ pub use service::ProcessServicePlugin;
 pub use service_driver::ProcessService;
 pub use viewport::{ProcessCommandLifecycle, ProcessMode, ProcessSnapshot, ProcessUpdate};
 
+mod browser_command;
 mod emulator;
 mod login_shell;
 mod plugin;

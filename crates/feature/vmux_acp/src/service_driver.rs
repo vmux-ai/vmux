@@ -152,7 +152,14 @@ struct AcpServiceConnection {
 }
 
 impl AcpServiceConnection {
-    fn subscribe_agent_commands(&mut self) {
+    async fn subscribe_agent_commands(&mut self) {
+        self.service.broker.subscribe_browser(&self.outbound).await;
+        for sid in self.session_forwarders.keys() {
+            self.service
+                .broker
+                .attach_browser(sid, &self.outbound)
+                .await;
+        }
         if let Some(task) = self.command_subscription.take() {
             task.abort();
         }
@@ -374,7 +381,7 @@ impl AcpServiceConnection {
     async fn dispatch(&mut self, message: ClientMessage) -> Result<(), ClientMessage> {
         self.catalog_tasks.retain(|_, task| !task.is_finished());
         match message {
-            ClientMessage::SubscribeAgentCommands => self.subscribe_agent_commands(),
+            ClientMessage::SubscribeAgentCommands => self.subscribe_agent_commands().await,
             ClientMessage::AgentRequest {
                 request_id,
                 anchor,
@@ -388,7 +395,7 @@ impl AcpServiceConnection {
                 self.resolve_command_response(request_id, result).await;
             }
             ClientMessage::Shared(shared) => self.dispatch_shared(shared).await,
-            ClientMessage::DetachAgentSession { sid } => self.detach(&sid),
+            ClientMessage::DetachAgentSession { sid } => self.detach(&sid).await,
             ClientMessage::RebindAcpWorkspace { sid, cwd } => {
                 self.rebind_acp_workspace(sid, cwd).await;
             }
@@ -403,9 +410,12 @@ impl AcpServiceConnection {
                     .set_config(sid, request_id, config_id, value)
                     .await;
             }
+            ClientMessage::AuthenticateAcpAgent { sid, method_id } => {
+                self.service.sessions.authenticate(sid, method_id).await;
+            }
             ClientMessage::CloseAgentSession { sid } => {
                 self.service.sessions.close(sid.clone()).await;
-                self.detach(&sid);
+                self.detach(&sid).await;
             }
             ClientMessage::AgentToolResult {
                 request_id,
@@ -479,7 +489,13 @@ impl AcpServiceConnection {
                 return;
             }
         }
-        self.detach(&sid);
+        self.detach(&sid).await;
+        if self.command_subscription.is_some() {
+            self.service
+                .broker
+                .attach_browser(&sid, &self.outbound)
+                .await;
+        }
         let outbound = self.outbound.clone();
         let task = tokio::spawn(async move {
             loop {
@@ -499,10 +515,14 @@ impl AcpServiceConnection {
         self.session_forwarders.insert(sid, task);
     }
 
-    fn detach(&mut self, sid: &str) {
+    async fn detach(&mut self, sid: &str) {
         if let Some(task) = self.session_forwarders.remove(sid) {
             task.abort();
         }
+        self.service
+            .broker
+            .detach_browser(sid, &self.outbound)
+            .await;
     }
 }
 

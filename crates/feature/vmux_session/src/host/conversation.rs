@@ -17,7 +17,10 @@ pub struct ChatConversationPlugin;
 impl Plugin for ChatConversationPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(all(ui, host))]
-        app.add_plugins(crate::ui::ChatPage::plugin());
+        app.add_plugins((
+            crate::ui::ChatPage::plugin(),
+            crate::ui::AgentOnboardingPage::plugin(),
+        ));
         app.add_message::<Reported>()
             .add_message::<Submitted>()
             .add_message::<Agents>()
@@ -313,6 +316,8 @@ impl Conversation {
             RemoteStatus::Errored(_) => "errored",
             RemoteStatus::Interrupted => "interrupted",
             RemoteStatus::Idle => "idle",
+            RemoteStatus::Starting => "preparing",
+            RemoteStatus::AuthenticationRequired { .. } => "authentication",
         }
     }
 }

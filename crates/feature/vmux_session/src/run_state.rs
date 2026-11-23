@@ -15,7 +15,57 @@ pub enum RunState {
     Errored(String),
 }
 
+#[derive(Component, Clone, Default)]
+pub struct Preparation {
+    pub phase: PreparationPhase,
+    pub detail: String,
+    pub percent: Option<u8>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum PreparationPhase {
+    #[default]
+    Inactive,
+    Preparing,
+    Installing,
+}
+
+impl Preparation {
+    pub fn starting() -> Self {
+        Self {
+            phase: PreparationPhase::Preparing,
+            ..Default::default()
+        }
+    }
+
+    pub fn installing(detail: String, percent: Option<u8>) -> Self {
+        Self {
+            phase: PreparationPhase::Installing,
+            detail,
+            percent,
+        }
+    }
+
+    pub fn active(&self) -> bool {
+        self.phase != PreparationPhase::Inactive
+    }
+}
+
+#[derive(Component, Clone, Default)]
+pub struct Authentication {
+    pub active: bool,
+    pub methods: Vec<vmux_api::protocol::AuthenticationMethod>,
+    pub pending: bool,
+}
+
 impl RunState {
+    pub fn needs_credentials(&self) -> bool {
+        match self {
+            Self::Errored(error) => Failure(error).needs_credentials(),
+            _ => false,
+        }
+    }
+
     pub fn status(&self) -> &'static str {
         match self {
             Self::Idle => "idle",
@@ -53,6 +103,14 @@ pub enum FailureKind {
 }
 
 impl Failure<'_> {
+    pub fn needs_credentials(&self) -> bool {
+        let message = self.0.to_ascii_lowercase();
+        message.contains("authentication")
+            || message.contains("api key")
+            || message.contains("unauthorized")
+            || message.contains("401")
+    }
+
     pub fn kind(&self) -> FailureKind {
         if self.in_use() {
             return FailureKind::Busy;
@@ -69,6 +127,12 @@ impl Failure<'_> {
             return FailureKind::Connection;
         }
         if message.contains("command not found")
+            || message.contains("acp installation failed")
+            || message.contains("acp setup cancelled")
+            || message.contains("authentication")
+            || message.contains("api key")
+            || message.contains("unauthorized")
+            || message.contains("401")
             || message.contains("not installed")
             || message.contains("unsupported version")
             || message.contains("package version")

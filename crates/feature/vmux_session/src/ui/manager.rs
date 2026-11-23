@@ -91,33 +91,20 @@ fn SessionsManagerActions(
 ) -> Element {
     let mut delete_confirm_open = use_signal(|| false);
     let selection = use_context::<SessionSelection>();
-    let selected_ids = selection.ids();
-    let selected_sessions = presentation
-        .snapshot
-        .sessions
-        .iter()
-        .filter(|session| {
-            selected_ids.contains(&session.id) && presentation.visible_ids.contains(&session.id)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
+    let selected_sessions = selection.visible(&presentation);
     let selected_count = selected_sessions.len();
-    let selected_archived = selected_count > 0
-        && selected_sessions
-            .iter()
-            .all(|session| session.archived_at > 0);
-    let selected_targets = selected_sessions
-        .iter()
-        .map(ArchiveTarget::from_session)
-        .collect::<Vec<_>>();
-    let selected_deletable = selected_sessions
-        .iter()
-        .map(DeleteTarget::from_session)
-        .collect::<Vec<_>>();
+    let selected_targets = ArchiveTarget::from_sessions(&selected_sessions);
+    let selected_archived = ArchiveTarget::all_archived(&selected_targets);
+    let selected_deletable = DeleteTarget::from_sessions(&selected_sessions);
     let mutations = use_context::<SessionMutations>();
     let deleted_provider_count = mutations.deleted_provider_count();
-    let delete_confirm = use_memo(move || Some(delete_confirm_open()));
     let mut toolbar = Vec::new();
+    toolbar.push(
+        ToolbarControl::button(translate("onboarding-setup"), move |_| {
+            PageNavigation::replace("vmux://start/onboarding/agent");
+        })
+        .icon(LineIcon::Plus),
+    );
     if deleted_provider_count > 0 {
         toolbar.push(
             ToolbarControl::button(translate("sessions-restore-deleted"), move |_| {
@@ -193,6 +180,19 @@ fn SessionsManagerActions(
             },
         }
         PageToolbar { controls: toolbar }
+        DeleteSessionsDialog { delete_confirm_open, selected_deletable }
+    }
+}
+
+#[component]
+fn DeleteSessionsDialog(
+    mut delete_confirm_open: Signal<bool>,
+    selected_deletable: Vec<DeleteTarget>,
+) -> Element {
+    let selection = use_context::<SessionSelection>();
+    let mutations = use_context::<SessionMutations>();
+    let delete_confirm = use_memo(move || Some(delete_confirm_open()));
+    rsx! {
         AlertDialogRoot {
             open: Into::<ReadSignal<Option<bool>>>::into(delete_confirm),
             on_open_change: Callback::new(move |next| delete_confirm_open.set(next)),
@@ -260,13 +260,7 @@ fn SessionsManagerContent(
             div { id: "sessions-scroll", class: "flex min-h-0 flex-1 flex-col overflow-auto [scrollbar-gutter:stable]",
             if presentation.loading {
                 SessionsSkeleton {}
-            } else if presentation.snapshot.sessions.is_empty() {
-                ManagerEmpty {
-                    title: translate("sessions-empty"),
-                    detail: translate("sessions-empty-detail"),
-                    actions: rsx! { StartSessionButton {} },
-                }
-            } else if !presentation.visible_sessions {
+            } else if presentation.snapshot.sessions.is_empty() || !presentation.visible_sessions {
                 ManagerEmpty {
                     title: translate("sessions-inbox-empty"),
                     detail: translate("sessions-inbox-empty-detail"),
@@ -396,7 +390,7 @@ fn StartSessionButton() -> Element {
         button {
             r#type: "button",
             class: "vmux-primary-action mt-2 inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[11px] font-medium",
-            onclick: move |_| StartPage::open(),
+            onclick: move |event| PageNavigation::click("vmux://start/onboarding/agent", &event),
             LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
             span { {translate("sessions-start")} }
         }

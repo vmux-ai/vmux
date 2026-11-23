@@ -402,6 +402,19 @@ pub(super) struct AcpConfigCommand {
     pub(super) value: String,
 }
 
+pub(super) struct AcpAuthenticateCommand {
+    pub(super) method_id: String,
+}
+
+pub(super) struct AcpDriverInputs {
+    pub(super) prompts: mpsc::UnboundedReceiver<AcpPromptCommand>,
+    pub(super) approvals: mpsc::UnboundedReceiver<AcpApprovalCommand>,
+    pub(super) configs: mpsc::UnboundedReceiver<AcpConfigCommand>,
+    pub(super) authentications: mpsc::UnboundedReceiver<AcpAuthenticateCommand>,
+    pub(super) cancels: mpsc::UnboundedReceiver<()>,
+    pub(super) closes: mpsc::UnboundedReceiver<()>,
+}
+
 #[derive(Clone, Copy)]
 enum AcpTerminalExit {
     Pending,
@@ -716,6 +729,7 @@ impl AcpShared {
         tracing::info!(target: "acp", sid = %self.sid, "session established");
         self.startup_ready.store(true, Ordering::SeqCst);
         self.projection.startup_ready();
+        self.projection.status(AgentRunStatus::Idle);
     }
 
     fn startup_ready(&self) -> bool {
@@ -900,6 +914,195 @@ async fn prompt_content_blocks(
 
 pub(super) struct AcpDriver;
 
+struct StartupSession {
+    shared: Arc<AcpShared>,
+    connection: ConnectionTo<Agent>,
+    methods: Vec<agent_client_protocol::schema::v1::AuthMethod>,
+}
+
+impl StartupSession {
+    fn new(
+        shared: Arc<AcpShared>,
+        connection: ConnectionTo<Agent>,
+        methods: Vec<agent_client_protocol::schema::v1::AuthMethod>,
+    ) -> Self {
+        Self {
+            shared,
+            connection,
+            methods,
+        }
+    }
+
+    async fn establish(
+        &mut self,
+        resume: Option<String>,
+        load_supported: bool,
+        servers: &[McpServer],
+        inputs: &mut AcpDriverInputs,
+    ) -> Result<SessionId, String> {
+        if resume.is_some() && !load_supported {
+            return Err("agent does not support resuming saved sessions".into());
+        }
+        if resume.is_some() {
+            self.shared.projection.begin_history_replay();
+        }
+        loop {
+            let connection = self.connection.clone();
+            let shared = self.shared.clone();
+            let operation = tokio::time::timeout(ACP_STARTUP_TIMEOUT, async {
+                if let Some(id) = &resume {
+                    let mut request = LoadSessionRequest::new(id.clone(), shared.cwd());
+                    request.mcp_servers = servers.to_vec();
+                    let response = connection.send_request(request).block_task().await?;
+                    Ok((
+                        SessionId::new(id.clone()),
+                        AcpConfigStateInput {
+                            config_options: response.config_options.unwrap_or_default(),
+                            modes: response.modes,
+                        },
+                    ))
+                } else {
+                    let mut request = NewSessionRequest::new(shared.cwd());
+                    request.mcp_servers = servers.to_vec();
+                    let response = connection.send_request(request).block_task().await?;
+                    Ok::<_, agent_client_protocol::Error>((
+                        response.session_id,
+                        AcpConfigStateInput {
+                            config_options: response.config_options.unwrap_or_default(),
+                            modes: response.modes,
+                        },
+                    ))
+                }
+            });
+            tokio::pin!(operation);
+            let response = loop {
+                tokio::select! {
+                    biased;
+                    _ = inputs.closes.recv() => {
+                        if resume.is_some() {
+                            self.shared.projection.finish_history_replay(false);
+                        }
+                        return Err("ACP session startup cancelled".into());
+                    }
+                    _ = inputs.cancels.recv() => {
+                        if resume.is_some() {
+                            self.shared.projection.finish_history_replay(false);
+                        }
+                        return Err("ACP session startup cancelled".into());
+                    }
+                    response = &mut operation => break response,
+                }
+            };
+            match response {
+                Ok(Ok((id, config))) => {
+                    self.shared.projection.config_state(config);
+                    if resume.is_some() {
+                        self.shared.projection.finish_history_replay(true);
+                    }
+                    self.shared.emit(ServiceMessage::AcpSessionCreated {
+                        sid: self.shared.sid.clone(),
+                        acp_session_id: id.to_string(),
+                    });
+                    return Ok(id);
+                }
+                Ok(Err(error)) if error.code == agent_client_protocol::ErrorCode::AuthRequired => {
+                    if let Err(error) = self.authenticate(inputs).await {
+                        if resume.is_some() {
+                            self.shared.projection.finish_history_replay(false);
+                        }
+                        return Err(error);
+                    }
+                }
+                Ok(Err(error)) => {
+                    if resume.is_some() {
+                        self.shared.projection.finish_history_replay(false);
+                    }
+                    let method = if resume.is_some() {
+                        "session/load"
+                    } else {
+                        "session/new"
+                    };
+                    return Err(format!("{method} failed: {error}"));
+                }
+                Err(_) => {
+                    if resume.is_some() {
+                        self.shared.projection.finish_history_replay(false);
+                    }
+                    return Err("ACP session startup timed out".into());
+                }
+            }
+        }
+    }
+
+    fn status(&self, pending: bool) {
+        let mut methods = Vec::new();
+        for method in &self.methods {
+            methods.push(vmux_api::protocol::AuthenticationMethod {
+                id: method.id().to_string(),
+                name: method.name().to_string(),
+                description: method.description().unwrap_or_default().to_string(),
+            });
+        }
+        self.shared
+            .projection
+            .status(AgentRunStatus::AuthenticationRequired {
+                methods: Box::new(methods),
+                pending,
+            });
+    }
+
+    async fn authenticate(&mut self, inputs: &mut AcpDriverInputs) -> Result<(), String> {
+        self.status(false);
+        loop {
+            let request = tokio::select! {
+                biased;
+                _ = inputs.closes.recv() => return Err("authentication cancelled".into()),
+                _ = inputs.cancels.recv() => return Err("authentication cancelled".into()),
+                request = inputs.authentications.recv() => match request {
+                    Some(request) => request,
+                    None => return Err("authentication connection closed".into()),
+                },
+            };
+            if !self
+                .methods
+                .iter()
+                .any(|method| method.id().to_string() == request.method_id)
+            {
+                continue;
+            }
+            self.status(true);
+            let auth_request =
+                agent_client_protocol::schema::v1::AuthenticateRequest::new(request.method_id);
+            let connection = self.connection.clone();
+            let operation = tokio::time::timeout(
+                std::time::Duration::from_secs(300),
+                connection.send_request(auth_request).block_task(),
+            );
+            tokio::pin!(operation);
+            let result = loop {
+                tokio::select! {
+                    biased;
+                    _ = inputs.closes.recv() => return Err("authentication cancelled".into()),
+                    _ = inputs.cancels.recv() => return Err("authentication cancelled".into()),
+                    extra = inputs.authentications.recv() => {
+                        if extra.is_none() {
+                            return Err("authentication cancelled".into());
+                        }
+                    }
+                    result = &mut operation => break result,
+                }
+            };
+            match result {
+                Ok(Ok(_)) => {
+                    self.shared.projection.status(AgentRunStatus::Starting);
+                    return Ok(());
+                }
+                _ => self.status(false),
+            }
+        }
+    }
+}
+
 impl AcpDriver {
     fn is_permissionless_tool(name: &str) -> bool {
         if AcpToolCallId::is_conversation_title(name) {
@@ -923,7 +1126,7 @@ impl AcpDriver {
         )
     }
 
-    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn run(
         command: String,
         args: Vec<String>,
@@ -931,25 +1134,20 @@ impl AcpDriver {
         mcp_servers: AcpMcpServers,
         resume: Option<String>,
         shared: Arc<AcpShared>,
-        inputs: (
-            mpsc::UnboundedReceiver<AcpPromptCommand>,
-            mpsc::UnboundedReceiver<AcpApprovalCommand>,
-            mpsc::UnboundedReceiver<AcpConfigCommand>,
-            mpsc::UnboundedReceiver<()>,
-            mpsc::UnboundedReceiver<()>,
-        ),
+        inputs: AcpDriverInputs,
     ) {
         let agent_cwd = shared.cwd();
         let mut launch = Command::new(&command);
-        let mut child = match AgentProcess::spawn(
-            launch
-                .args(&args)
-                .envs(env)
-                .current_dir(agent_cwd)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped()),
-        ) {
+        vmux_process::LoginShellEnvironment::apply_isolation(launch.as_std_mut());
+        launch
+            .args(&args)
+            .envs(env)
+            .current_dir(agent_cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        vmux_process::LoginShellEnvironment::protect_isolated_configuration(launch.as_std_mut());
+        let mut child = match AgentProcess::spawn(&mut launch) {
             Ok(child) => child,
             Err(err) => {
                 shared.fail_startup(format!("acp spawn failed: {err}"));
@@ -984,7 +1182,6 @@ impl AcpDriver {
         child.stop().await;
     }
 
-    #[allow(clippy::type_complexity)]
     async fn connect(
         transport: agent_client_protocol::ByteStreams<
             tokio_util::compat::Compat<tokio::process::ChildStdin>,
@@ -993,13 +1190,7 @@ impl AcpDriver {
         mcp_servers: AcpMcpServers,
         resume: Option<String>,
         shared: Arc<AcpShared>,
-        inputs: (
-            mpsc::UnboundedReceiver<AcpPromptCommand>,
-            mpsc::UnboundedReceiver<AcpApprovalCommand>,
-            mpsc::UnboundedReceiver<AcpConfigCommand>,
-            mpsc::UnboundedReceiver<()>,
-            mpsc::UnboundedReceiver<()>,
-        ),
+        inputs: AcpDriverInputs,
     ) -> Result<(), agent_client_protocol::Error> {
         let perm_shared = shared.clone();
         let update_shared = shared.clone();
@@ -1166,26 +1357,26 @@ impl AcpDriver {
         responder.respond(RequestPermissionResponse::new(outcome))
     }
 
-    #[allow(clippy::type_complexity)]
     async fn drive_session(
         cx: ConnectionTo<Agent>,
         mcp_servers: AcpMcpServers,
         resume: Option<String>,
         shared: Arc<AcpShared>,
-        inputs: (
-            mpsc::UnboundedReceiver<AcpPromptCommand>,
-            mpsc::UnboundedReceiver<AcpApprovalCommand>,
-            mpsc::UnboundedReceiver<AcpConfigCommand>,
-            mpsc::UnboundedReceiver<()>,
-            mpsc::UnboundedReceiver<()>,
-        ),
+        mut inputs: AcpDriverInputs,
     ) -> Result<(), agent_client_protocol::Error> {
-        let (mut prompts, mut approvals, mut configs, mut cancels, mut closes) = inputs;
         let Some((mut session_id, prompt_capabilities, mcp_servers)) =
-            Self::initialize_session(&cx, &mcp_servers, resume, &shared).await
+            Self::initialize_session(&cx, &mcp_servers, resume, &shared, &mut inputs).await
         else {
             return Ok(());
         };
+        let AcpDriverInputs {
+            mut prompts,
+            mut approvals,
+            mut configs,
+            mut authentications,
+            mut cancels,
+            mut closes,
+        } = inputs;
         shared.mark_startup_ready();
         loop {
             tokio::select! {
@@ -1231,6 +1422,11 @@ impl AcpDriver {
                     )
                     .await;
                 }
+                auth = authentications.recv() => {
+                    if auth.is_none() {
+                        break;
+                    }
+                }
                 prompt = prompts.recv() => {
                     let Some(prompt) = prompt else {
                         break;
@@ -1258,32 +1454,39 @@ impl AcpDriver {
         mcp_servers: &AcpMcpServers,
         resume: Option<String>,
         shared: &Arc<AcpShared>,
+        inputs: &mut AcpDriverInputs,
     ) -> Option<(Option<SessionId>, PromptCapabilities, Vec<McpServer>)> {
         let mut init = InitializeRequest::new(ProtocolVersion::V1);
         init.client_capabilities.fs.read_text_file = true;
         init.client_capabilities.fs.write_text_file = true;
         init.client_capabilities.terminal = true;
-        let init_resp =
-            match tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(init).block_task())
-                .await
-            {
-                Ok(Ok(resp)) => resp,
-                Ok(Err(err)) => {
-                    shared.fail_startup(format!(
-                        "agent failed to start: {err}{}",
-                        shared.stderr_detail()
-                    ));
-                    return None;
-                }
-                Err(_) => {
-                    shared.fail_startup(format!(
-                        "agent did not start within {}s{}",
-                        ACP_STARTUP_TIMEOUT.as_secs(),
-                        shared.stderr_detail()
-                    ));
-                    return None;
-                }
-            };
+        let operation =
+            tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(init).block_task());
+        tokio::pin!(operation);
+        let initialized = tokio::select! {
+            biased;
+            _ = inputs.closes.recv() => return None,
+            _ = inputs.cancels.recv() => return None,
+            result = &mut operation => result,
+        };
+        let init_resp = match initialized {
+            Ok(Ok(resp)) => resp,
+            Ok(Err(err)) => {
+                shared.fail_startup(format!(
+                    "agent failed to start: {err}{}",
+                    shared.stderr_detail()
+                ));
+                return None;
+            }
+            Err(_) => {
+                shared.fail_startup(format!(
+                    "agent did not start within {}s{}",
+                    ACP_STARTUP_TIMEOUT.as_secs(),
+                    shared.stderr_detail()
+                ));
+                return None;
+            }
+        };
         tracing::info!(target: "acp", sid = %shared.sid, "initialize answered");
         let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
         let mcp_servers =
@@ -1291,134 +1494,23 @@ impl AcpDriver {
         if let Some(name) = AcpAgentInfo(init_resp.agent_info.as_ref()).display_name() {
             shared.projection.agent_info(name);
         }
-        let session_id = Self::load_or_create_session(
-            cx,
-            resume,
-            init_resp.agent_capabilities.load_session,
-            &mcp_servers,
-            shared,
-        )
-        .await?;
-        Some((session_id, prompt_capabilities, mcp_servers))
-    }
-
-    async fn load_or_create_session(
-        cx: &ConnectionTo<Agent>,
-        resume: Option<String>,
-        load_supported: bool,
-        mcp_servers: &[McpServer],
-        shared: &Arc<AcpShared>,
-    ) -> Option<Option<SessionId>> {
-        let resume_requested = resume.is_some();
-        if resume_requested {
-            shared.projection.begin_history_replay();
-        }
-        let loaded_session = load_requested_session(resume, load_supported, |sid| {
-            let mut load = LoadSessionRequest::new(sid, shared.cwd());
-            load.mcp_servers = mcp_servers.to_vec();
-            let shared = shared.clone();
-            let cx = cx.clone();
-            async move {
-                let answered =
-                    tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(load).block_task())
-                        .await;
-                let Ok(loaded) = answered else {
-                    tracing::warn!(
-                        target: "acp",
-                        "session/load did not answer within {}s",
-                        ACP_STARTUP_TIMEOUT.as_secs()
-                    );
-                    return Err("session/load timed out".to_string());
-                };
-                let response = loaded.map_err(|err| err.to_string())?;
-                let config_options = response.config_options.as_deref().unwrap_or_default();
-                shared.projection.config_state(AcpConfigStateInput {
-                    config_options: config_options.to_vec(),
-                    modes: response.modes.clone(),
-                });
-                Ok(())
-            }
-        })
-        .await;
-        let mut session_id = match loaded_session {
-            Ok(session_id) => session_id,
+        let mut startup = StartupSession::new(shared.clone(), cx.clone(), init_resp.auth_methods);
+        let session_id = match startup
+            .establish(
+                resume,
+                init_resp.agent_capabilities.load_session,
+                &mcp_servers,
+                inputs,
+            )
+            .await
+        {
+            Ok(id) => Some(id),
             Err(error) => {
-                tracing::warn!(target: "acp", sid = %shared.sid, %error, "session resume failed");
-                if resume_requested {
-                    shared.projection.finish_history_replay(false);
-                }
                 shared.fail_startup(error);
                 return None;
             }
         };
-        if resume_requested {
-            shared
-                .projection
-                .finish_history_replay(session_id.is_some());
-        }
-        if let Some(sid) = &session_id {
-            shared.emit(ServiceMessage::AcpSessionCreated {
-                sid: shared.sid.clone(),
-                acp_session_id: sid.to_string(),
-            });
-            return Some(session_id);
-        }
-        Self::create_initial_session(cx, &mut session_id, mcp_servers, shared).await
-    }
-
-    async fn create_initial_session(
-        cx: &ConnectionTo<Agent>,
-        session_id: &mut Option<SessionId>,
-        mcp_servers: &[McpServer],
-        shared: &Arc<AcpShared>,
-    ) -> Option<Option<SessionId>> {
-        let ensured = ensure_session(session_id, || {
-            let mut new_session = NewSessionRequest::new(shared.cwd());
-            new_session.mcp_servers = mcp_servers.to_vec();
-            let shared = shared.clone();
-            let cx = cx.clone();
-            async move {
-                match tokio::time::timeout(
-                    ACP_STARTUP_TIMEOUT,
-                    cx.send_request(new_session).block_task(),
-                )
-                .await
-                {
-                    Ok(Ok(response)) => {
-                        let config_options = response.config_options.as_deref().unwrap_or_default();
-                        shared.projection.config_state(AcpConfigStateInput {
-                            config_options: config_options.to_vec(),
-                            modes: response.modes.clone(),
-                        });
-                        Ok(response.session_id)
-                    }
-                    Ok(Err(err)) => Err(err.to_string()),
-                    Err(_) => Err(format!(
-                        "no answer within {}s{}",
-                        ACP_STARTUP_TIMEOUT.as_secs(),
-                        shared.stderr_detail()
-                    )),
-                }
-            }
-        })
-        .await;
-        match ensured {
-            Ok((sid, created)) => {
-                if created {
-                    shared.emit(ServiceMessage::AcpSessionCreated {
-                        sid: shared.sid.clone(),
-                        acp_session_id: sid.to_string(),
-                    });
-                }
-                Some(session_id.clone())
-            }
-            Err(err) => {
-                shared.projection.status(AgentRunStatus::Errored(format!(
-                    "acp session/new failed: {err}"
-                )));
-                None
-            }
-        }
+        Some((session_id, prompt_capabilities, mcp_servers))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1620,29 +1712,6 @@ impl AcpDriver {
     }
 }
 
-async fn load_requested_session<F, Fut, E>(
-    resume: Option<String>,
-    load_supported: bool,
-    load: F,
-) -> Result<Option<SessionId>, String>
-where
-    F: FnOnce(SessionId) -> Fut,
-    Fut: Future<Output = Result<(), E>>,
-    E: std::fmt::Display,
-{
-    let Some(resume) = resume else {
-        return Ok(None);
-    };
-    if !load_supported {
-        return Err("agent does not support resuming saved sessions".to_string());
-    }
-    let sid = SessionId::new(resume);
-    load(sid.clone())
-        .await
-        .map_err(|error| format!("session/load failed for {sid}: {error}"))?;
-    Ok(Some(sid))
-}
-
 async fn ensure_session<F, Fut, E>(
     session_id: &mut Option<SessionId>,
     create: F,
@@ -1835,12 +1904,488 @@ async fn release_terminal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::schema::v1::{AuthMethod, AuthMethodAgent};
     use agent_client_protocol::schema::v1::{
         ContentChunk, Implementation, PermissionOptionKind, SessionConfigSelectGroup,
         SessionConfigSelectOption, SessionMode, ToolCall, ToolCallUpdateFields, ToolKind,
     };
     use bevy::ecs::system::RunSystemOnce;
     use bevy::prelude::{App, Entity};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+    struct TestDriverSenders {
+        prompts: mpsc::UnboundedSender<AcpPromptCommand>,
+        _approvals: mpsc::UnboundedSender<AcpApprovalCommand>,
+        _configs: mpsc::UnboundedSender<AcpConfigCommand>,
+        authentications: mpsc::UnboundedSender<AcpAuthenticateCommand>,
+        _cancels: mpsc::UnboundedSender<()>,
+        closes: mpsc::UnboundedSender<()>,
+    }
+
+    impl TestDriverSenders {
+        fn open() -> (Self, AcpDriverInputs) {
+            let (prompts, prompt_rx) = mpsc::unbounded_channel();
+            let (approvals, approval_rx) = mpsc::unbounded_channel();
+            let (configs, config_rx) = mpsc::unbounded_channel();
+            let (authentications, authentication_rx) = mpsc::unbounded_channel();
+            let (cancels, cancel_rx) = mpsc::unbounded_channel();
+            let (closes, close_rx) = mpsc::unbounded_channel();
+            (
+                Self {
+                    prompts,
+                    _approvals: approvals,
+                    _configs: configs,
+                    authentications,
+                    _cancels: cancels,
+                    closes,
+                },
+                AcpDriverInputs {
+                    prompts: prompt_rx,
+                    approvals: approval_rx,
+                    configs: config_rx,
+                    authentications: authentication_rx,
+                    cancels: cancel_rx,
+                    closes: close_rx,
+                },
+            )
+        }
+    }
+
+    struct AuthenticationAgent {
+        calls: Arc<Mutex<Vec<String>>>,
+        blocked: Option<&'static str>,
+        notified: Option<mpsc::UnboundedSender<()>>,
+        reply: Option<Arc<tokio::sync::Notify>>,
+    }
+
+    impl AuthenticationAgent {
+        fn start(&self) -> (tokio::io::DuplexStream, tokio::task::JoinHandle<()>) {
+            let (client, server) = tokio::io::duplex(8192);
+            let calls = self.calls.clone();
+            let blocked = self.blocked;
+            let notified = self.notified.clone();
+            let reply = self.reply.clone();
+            let task = tokio::spawn(async move {
+                let (reader, mut writer) = tokio::io::split(server);
+                let mut reader = tokio::io::BufReader::new(reader);
+                let mut line = String::new();
+                let mut attempts = 0;
+                loop {
+                    line.clear();
+                    if reader.read_line(&mut line).await.unwrap() == 0 {
+                        break;
+                    }
+                    let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                    let method = request["method"].as_str().unwrap().to_string();
+                    calls.lock().unwrap().push(method.clone());
+                    if blocked == Some(method.as_str()) {
+                        if let Some(notified) = &notified {
+                            let _ = notified.send(());
+                        }
+                        if let Some(reply) = &reply {
+                            reply.notified().await;
+                        } else {
+                            continue;
+                        }
+                    }
+                    let authenticated = attempts >= 2;
+                    let result = match method.as_str() {
+                        "authenticate" => {
+                            assert_eq!(request["params"]["methodId"], "browser");
+                            attempts += 1;
+                            if attempts == 1 {
+                                None
+                            } else {
+                                Some(serde_json::json!({}))
+                            }
+                        }
+                        "session/new" if authenticated => {
+                            Some(serde_json::json!({"sessionId": "provider-session"}))
+                        }
+                        "session/new" => None,
+                        other => panic!("unexpected ACP method: {other}"),
+                    };
+                    let response = match result {
+                        Some(result) => {
+                            serde_json::json!({"jsonrpc": "2.0", "id": request["id"], "result": result})
+                        }
+                        None => {
+                            serde_json::json!({"jsonrpc": "2.0", "id": request["id"], "error": {"code": -32000, "message": "Sign-in required"}})
+                        }
+                    };
+                    writer
+                        .write_all(serde_json::to_string(&response).unwrap().as_bytes())
+                        .await
+                        .unwrap();
+                    writer.write_all(b"\n").await.unwrap();
+                }
+            });
+            (client, task)
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_an_unanswered_initialize_drains_without_publishing_a_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let marker = directory.path().join("initialized");
+        let script = directory.path().join("agent.py");
+        std::fs::write(&script, "import json,os,sys\nrequest=json.loads(sys.stdin.readline())\nassert request['method']=='initialize'\nopen(os.environ['TEST_INIT_FILE'],'w').write('ready')\nfor line in sys.stdin: pass\n").unwrap();
+        let (stream, mut events) = broadcast::channel(8);
+        let (wake, _) = mpsc::unbounded_channel();
+        let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
+        let (projection, _inboxes) = AcpProjectionSenders::open(wake);
+        let shared = Arc::new(AcpShared::with_projection(
+            "cancel-initialize".into(),
+            directory.path().to_path_buf(),
+            ProcessId::new(),
+            stream,
+            processes,
+            projection,
+        ));
+        let (senders, inputs) = TestDriverSenders::open();
+        let run = tokio::spawn(AcpDriver::run(
+            "python3".into(),
+            vec![script.to_string_lossy().into_owned()],
+            vec![(
+                "TEST_INIT_FILE".into(),
+                marker.to_string_lossy().into_owned(),
+            )],
+            AcpMcpServers::default(),
+            None,
+            shared,
+            inputs,
+        ));
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !marker.exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        senders.closes.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), run)
+            .await
+            .unwrap()
+            .unwrap();
+        while let Ok(event) = events.try_recv() {
+            assert!(!matches!(event, ServiceMessage::AcpSessionCreated { .. }));
+        }
+    }
+
+    #[tokio::test]
+    async fn authentication_keeps_preexisting_work_before_later_input() {
+        let (notify, mut notified) = mpsc::unbounded_channel();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let agent = AuthenticationAgent {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            blocked: Some("authenticate"),
+            notified: Some(notify),
+            reply: Some(release.clone()),
+        };
+        let (client, server) = agent.start();
+        let (reader, writer) = tokio::io::split(client);
+        let transport =
+            agent_client_protocol::ByteStreams::new(writer.compat_write(), reader.compat());
+        let (stream, _) = broadcast::channel(8);
+        let (wake, _) = mpsc::unbounded_channel();
+        let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
+        let (projection, (_transcript_inboxes, (_, _, _, mut status_inbox, _, _, _, _))) =
+            AcpProjectionSenders::open(wake);
+        let shared = Arc::new(AcpShared::with_projection(
+            "ordered-auth".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream,
+            processes,
+            projection,
+        ));
+        let (senders, mut inputs) = TestDriverSenders::open();
+        let connection = Client
+            .builder()
+            .connect_with(transport, async move |connection| {
+                let mut startup = StartupSession::new(
+                    shared,
+                    connection,
+                    vec![AuthMethod::Agent(AuthMethodAgent::new(
+                        "browser", "Sign in",
+                    ))],
+                );
+                senders
+                    .authentications
+                    .send(AcpAuthenticateCommand {
+                        method_id: "browser".into(),
+                    })
+                    .unwrap();
+                senders
+                    .prompts
+                    .send(AcpPromptCommand {
+                        text: "earlier".into(),
+                        context: None,
+                        attachments: Vec::new(),
+                        preferred_mode: None,
+                    })
+                    .unwrap();
+                {
+                    let future = startup.authenticate(&mut inputs);
+                    tokio::pin!(future);
+                    std::future::poll_fn(|context| {
+                        assert!(future.as_mut().poll(context).is_pending());
+                        std::task::Poll::Ready(())
+                    })
+                    .await;
+                    tokio::select! {
+                        notice = notified.recv() => { notice.unwrap(); },
+                        result = &mut future => panic!("authentication completed before its held response: {result:?}"),
+                    }
+                    senders
+                        .prompts
+                        .send(AcpPromptCommand {
+                            text: "later".into(),
+                            context: None,
+                            attachments: Vec::new(),
+                            preferred_mode: None,
+                        })
+                        .unwrap();
+                    std::future::poll_fn(|context| {
+                        assert!(future.as_mut().poll(context).is_pending());
+                        std::task::Poll::Ready(())
+                    })
+                    .await;
+                    release.notify_one();
+                    let retry_sender = senders.authentications.clone();
+                    let finish = tokio::spawn(async move {
+                        let mut saw_pending = false;
+                        while let Some(status) = status_inbox.0.recv().await {
+                            if let AgentRunStatus::AuthenticationRequired { pending, .. } = status {
+                                if pending {
+                                    saw_pending = true;
+                                } else if saw_pending {
+                                    retry_sender
+                                        .send(AcpAuthenticateCommand {
+                                            method_id: "browser".into(),
+                                        })
+                                        .unwrap();
+                                    break;
+                                }
+                            }
+                        }
+                        notified.recv().await.unwrap();
+                        release.notify_one();
+                    });
+                    future.await.unwrap();
+                    finish.await.unwrap();
+                }
+                let mut order = Vec::new();
+                while let Ok(prompt) = inputs.prompts.try_recv() {
+                    order.push(prompt.text);
+                }
+                assert_eq!(order, ["earlier", "later"]);
+                Ok(())
+            });
+        tokio::time::timeout(std::time::Duration::from_secs(5), connection)
+            .await
+            .unwrap()
+            .unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn setup_cancellation_interrupts_unanswered_session_creation_and_load() {
+        for method in ["session/new", "session/load"] {
+            let (notified, mut requests) = mpsc::unbounded_channel();
+            let agent = AuthenticationAgent {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                blocked: Some(method),
+                notified: Some(notified),
+                reply: None,
+            };
+            let (client, server) = agent.start();
+            let (reader, writer) = tokio::io::split(client);
+            let transport =
+                agent_client_protocol::ByteStreams::new(writer.compat_write(), reader.compat());
+            let (stream, mut events) = broadcast::channel(8);
+            let (wake, _) = mpsc::unbounded_channel();
+            let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
+            let (projection, _inboxes) = AcpProjectionSenders::open(wake);
+            let shared = Arc::new(AcpShared::with_projection(
+                "canonical-session".into(),
+                PathBuf::from("/tmp"),
+                ProcessId::new(),
+                stream,
+                processes,
+                projection,
+            ));
+            let (senders, mut inputs) = TestDriverSenders::open();
+            let close = tokio::spawn(async move {
+                requests.recv().await.unwrap();
+                senders.closes.send(()).unwrap();
+            });
+            let connection = Client
+                .builder()
+                .connect_with(transport, async move |connection| {
+                    let mut startup = StartupSession::new(shared, connection, Vec::new());
+                    let resume = if method == "session/load" {
+                        Some("saved-session".into())
+                    } else {
+                        None
+                    };
+                    let error = startup
+                        .establish(resume, true, &[], &mut inputs)
+                        .await
+                        .unwrap_err();
+                    assert_eq!(error, "ACP session startup cancelled");
+                    Ok(())
+                });
+            tokio::time::timeout(std::time::Duration::from_secs(2), connection)
+                .await
+                .unwrap()
+                .unwrap();
+            close.await.unwrap();
+            server.await.unwrap();
+            assert_eq!(*agent.calls.lock().unwrap(), [method]);
+            assert!(events.try_recv().is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn authentication_retries_without_creating_or_publishing_duplicate_sessions() {
+        let agent = AuthenticationAgent {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            blocked: None,
+            notified: None,
+            reply: None,
+        };
+        let (client, server) = agent.start();
+        let (reader, writer) = tokio::io::split(client);
+        let transport =
+            agent_client_protocol::ByteStreams::new(writer.compat_write(), reader.compat());
+        let (stream, mut events) = broadcast::channel(8);
+        let (wake, _) = mpsc::unbounded_channel();
+        let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
+        let (projection, (_transcript_inboxes, (_, _, _, mut status_inbox, _, _, _, _))) =
+            AcpProjectionSenders::open(wake);
+        let shared = Arc::new(AcpShared::with_projection(
+            "canonical-session".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream,
+            processes,
+            projection,
+        ));
+        let (senders, mut inputs) = TestDriverSenders::open();
+        senders
+            .authentications
+            .send(AcpAuthenticateCommand {
+                method_id: "unadvertised".into(),
+            })
+            .unwrap();
+        let auth_tx = senders.authentications.clone();
+        let choices = tokio::spawn(async move {
+            while let Some(status) = status_inbox.0.recv().await {
+                if matches!(
+                    status,
+                    AgentRunStatus::AuthenticationRequired { pending: false, .. }
+                ) {
+                    let _ = auth_tx.send(AcpAuthenticateCommand {
+                        method_id: "browser".into(),
+                    });
+                }
+            }
+        });
+        let connection = Client
+            .builder()
+            .connect_with(transport, async move |connection| {
+                let methods = vec![AuthMethod::Agent(AuthMethodAgent::new(
+                    "browser", "Sign in",
+                ))];
+                let mut startup = StartupSession::new(shared, connection, methods);
+                let id = startup
+                    .establish(None, false, &[], &mut inputs)
+                    .await
+                    .unwrap();
+                assert_eq!(id.to_string(), "provider-session");
+                Ok(())
+            });
+        tokio::time::timeout(std::time::Duration::from_secs(5), connection)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(senders);
+        server.await.unwrap();
+        choices.await.unwrap();
+        assert_eq!(
+            *agent.calls.lock().unwrap(),
+            ["session/new", "authenticate", "authenticate", "session/new"]
+        );
+        let event = events.try_recv().unwrap();
+        assert!(
+            matches!(event, ServiceMessage::AcpSessionCreated { acp_session_id, .. } if acp_session_id == "provider-session")
+        );
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn setup_cancellation_interrupts_an_authentication_request_that_does_not_answer() {
+        let (notified, mut requests) = mpsc::unbounded_channel();
+        let agent = AuthenticationAgent {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            blocked: Some("authenticate"),
+            notified: Some(notified),
+            reply: None,
+        };
+        let (client, server) = agent.start();
+        let (reader, writer) = tokio::io::split(client);
+        let transport =
+            agent_client_protocol::ByteStreams::new(writer.compat_write(), reader.compat());
+        let (stream, mut events) = broadcast::channel(8);
+        let (wake, _) = mpsc::unbounded_channel();
+        let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
+        let (projection, _inboxes) = AcpProjectionSenders::open(wake);
+        let shared = Arc::new(AcpShared::with_projection(
+            "canonical-session".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream,
+            processes,
+            projection,
+        ));
+        let (senders, mut inputs) = TestDriverSenders::open();
+        senders
+            .authentications
+            .send(AcpAuthenticateCommand {
+                method_id: "browser".into(),
+            })
+            .unwrap();
+        let close = tokio::spawn(async move {
+            requests.recv().await.unwrap();
+            senders.closes.send(()).unwrap();
+        });
+        let connection = Client
+            .builder()
+            .connect_with(transport, async move |connection| {
+                let methods = vec![AuthMethod::Agent(AuthMethodAgent::new(
+                    "browser", "Sign in",
+                ))];
+                let mut startup = StartupSession::new(shared, connection, methods);
+                let error = startup
+                    .establish(None, false, &[], &mut inputs)
+                    .await
+                    .unwrap_err();
+                assert_eq!(error, "authentication cancelled");
+                Ok(())
+            });
+        tokio::time::timeout(std::time::Duration::from_secs(5), connection)
+            .await
+            .unwrap()
+            .unwrap();
+        close.await.unwrap();
+        server.await.unwrap();
+        assert_eq!(
+            *agent.calls.lock().unwrap(),
+            ["session/new", "authenticate"]
+        );
+        assert!(events.try_recv().is_err());
+    }
 
     struct ProjectionHarness {
         app: App,
@@ -2544,41 +3089,6 @@ mod tests {
         }
         assert!(!AcpDriver::is_permissionless_tool("write_knowledge"));
         assert!(!AcpDriver::is_permissionless_tool("other_search_knowledge"));
-    }
-
-    #[tokio::test]
-    async fn requested_resume_loads_only_when_supported() {
-        let calls = std::sync::atomic::AtomicUsize::new(0);
-        let loaded = load_requested_session(Some("resume-1".into()), true, |sid| {
-            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            async move {
-                assert_eq!(sid.to_string(), "resume-1");
-                Ok::<(), &'static str>(())
-            }
-        })
-        .await;
-        assert_eq!(loaded.unwrap().unwrap().to_string(), "resume-1");
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-
-        let skipped = load_requested_session(Some("resume-2".into()), false, |_| {
-            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            async { Ok::<(), &'static str>(()) }
-        })
-        .await;
-        assert!(skipped.is_err());
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    async fn failed_requested_resume_reports_the_provider_error() {
-        let loaded = load_requested_session(Some("stale".into()), true, |_| async {
-            Err::<(), &'static str>("missing")
-        })
-        .await;
-        assert_eq!(
-            loaded.unwrap_err(),
-            "session/load failed for stale: missing"
-        );
     }
 
     #[tokio::test]

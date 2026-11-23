@@ -12,10 +12,11 @@ use vmux_ecs::{Operation, OperationState, Order};
 
 use crate::debug_io::{
     AcquireTarget, AcquiredLock, CaptureOutput, CleanupFlight, CleanupQueue, CloneExecutable,
-    CopyFile, CreateDirectory, CreateTemporary, DirectoryEntries, Done, FileBytes, FileDigest,
-    Flight, HashFile, HashInput, InspectPath, IoJob, IoValue, LinkPath, PathMetadata, PendingValue,
-    ProbeOutput, ProbeProcess, ProcessValue, ReadDirectory, ReadFile, ReapRequest, RemoveDirectory,
-    RemoveFile, RenamePath, RunProcess, SpawnProcess, Task, TemporaryValue, ToolOutput, WriteFile,
+    CopyFile, CreateDirectory, CreateOnboardingDirectory, CreateTemporary, DirectoryEntries, Done,
+    FileBytes, FileDigest, Flight, HashFile, HashInput, InspectPath, IoJob, IoValue, LinkPath,
+    PathMetadata, PendingValue, ProbeOutput, ProbeProcess, ProcessValue, ReadDirectory, ReadFile,
+    ReapRequest, RemoveDirectory, RemoveFile, RenamePath, RunProcess, SpawnProcess, Task,
+    TemporaryValue, ToolOutput, WriteFile,
 };
 use crate::execution::Failure;
 use crate::product::ProductMetadata;
@@ -35,6 +36,7 @@ impl bevy_app::Plugin for DebugPlugin {
                     crate::cargo::CargoPlugin,
                     crate::compiler_lint::CompilerLintPlugin,
                     IoPlugin::<CaptureOutput>::default(),
+                    IoPlugin::<CreateOnboardingDirectory>::default(),
                     IoPlugin::<ProbeProcess>::default(),
                     IoPlugin::<HashInput>::default(),
                     IoPlugin::<RemoveDirectory>::default(),
@@ -124,6 +126,7 @@ impl bevy_app::Plugin for DebugPlugin {
                     (
                         prepare_frontend,
                         serve,
+                        prepare_onboarding_directory,
                         run_start,
                         inspect_local,
                         inspect_development,
@@ -587,6 +590,9 @@ struct IdentitiesSlot;
 #[derive(Component)]
 struct TemporarySlot;
 
+#[derive(Component, Clone)]
+struct OnboardingDirectorySlot;
+
 #[derive(Component)]
 struct PasswordSlot;
 
@@ -746,6 +752,7 @@ type NativeResults<'w, 's> = Query<
                 With<KeychainSlot>,
                 With<IdentitiesSlot>,
                 With<TemporarySlot>,
+                With<OnboardingDirectorySlot>,
                 With<PasswordSlot>,
                 With<PartitionSlot>,
                 With<ManifestSlot>,
@@ -3098,7 +3105,36 @@ fn finish_run(mut requests: RunRequests, facts: Facts, mut io: IoWriter) {
         if *phase != RunPhase::Done || facts.pending(entity) {
             continue;
         }
+        if let Some(TemporaryValue(directory)) = facts.get::<_, OnboardingDirectorySlot>(entity) {
+            directory
+                .retention()
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
         io.commands.entity(entity).insert(Complete(Outcome::Done));
+    }
+}
+
+fn prepare_onboarding_directory(mut requests: RunRequests, facts: Facts, mut io: IoWriter) {
+    for (entity, request, _, settings, phase, mut sequence) in &mut requests {
+        if *phase != RunPhase::Start
+            || request.profile != "dev"
+            || request.platform != "desktop"
+            || settings.0.get("VMUX_ONBOARDING_FRESH") != Some(OsStr::new("1"))
+            || facts.pending(entity)
+            || facts
+                .get::<TemporaryValue, OnboardingDirectorySlot>(entity)
+                .is_some()
+        {
+            continue;
+        }
+        io.request(
+            &mut sequence,
+            entity,
+            &mut None,
+            CreateOnboardingDirectory,
+            OnboardingDirectorySlot,
+            false,
+        );
     }
 }
 
@@ -3110,6 +3146,14 @@ fn run_start(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mut io
 
         let Run { profile, platform } = request;
         if platform != "desktop" {
+            continue;
+        }
+        if profile == "dev"
+            && settings.0.get("VMUX_ONBOARDING_FRESH") == Some(OsStr::new("1"))
+            && facts
+                .get::<TemporaryValue, OnboardingDirectorySlot>(entity)
+                .is_none()
+        {
             continue;
         }
         if facts.pending(entity) {
@@ -3654,12 +3698,20 @@ fn run_execute(
 
         let target = targets.get(entity).unwrap();
         let mut environment = settings.0.clone();
+        if let Some(TemporaryValue(directory)) = facts.get::<_, OnboardingDirectorySlot>(entity) {
+            environment.remove("VMUX_ONBOARDING_FRESH");
+            environment.set("VMUX_DATA_DIR", directory.path().as_os_str());
+            environment.set("VMUX_PROFILE", "fresh");
+            environment.set("VMUX_TEST_ENV_KEYS", "0");
+            println!("Onboarding test data: {}", directory.path().display());
+        }
         let (program, arguments) = if cfg!(target_os = "macos") || profile != "dev" {
             let mut arguments = Vec::new();
             for key in [
                 "VMUX_PROFILE",
                 "VMUX_TEST",
                 "VMUX_DATA_DIR",
+                "VMUX_TEST_ENV_KEYS",
                 "VMUX_REMOTE_RELAY_URL",
                 "VMUX_ACCOUNT_HOST",
                 "VMUX_ACCOUNT_PORT",

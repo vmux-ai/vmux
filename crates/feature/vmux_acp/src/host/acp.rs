@@ -116,6 +116,12 @@ struct AcpInstallWaiter {
 #[relationship_target(relationship = AcpInstallWaiter)]
 struct AcpInstallWaiters(Vec<Entity>);
 
+impl AcpInstallWaiters {
+    fn snapshot(&self) -> Vec<Entity> {
+        self.0.clone()
+    }
+}
+
 #[derive(Component, Clone)]
 struct AcpInstallRequest {
     profile: Option<Entity>,
