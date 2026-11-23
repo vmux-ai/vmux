@@ -12473,6 +12473,30 @@ impl Inventory {
             .is_some_and(|keys| keys.contains(&entry.key))
     }
 
+    fn type_has_direct_borrow(ty: &Type) -> bool {
+        match ty {
+            Type::Reference(_) => true,
+            Type::Paren(inner) => Self::type_has_direct_borrow(&inner.elem),
+            Type::Group(inner) => Self::type_has_direct_borrow(&inner.elem),
+            Type::Tuple(tuple) => tuple.elems.iter().any(Self::type_has_direct_borrow),
+            Type::Path(path) if path.qself.is_none() => {
+                let Some(segment) = path.path.segments.last() else {
+                    return false;
+                };
+                if segment.ident != "Option" {
+                    return false;
+                }
+                let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+                    return false;
+                };
+                arguments.args.iter().any(|arg| {
+                    matches!(arg, syn::GenericArgument::Type(inner) if Self::type_has_direct_borrow(inner))
+                })
+            }
+            _ => false,
+        }
+    }
+
     fn value_handle_candidate(&self, entry: &Declaration) -> bool {
         if !entry.production
             || !matches!(entry.kind, Kind::Struct)
@@ -12496,10 +12520,7 @@ impl Inventory {
         let has_lifetime = matches!(
             &entry.syntax,
             Some(Item::Struct(structure)) if structure.generics.lifetimes().next().is_some()
-        ) && entry
-            .field_types
-            .iter()
-            .any(|ty| matches!(ty, Type::Reference(_)));
+        ) && entry.field_types.iter().any(Self::type_has_direct_borrow);
         let derives_copy = entry.derive_paths.iter().any(|path| {
             match self
                 .external_path(&entry.namespace, path, &mut BTreeSet::new())

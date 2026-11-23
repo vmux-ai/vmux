@@ -522,12 +522,27 @@ impl<'tcx> Ownership<'tcx> {
         let TyKind::Adt(owner, arguments) = ty.kind() else {
             return false;
         };
-        owner.all_fields().any(|field| {
-            matches!(
-                field.ty(cx.tcx, arguments).skip_norm_wip().kind(),
-                TyKind::Ref(..)
-            )
-        })
+        owner
+            .all_fields()
+            .any(|field| Self::has_direct_borrow(cx, field.ty(cx.tcx, arguments).skip_norm_wip()))
+    }
+
+    fn has_direct_borrow(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
+        match ty.kind() {
+            TyKind::Ref(..) => true,
+            TyKind::Tuple(elements) => elements
+                .iter()
+                .any(|element| Self::has_direct_borrow(cx, element)),
+            TyKind::Adt(owner, arguments)
+                if cx.tcx.crate_name(owner.did().krate).as_str() == "core"
+                    && cx.tcx.item_name(owner.did()).as_str() == "Option" =>
+            {
+                arguments
+                    .types()
+                    .any(|inner| Self::has_direct_borrow(cx, inner))
+            }
+            _ => false,
+        }
     }
 
     fn stateless_unit_adapter(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
