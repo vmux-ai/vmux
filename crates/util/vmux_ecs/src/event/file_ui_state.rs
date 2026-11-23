@@ -153,162 +153,184 @@ impl vmux_api::UiStateProjection<FileUiStatePatch> for FileUiState {
         }
     }
 
-    fn apply(&mut self, patch: FileUiStatePatch) {
-        if let Some(checkout) = patch.checkout {
+    fn apply(&mut self, mut patch: FileUiStatePatch) {
+        if let Some(checkout) = patch.checkout.take() {
             self.document.checkout = Some(checkout);
         }
-        let reset_document = patch.meta.as_ref().is_some_and(|meta| {
-            self.document
+        if let Some(meta) = patch.meta.as_ref()
+            && self
+                .document
                 .meta
                 .as_ref()
                 .is_none_or(|current| current.revision != meta.revision)
-        });
-        if reset_document {
-            if self.document.checkout.as_ref().is_some_and(|checkout| {
-                patch
-                    .meta
-                    .as_ref()
-                    .is_some_and(|meta| checkout.path != meta.abs_path)
-            }) {
-                self.document.checkout = None;
-            }
-            self.viewport.content = None;
-            self.document.note = None;
-            self.document.error = None;
-            self.viewport.scroll_by = None;
-            self.document.directory = None;
-            self.document.breadcrumb = FileBreadcrumbState::default();
-            self.document.preview = None;
-            self.document.media = None;
-            self.viewport.cursor = None;
-            self.document.dirty = None;
-            self.document.shape = None;
-            self.document.encoding = None;
-            self.explorer.tidy = FileTidyState::default();
-            self.explorer.outline = None;
-            self.explorer.explorer_notice = ExplorerNotice::default();
-            self.explorer.explorer_search = ExplorerSearchEvent::default();
-            self.explorer.explorer_prompt = ExplorerPromptState::default();
-            self.language.diagnostics = None;
-            self.language.lsp_status = None;
-            self.language.lsp_install_notice = LspInstallNotice::default();
-            self.language.hover = FileHoverState::default();
-            self.language.code_actions = None;
-            self.document.edit_notice = FileEditNotice::default();
-            self.language.rename = FileRenameState::default();
-            self.panel.panel = None;
-            self.git.git_state = None;
+        {
+            self.reset_document(meta);
         }
-        if patch.meta.is_some() {
-            self.document.meta = patch.meta;
-        }
-        if patch.viewport.is_some() {
-            self.viewport.content = patch.viewport;
-        }
-        if patch.note.is_some() {
-            self.document.note = patch.note;
-        }
-        if patch.error.is_some() {
-            self.document.error = patch.error;
-        }
-        if patch.scroll_by.is_some() {
-            self.viewport.scroll_by = patch.scroll_by;
-        }
-        if patch.directory.is_some() {
-            self.document.error = None;
-            self.document.media = None;
-            self.document.preview = None;
-            self.document.directory = patch.directory;
-        }
-        if let Some(breadcrumb) = patch.breadcrumb {
-            self.document.breadcrumb = breadcrumb;
-        }
-        if patch.theme.is_some() {
-            self.document.theme = patch.theme;
-        }
-        if patch.preview.is_some() {
-            self.document.preview = patch.preview;
-        }
-        if patch.media.is_some() {
-            self.document.error = None;
-            self.document.directory = None;
-            self.document.preview = None;
-            self.document.media = patch.media;
-        }
-        if patch.cursor.is_some() {
-            self.viewport.cursor = patch.cursor;
-        }
-        if patch.dirty.is_some() {
-            self.document.dirty = patch.dirty;
-        }
-        if patch.view_mode.is_some() {
-            self.document.view_mode = patch.view_mode;
-        }
-        if patch.keymap.is_some() {
-            self.viewport.keymap = patch.keymap;
-        }
-        if patch.shape.is_some() {
-            self.document.shape = patch.shape;
-        }
-        if patch.encoding.is_some() {
-            self.document.encoding = patch.encoding;
-        }
-        if let Some(tidy) = patch.tidy {
-            self.explorer.tidy = tidy;
-        }
-        if patch.explorer_tree.is_some() {
-            self.explorer.explorer_tree = patch.explorer_tree;
-        }
-        if patch.explorer_focus.is_some() {
-            self.explorer.explorer_focus = patch.explorer_focus;
-        }
-        if let Some(notice) = patch.explorer_notice {
-            self.explorer.explorer_notice = notice;
-        }
-        if patch.open_editors.is_some() {
-            self.explorer.open_editors = patch.open_editors;
-        }
-        if patch.outline.is_some() {
-            self.explorer.outline = patch.outline;
-        }
-        if patch.explorer_panel.is_some() {
-            self.explorer.explorer_panel = patch.explorer_panel;
-        }
-        if let Some(search) = patch.explorer_search {
-            self.explorer.explorer_search = search;
-        }
-        if let Some(prompt) = patch.explorer_prompt {
-            self.explorer.explorer_prompt = prompt;
-        }
-        if patch.diagnostics.is_some() {
-            self.language.diagnostics = patch.diagnostics;
-        }
-        if patch.lsp_status.is_some() {
-            self.language.lsp_status = patch.lsp_status;
-        }
-        if let Some(notice) = patch.lsp_install_notice {
-            self.language.lsp_install_notice = notice;
-        }
-        if let Some(hover) = patch.hover {
-            self.language.hover = hover;
-        }
-        if patch.code_actions.is_some() {
-            self.language.code_actions = patch.code_actions;
-        }
-        if let Some(notice) = patch.edit_notice {
-            self.document.edit_notice = notice;
-        }
-        if let Some(rename) = patch.rename {
-            self.language.rename = rename;
-        }
+        self.apply_document(&mut patch);
+        self.apply_viewport(&mut patch);
+        self.apply_explorer(&mut patch);
+        self.apply_language(&mut patch);
         if patch.panel.is_some() {
             self.panel.panel = patch.panel;
         }
         if patch.git_state.is_some() {
             self.git.git_state = patch.git_state;
         }
-        if patch.find.is_some() {
-            self.viewport.find = patch.find;
+    }
+}
+
+impl FileUiState {
+    fn reset_document(&mut self, meta: &FileMetaEvent) {
+        if self
+            .document
+            .checkout
+            .as_ref()
+            .is_some_and(|checkout| checkout.path != meta.abs_path)
+        {
+            self.document.checkout = None;
+        }
+        self.viewport.content = None;
+        self.document.note = None;
+        self.document.error = None;
+        self.viewport.scroll_by = None;
+        self.document.directory = None;
+        self.document.breadcrumb = FileBreadcrumbState::default();
+        self.document.preview = None;
+        self.document.media = None;
+        self.viewport.cursor = None;
+        self.document.dirty = None;
+        self.document.shape = None;
+        self.document.encoding = None;
+        self.explorer.tidy = FileTidyState::default();
+        self.explorer.outline = None;
+        self.explorer.explorer_notice = ExplorerNotice::default();
+        self.explorer.explorer_search = ExplorerSearchEvent::default();
+        self.explorer.explorer_prompt = ExplorerPromptState::default();
+        self.language.diagnostics = None;
+        self.language.lsp_status = None;
+        self.language.lsp_install_notice = LspInstallNotice::default();
+        self.language.hover = FileHoverState::default();
+        self.language.code_actions = None;
+        self.document.edit_notice = FileEditNotice::default();
+        self.language.rename = FileRenameState::default();
+        self.panel.panel = None;
+        self.git.git_state = None;
+    }
+
+    fn apply_document(&mut self, patch: &mut FileUiStatePatch) {
+        if let Some(meta) = patch.meta.take() {
+            self.document.meta = Some(meta);
+        }
+        if let Some(note) = patch.note.take() {
+            self.document.note = Some(note);
+        }
+        if let Some(error) = patch.error.take() {
+            self.document.error = Some(error);
+        }
+        if let Some(directory) = patch.directory.take() {
+            self.document.error = None;
+            self.document.media = None;
+            self.document.preview = None;
+            self.document.directory = Some(directory);
+        }
+        if let Some(breadcrumb) = patch.breadcrumb.take() {
+            self.document.breadcrumb = breadcrumb;
+        }
+        if let Some(theme) = patch.theme.take() {
+            self.document.theme = Some(theme);
+        }
+        if let Some(preview) = patch.preview.take() {
+            self.document.preview = Some(preview);
+        }
+        if let Some(media) = patch.media.take() {
+            self.document.error = None;
+            self.document.directory = None;
+            self.document.preview = None;
+            self.document.media = Some(media);
+        }
+        if let Some(dirty) = patch.dirty.take() {
+            self.document.dirty = Some(dirty);
+        }
+        if let Some(view_mode) = patch.view_mode.take() {
+            self.document.view_mode = Some(view_mode);
+        }
+        if let Some(shape) = patch.shape.take() {
+            self.document.shape = Some(shape);
+        }
+        if let Some(encoding) = patch.encoding.take() {
+            self.document.encoding = Some(encoding);
+        }
+        if let Some(notice) = patch.edit_notice.take() {
+            self.document.edit_notice = notice;
+        }
+    }
+
+    fn apply_viewport(&mut self, patch: &mut FileUiStatePatch) {
+        if let Some(viewport) = patch.viewport.take() {
+            self.viewport.content = Some(viewport);
+        }
+        if let Some(scroll_by) = patch.scroll_by.take() {
+            self.viewport.scroll_by = Some(scroll_by);
+        }
+        if let Some(cursor) = patch.cursor.take() {
+            self.viewport.cursor = Some(cursor);
+        }
+        if let Some(keymap) = patch.keymap.take() {
+            self.viewport.keymap = Some(keymap);
+        }
+        if let Some(find) = patch.find.take() {
+            self.viewport.find = Some(find);
+        }
+    }
+
+    fn apply_explorer(&mut self, patch: &mut FileUiStatePatch) {
+        if let Some(tidy) = patch.tidy.take() {
+            self.explorer.tidy = tidy;
+        }
+        if let Some(tree) = patch.explorer_tree.take() {
+            self.explorer.explorer_tree = Some(tree);
+        }
+        if let Some(focus) = patch.explorer_focus.take() {
+            self.explorer.explorer_focus = Some(focus);
+        }
+        if let Some(notice) = patch.explorer_notice.take() {
+            self.explorer.explorer_notice = notice;
+        }
+        if let Some(editors) = patch.open_editors.take() {
+            self.explorer.open_editors = Some(editors);
+        }
+        if let Some(outline) = patch.outline.take() {
+            self.explorer.outline = Some(outline);
+        }
+        if let Some(panel) = patch.explorer_panel.take() {
+            self.explorer.explorer_panel = Some(panel);
+        }
+        if let Some(search) = patch.explorer_search.take() {
+            self.explorer.explorer_search = search;
+        }
+        if let Some(prompt) = patch.explorer_prompt.take() {
+            self.explorer.explorer_prompt = prompt;
+        }
+    }
+
+    fn apply_language(&mut self, patch: &mut FileUiStatePatch) {
+        if let Some(diagnostics) = patch.diagnostics.take() {
+            self.language.diagnostics = Some(diagnostics);
+        }
+        if let Some(status) = patch.lsp_status.take() {
+            self.language.lsp_status = Some(status);
+        }
+        if let Some(notice) = patch.lsp_install_notice.take() {
+            self.language.lsp_install_notice = notice;
+        }
+        if let Some(hover) = patch.hover.take() {
+            self.language.hover = hover;
+        }
+        if let Some(actions) = patch.code_actions.take() {
+            self.language.code_actions = Some(actions);
+        }
+        if let Some(rename) = patch.rename.take() {
+            self.language.rename = rename;
         }
     }
 }

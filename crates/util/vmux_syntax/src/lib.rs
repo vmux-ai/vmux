@@ -4,9 +4,9 @@ use syntect::highlighting::{
 
 #[derive(Clone, Copy)]
 struct Token {
-    scope: TokenScope,
+    scope: &'static str,
     colour: PaletteColour,
-    style: TokenStyle,
+    style: FontStyle,
 }
 
 #[derive(Clone, Copy)]
@@ -61,7 +61,7 @@ impl Palette {
 
 impl Token {
     fn theme_item(self) -> Option<ThemeItem> {
-        let Ok(scope) = self.scope.0.parse::<ScopeSelectors>() else {
+        let Ok(scope) = self.scope.parse::<ScopeSelectors>() else {
             return None;
         };
         Some(ThemeItem {
@@ -69,37 +69,9 @@ impl Token {
             style: StyleModifier {
                 foreground: Some(self.colour.syntect()),
                 background: None,
-                font_style: Some(self.style.syntect()),
+                font_style: Some(self.style),
             },
         })
-    }
-}
-
-#[derive(Clone, Copy)]
-struct TokenScope(&'static str);
-
-impl TokenScope {
-    const fn new(value: &'static str) -> Self {
-        Self(value)
-    }
-}
-
-#[derive(Clone, Copy)]
-enum TokenStyle {
-    Plain,
-    Bold,
-    Italic,
-    ItalicUnderline,
-}
-
-impl TokenStyle {
-    fn syntect(self) -> FontStyle {
-        match self {
-            Self::Plain => FontStyle::empty(),
-            Self::Bold => FontStyle::BOLD,
-            Self::Italic => FontStyle::ITALIC,
-            Self::ItalicUnderline => FontStyle::ITALIC | FontStyle::UNDERLINE,
-        }
     }
 }
 
@@ -155,253 +127,239 @@ pub const GITHUB_DARK: Palette = Palette {
     ],
     tokens: &[
         Token {
-            scope: TokenScope::new("comment, punctuation.definition.comment, string.comment"),
+            scope: "comment, punctuation.definition.comment, string.comment",
             colour: PaletteColour::hex(0x8b949e),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("constant.other.placeholder, constant.character"),
+            scope: "constant.other.placeholder, constant.character",
             colour: PaletteColour::hex(0xff7b72),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "constant, entity.name.constant, variable.other.constant, variable.other.enummember, variable.language, entity",
-            ),
+            scope: "constant, entity.name.constant, variable.other.constant, variable.other.enummember, variable.language, entity",
             colour: PaletteColour::hex(0x79c0ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("entity.name, meta.export.default, meta.definition.variable"),
+            scope: "entity.name, meta.export.default, meta.definition.variable",
             colour: PaletteColour::hex(0xffa657),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "variable.parameter.function, meta.jsx.children, meta.block, meta.tag.attributes, entity.name.constant, meta.object.member, meta.embedded.expression",
-            ),
+            scope: "variable.parameter.function, meta.jsx.children, meta.block, meta.tag.attributes, entity.name.constant, meta.object.member, meta.embedded.expression",
             colour: PaletteColour::hex(0xe6edf3),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("entity.name.function"),
+            scope: "entity.name.function",
             colour: PaletteColour::hex(0xd2a8ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("entity.name.tag, support.class.component"),
+            scope: "entity.name.tag, support.class.component",
             colour: PaletteColour::hex(0x7ee787),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("keyword"),
+            scope: "keyword",
             colour: PaletteColour::hex(0xff7b72),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("storage, storage.type"),
+            scope: "storage, storage.type",
             colour: PaletteColour::hex(0xff7b72),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "storage.modifier.package, storage.modifier.import, storage.type.java",
-            ),
+            scope: "storage.modifier.package, storage.modifier.import, storage.type.java",
             colour: PaletteColour::hex(0xe6edf3),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("string, string punctuation.section.embedded source"),
+            scope: "string, string punctuation.section.embedded source",
             colour: PaletteColour::hex(0xa5d6ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("support"),
+            scope: "support",
             colour: PaletteColour::hex(0x79c0ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("meta.property-name"),
+            scope: "meta.property-name",
             colour: PaletteColour::hex(0x79c0ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("variable"),
+            scope: "variable",
             colour: PaletteColour::hex(0xffa657),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("variable.other"),
+            scope: "variable.other",
             colour: PaletteColour::hex(0xe6edf3),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("invalid.broken"),
+            scope: "invalid.broken",
             colour: PaletteColour::hex(0xffa198),
-            style: TokenStyle::Italic,
+            style: FontStyle::ITALIC,
         },
         Token {
-            scope: TokenScope::new("invalid.deprecated"),
+            scope: "invalid.deprecated",
             colour: PaletteColour::hex(0xffa198),
-            style: TokenStyle::Italic,
+            style: FontStyle::ITALIC,
         },
         Token {
-            scope: TokenScope::new("invalid.illegal"),
+            scope: "invalid.illegal",
             colour: PaletteColour::hex(0xffa198),
-            style: TokenStyle::Italic,
+            style: FontStyle::ITALIC,
         },
         Token {
-            scope: TokenScope::new("invalid.unimplemented"),
+            scope: "invalid.unimplemented",
             colour: PaletteColour::hex(0xffa198),
-            style: TokenStyle::Italic,
+            style: FontStyle::ITALIC,
         },
         Token {
-            scope: TokenScope::new("carriage-return"),
+            scope: "carriage-return",
             colour: PaletteColour::hex(0xf0f6fc),
-            style: TokenStyle::ItalicUnderline,
+            style: FontStyle::ITALIC.union(FontStyle::UNDERLINE),
         },
         Token {
-            scope: TokenScope::new("message.error"),
+            scope: "message.error",
             colour: PaletteColour::hex(0xffa198),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("string variable"),
+            scope: "string variable",
             colour: PaletteColour::hex(0x79c0ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("source.regexp, string.regexp"),
+            scope: "source.regexp, string.regexp",
             colour: PaletteColour::hex(0xa5d6ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "string.regexp.character-class, string.regexp constant.character.escape, string.regexp source.ruby.embedded, string.regexp string.regexp.arbitrary-repitition",
-            ),
+            scope: "string.regexp.character-class, string.regexp constant.character.escape, string.regexp source.ruby.embedded, string.regexp string.regexp.arbitrary-repitition",
             colour: PaletteColour::hex(0xa5d6ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("string.regexp constant.character.escape"),
+            scope: "string.regexp constant.character.escape",
             colour: PaletteColour::hex(0x7ee787),
-            style: TokenStyle::Bold,
+            style: FontStyle::BOLD,
         },
         Token {
-            scope: TokenScope::new("support.constant"),
+            scope: "support.constant",
             colour: PaletteColour::hex(0x79c0ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("support.variable"),
+            scope: "support.variable",
             colour: PaletteColour::hex(0x79c0ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("support.type.property-name.json"),
+            scope: "support.type.property-name.json",
             colour: PaletteColour::hex(0x7ee787),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("meta.module-reference"),
+            scope: "meta.module-reference",
             colour: PaletteColour::hex(0x79c0ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("punctuation.definition.list.begin.markdown"),
+            scope: "punctuation.definition.list.begin.markdown",
             colour: PaletteColour::hex(0xffa657),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("markup.heading, markup.heading entity.name"),
+            scope: "markup.heading, markup.heading entity.name",
             colour: PaletteColour::hex(0x79c0ff),
-            style: TokenStyle::Bold,
+            style: FontStyle::BOLD,
         },
         Token {
-            scope: TokenScope::new("markup.quote"),
+            scope: "markup.quote",
             colour: PaletteColour::hex(0x7ee787),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("markup.italic"),
+            scope: "markup.italic",
             colour: PaletteColour::hex(0xe6edf3),
-            style: TokenStyle::Italic,
+            style: FontStyle::ITALIC,
         },
         Token {
-            scope: TokenScope::new("markup.bold"),
+            scope: "markup.bold",
             colour: PaletteColour::hex(0xe6edf3),
-            style: TokenStyle::Bold,
+            style: FontStyle::BOLD,
         },
         Token {
-            scope: TokenScope::new("markup.inline.raw"),
+            scope: "markup.inline.raw",
             colour: PaletteColour::hex(0x79c0ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "markup.deleted, meta.diff.header.from-file, punctuation.definition.deleted",
-            ),
+            scope: "markup.deleted, meta.diff.header.from-file, punctuation.definition.deleted",
             colour: PaletteColour::hex(0xffa198),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("punctuation.section.embedded"),
+            scope: "punctuation.section.embedded",
             colour: PaletteColour::hex(0xff7b72),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "markup.inserted, meta.diff.header.to-file, punctuation.definition.inserted",
-            ),
+            scope: "markup.inserted, meta.diff.header.to-file, punctuation.definition.inserted",
             colour: PaletteColour::hex(0x7ee787),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("markup.changed, punctuation.definition.changed"),
+            scope: "markup.changed, punctuation.definition.changed",
             colour: PaletteColour::hex(0xffa657),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("markup.ignored, markup.untracked"),
+            scope: "markup.ignored, markup.untracked",
             colour: PaletteColour::hex(0x161b22),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("meta.diff.range"),
+            scope: "meta.diff.range",
             colour: PaletteColour::hex(0xd2a8ff),
-            style: TokenStyle::Bold,
+            style: FontStyle::BOLD,
         },
         Token {
-            scope: TokenScope::new("meta.diff.header"),
+            scope: "meta.diff.header",
             colour: PaletteColour::hex(0x79c0ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("meta.separator"),
+            scope: "meta.separator",
             colour: PaletteColour::hex(0x79c0ff),
-            style: TokenStyle::Bold,
+            style: FontStyle::BOLD,
         },
         Token {
-            scope: TokenScope::new("meta.output"),
+            scope: "meta.output",
             colour: PaletteColour::hex(0x79c0ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "brackethighlighter.tag, brackethighlighter.curly, brackethighlighter.round, brackethighlighter.square, brackethighlighter.angle, brackethighlighter.quote",
-            ),
+            scope: "brackethighlighter.tag, brackethighlighter.curly, brackethighlighter.round, brackethighlighter.square, brackethighlighter.angle, brackethighlighter.quote",
             colour: PaletteColour::hex(0x8b949e),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("brackethighlighter.unmatched"),
+            scope: "brackethighlighter.unmatched",
             colour: PaletteColour::hex(0xffa198),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("constant.other.reference.link, string.other.link"),
+            scope: "constant.other.reference.link, string.other.link",
             colour: PaletteColour::hex(0xa5d6ff),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
     ],
 };
@@ -432,253 +390,239 @@ pub const GITHUB_LIGHT: Palette = Palette {
     ],
     tokens: &[
         Token {
-            scope: TokenScope::new("comment, punctuation.definition.comment, string.comment"),
+            scope: "comment, punctuation.definition.comment, string.comment",
             colour: PaletteColour::hex(0x6e7781),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("constant.other.placeholder, constant.character"),
+            scope: "constant.other.placeholder, constant.character",
             colour: PaletteColour::hex(0xcf222e),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "constant, entity.name.constant, variable.other.constant, variable.other.enummember, variable.language, entity",
-            ),
+            scope: "constant, entity.name.constant, variable.other.constant, variable.other.enummember, variable.language, entity",
             colour: PaletteColour::hex(0x0550ae),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("entity.name, meta.export.default, meta.definition.variable"),
+            scope: "entity.name, meta.export.default, meta.definition.variable",
             colour: PaletteColour::hex(0x953800),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "variable.parameter.function, meta.jsx.children, meta.block, meta.tag.attributes, entity.name.constant, meta.object.member, meta.embedded.expression",
-            ),
+            scope: "variable.parameter.function, meta.jsx.children, meta.block, meta.tag.attributes, entity.name.constant, meta.object.member, meta.embedded.expression",
             colour: PaletteColour::hex(0x1f2328),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("entity.name.function"),
+            scope: "entity.name.function",
             colour: PaletteColour::hex(0x8250df),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("entity.name.tag, support.class.component"),
+            scope: "entity.name.tag, support.class.component",
             colour: PaletteColour::hex(0x116329),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("keyword"),
+            scope: "keyword",
             colour: PaletteColour::hex(0xcf222e),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("storage, storage.type"),
+            scope: "storage, storage.type",
             colour: PaletteColour::hex(0xcf222e),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "storage.modifier.package, storage.modifier.import, storage.type.java",
-            ),
+            scope: "storage.modifier.package, storage.modifier.import, storage.type.java",
             colour: PaletteColour::hex(0x1f2328),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("string, string punctuation.section.embedded source"),
+            scope: "string, string punctuation.section.embedded source",
             colour: PaletteColour::hex(0x0a3069),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("support"),
+            scope: "support",
             colour: PaletteColour::hex(0x0550ae),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("meta.property-name"),
+            scope: "meta.property-name",
             colour: PaletteColour::hex(0x0550ae),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("variable"),
+            scope: "variable",
             colour: PaletteColour::hex(0x953800),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("variable.other"),
+            scope: "variable.other",
             colour: PaletteColour::hex(0x1f2328),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("invalid.broken"),
+            scope: "invalid.broken",
             colour: PaletteColour::hex(0x82071e),
-            style: TokenStyle::Italic,
+            style: FontStyle::ITALIC,
         },
         Token {
-            scope: TokenScope::new("invalid.deprecated"),
+            scope: "invalid.deprecated",
             colour: PaletteColour::hex(0x82071e),
-            style: TokenStyle::Italic,
+            style: FontStyle::ITALIC,
         },
         Token {
-            scope: TokenScope::new("invalid.illegal"),
+            scope: "invalid.illegal",
             colour: PaletteColour::hex(0x82071e),
-            style: TokenStyle::Italic,
+            style: FontStyle::ITALIC,
         },
         Token {
-            scope: TokenScope::new("invalid.unimplemented"),
+            scope: "invalid.unimplemented",
             colour: PaletteColour::hex(0x82071e),
-            style: TokenStyle::Italic,
+            style: FontStyle::ITALIC,
         },
         Token {
-            scope: TokenScope::new("carriage-return"),
+            scope: "carriage-return",
             colour: PaletteColour::hex(0xf6f8fa),
-            style: TokenStyle::ItalicUnderline,
+            style: FontStyle::ITALIC.union(FontStyle::UNDERLINE),
         },
         Token {
-            scope: TokenScope::new("message.error"),
+            scope: "message.error",
             colour: PaletteColour::hex(0x82071e),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("string variable"),
+            scope: "string variable",
             colour: PaletteColour::hex(0x0550ae),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("source.regexp, string.regexp"),
+            scope: "source.regexp, string.regexp",
             colour: PaletteColour::hex(0x0a3069),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "string.regexp.character-class, string.regexp constant.character.escape, string.regexp source.ruby.embedded, string.regexp string.regexp.arbitrary-repitition",
-            ),
+            scope: "string.regexp.character-class, string.regexp constant.character.escape, string.regexp source.ruby.embedded, string.regexp string.regexp.arbitrary-repitition",
             colour: PaletteColour::hex(0x0a3069),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("string.regexp constant.character.escape"),
+            scope: "string.regexp constant.character.escape",
             colour: PaletteColour::hex(0x116329),
-            style: TokenStyle::Bold,
+            style: FontStyle::BOLD,
         },
         Token {
-            scope: TokenScope::new("support.constant"),
+            scope: "support.constant",
             colour: PaletteColour::hex(0x0550ae),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("support.variable"),
+            scope: "support.variable",
             colour: PaletteColour::hex(0x0550ae),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("support.type.property-name.json"),
+            scope: "support.type.property-name.json",
             colour: PaletteColour::hex(0x116329),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("meta.module-reference"),
+            scope: "meta.module-reference",
             colour: PaletteColour::hex(0x0550ae),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("punctuation.definition.list.begin.markdown"),
+            scope: "punctuation.definition.list.begin.markdown",
             colour: PaletteColour::hex(0x953800),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("markup.heading, markup.heading entity.name"),
+            scope: "markup.heading, markup.heading entity.name",
             colour: PaletteColour::hex(0x0550ae),
-            style: TokenStyle::Bold,
+            style: FontStyle::BOLD,
         },
         Token {
-            scope: TokenScope::new("markup.quote"),
+            scope: "markup.quote",
             colour: PaletteColour::hex(0x116329),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("markup.italic"),
+            scope: "markup.italic",
             colour: PaletteColour::hex(0x1f2328),
-            style: TokenStyle::Italic,
+            style: FontStyle::ITALIC,
         },
         Token {
-            scope: TokenScope::new("markup.bold"),
+            scope: "markup.bold",
             colour: PaletteColour::hex(0x1f2328),
-            style: TokenStyle::Bold,
+            style: FontStyle::BOLD,
         },
         Token {
-            scope: TokenScope::new("markup.inline.raw"),
+            scope: "markup.inline.raw",
             colour: PaletteColour::hex(0x0550ae),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "markup.deleted, meta.diff.header.from-file, punctuation.definition.deleted",
-            ),
+            scope: "markup.deleted, meta.diff.header.from-file, punctuation.definition.deleted",
             colour: PaletteColour::hex(0x82071e),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("punctuation.section.embedded"),
+            scope: "punctuation.section.embedded",
             colour: PaletteColour::hex(0xcf222e),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "markup.inserted, meta.diff.header.to-file, punctuation.definition.inserted",
-            ),
+            scope: "markup.inserted, meta.diff.header.to-file, punctuation.definition.inserted",
             colour: PaletteColour::hex(0x116329),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("markup.changed, punctuation.definition.changed"),
+            scope: "markup.changed, punctuation.definition.changed",
             colour: PaletteColour::hex(0x953800),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("markup.ignored, markup.untracked"),
+            scope: "markup.ignored, markup.untracked",
             colour: PaletteColour::hex(0xeaeef2),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("meta.diff.range"),
+            scope: "meta.diff.range",
             colour: PaletteColour::hex(0x8250df),
-            style: TokenStyle::Bold,
+            style: FontStyle::BOLD,
         },
         Token {
-            scope: TokenScope::new("meta.diff.header"),
+            scope: "meta.diff.header",
             colour: PaletteColour::hex(0x0550ae),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("meta.separator"),
+            scope: "meta.separator",
             colour: PaletteColour::hex(0x0550ae),
-            style: TokenStyle::Bold,
+            style: FontStyle::BOLD,
         },
         Token {
-            scope: TokenScope::new("meta.output"),
+            scope: "meta.output",
             colour: PaletteColour::hex(0x0550ae),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new(
-                "brackethighlighter.tag, brackethighlighter.curly, brackethighlighter.round, brackethighlighter.square, brackethighlighter.angle, brackethighlighter.quote",
-            ),
+            scope: "brackethighlighter.tag, brackethighlighter.curly, brackethighlighter.round, brackethighlighter.square, brackethighlighter.angle, brackethighlighter.quote",
             colour: PaletteColour::hex(0x57606a),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("brackethighlighter.unmatched"),
+            scope: "brackethighlighter.unmatched",
             colour: PaletteColour::hex(0x82071e),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
         Token {
-            scope: TokenScope::new("constant.other.reference.link, string.other.link"),
+            scope: "constant.other.reference.link, string.other.link",
             colour: PaletteColour::hex(0x0a3069),
-            style: TokenStyle::Plain,
+            style: FontStyle::empty(),
         },
     ],
 };

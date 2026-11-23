@@ -73,35 +73,39 @@ impl super::Clipboard {
                 continue;
             };
             let path = std::path::PathBuf::from(path.to_string());
-            if path_looks_like_image(&path) {
+            if Self::path_looks_like_image(&path) {
                 return Some(path.to_string_lossy().into_owned());
             }
         }
         None
     }
-}
 
-fn path_looks_like_image(path: &std::path::Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_ascii_lowercase())
-            .as_deref(),
-        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "tiff" | "tif" | "bmp" | "heic")
-    )
+    fn path_looks_like_image(path: &std::path::Path) -> bool {
+        matches!(
+            path.extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.to_ascii_lowercase())
+                .as_deref(),
+            Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "tiff" | "tif" | "bmp" | "heic")
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::super::Clipboard;
     use std::path::Path;
 
     #[test]
     fn image_extensions_detected_case_insensitively() {
-        assert!(path_looks_like_image(Path::new("/tmp/Screenshot.png")));
-        assert!(path_looks_like_image(Path::new("/tmp/a.JPG")));
-        assert!(path_looks_like_image(Path::new("/tmp/a.jpeg")));
-        assert!(!path_looks_like_image(Path::new("/tmp/notes.txt")));
-        assert!(!path_looks_like_image(Path::new("/tmp/noext")));
+        assert!(Clipboard::path_looks_like_image(Path::new(
+            "/tmp/Screenshot.png"
+        )));
+        assert!(Clipboard::path_looks_like_image(Path::new("/tmp/a.JPG")));
+        assert!(Clipboard::path_looks_like_image(Path::new("/tmp/a.jpeg")));
+        assert!(!Clipboard::path_looks_like_image(Path::new(
+            "/tmp/notes.txt"
+        )));
+        assert!(!Clipboard::path_looks_like_image(Path::new("/tmp/noext")));
     }
 }

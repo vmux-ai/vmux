@@ -223,16 +223,32 @@ impl JsonSchema {
     }
 
     fn validate_value_with_root(&self, value: &Value, root: &Self) -> Result<(), String> {
-        if let Some(reference) = &self.reference {
-            let name = reference
-                .strip_prefix("#/$defs/")
-                .ok_or_else(|| format!("unsupported input schema reference: {reference}"))?;
-            let schema = root
-                .definitions
-                .get(name)
-                .ok_or_else(|| format!("unknown input schema reference: {reference}"))?;
-            schema.validate_value_with_root(value, root)?;
+        self.validate_reference(value, root)?;
+        self.validate_scalars(value)?;
+        if let Some(values) = value.as_array() {
+            self.validate_array(values, root)?;
         }
+        if let Some(object) = value.as_object() {
+            self.validate_object(object, root)?;
+        }
+        self.validate_one_of(value, root)
+    }
+
+    fn validate_reference(&self, value: &Value, root: &Self) -> Result<(), String> {
+        let Some(reference) = &self.reference else {
+            return Ok(());
+        };
+        let name = reference
+            .strip_prefix("#/$defs/")
+            .ok_or_else(|| format!("unsupported input schema reference: {reference}"))?;
+        let schema = root
+            .definitions
+            .get(name)
+            .ok_or_else(|| format!("unknown input schema reference: {reference}"))?;
+        schema.validate_value_with_root(value, root)
+    }
+
+    fn validate_scalars(&self, value: &Value) -> Result<(), String> {
         if let Some(schema_type) = self.schema_type
             && !schema_type.accepts(value)
         {
@@ -252,84 +268,88 @@ impl JsonSchema {
         }
         if let Some(value) = value.as_str() {
             let length = value.chars().count() as u64;
-            if self.min_length.is_some_and(|minimum| length < minimum) {
-                return Err(format!(
-                    "must contain at least {} characters",
-                    self.min_length.unwrap()
-                ));
+            if let Some(minimum) = self.min_length
+                && length < minimum
+            {
+                return Err(format!("must contain at least {minimum} characters"));
             }
-            if self.max_length.is_some_and(|maximum| length > maximum) {
-                return Err(format!(
-                    "must contain at most {} characters",
-                    self.max_length.unwrap()
-                ));
+            if let Some(maximum) = self.max_length
+                && length > maximum
+            {
+                return Err(format!("must contain at most {maximum} characters"));
             }
         }
         if let Some(value) = value.as_i64() {
-            if self.minimum.is_some_and(|minimum| value < minimum) {
-                return Err(format!("must be at least {}", self.minimum.unwrap()));
-            }
-            if self.maximum.is_some_and(|maximum| value > maximum) {
-                return Err(format!("must be at most {}", self.maximum.unwrap()));
-            }
-        }
-        if let Some(values) = value.as_array() {
-            if self
-                .min_items
-                .is_some_and(|minimum| values.len() < minimum as usize)
+            if let Some(minimum) = self.minimum
+                && value < minimum
             {
-                return Err(format!(
-                    "must contain at least {} items",
-                    self.min_items.unwrap()
-                ));
+                return Err(format!("must be at least {minimum}"));
             }
-            if self
-                .max_items
-                .is_some_and(|maximum| values.len() > maximum as usize)
+            if let Some(maximum) = self.maximum
+                && value > maximum
             {
-                return Err(format!(
-                    "must contain at most {} items",
-                    self.max_items.unwrap()
-                ));
+                return Err(format!("must be at most {maximum}"));
             }
-            if let Some(items) = &self.items {
-                for (index, value) in values.iter().enumerate() {
-                    items
-                        .validate_value_with_root(value, root)
-                        .map_err(|error| format!("item {index}: {error}"))?;
+        }
+        Ok(())
+    }
+
+    fn validate_array(&self, values: &[Value], root: &Self) -> Result<(), String> {
+        if let Some(minimum) = self.min_items
+            && values.len() < minimum as usize
+        {
+            return Err(format!("must contain at least {minimum} items"));
+        }
+        if let Some(maximum) = self.max_items
+            && values.len() > maximum as usize
+        {
+            return Err(format!("must contain at most {maximum} items"));
+        }
+        if let Some(items) = &self.items {
+            for (index, value) in values.iter().enumerate() {
+                items
+                    .validate_value_with_root(value, root)
+                    .map_err(|error| format!("item {index}: {error}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_object(&self, object: &Map<String, Value>, root: &Self) -> Result<(), String> {
+        for required in &self.required {
+            if !object.contains_key(required) {
+                return Err(format!("{required} is required"));
+            }
+        }
+        if !self.additional_properties {
+            for name in object.keys() {
+                if !self.properties.contains_key(name) {
+                    return Err(format!("unknown argument {name}"));
                 }
             }
         }
-        if let Some(object) = value.as_object() {
-            for required in &self.required {
-                if !object.contains_key(required) {
-                    return Err(format!("{required} is required"));
-                }
-            }
-            if !self.additional_properties {
-                for name in object.keys() {
-                    if !self.properties.contains_key(name) {
-                        return Err(format!("unknown argument {name}"));
-                    }
-                }
-            }
-            for (name, schema) in &self.properties {
-                if let Some(value) = object.get(name) {
-                    schema
-                        .validate_value_with_root(value, root)
-                        .map_err(|error| format!("{name}: {error}"))?;
-                }
+        for (name, schema) in &self.properties {
+            if let Some(value) = object.get(name) {
+                schema
+                    .validate_value_with_root(value, root)
+                    .map_err(|error| format!("{name}: {error}"))?;
             }
         }
-        if !self.one_of.is_empty() {
-            let matches = self
-                .one_of
-                .iter()
-                .filter(|schema| schema.validate_value_with_root(value, root).is_ok())
-                .count();
-            if matches != 1 {
-                return Err("must match exactly one input shape".to_string());
+        Ok(())
+    }
+
+    fn validate_one_of(&self, value: &Value, root: &Self) -> Result<(), String> {
+        if self.one_of.is_empty() {
+            return Ok(());
+        }
+        let mut matches = 0usize;
+        for schema in &self.one_of {
+            if schema.validate_value_with_root(value, root).is_ok() {
+                matches += 1;
             }
+        }
+        if matches != 1 {
+            return Err("must match exactly one input shape".to_string());
         }
         Ok(())
     }

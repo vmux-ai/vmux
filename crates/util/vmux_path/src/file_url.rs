@@ -54,27 +54,26 @@ impl<'a> FileUrl<'a> {
 mod tests {
     use super::*;
 
-    fn path_of(url: &str) -> Option<PathBuf> {
-        FileUrl::parse(url)?.path()
-    }
-
     #[test]
     fn a_file_url_names_the_path_after_the_scheme() {
         assert_eq!(
-            path_of("file:///Users/me/src/main.rs"),
+            FileUrl::parse("file:///Users/me/src/main.rs").and_then(|url| url.path()),
             Some(PathBuf::from("/Users/me/src/main.rs"))
         );
-        assert_eq!(path_of("file:///"), Some(PathBuf::from("/")));
+        assert_eq!(
+            FileUrl::parse("file:///").and_then(|url| url.path()),
+            Some(PathBuf::from("/"))
+        );
     }
 
     #[test]
     fn a_file_url_is_percent_decoded_and_stripped_of_query_and_fragment() {
         assert_eq!(
-            path_of("file:///Users/me/a%20b.rs"),
+            FileUrl::parse("file:///Users/me/a%20b.rs").and_then(|url| url.path()),
             Some(PathBuf::from("/Users/me/a b.rs"))
         );
         assert_eq!(
-            path_of("file:///Users/me/a.rs?vmux-raw=1#L3"),
+            FileUrl::parse("file:///Users/me/a.rs?vmux-raw=1#L3").and_then(|url| url.path()),
             Some(PathBuf::from("/Users/me/a.rs"))
         );
     }
@@ -82,15 +81,15 @@ mod tests {
     #[test]
     fn a_file_url_never_reads_its_first_segment_as_a_host() {
         assert_eq!(
-            path_of("file://Users/me/a.rs"),
+            FileUrl::parse("file://Users/me/a.rs").and_then(|url| url.path()),
             Some(PathBuf::from("/Users/me/a.rs"))
         );
         assert_eq!(
-            path_of("file://localhost/Users/me/a.rs"),
+            FileUrl::parse("file://localhost/Users/me/a.rs").and_then(|url| url.path()),
             Some(PathBuf::from("/Users/me/a.rs"))
         );
         assert_eq!(
-            path_of("file://localhost-notes/a.rs"),
+            FileUrl::parse("file://localhost-notes/a.rs").and_then(|url| url.path()),
             Some(PathBuf::from("/localhost-notes/a.rs"))
         );
     }
