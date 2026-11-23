@@ -9,10 +9,10 @@ use crate::state::{
     VaultChooseCloudFolderRequest, VaultConnectCloudRequest, VaultConnectGithubRequest,
     VaultConnectRequest, VaultConnectionProvider, VaultCreateCloudFolderRequest,
     VaultCreateRecoveryKeyRequest, VaultCreateRequest, VaultDestination,
-    VaultDestinationSelectRequest, VaultNotice, VaultOperation, VaultOperationKind,
-    VaultOwnerChoice, VaultOwnerKind, VaultOwnerSelectRequest, VaultPrivacyRequest,
-    VaultProviderSelectRequest, VaultRecoveryConfirmationRequest, VaultRecoveryInputRequest,
-    VaultRefreshRequest, VaultRepository, VaultRepositoryChoice, VaultRepositoryNameRequest,
+    VaultDestinationSelectRequest, VaultNotice, VaultOperation, VaultOperationKind, VaultOwnerKind,
+    VaultOwnerSelectRequest, VaultPrivacyRequest, VaultProviderSelectRequest,
+    VaultRecoveryConfirmationRequest, VaultRecoveryInputRequest, VaultRefreshRequest,
+    VaultRepository, VaultRepositoryChoice, VaultRepositoryNameRequest,
     VaultRepositorySelectRequest, VaultSyncStatus, VaultUiState, VaultUnlockRecoveryKeyRequest,
     VaultWorkflowConnectRequest, VaultWorkflowCreateRequest, VaultWorkflowState,
 };
@@ -104,13 +104,13 @@ impl VaultWorkflow {
         projected.owners = vault
             .github_owners
             .iter()
-            .map(|owner| VaultOwnerChoice {
-                value: owner.clone(),
-                kind: if owner == &vault.github_owner {
+            .map(|owner| {
+                let kind = if owner == &vault.github_owner {
                     VaultOwnerKind::User
                 } else {
                     VaultOwnerKind::Organization
-                },
+                };
+                VaultWorkflow::owner_choice(owner.clone(), kind)
             })
             .collect();
         let owner_prefix = format!("{}/", projected.selected_owner);

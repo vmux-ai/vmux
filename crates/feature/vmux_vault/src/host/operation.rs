@@ -27,8 +27,8 @@ use super::vault_io::{ActiveVaultOperation, VaultOperationOutcome};
 use super::{
     OperationPlugin, OperationSet, PendingVaultOperation, ReadyVaultOperation, RuntimeSet,
     VaultOperationContext, VaultOperationOutput, VaultOperationRequest, VaultOperationSequence,
-    VaultOperationTarget, VaultOperationTask, VaultRecoveryState, VaultRegistry, VaultScanTask,
-    VaultStatusProjection, VaultSubscriber,
+    VaultOperationTask, VaultRecoveryState, VaultRegistry, VaultScanTask, VaultStatusProjection,
+    VaultSubscriber,
 };
 
 impl Plugin for OperationPlugin {
@@ -76,15 +76,6 @@ impl Plugin for OperationPlugin {
                     .after(RuntimeSet)
                     .in_set(OperationSet),
             );
-    }
-}
-
-impl VaultOperationTarget {
-    fn webview(self) -> Option<Entity> {
-        match self {
-            Self::Webview(entity) => Some(entity),
-            Self::Automatic => None,
-        }
     }
 }
 
@@ -149,7 +140,7 @@ fn cancel_superseded(
 ) {
     let mut latest = None;
     for (entity, context, github) in &incoming {
-        if context.target == VaultOperationTarget::Automatic {
+        if context.webview.is_none() {
             continue;
         }
         if latest.is_none_or(|(_, id, _)| context.operation_id > id) {
@@ -168,7 +159,7 @@ fn cancel_superseded(
         }
     }
     for (entity, context, queued_github) in &pending {
-        if context.target == VaultOperationTarget::Automatic {
+        if context.webview.is_none() {
             continue;
         }
         if entity != latest && (connecting || (github && queued_github)) {
@@ -187,7 +178,7 @@ fn queue_create(trigger: On<UiInput<VaultCreateRequest>>, mut queue: VaultOperat
         PendingVaultOperation,
         VaultOperationContext {
             operation_id,
-            target: VaultOperationTarget::Webview(target),
+            webview: Some(target),
             kind: VaultOperationKind::Create,
         },
         VaultOperationRequest::new(trigger.event().payload.clone()),
@@ -204,7 +195,7 @@ fn queue_connect(trigger: On<UiInput<VaultConnectRequest>>, mut queue: VaultOper
         PendingVaultOperation,
         VaultOperationContext {
             operation_id,
-            target: VaultOperationTarget::Webview(target),
+            webview: Some(target),
             kind: VaultOperationKind::Connect,
         },
         VaultOperationRequest::new(trigger.event().payload.clone()),
@@ -221,7 +212,7 @@ fn queue_sync(trigger: On<UiInput<VaultSyncRequest>>, mut queue: VaultOperationQ
         PendingVaultOperation,
         VaultOperationContext {
             operation_id,
-            target: VaultOperationTarget::Webview(target),
+            webview: Some(target),
             kind: VaultOperationKind::Sync,
         },
         VaultOperationRequest::new(trigger.event().payload),
@@ -241,7 +232,7 @@ fn queue_connect_github(
         PendingVaultOperation,
         VaultOperationContext {
             operation_id,
-            target: VaultOperationTarget::Webview(target),
+            webview: Some(target),
             kind: VaultOperationKind::ConnectGithub,
         },
         VaultOperationRequest::new(trigger.event().payload),
@@ -261,7 +252,7 @@ fn queue_connect_folder(
         PendingVaultOperation,
         VaultOperationContext {
             operation_id,
-            target: VaultOperationTarget::Webview(target),
+            webview: Some(target),
             kind: VaultOperationKind::ConnectFolder,
         },
         VaultOperationRequest::new(trigger.event().payload),
@@ -285,7 +276,7 @@ fn queue_generate_recovery_key(
         PendingVaultOperation,
         VaultOperationContext {
             operation_id,
-            target: VaultOperationTarget::Webview(target),
+            webview: Some(target),
             kind: VaultOperationKind::GenerateRecoveryKey,
         },
         VaultOperationRequest::new(trigger.event().payload),
@@ -305,7 +296,7 @@ fn queue_create_recovery_key(
         PendingVaultOperation,
         VaultOperationContext {
             operation_id,
-            target: VaultOperationTarget::Webview(target),
+            webview: Some(target),
             kind: VaultOperationKind::CreateRecoveryKey,
         },
         VaultOperationRequest::new(trigger.event().payload),
@@ -325,7 +316,7 @@ fn queue_unlock_recovery_key(
         PendingVaultOperation,
         VaultOperationContext {
             operation_id,
-            target: VaultOperationTarget::Webview(target),
+            webview: Some(target),
             kind: VaultOperationKind::UnlockRecoveryKey,
         },
         VaultOperationRequest::new(trigger.event().payload.clone()),
@@ -345,7 +336,7 @@ fn queue_connect_cloud(
         PendingVaultOperation,
         VaultOperationContext {
             operation_id,
-            target: VaultOperationTarget::Webview(target),
+            webview: Some(target),
             kind: VaultOperationKind::ConnectCloud,
         },
         VaultOperationRequest::new(trigger.event().payload.clone()),
@@ -365,7 +356,7 @@ fn queue_create_cloud_folder(
         PendingVaultOperation,
         VaultOperationContext {
             operation_id,
-            target: VaultOperationTarget::Webview(target),
+            webview: Some(target),
             kind: VaultOperationKind::CreateCloudFolder,
         },
         VaultOperationRequest::new(trigger.event().payload.clone()),
@@ -385,7 +376,7 @@ fn queue_choose_cloud_folder(
         PendingVaultOperation,
         VaultOperationContext {
             operation_id,
-            target: VaultOperationTarget::Webview(target),
+            webview: Some(target),
             kind: VaultOperationKind::ChooseCloudFolder,
         },
         VaultOperationRequest::new(trigger.event().payload.clone()),
@@ -807,7 +798,7 @@ fn drain(
             .get(target.entity())
             .is_ok_and(|(_, _, g)| g.0 == accepted.0)
             && !task.canceled.load(Ordering::Acquire);
-        let webview = context.target.webview();
+        let webview = context.webview;
         while let Ok(progress) = task.progress.get_mut().try_recv() {
             if valid
                 && let Some(webview) = webview
@@ -909,7 +900,7 @@ fn drain_outcomes(
             state.snapshot.sync_failed = !success;
             state.revision = state.revision.wrapping_add(1);
         }
-        if let Some(webview) = context.target.webview()
+        if let Some(webview) = context.webview
             && let Ok(mut subscriber) = subscribers.get_mut(webview)
         {
             subscriber.complete_operation(context.operation_id, context.kind, completion);
@@ -1047,7 +1038,7 @@ mod tests {
             .spawn((
                 VaultOperationContext {
                     operation_id: 1,
-                    target: VaultOperationTarget::Webview(Entity::PLACEHOLDER),
+                    webview: Some(Entity::PLACEHOLDER),
                     kind: VaultOperationKind::ConnectGithub,
                 },
                 VaultOperationRequest::new(VaultConnectGithubRequest),
@@ -1064,7 +1055,7 @@ mod tests {
                 PendingVaultOperation,
                 VaultOperationContext {
                     operation_id: 2,
-                    target: VaultOperationTarget::Automatic,
+                    webview: None,
                     kind: VaultOperationKind::Sync,
                 },
                 VaultOperationRequest::new(VaultSyncRequest),

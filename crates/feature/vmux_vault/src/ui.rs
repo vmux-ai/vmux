@@ -218,10 +218,15 @@ fn VaultPanel(
                                         class: "group mt-4 rounded-lg bg-foreground/[0.06] px-4 py-2.5 text-foreground transition-colors hover:bg-foreground/[0.09]",
                                         title: translate("common-copy"),
                                         aria_label: translate("common-copy"),
-                                        onclick: move |_| copy_recovery_key(
-                                            workflow.github_device_code.clone(),
-                                            github_device_code_copied,
-                                        ),
+                                        onclick: move |_| {
+                                            let value = workflow.github_device_code.clone();
+                                            let mut copied = github_device_code_copied;
+                                            spawn(async move {
+                                                if vmux_ui::platform::Platform::copy(value).await {
+                                                    copied.set(true);
+                                                }
+                                            });
+                                        },
                                         code { class: "font-mono text-base font-semibold tracking-[0.2em]", {workflow.github_device_code.clone()} }
                                     }
                                     div {
@@ -507,7 +512,13 @@ fn RecoveryCard(
                         },
                         onclick: move |_| {
                             recovery_key_copied.set(false);
-                            copy_recovery_key(copy_value.clone(), recovery_key_copied);
+                            let value = copy_value.clone();
+                            let mut copied = recovery_key_copied;
+                            spawn(async move {
+                                if vmux_ui::platform::Platform::copy(value).await {
+                                    copied.set(true);
+                                }
+                            });
                         },
                         code { class: "min-w-0 flex-1 break-all font-mono text-[11px] leading-relaxed text-foreground",
                             if recovery_key_copied() {
@@ -585,12 +596,4 @@ fn RecoveryCard(
             }
         }
     }
-}
-
-fn copy_recovery_key(value: String, mut copied: Signal<bool>) {
-    spawn(async move {
-        if vmux_ui::platform::Platform::copy(value).await {
-            copied.set(true);
-        }
-    });
 }

@@ -50,6 +50,12 @@ impl Default for ResolvedColorScheme {
     }
 }
 
+impl ResolvedColorScheme {
+    fn from_mode(mode: ColorScheme, system: Option<ResolvedScheme>) -> Self {
+        Self(ResolvedScheme::resolve(mode, system))
+    }
+}
+
 #[derive(Message, Clone, Copy, Debug)]
 pub struct ColorSchemeChanged(pub ResolvedScheme);
 
@@ -77,7 +83,7 @@ fn resolve(
     if !settings.is_changed() && !system.is_changed() {
         return;
     }
-    let next = ResolvedScheme::resolve(settings.appearance.mode, system.0);
+    let next = ResolvedColorScheme::from_mode(settings.appearance.mode, system.0).0;
     if resolved.0 != next {
         resolved.0 = next;
         changed.write(ColorSchemeChanged(next));

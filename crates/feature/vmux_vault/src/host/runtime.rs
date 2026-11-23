@@ -10,12 +10,9 @@ use crate::state::{VaultOperationKind, VaultRepository, VaultSnapshot, VaultSync
 
 use super::{
     PendingVaultOperation, ReadyVaultOperation, RuntimePlugin, RuntimeSet, VaultAutoSync,
-    VaultOperationContext, VaultOperationRequest, VaultOperationSequence, VaultOperationTarget,
-    VaultOperationTask, VaultRecoveryState, VaultRegistry, VaultScanTask,
+    VaultOperationContext, VaultOperationRequest, VaultOperationSequence, VaultOperationTask,
+    VaultRecoveryState, VaultRegistry, VaultScanTask,
 };
-
-const VAULT_AUTO_SYNC_DELAY: Duration = Duration::from_secs(2);
-const VAULT_REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(30);
 
 impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
@@ -53,6 +50,9 @@ struct VaultWatch {
 struct Notification(Vec<std::path::PathBuf>);
 
 impl VaultWatch {
+    const AUTO_SYNC_DELAY: Duration = Duration::from_secs(2);
+    const REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(30);
+
     fn new(app: &App) -> Option<Self> {
         let vault_root = VaultStorage::current().root().to_path_buf();
         let _ = std::fs::create_dir_all(&vault_root);
@@ -85,7 +85,7 @@ impl VaultWatch {
                         return;
                     }
                     loop {
-                        match debounce_rx.recv_timeout(VAULT_AUTO_SYNC_DELAY) {
+                        match debounce_rx.recv_timeout(Self::AUTO_SYNC_DELAY) {
                             Ok(()) => {}
                             Err(mpsc::RecvTimeoutError::Timeout) => {
                                 if ready_tx.send(()).is_ok()
@@ -107,7 +107,7 @@ impl VaultWatch {
             .name("vmux-vault-remote-sync".to_string())
             .spawn(move || {
                 loop {
-                    std::thread::sleep(VAULT_REMOTE_SYNC_INTERVAL);
+                    std::thread::sleep(Self::REMOTE_SYNC_INTERVAL);
                     if remote_tx.send(()).is_err() {
                         return;
                     }
@@ -451,7 +451,7 @@ fn queue_auto_sync(
         PendingVaultOperation,
         VaultOperationContext {
             operation_id: sequence.next(),
-            target: VaultOperationTarget::Automatic,
+            webview: None,
             kind: VaultOperationKind::Sync,
         },
         VaultOperationRequest::new(VaultSyncRequest),
@@ -520,7 +520,7 @@ mod tests {
     struct VaultAutoSyncScenario;
 
     impl VaultAutoSyncScenario {
-        fn pending_targets(vault: VaultSnapshot, remote_check: bool) -> Vec<VaultOperationTarget> {
+        fn pending_targets(vault: VaultSnapshot, remote_check: bool) -> Vec<Option<Entity>> {
             let mut app = App::new();
             app.add_systems(Update, queue_auto_sync);
             let registry = app
@@ -550,7 +550,7 @@ mod tests {
                 world.query_filtered::<&VaultOperationContext, With<PendingVaultOperation>>();
             query
                 .iter(world)
-                .map(|operation| operation.target)
+                .map(|operation| operation.webview)
                 .collect()
         }
     }
@@ -609,7 +609,7 @@ mod tests {
         };
         assert_eq!(
             VaultAutoSyncScenario::pending_targets(connected.clone(), false),
-            [VaultOperationTarget::Automatic]
+            [None]
         );
         assert_eq!(
             VaultAutoSyncScenario::pending_targets(
@@ -630,7 +630,7 @@ mod tests {
                 },
                 false
             ),
-            [VaultOperationTarget::Automatic]
+            [None]
         );
         assert_eq!(
             VaultAutoSyncScenario::pending_targets(
@@ -650,7 +650,7 @@ mod tests {
                 },
                 true,
             ),
-            [VaultOperationTarget::Automatic]
+            [None]
         );
     }
 }

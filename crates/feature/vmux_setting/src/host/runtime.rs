@@ -192,6 +192,10 @@ impl AppSettings {
         StartupDir::resolve(self, space_id, None).map(|dir| dir.path)
     }
 
+    pub fn startup_dir_source(&self, space_id: &str, tab_dir: Option<&str>) -> Option<DirSource> {
+        StartupDir::resolve(self, space_id, tab_dir).map(|dir| dir.source)
+    }
+
     pub fn project_rows(&self, space_id: &str) -> Vec<ProjectRow> {
         let mut rows = self
             .space(space_id)

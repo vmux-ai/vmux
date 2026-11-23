@@ -136,6 +136,25 @@ impl FixedKeyStore {
     fn status(&self, root: &Path, repository: &Path) -> VaultStatus {
         VaultStatus::at(root, repository, self)
     }
+
+    fn repository(root: &Path) -> PathBuf {
+        root.join(".vmux-vault")
+    }
+
+    fn configure_identity(root: &Path) {
+        let git = GitRepository::at(root);
+        git.run(&["config", "user.name", "Vmux Test"]).unwrap();
+        git.run(&["config", "user.email", "vmux@example.com"])
+            .unwrap();
+        git.run(&["config", "commit.gpgSign", "false"]).unwrap();
+    }
+
+    fn prepare_repository(root: &Path) -> PathBuf {
+        let repository = Self::repository(root);
+        VaultRepositoryPath::at(&repository).ensure().unwrap();
+        Self::configure_identity(&repository);
+        repository
+    }
 }
 
 impl KeyStore for FixedKeyStore {
@@ -202,7 +221,7 @@ fn missing_vault_key_distinguishes_registered_recovery_methods() {
 #[test]
 fn vault_status_requires_an_accessible_encryption_key() {
     let root = tempfile::tempdir().unwrap();
-    let repository = prepare_repository(root.path());
+    let repository = FixedKeyStore::prepare_repository(root.path());
     let keys = FixedKeyStore::new(47);
     let files = VaultSync::collect(root.path()).unwrap();
     VaultRepositoryPath::at(&repository)
@@ -219,25 +238,6 @@ fn vault_status_requires_an_accessible_encryption_key() {
             .status(root.path(), &repository)
             .unlocked
     );
-}
-
-fn repository(root: &Path) -> PathBuf {
-    root.join(".vmux-vault")
-}
-
-fn configure_identity(root: &Path) {
-    let git = GitRepository::at(root);
-    git.run(&["config", "user.name", "Vmux Test"]).unwrap();
-    git.run(&["config", "user.email", "vmux@example.com"])
-        .unwrap();
-    git.run(&["config", "commit.gpgSign", "false"]).unwrap();
-}
-
-fn prepare_repository(root: &Path) -> PathBuf {
-    let repository = repository(root);
-    VaultRepositoryPath::at(&repository).ensure().unwrap();
-    configure_identity(&repository);
-    repository
 }
 
 #[test]
@@ -382,7 +382,7 @@ fn recovery_key_format_round_trips_and_rejects_invalid_input() {
 #[test]
 fn recovery_key_creation_survives_remote_upload_failure() {
     let root = tempfile::tempdir().unwrap();
-    let repository = prepare_repository(root.path());
+    let repository = FixedKeyStore::prepare_repository(root.path());
     let keys = FixedKeyStore::new(44);
     let files = VaultSync::collect(root.path()).unwrap();
     VaultRepositoryPath::at(&repository)

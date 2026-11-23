@@ -19,10 +19,6 @@ pub(super) struct GitHubCli {
     config_dir: PathBuf,
 }
 
-pub(super) trait OutputText {
-    fn success_text(self) -> Result<String, String>;
-}
-
 impl VaultRepositoryPath {
     pub(crate) fn at(root: &Path) -> Self {
         Self {
@@ -159,10 +155,23 @@ impl GitRepository {
         }
         command.args(args);
         Self::remove_inherited_environment(&mut command);
-        command
+        let output = command
             .output()
-            .map_err(|error| format!("failed to run git: {error}"))?
-            .success_text()
+            .map_err(|error| format!("failed to run git: {error}"))?;
+        Self::output_text(output)
+    }
+
+    pub(super) fn output_text(output: Output) -> Result<String, String> {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if output.status.success() {
+            return Ok(stdout);
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            Err(stdout)
+        } else {
+            Err(stderr)
+        }
     }
 
     pub(super) fn optional(&self, args: &[&str]) -> String {
@@ -306,20 +315,5 @@ impl TryFrom<&[u8]> for RemoteManifest {
             );
         }
         Ok(manifest)
-    }
-}
-
-impl OutputText for Output {
-    fn success_text(self) -> Result<String, String> {
-        let stdout = String::from_utf8_lossy(&self.stdout).trim().to_string();
-        if self.status.success() {
-            return Ok(stdout);
-        }
-        let stderr = String::from_utf8_lossy(&self.stderr).trim().to_string();
-        if stderr.is_empty() {
-            Err(stdout)
-        } else {
-            Err(stderr)
-        }
     }
 }

@@ -81,7 +81,15 @@ impl Profile {
     }
 
     pub fn cef_keychain_switches(&self) -> &'static [&'static str] {
-        cef_keychain_switches_for(SessionEnvironment::is_test())
+        Self::cef_keychain_switches_for(SessionEnvironment::is_test())
+    }
+
+    fn cef_keychain_switches_for(is_test_session: bool) -> &'static [&'static str] {
+        if is_test_session {
+            &["use-mock-keychain"]
+        } else {
+            &[]
+        }
     }
 }
 
@@ -94,12 +102,6 @@ impl std::fmt::Display for Profile {
 impl AsRef<str> for Profile {
     fn as_ref(&self) -> &str {
         &self.id
-    }
-}
-
-impl From<Profile> for String {
-    fn from(profile: Profile) -> Self {
-        profile.id
     }
 }
 
@@ -193,6 +195,7 @@ impl ProfilePaths {
     }
 
     fn native_paths(data: &Path, isolated: bool) -> (PathBuf, PathBuf) {
+        let _ = git_hash();
         if isolated {
             return (data.join("config"), data.join("home"));
         }
@@ -234,11 +237,11 @@ impl ProfilePaths {
     }
 
     pub fn recording(&self) -> PathBuf {
-        recording_dir_for(&self.shared_data(), self.profile.id())
+        Self::recording_dir_for(&self.shared_data(), self.profile.id())
     }
 
     pub fn settings_candidates(&self) -> Vec<PathBuf> {
-        settings_candidates_in(&self.config(), config_suffix())
+        Self::settings_candidates_in(&self.config(), Self::config_suffix())
     }
 
     pub fn settings(&self) -> PathBuf {
@@ -343,7 +346,7 @@ impl ProfilePaths {
     }
 
     pub fn store(&self) -> PathBuf {
-        let directory = store_dir_for(&self.shared_data(), self.profile.id());
+        let directory = Self::store_dir_for(&self.shared_data(), self.profile.id());
         let _ = std::fs::create_dir_all(&directory);
         directory
     }
@@ -363,48 +366,40 @@ impl ProfilePaths {
     fn managed(&self, name: &str) -> PathBuf {
         self.application_data().join(name)
     }
-}
 
-fn recording_dir_for(data: &Path, profile: &str) -> PathBuf {
-    data.join("profiles").join(profile).join("recording")
-}
-
-fn config_suffix() -> Option<&'static str> {
-    match build_profile() {
-        "release" | "local" => None,
-        other => Some(other),
+    fn recording_dir_for(data: &Path, profile: &str) -> PathBuf {
+        data.join("profiles").join(profile).join("recording")
     }
-}
 
-fn settings_candidates_in(base: &Path, suffix: Option<&str>) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(suffix) = suffix {
-        candidates.push(base.join(suffix).join("settings.ron"));
+    fn config_suffix() -> Option<&'static str> {
+        match build_profile() {
+            "release" | "local" => None,
+            other => Some(other),
+        }
     }
-    candidates.push(base.join("settings.ron"));
-    candidates
-}
 
-fn cef_keychain_switches_for(is_test_session: bool) -> &'static [&'static str] {
-    if is_test_session {
-        &["use-mock-keychain"]
-    } else {
-        &[]
+    fn settings_candidates_in(base: &Path, suffix: Option<&str>) -> Vec<PathBuf> {
+        let mut candidates = Vec::new();
+        if let Some(suffix) = suffix {
+            candidates.push(base.join(suffix).join("settings.ron"));
+        }
+        candidates.push(base.join("settings.ron"));
+        candidates
     }
-}
 
-fn store_dir_for(base: &Path, _profile: &str) -> PathBuf {
-    base.to_path_buf()
-}
+    fn store_dir_for(base: &Path, _profile: &str) -> PathBuf {
+        base.to_path_buf()
+    }
 
-#[cfg(test)]
-fn spaces_root_for(data: &Path, _profile: &str) -> PathBuf {
-    data.join("spaces")
-}
+    #[cfg(test)]
+    fn spaces_root_for(data: &Path, _profile: &str) -> PathBuf {
+        data.join("spaces")
+    }
 
-#[cfg(test)]
-fn space_dir_path(data: &Path, profile: &str, space_id: &str) -> PathBuf {
-    spaces_root_for(data, profile).join(space_id)
+    #[cfg(test)]
+    fn space_dir_path(data: &Path, profile: &str, space_id: &str) -> PathBuf {
+        Self::spaces_root_for(data, profile).join(space_id)
+    }
 }
 
 #[cfg(test)]
@@ -414,7 +409,7 @@ mod tests {
     #[test]
     fn recording_dir_is_nested_under_profile() {
         assert_eq!(
-            recording_dir_for(Path::new("/data/Vmux"), "personal"),
+            ProfilePaths::recording_dir_for(Path::new("/data/Vmux"), "personal"),
             PathBuf::from("/data/Vmux/profiles/personal/recording")
         );
     }
@@ -422,7 +417,7 @@ mod tests {
     #[test]
     fn recording_dir_test_profile_is_nested() {
         assert_eq!(
-            recording_dir_for(Path::new("/data/Vmux"), "test"),
+            ProfilePaths::recording_dir_for(Path::new("/data/Vmux"), "test"),
             PathBuf::from("/data/Vmux/profiles/test/recording")
         );
     }
@@ -441,11 +436,11 @@ mod tests {
     fn store_dir_is_profile_agnostic_base() {
         let base = Path::new("/data/Vmux/dev");
         assert_eq!(
-            store_dir_for(base, "personal"),
+            ProfilePaths::store_dir_for(base, "personal"),
             PathBuf::from("/data/Vmux/dev")
         );
         assert_eq!(
-            store_dir_for(base, "gregor"),
+            ProfilePaths::store_dir_for(base, "gregor"),
             PathBuf::from("/data/Vmux/dev")
         );
     }
@@ -466,11 +461,11 @@ mod tests {
     fn spaces_root_is_profile_agnostic() {
         let data = Path::new("/data/Vmux");
         assert_eq!(
-            spaces_root_for(data, "personal"),
+            ProfilePaths::spaces_root_for(data, "personal"),
             PathBuf::from("/data/Vmux/spaces")
         );
         assert_eq!(
-            spaces_root_for(data, "gregor"),
+            ProfilePaths::spaces_root_for(data, "gregor"),
             PathBuf::from("/data/Vmux/spaces")
         );
     }
@@ -599,20 +594,20 @@ mod tests {
     #[test]
     fn test_sessions_use_mock_keychain() {
         assert_eq!(
-            cef_keychain_switches_for(true),
+            Profile::cef_keychain_switches_for(true),
             ["use-mock-keychain"].as_slice()
         );
     }
 
     #[test]
     fn interactive_sessions_use_real_keychain() {
-        assert!(cef_keychain_switches_for(false).is_empty());
+        assert!(Profile::cef_keychain_switches_for(false).is_empty());
     }
 
     #[test]
     fn space_dir_is_under_vmux_spaces() {
         assert_eq!(
-            space_dir_path(Path::new("/data/Vmux"), "personal", "work"),
+            ProfilePaths::space_dir_path(Path::new("/data/Vmux"), "personal", "work"),
             PathBuf::from("/data/Vmux/spaces/work")
         );
     }
@@ -648,11 +643,11 @@ mod tests {
     fn settings_candidates_prefer_per_build_override_then_shared() {
         let base = PathBuf::from("/base");
         assert_eq!(
-            settings_candidates_in(&base, None),
+            ProfilePaths::settings_candidates_in(&base, None),
             vec![base.join("settings.ron")]
         );
         assert_eq!(
-            settings_candidates_in(&base, Some("dev")),
+            ProfilePaths::settings_candidates_in(&base, Some("dev")),
             vec![
                 base.join("dev").join("settings.ron"),
                 base.join("settings.ron"),
