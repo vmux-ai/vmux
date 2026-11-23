@@ -584,7 +584,22 @@ impl CompilerInputs {
         if !value.path.is_ident("Self") && !value.path.is_ident(&self.harness) {
             return Err("Compiler project constructor returns a different owner".into());
         }
-        let mut projects = previous;
+        let (projects, owned) = self.collect_project_fields(previous, value)?;
+        self.projects = projects;
+        if owned {
+            self.constructors.insert(function.sig.ident.to_string());
+        }
+        self.local_paths.clear();
+        self.fixed_paths.clear();
+        self.local_temporaries.clear();
+        Ok(())
+    }
+
+    fn collect_project_fields(
+        &mut self,
+        mut projects: BTreeMap<String, toml::Value>,
+        value: &syn::ExprStruct,
+    ) -> Result<(BTreeMap<String, toml::Value>, bool), String> {
         let mut owned = false;
         for field in &value.fields {
             let syn::Member::Named(name) = &field.member else {
@@ -635,14 +650,80 @@ impl CompilerInputs {
             }
             owned = true;
         }
-        self.projects = projects;
-        if owned {
-            self.constructors.insert(function.sig.ident.to_string());
+        Ok((projects, owned))
+    }
+
+    fn record_tuple_call(
+        &mut self,
+        pattern: &syn::PatTuple,
+        inputs: &syn::ExprArray,
+        call: &syn::ExprMethodCall,
+        invalid: &BTreeSet<String>,
+        compilations: &[Compilation],
+    ) {
+        for input in &inputs.elems {
+            if !Self::enabled(Self::expression_attributes(input), false, Some(true)) {
+                continue;
+            }
+            let Expr::Tuple(tuple) = input else {
+                continue;
+            };
+            let mut arguments = Vec::new();
+            for argument in &call.args {
+                let value = match argument {
+                    Expr::Path(value) => {
+                        let Some(name) = value.path.get_ident() else {
+                            arguments.push(None);
+                            continue;
+                        };
+                        if invalid.contains(&name.to_string()) {
+                            arguments.push(None);
+                            continue;
+                        }
+                        let position = pattern.elems.iter().position(
+                            |value| matches!(value, Pat::Ident(binding) if binding.ident == *name),
+                        );
+                        position.and_then(|position| tuple.elems.iter().nth(position))
+                    }
+                    value => Some(value),
+                };
+                let literal = match value {
+                    Some(Expr::Lit(value)) => match &value.lit {
+                        syn::Lit::Str(value) if !value.value().contains('\0') => {
+                            Some(value.value())
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                arguments.push(literal);
+            }
+            for compilation in compilations {
+                let Some(position) = compilation.source(&arguments) else {
+                    continue;
+                };
+                let Some(Expr::Path(argument)) = call.args.iter().nth(position) else {
+                    continue;
+                };
+                let Some(argument) = argument.path.get_ident() else {
+                    continue;
+                };
+                if invalid.contains(&argument.to_string()) {
+                    continue;
+                }
+                let Some(index) = pattern.elems.iter().position(
+                    |value| matches!(value, Pat::Ident(binding) if binding.ident == *argument),
+                ) else {
+                    continue;
+                };
+                if let Some(Expr::Macro(value)) = tuple.elems.iter().nth(index)
+                    && value.mac.path.is_ident("include_str")
+                    && let Ok(path) = syn::parse2::<syn::LitStr>(value.mac.tokens.clone())
+                {
+                    self.included.insert(path.value());
+                }
+            }
         }
-        self.local_paths.clear();
-        self.fixed_paths.clear();
-        self.local_temporaries.clear();
-        Ok(())
     }
 
     fn relative(value: &str) -> Option<Vec<String>> {
@@ -1289,6 +1370,7 @@ impl CompilerInputs {
     }
 }
 
+#[derive(Clone)]
 struct Compilation {
     kind: String,
     name: String,
@@ -1717,68 +1799,12 @@ impl<'ast> Visit<'ast> for CompilerInputs {
                     {
                         continue;
                     }
-                    let Some(compilations) = self.methods.get(&call.method.to_string()) else {
+                    let Some(compilations) = self.methods.get(&call.method.to_string()).cloned()
+                    else {
                         invalid.insert(receiver.to_string());
                         continue;
                     };
-                    for input in &inputs.elems {
-                        if !Self::enabled(Self::expression_attributes(input), false, Some(true)) {
-                            continue;
-                        }
-                        let Expr::Tuple(tuple) = input else {
-                            continue;
-                        };
-                        let mut arguments = Vec::new();
-                        for argument in &call.args {
-                            let value = match argument {
-                                Expr::Path(value) => {
-                                    let Some(name) = value.path.get_ident() else {
-                                        arguments.push(None);
-                                        continue;
-                                    };
-                                    if invalid.contains(&name.to_string()) {
-                                        arguments.push(None);
-                                        continue;
-                                    }
-                                    let position = pattern.elems.iter().position(|value| matches!(value, Pat::Ident(binding) if binding.ident == *name));
-                                    position.and_then(|position| tuple.elems.iter().nth(position))
-                                }
-                                value => Some(value),
-                            };
-                            let literal = match value {
-                                Some(Expr::Lit(value)) => match &value.lit {
-                                    syn::Lit::Str(value) if !value.value().contains('\0') => {
-                                        Some(value.value())
-                                    }
-                                    _ => None,
-                                },
-                                _ => None,
-                            };
-                            arguments.push(literal);
-                        }
-                        for compilation in compilations {
-                            let Some(position) = compilation.source(&arguments) else {
-                                continue;
-                            };
-                            let Some(Expr::Path(argument)) = call.args.iter().nth(position) else {
-                                continue;
-                            };
-                            let Some(argument) = argument.path.get_ident() else {
-                                continue;
-                            };
-                            if invalid.contains(&argument.to_string()) {
-                                continue;
-                            }
-                            let Some(index) = pattern.elems.iter().position(|value| matches!(value, Pat::Ident(binding) if binding.ident == *argument)) else { continue; };
-                            if let Some(Expr::Macro(value)) = tuple.elems.iter().nth(index)
-                                && value.mac.path.is_ident("include_str")
-                                && let Ok(path) =
-                                    syn::parse2::<syn::LitStr>(value.mac.tokens.clone())
-                            {
-                                self.included.insert(path.value());
-                            }
-                        }
-                    }
+                    self.record_tuple_call(pattern, inputs, call, &invalid, &compilations);
                 }
                 _ => {
                     self.bindings.clear();

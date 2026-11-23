@@ -49,6 +49,7 @@ impl<'tcx> Ownership<'tcx> {
                 ("dioxus_core", "Properties") => "props",
                 ("dioxus_router" | "dioxus_router_core", "Routable") => "routable",
                 ("serde" | "serde_core", "Serialize" | "Deserialize") => "serde",
+                ("core" | "std", "Error") => "error",
                 _ => continue,
             };
             for implementation in implementations {
@@ -180,8 +181,12 @@ impl<'tcx> Ownership<'tcx> {
                             "registered system retains Local state without a canonical ECS owner",
                         ),
                         "Query" | "Single" | "Populated" => {
-                            if let Some(data) = arguments.types().next() {
+                            let mut types = arguments.types();
+                            if let Some(data) = types.next() {
                                 self.data(cx, data, &mut HashSet::new());
+                            }
+                            if let Some(filter) = types.next() {
+                                self.filter(cx, filter, &mut HashSet::new());
                             }
                         }
                         "Res" | "ResMut" | "MessageReader" | "MessageWriter" | "On" => {
@@ -232,6 +237,10 @@ impl<'tcx> Ownership<'tcx> {
                     if let Some(value) = arguments.types().next() {
                         self.root(cx, value);
                     }
+                } else if package.as_str() == "bevy_ecs" && name.as_str() == "Has" {
+                    if let Some(value) = arguments.types().next() {
+                        self.marker_filter(value);
+                    }
                 } else if self.has_role(owner.did(), "query") {
                     self.used.insert(owner.did());
                     for field in owner.all_fields() {
@@ -244,6 +253,51 @@ impl<'tcx> Ownership<'tcx> {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn filter(&mut self, cx: &LateContext<'tcx>, ty: Ty<'tcx>, visiting: &mut HashSet<Ty<'tcx>>) {
+        if !visiting.insert(ty) {
+            return;
+        }
+        match ty.kind() {
+            TyKind::Tuple(values) => {
+                for value in values.iter() {
+                    self.filter(cx, value, visiting);
+                }
+            }
+            TyKind::Adt(owner, arguments) => {
+                let package = cx.tcx.crate_name(owner.did().krate);
+                let name = cx.tcx.item_name(owner.did());
+                if package.as_str() == "bevy_ecs" {
+                    match name.as_str() {
+                        "With" | "Without" | "Added" | "Changed" => {
+                            if let Some(value) = arguments.types().next() {
+                                self.marker_filter(value);
+                            }
+                        }
+                        "Or" => {
+                            for value in arguments.types() {
+                                self.filter(cx, value, visiting);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn marker_filter(&mut self, ty: Ty<'tcx>) {
+        let TyKind::Adt(owner, _) = ty.kind() else {
+            return;
+        };
+        if !owner.did().is_local() || !self.has_role(owner.did(), "component") {
+            return;
+        }
+        if owner.is_struct() && owner.all_fields().next().is_none() {
+            self.used.insert(owner.did());
         }
     }
 
@@ -261,9 +315,24 @@ impl<'tcx> Ownership<'tcx> {
             return;
         }
         self.used.insert(owner.did());
+        let canonical = self
+            .roles
+            .iter()
+            .filter_map(|(id, roles)| {
+                roles
+                    .iter()
+                    .any(|role| {
+                        matches!(
+                            *role,
+                            "component" | "resource" | "message" | "bundle" | "query" | "parameter"
+                        )
+                    })
+                    .then_some(*id)
+            })
+            .collect();
         let mut graph = ValueGraph {
             root: owner.did(),
-            canonical: self.roles.keys().copied().collect(),
+            canonical,
             values: HashSet::new(),
             visiting: HashSet::new(),
             issues: Vec::new(),
@@ -319,7 +388,9 @@ impl<'tcx> Ownership<'tcx> {
                 || self.has_role(definition, "command")
                     && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
                 || self.has_role(definition, "serde")
+                || self.has_role(definition, "error")
                 || self.has_role(definition, "contract")
+                || self.stateless_unit_adapter(cx, definition)
                 || self.has_role(definition, "inventory")
                     && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
                 || self.has_role(definition, "props")
@@ -406,6 +477,18 @@ impl<'tcx> Ownership<'tcx> {
             }
         }
         true
+    }
+
+    fn stateless_unit_adapter(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
+        if self.roles.contains_key(&definition) {
+            return false;
+        }
+        let ty = cx
+            .tcx
+            .type_of(definition)
+            .instantiate_identity()
+            .skip_norm_wip();
+        matches!(ty.kind(), TyKind::Adt(owner, _) if owner.is_struct() && owner.all_fields().next().is_none())
     }
 
     fn stateless_unit_role(&self, cx: &LateContext<'tcx>, definition: DefId, role: &str) -> bool {
@@ -553,7 +636,7 @@ impl<'tcx> ValueGraph<'tcx> {
                     return self.check(cx, resolved, retained, location);
                 }
             }
-            TyKind::Param(..) => {}
+            TyKind::Param(..) => return true,
             TyKind::Bool
             | TyKind::Char
             | TyKind::Int(_)
