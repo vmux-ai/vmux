@@ -58,8 +58,6 @@ use crate::launch::TerminalLaunch;
 
 #[cfg(test)]
 use super::input_queue::InputQueuePlugin;
-#[cfg(test)]
-use super::input_queue::pending_terminal_input;
 use super::input_queue::{QueueTerminalInput, TerminalProcessIndex};
 use super::mouse::TerminalMouseState;
 use super::process_control::{PendingTerminalSnapshot, ProcessControlPlugin, TerminalGridSize};
@@ -548,8 +546,6 @@ impl Plugin for TerminalUpdatePlugin {
         );
     }
 }
-
-const CTRL_V: u8 = 0x16;
 
 #[derive(Clone, Copy)]
 struct CopyModeKeyInput<'a> {
@@ -1078,9 +1074,9 @@ fn restart(trigger: On<TerminalRestartRequest>, mut commands: Commands) {
         ));
 }
 
-const MAX_CONCURRENT_PROCESS_CREATES: usize = 8;
-
 impl PendingServiceCreate {
+    const MAX_CONCURRENT: usize = 8;
+
     fn budget(in_flight: usize, max_concurrent: usize) -> usize {
         max_concurrent.saturating_sub(in_flight)
     }
@@ -1170,7 +1166,7 @@ fn send_service_requests(
 
     let create_budget = PendingServiceCreate::budget(
         awaiting_create.iter().count(),
-        MAX_CONCURRENT_PROCESS_CREATES,
+        PendingServiceCreate::MAX_CONCURRENT,
     );
     for (entity, process_id, launch, agent_run) in pending_create.iter().take(create_budget) {
         let mut env = launch.env.clone();
@@ -1652,6 +1648,8 @@ fn resolve_terminal_input_targets(
 struct TerminalInput;
 
 impl TerminalInput {
+    const CTRL_V: u8 = 0x16;
+
     fn bytes_for_key(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
         match key {
             Key::Character(s) => {
@@ -1744,7 +1742,7 @@ impl TerminalInput {
             return Some(Self::bracketed(path.as_bytes()));
         }
         if Clipboard::has_image() {
-            return Some(vec![CTRL_V]);
+            return Some(vec![Self::CTRL_V]);
         }
         let text = Clipboard::read_text()?;
         (!text.is_empty()).then(|| Self::bracketed(text.as_bytes()))
@@ -2475,7 +2473,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            pending_terminal_input(app.world_mut(), terminal),
+            TerminalProcessIndex::pending_input(app.world_mut(), terminal),
             [b"initial\r".to_vec(), b"next\r".to_vec()]
         );
     }
@@ -2502,7 +2500,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            pending_terminal_input(app.world_mut(), terminal),
+            TerminalProcessIndex::pending_input(app.world_mut(), terminal),
             [b"one\r".to_vec(), b"two\r".to_vec()]
         );
     }
@@ -2557,7 +2555,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            pending_terminal_input(app.world_mut(), terminal),
+            TerminalProcessIndex::pending_input(app.world_mut(), terminal),
             [b"hi".to_vec()]
         );
     }
@@ -3272,7 +3270,7 @@ mod tests {
         assert!(app.world().get::<ShellOutputSeen>(entity).is_none());
         assert!(app.world().get::<AwaitingProcessCreated>(entity).is_some());
         assert_eq!(
-            pending_terminal_input(app.world_mut(), entity),
+            TerminalProcessIndex::pending_input(app.world_mut(), entity),
             [b"queued\r".to_vec()]
         );
     }

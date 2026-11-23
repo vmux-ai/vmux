@@ -20,11 +20,6 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::matrix_rain::MatrixRain;
 use vmux_ui::prompt_ghost::PromptGhost;
 
-const CONTAINER_ID: &str = "term-container";
-
-const MEASURE_COLS: usize = 80;
-const MEASURE_ROWS: usize = 8;
-
 #[::vmux_page::page(
     component = Page,
     subtree,
@@ -41,6 +36,23 @@ struct Viewport {
 }
 
 impl Viewport {
+    const CONTAINER_ID: &'static str = "term-container";
+    const MEASURE_COLS: usize = 80;
+    const MEASURE_ROWS: usize = 8;
+    #[rustfmt::skip]
+    const _TW_SAFELIST: &'static [&'static str] = &[
+        "text-ansi-0",  "text-ansi-1",  "text-ansi-2",  "text-ansi-3",
+        "text-ansi-4",  "text-ansi-5",  "text-ansi-6",  "text-ansi-7",
+        "text-ansi-8",  "text-ansi-9",  "text-ansi-10", "text-ansi-11",
+        "text-ansi-12", "text-ansi-13", "text-ansi-14", "text-ansi-15",
+        "bg-ansi-0",  "bg-ansi-1",  "bg-ansi-2",  "bg-ansi-3",
+        "bg-ansi-4",  "bg-ansi-5",  "bg-ansi-6",  "bg-ansi-7",
+        "bg-ansi-8",  "bg-ansi-9",  "bg-ansi-10", "bg-ansi-11",
+        "bg-ansi-12", "bg-ansi-13", "bg-ansi-14", "bg-ansi-15",
+        "text-term-bg", "bg-term-fg",
+        "border-ansi-1",
+    ];
+
     fn cell_at(&self, at: ClientPoint, padding: f64) -> Option<(u16, u16)> {
         let (cw, ch) = self.cell;
         if cw <= 0.0 || ch <= 0.0 {
@@ -114,11 +126,11 @@ impl Viewport {
 
     fn handle_mouse_button(&self, e: &Event<MouseData>, padding: f64, pressed: bool) {
         if let Some((col, row)) = self.cell_at(e.client_coordinates(), padding) {
-            emit_mouse(
-                trigger_button_id(e),
+            Self::emit_mouse(
+                Self::trigger_button_id(e),
                 col,
                 row,
-                modifier_bits(e.modifiers()),
+                Self::modifier_bits(e.modifiers()),
                 pressed,
                 false,
             );
@@ -137,11 +149,11 @@ impl Viewport {
                 return;
             }
             last_mouse_cell.set((col as i32, row as i32));
-            emit_mouse(
-                held_button_id(e),
+            Self::emit_mouse(
+                Self::held_button_id(e),
                 col,
                 row,
-                modifier_bits(e.modifiers()),
+                Self::modifier_bits(e.modifiers()),
                 true,
                 true,
             );
@@ -194,9 +206,9 @@ impl Viewport {
         }
         if let Some((col, row)) = self.cell_at(e.client_coordinates(), padding) {
             let button = if count < 0 { 64 } else { 65 };
-            let modifiers = modifier_bits(e.modifiers());
+            let modifiers = Self::modifier_bits(e.modifiers());
             for _ in 0..count.unsigned_abs() {
-                emit_mouse(button, col, row, modifiers, true, false);
+                Self::emit_mouse(button, col, row, modifiers, true, false);
             }
         }
     }
@@ -271,6 +283,137 @@ impl Viewport {
         }
         result.is_ok()
     }
+
+    fn localized_terminal_title(title: &str) -> String {
+        if title == "Terminal" {
+            translate("command-terminal")
+        } else if let Some(detail) = title
+            .strip_prefix("Terminal (")
+            .and_then(|value| value.strip_suffix(')'))
+        {
+            translate_with(
+                "command-terminal-path",
+                &[("path", TranslationValue::String(detail))],
+            )
+        } else {
+            title.to_string()
+        }
+    }
+
+    fn trigger_button_id(e: &Event<MouseData>) -> u8 {
+        match e.trigger_button() {
+            Some(MouseButton::Primary) => 0,
+            Some(MouseButton::Auxiliary) => 1,
+            Some(MouseButton::Secondary) => 2,
+            _ => 0,
+        }
+    }
+
+    fn held_button_id(e: &Event<MouseData>) -> u8 {
+        let held = e.held_buttons();
+        if held.contains(MouseButton::Primary) {
+            0
+        } else if held.contains(MouseButton::Auxiliary) {
+            1
+        } else if held.contains(MouseButton::Secondary) {
+            2
+        } else {
+            3
+        }
+    }
+
+    fn modifier_bits(mods: Modifiers) -> u8 {
+        let mut m = 0u8;
+        if mods.contains(Modifiers::CONTROL) {
+            m |= MOD_CTRL;
+        }
+        if mods.contains(Modifiers::ALT) {
+            m |= MOD_ALT;
+        }
+        if mods.contains(Modifiers::SHIFT) {
+            m |= MOD_SHIFT;
+        }
+        if mods.contains(Modifiers::META) {
+            m |= MOD_SUPER;
+        }
+        m
+    }
+
+    fn emit_mouse(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool, moving: bool) {
+        let _ = send(&TermMouseEvent {
+            button,
+            col,
+            row,
+            modifiers,
+            pressed,
+            moving,
+        });
+    }
+
+    fn span_contains_col(span: &TermSpan, col: u16) -> bool {
+        let end_col = if span.grid_cols > 0 {
+            span.col + span.grid_cols
+        } else {
+            span.col + span.text.chars().count() as u16
+        };
+        col >= span.col && col < end_col
+    }
+
+    fn span_char_offset_for_col(span: &TermSpan, col: u16) -> usize {
+        let target_grid_col = col.saturating_sub(span.col);
+        let mut offset = 0usize;
+        let mut grid_col_acc = 0u16;
+        for (i, ch) in span.text.chars().enumerate() {
+            if grid_col_acc >= target_grid_col {
+                return i;
+            }
+            grid_col_acc += ch.width().unwrap_or(1) as u16;
+            offset = i + 1;
+        }
+        offset
+    }
+
+    fn row_selection_cols(
+        selection: &Option<TermSelectionRange>,
+        row_idx: usize,
+        total_cols: u16,
+    ) -> Option<(usize, usize)> {
+        let sel = selection.as_ref()?;
+        let row = row_idx as u16;
+        let lo_row = sel.start_row.min(sel.end_row);
+        let hi_row = sel.start_row.max(sel.end_row);
+        if row < lo_row || row > hi_row {
+            return None;
+        }
+        let (sr, sc, er, ec) = if sel.is_block {
+            (
+                lo_row,
+                sel.start_col.min(sel.end_col),
+                hi_row,
+                sel.start_col.max(sel.end_col),
+            )
+        } else if (sel.start_row, sel.start_col) <= (sel.end_row, sel.end_col) {
+            (sel.start_row, sel.start_col, sel.end_row, sel.end_col)
+        } else {
+            (sel.end_row, sel.end_col, sel.start_row, sel.start_col)
+        };
+
+        let (start, end_exclusive) = if sel.is_block || sr == er {
+            (sc as usize, ec as usize + 1)
+        } else if row == sr {
+            (sc as usize, total_cols as usize)
+        } else if row == er {
+            (0, ec as usize + 1)
+        } else {
+            (0, total_cols as usize)
+        };
+
+        if end_exclusive <= start {
+            None
+        } else {
+            Some((start, end_exclusive))
+        }
+    }
 }
 
 #[component]
@@ -286,22 +429,6 @@ fn ViewportSizing(viewport: Signal<Viewport>, padding: f64) -> Element {
         }
     }));
     rsx! {}
-}
-
-fn localized_terminal_title(title: &str) -> String {
-    if title == "Terminal" {
-        translate("command-terminal")
-    } else if let Some(detail) = title
-        .strip_prefix("Terminal (")
-        .and_then(|value| value.strip_suffix(')'))
-    {
-        translate_with(
-            "command-terminal-path",
-            &[("path", TranslationValue::String(detail))],
-        )
-    } else {
-        title.to_string()
-    }
 }
 
 #[component]
@@ -328,12 +455,12 @@ pub fn Page() -> Element {
     } else {
         "overflow-auto"
     };
-    let _ = localized_terminal_title(&(terminal.raw_title)());
+    let _ = Viewport::localized_terminal_title(&(terminal.raw_title)());
 
     rsx! {
         ViewportSizing { viewport, padding }
         div {
-            id: CONTAINER_ID,
+            id: Viewport::CONTAINER_ID,
             "data-vmux-initial-scroll": if passthrough { "0" } else { "bottom" },
             "data-vmux-follow-scroll": (following() && !passthrough).to_string(),
             "data-vmux-preserve-scroll": "auto",
@@ -419,7 +546,7 @@ fn TerminalSurfaceBody(
         0.0
     };
     let spacer_h = content_h + bottom_pad;
-    let measure_text = vec!["X".repeat(MEASURE_COLS); MEASURE_ROWS].join("\n");
+    let measure_text = vec!["X".repeat(Viewport::MEASURE_COLS); Viewport::MEASURE_ROWS].join("\n");
     let base_rows = rows();
     let service_error = service_error.read().clone();
     let loading = loading.read().clone();
@@ -460,8 +587,8 @@ fn TerminalSurfaceBody(
             onresize: move |e: Event<ResizeData>| {
                 if let Ok(size) = e.get_border_box_size() {
                     viewport.write().cell_measured((
-                        size.width / MEASURE_COLS as f64,
-                        size.height / MEASURE_ROWS as f64,
+                        size.width / Viewport::MEASURE_COLS as f64,
+                        size.height / Viewport::MEASURE_ROWS as f64,
                     ));
                 }
             },
@@ -561,20 +688,6 @@ fn TerminalLoadingOverlay(
     }
 }
 
-#[rustfmt::skip]
-const _TW_SAFELIST: &[&str] = &[
-    "text-ansi-0",  "text-ansi-1",  "text-ansi-2",  "text-ansi-3",
-    "text-ansi-4",  "text-ansi-5",  "text-ansi-6",  "text-ansi-7",
-    "text-ansi-8",  "text-ansi-9",  "text-ansi-10", "text-ansi-11",
-    "text-ansi-12", "text-ansi-13", "text-ansi-14", "text-ansi-15",
-    "bg-ansi-0",  "bg-ansi-1",  "bg-ansi-2",  "bg-ansi-3",
-    "bg-ansi-4",  "bg-ansi-5",  "bg-ansi-6",  "bg-ansi-7",
-    "bg-ansi-8",  "bg-ansi-9",  "bg-ansi-10", "bg-ansi-11",
-    "bg-ansi-12", "bg-ansi-13", "bg-ansi-14", "bg-ansi-15",
-    "text-term-bg", "bg-term-fg",
-    "border-ansi-1",
-];
-
 #[component]
 fn TerminalRow(
     row_idx: usize,
@@ -583,7 +696,7 @@ fn TerminalRow(
     cols: Memo<u16>,
 ) -> Element {
     let line = &row.line;
-    let selected_cols = row_selection_cols(&selection(), row_idx, cols());
+    let selected_cols = Viewport::row_selection_cols(&selection(), row_idx, cols());
 
     rsx! {
         div {
@@ -638,56 +751,6 @@ fn TerminalRow(
     }
 }
 
-fn trigger_button_id(e: &Event<MouseData>) -> u8 {
-    match e.trigger_button() {
-        Some(MouseButton::Primary) => 0,
-        Some(MouseButton::Auxiliary) => 1,
-        Some(MouseButton::Secondary) => 2,
-        _ => 0,
-    }
-}
-
-fn held_button_id(e: &Event<MouseData>) -> u8 {
-    let held = e.held_buttons();
-    if held.contains(MouseButton::Primary) {
-        0
-    } else if held.contains(MouseButton::Auxiliary) {
-        1
-    } else if held.contains(MouseButton::Secondary) {
-        2
-    } else {
-        3
-    }
-}
-
-fn modifier_bits(mods: Modifiers) -> u8 {
-    let mut m = 0u8;
-    if mods.contains(Modifiers::CONTROL) {
-        m |= MOD_CTRL;
-    }
-    if mods.contains(Modifiers::ALT) {
-        m |= MOD_ALT;
-    }
-    if mods.contains(Modifiers::SHIFT) {
-        m |= MOD_SHIFT;
-    }
-    if mods.contains(Modifiers::META) {
-        m |= MOD_SUPER;
-    }
-    m
-}
-
-fn emit_mouse(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool, moving: bool) {
-    let _ = send(&TermMouseEvent {
-        button,
-        col,
-        row,
-        modifiers,
-        pressed,
-        moving,
-    });
-}
-
 #[component]
 fn TermSpanView(
     span: TermSpan,
@@ -703,9 +766,9 @@ fn TermSpanView(
 
     if let Some(cursor) = cursor
         && cursor.visible
-        && span_contains_col(span, cursor.col)
+        && Viewport::span_contains_col(span, cursor.col)
     {
-        let offset = span_char_offset_for_col(span, cursor.col);
+        let offset = Viewport::span_char_offset_for_col(span, cursor.col);
         let chars = span.text.chars().collect::<Vec<_>>();
         let before = chars[..offset.min(chars.len())].iter().collect::<String>();
         let after = chars
@@ -750,71 +813,6 @@ fn TermSpanView(
             style: "{style}",
             "{span.text}"
         }
-    }
-}
-
-fn span_contains_col(span: &TermSpan, col: u16) -> bool {
-    let end_col = if span.grid_cols > 0 {
-        span.col + span.grid_cols
-    } else {
-        span.col + span.text.chars().count() as u16
-    };
-    col >= span.col && col < end_col
-}
-
-fn span_char_offset_for_col(span: &TermSpan, col: u16) -> usize {
-    let target_grid_col = col.saturating_sub(span.col);
-    let mut offset = 0usize;
-    let mut grid_col_acc = 0u16;
-    for (i, ch) in span.text.chars().enumerate() {
-        if grid_col_acc >= target_grid_col {
-            return i;
-        }
-        grid_col_acc += ch.width().unwrap_or(1) as u16;
-        offset = i + 1;
-    }
-    offset
-}
-
-fn row_selection_cols(
-    selection: &Option<TermSelectionRange>,
-    row_idx: usize,
-    total_cols: u16,
-) -> Option<(usize, usize)> {
-    let sel = selection.as_ref()?;
-    let row = row_idx as u16;
-    let lo_row = sel.start_row.min(sel.end_row);
-    let hi_row = sel.start_row.max(sel.end_row);
-    if row < lo_row || row > hi_row {
-        return None;
-    }
-    let (sr, sc, er, ec) = if sel.is_block {
-        (
-            lo_row,
-            sel.start_col.min(sel.end_col),
-            hi_row,
-            sel.start_col.max(sel.end_col),
-        )
-    } else if (sel.start_row, sel.start_col) <= (sel.end_row, sel.end_col) {
-        (sel.start_row, sel.start_col, sel.end_row, sel.end_col)
-    } else {
-        (sel.end_row, sel.end_col, sel.start_row, sel.start_col)
-    };
-
-    let (start, end_exclusive) = if sel.is_block || sr == er {
-        (sc as usize, ec as usize + 1)
-    } else if row == sr {
-        (sc as usize, total_cols as usize)
-    } else if row == er {
-        (0, ec as usize + 1)
-    } else {
-        (0, total_cols as usize)
-    };
-
-    if end_exclusive <= start {
-        None
-    } else {
-        Some((start, end_exclusive))
     }
 }
 

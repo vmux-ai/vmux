@@ -22,12 +22,6 @@ pub(super) struct LocalProcess {
     pub uptime_secs: u64,
 }
 
-const DISCOVERY_POLL_INTERVAL_SECONDS: f32 = 300.0;
-const DISCOVERY_REQUEST_MIN_INTERVAL: Duration = Duration::from_secs(2);
-const PROCESS_TREE_LIMIT: usize = 4096;
-const SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
-const CPU_WARMUP_INTERVAL: Duration = Duration::from_millis(250);
-
 struct DiscoveryGate {
     poll: Timer,
     requested: bool,
@@ -37,7 +31,7 @@ struct DiscoveryGate {
 impl Default for DiscoveryGate {
     fn default() -> Self {
         Self {
-            poll: Timer::from_seconds(DISCOVERY_POLL_INTERVAL_SECONDS, TimerMode::Repeating),
+            poll: Timer::from_seconds(Self::POLL_INTERVAL_SECONDS, TimerMode::Repeating),
             requested: false,
             last: None,
         }
@@ -45,6 +39,9 @@ impl Default for DiscoveryGate {
 }
 
 impl DiscoveryGate {
+    const POLL_INTERVAL_SECONDS: f32 = 300.0;
+    const REQUEST_MIN_INTERVAL: Duration = Duration::from_secs(2);
+
     fn tick(&mut self, delta: Duration, requested: bool) {
         self.poll.tick(delta);
         self.requested |= requested || self.poll.just_finished();
@@ -55,7 +52,7 @@ impl DiscoveryGate {
             || (self.requested
                 && self
                     .last
-                    .is_none_or(|last| last.elapsed() >= DISCOVERY_REQUEST_MIN_INTERVAL))
+                    .is_none_or(|last| last.elapsed() >= Self::REQUEST_MIN_INTERVAL))
     }
 
     fn finish(&mut self) {
@@ -79,10 +76,16 @@ pub(super) struct ProcessSampler {
     system: sysinfo::System,
 }
 
+impl ProcessSampler {
+    const PROCESS_TREE_LIMIT: usize = 4096;
+    const SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
+    const CPU_WARMUP_INTERVAL: Duration = Duration::from_millis(250);
+}
+
 impl Default for ProcessSampler {
     fn default() -> Self {
         Self {
-            sample_poll: Timer::new(CPU_WARMUP_INTERVAL, TimerMode::Repeating),
+            sample_poll: Timer::new(Self::CPU_WARMUP_INTERVAL, TimerMode::Repeating),
             discovery: DiscoveryGate::default(),
             sampled: false,
             #[cfg(target_os = "macos")]
@@ -119,9 +122,9 @@ impl ProcessSampler {
         let mut snapshot = self.snapshot(service_roots);
         snapshot.cpu_ready = self.sampled;
         self.sample_poll.set_duration(if self.sampled {
-            SAMPLE_INTERVAL
+            Self::SAMPLE_INTERVAL
         } else {
-            CPU_WARMUP_INTERVAL
+            Self::CPU_WARMUP_INTERVAL
         });
         self.sampled = true;
         Some(snapshot)
@@ -151,7 +154,7 @@ impl ProcessSampler {
         let mut pending = pids.iter().copied().collect::<Vec<_>>();
         while let Some(pid) = pending.pop() {
             for child in MacProcess::children(pid) {
-                if pids.len() >= PROCESS_TREE_LIMIT {
+                if pids.len() >= Self::PROCESS_TREE_LIMIT {
                     pending.clear();
                     break;
                 }
@@ -231,8 +234,15 @@ impl MacLocalProcess {
         LocalProcess {
             shell: self.shell.clone(),
             cwd: self.cwd.clone(),
-            uptime_secs: unix_time().saturating_sub(self.started_at),
+            uptime_secs: Self::unix_time().saturating_sub(self.started_at),
         }
+    }
+
+    fn unix_time() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
     }
 }
 
@@ -402,14 +412,6 @@ impl MacProcess {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn unix_time() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
 #[cfg(not(target_os = "macos"))]
 impl ProcessSampler {
     pub fn refresh(
@@ -446,9 +448,9 @@ impl ProcessSampler {
         let mut snapshot = monitored.snapshot(&self.system);
         snapshot.cpu_ready = self.sampled;
         self.sample_poll.set_duration(if self.sampled {
-            SAMPLE_INTERVAL
+            Self::SAMPLE_INTERVAL
         } else {
-            CPU_WARMUP_INTERVAL
+            Self::CPU_WARMUP_INTERVAL
         });
         self.sampled = true;
         Some(snapshot)
@@ -489,7 +491,7 @@ impl MonitoredProcesses {
                 continue;
             };
             for child in descendants {
-                if selected.len() >= PROCESS_TREE_LIMIT {
+                if selected.len() >= ProcessSampler::PROCESS_TREE_LIMIT {
                     pending.clear();
                     break;
                 }
@@ -576,7 +578,7 @@ mod tests {
         discovery.tick(Duration::ZERO, true);
 
         assert!(!discovery.due(false));
-        discovery.last = Some(Instant::now() - DISCOVERY_REQUEST_MIN_INTERVAL);
+        discovery.last = Some(Instant::now() - DiscoveryGate::REQUEST_MIN_INTERVAL);
         assert!(discovery.due(false));
     }
 

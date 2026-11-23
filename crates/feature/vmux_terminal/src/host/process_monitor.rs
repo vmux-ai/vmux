@@ -80,24 +80,22 @@ impl Plugin for ProcessMonitorPlugin {
     }
 }
 
-const PROCESS_HISTORY_LIMIT: usize = 72;
-
 #[derive(Clone, Copy)]
 struct ProcessMemory(u64);
 
 impl ProcessMemory {
     fn label(self) -> String {
-        const MB: f64 = 1024.0 * 1024.0;
-        const GB: f64 = MB * 1024.0;
+        let mb = 1024.0 * 1024.0;
+        let gb = mb * 1024.0;
         let bytes = self.0 as f64;
         if self.0 == 0 {
             "—".to_string()
-        } else if bytes < MB {
+        } else if bytes < mb {
             "<1 MB".to_string()
-        } else if bytes < GB {
-            format!("{:.0} MB", bytes / MB)
+        } else if bytes < gb {
+            format!("{:.0} MB", bytes / mb)
         } else {
-            format!("{:.1} GB", bytes / GB)
+            format!("{:.1} GB", bytes / gb)
         }
     }
 }
@@ -639,14 +637,16 @@ fn broadcast_to_monitors(
 }
 
 impl ProcessMonitorView {
+    const HISTORY_LIMIT: usize = 72;
+
     fn record_sample(&mut self, total_cpu_percent: f32, total_memory_bytes: u64) {
         self.cpu_history.push_back(total_cpu_percent.max(0.0));
         self.memory_history_mb
             .push_back(total_memory_bytes as f32 / (1024.0 * 1024.0));
-        while self.cpu_history.len() > PROCESS_HISTORY_LIMIT {
+        while self.cpu_history.len() > Self::HISTORY_LIMIT {
             self.cpu_history.pop_front();
         }
-        while self.memory_history_mb.len() > PROCESS_HISTORY_LIMIT {
+        while self.memory_history_mb.len() > Self::HISTORY_LIMIT {
             self.memory_history_mb.pop_front();
         }
     }
