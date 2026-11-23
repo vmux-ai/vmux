@@ -385,20 +385,22 @@ impl TranscriptWriter<'_, '_> {
         ));
     }
 
-    fn push_assistant_block(&mut self, session: Entity, block: AssistantBlock) {
+    fn push_assistant_blocks(&mut self, session: Entity, new_blocks: Vec<AssistantBlock>) {
+        if new_blocks.is_empty() {
+            return;
+        }
         if let Some(last) = self.last_entry(session)
             && let Ok((_, _, _, mut entry)) = self.entries.get_mut(last)
             && let Message::Assistant { blocks } = &mut entry.0
         {
-            blocks.push(block);
+            blocks.extend(new_blocks);
             return;
         }
-        self.spawn_entry(
-            session,
-            Message::Assistant {
-                blocks: vec![block],
-            },
-        );
+        self.spawn_entry(session, Message::Assistant { blocks: new_blocks });
+    }
+
+    fn push_assistant_block(&mut self, session: Entity, block: AssistantBlock) {
+        self.push_assistant_blocks(session, vec![block]);
     }
 
     fn append_assistant_text(&mut self, session: Entity, text: &str) {
@@ -486,6 +488,7 @@ impl TranscriptWriter<'_, '_> {
         name: &str,
         args: &str,
         kind: Option<vmux_api::session::ToolKind>,
+        pending: &mut Vec<AssistantBlock>,
     ) {
         for (_, parent, _, mut entry) in &mut self.entries {
             if parent.parent() != session {
@@ -517,16 +520,13 @@ impl TranscriptWriter<'_, '_> {
                 }
             }
         }
-        self.push_assistant_block(
-            session,
-            AssistantBlock::ToolUse {
-                call_id: call_id.to_string(),
-                name: name.to_string(),
-                args: args.to_string(),
-                parent_call_id: None,
-                kind,
-            },
-        );
+        pending.push(AssistantBlock::ToolUse {
+            call_id: call_id.to_string(),
+            name: name.to_string(),
+            args: args.to_string(),
+            parent_call_id: None,
+            kind,
+        });
     }
 
     fn upsert_diff(
@@ -536,6 +536,7 @@ impl TranscriptWriter<'_, '_> {
         path: &str,
         old_text: Option<String>,
         new_text: String,
+        pending: &mut Vec<AssistantBlock>,
     ) {
         for (_, parent, _, mut entry) in &mut self.entries {
             if parent.parent() != session {
@@ -559,15 +560,26 @@ impl TranscriptWriter<'_, '_> {
                 }
             }
         }
-        self.push_assistant_block(
-            session,
-            AssistantBlock::Diff {
-                call_id: call_id.to_string(),
-                path: path.to_string(),
-                old_text,
-                new_text,
-            },
-        );
+        for block in pending.iter_mut() {
+            if let AssistantBlock::Diff {
+                call_id: existing,
+                old_text: existing_old,
+                new_text: existing_new,
+                ..
+            } = block
+                && existing == call_id
+            {
+                *existing_old = old_text;
+                *existing_new = new_text;
+                return;
+            }
+        }
+        pending.push(AssistantBlock::Diff {
+            call_id: call_id.to_string(),
+            path: path.to_string(),
+            old_text,
+            new_text,
+        });
     }
 
     fn upsert_tool_result(
@@ -609,6 +621,7 @@ impl TranscriptWriter<'_, '_> {
         call_id: &str,
         content: &[ToolCallContent],
         failed: bool,
+        pending: &mut Vec<AssistantBlock>,
     ) -> Vec<(String, String, Option<String>, String)> {
         let mut diffs = Vec::new();
         let mut has_terminal = false;
@@ -623,6 +636,7 @@ impl TranscriptWriter<'_, '_> {
                         &path,
                         diff.old_text.clone(),
                         diff.new_text.clone(),
+                        pending,
                     );
                     diffs.push((
                         call_id.to_string(),
@@ -643,6 +657,7 @@ impl TranscriptWriter<'_, '_> {
                 _ => {}
             }
         }
+        self.push_assistant_blocks(session, std::mem::take(pending));
         if !output.is_empty() {
             self.upsert_tool_result(session, call_id, output, failed);
         } else if has_terminal {
@@ -678,18 +693,21 @@ impl TranscriptWriter<'_, '_> {
             );
             return;
         }
+        let mut pending = Vec::new();
         self.upsert_tool_use(
             session,
             &call_id,
             &tc.title,
             &AcpToolInput::from_raw(tc.raw_input.as_ref()),
             Some(Self::classify_tool_kind(tc.kind)),
+            &mut pending,
         );
         let diff_locs = tc
             .locations
             .is_empty()
             .then(|| Self::diff_locations(&tc.content));
         let locations = diff_locs.as_deref().unwrap_or(&tc.locations);
+        let order = self.next_order(session);
         let touched = touches.project(
             session,
             &call_id,
@@ -697,9 +715,10 @@ impl TranscriptWriter<'_, '_> {
             Some(locations),
             Some(tc.status),
             true,
+            order,
         );
         let failed = matches!(tc.status, ToolCallStatus::Failed);
-        let diffs = self.record_tool_content(session, &call_id, &tc.content, failed);
+        let diffs = self.record_tool_content(session, &call_id, &tc.content, failed, &mut pending);
         if !Self::has_text_content(&tc.content) {
             self.record_raw_output(session, &call_id, tc.raw_output.as_ref(), failed);
         }
@@ -731,12 +750,14 @@ impl TranscriptWriter<'_, '_> {
             );
             return;
         }
+        let mut pending = Vec::new();
         self.upsert_tool_use(
             session,
             &call_id,
             title,
             &AcpToolInput::from_raw(update.fields.raw_input.as_ref()),
             update.fields.kind.map(Self::classify_tool_kind),
+            &mut pending,
         );
         let diff_locs = update
             .fields
@@ -750,6 +771,7 @@ impl TranscriptWriter<'_, '_> {
         } else {
             locations
         };
+        let order = self.next_order(session);
         let touched = touches.project(
             session,
             &call_id,
@@ -757,11 +779,12 @@ impl TranscriptWriter<'_, '_> {
             locations,
             update.fields.status,
             false,
+            order,
         );
         let mut diffs = Vec::new();
         if let Some(content) = &update.fields.content {
             let failed = matches!(update.fields.status, Some(ToolCallStatus::Failed));
-            diffs = self.record_tool_content(session, &call_id, content, failed);
+            diffs = self.record_tool_content(session, &call_id, content, failed, &mut pending);
             if !Self::has_text_content(content) {
                 self.record_raw_output(
                     session,
@@ -770,12 +793,20 @@ impl TranscriptWriter<'_, '_> {
                     failed,
                 );
             }
-        } else if matches!(
-            update.fields.status,
-            Some(ToolCallStatus::Completed | ToolCallStatus::Failed)
-        ) {
-            let failed = matches!(update.fields.status, Some(ToolCallStatus::Failed));
-            self.record_raw_output(session, &call_id, update.fields.raw_output.as_ref(), failed);
+        } else {
+            self.push_assistant_blocks(session, pending);
+            if matches!(
+                update.fields.status,
+                Some(ToolCallStatus::Completed | ToolCallStatus::Failed)
+            ) {
+                let failed = matches!(update.fields.status, Some(ToolCallStatus::Failed));
+                self.record_raw_output(
+                    session,
+                    &call_id,
+                    update.fields.raw_output.as_ref(),
+                    failed,
+                );
+            }
         }
         if !replay_active {
             self.emit_tool_events(session, touched, diffs);
@@ -942,18 +973,11 @@ struct FileTouchTracker<'w, 's> {
         ),
         With<AcpFinalizedFileTouch>,
     >,
-    orders: Query<'w, 's, &'static mut AcpProjectionOrder>,
     commands: Commands<'w, 's>,
 }
 
 impl FileTouchTracker<'_, '_> {
-    fn next_order(&mut self, session: Entity) -> Order {
-        match self.orders.get_mut(session) {
-            Ok(mut counter) => counter.next(),
-            Err(_) => Order(0),
-        }
-    }
-
+    #[allow(clippy::too_many_arguments)]
     fn project(
         &mut self,
         session: Entity,
@@ -962,6 +986,7 @@ impl FileTouchTracker<'_, '_> {
         locations: Option<&[ToolCallLocation]>,
         status: Option<ToolCallStatus>,
         full_update: bool,
+        order: Order,
     ) -> Vec<(String, Option<u32>, FileTouchKind)> {
         if self
             .finalized
@@ -997,7 +1022,6 @@ impl FileTouchTracker<'_, '_> {
             let result = state.update(kind, locations, status, full_update);
             if !result.1 {
                 self.evict_oldest_active(session);
-                let order = self.next_order(session);
                 self.commands.spawn((
                     state,
                     AcpToolCallId(call_id.to_string()),
@@ -1009,7 +1033,6 @@ impl FileTouchTracker<'_, '_> {
         };
         if finalized {
             self.evict_oldest_finalized(session);
-            let order = self.next_order(session);
             self.commands.spawn((
                 AcpFinalizedFileTouch,
                 AcpToolCallId(call_id.to_string()),

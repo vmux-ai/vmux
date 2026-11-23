@@ -40,12 +40,13 @@ impl bevy::prelude::Plugin for AcpRuntimePlugin {
         app.add_plugins(AcpProjectionPlugin)
             .add_systems(
                 Update,
+                (receive, ApplyDeferred, spawn, ApplyDeferred)
+                    .chain()
+                    .before(AcpProjectionSet),
+            )
+            .add_systems(
+                Update,
                 (
-                    receive,
-                    ApplyDeferred,
-                    spawn,
-                    ApplyDeferred,
-                    AcpProjectionSet,
                     ApplyDeferred,
                     (
                         project_info,
@@ -61,7 +62,8 @@ impl bevy::prelude::Plugin for AcpRuntimePlugin {
                     ApplyDeferred,
                     (subscribe, read, list, rebind, close, reap).chain(),
                 )
-                    .chain(),
+                    .chain()
+                    .after(AcpProjectionSet),
             )
             .add_systems(Shutdown, begin_shutdown)
             .add_systems(ShutdownComplete, shutdown);
