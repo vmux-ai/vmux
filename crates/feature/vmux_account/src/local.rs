@@ -163,13 +163,10 @@ impl Database {
         })
     }
 
-    fn write(data: &Path, request: &WriteRequest) -> Result<Commit, WriteFailure> {
-        let mut connection = Self::connect(data).map_err(WriteFailure::Storage)?;
-        #[cfg(feature = "profile-sync")]
-        crate::sync_store::Store::schema(&connection).map_err(WriteFailure::Storage)?;
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| WriteFailure::Storage(error.to_string()))?;
+    fn replay_operation(
+        transaction: &rusqlite::Transaction<'_>,
+        request: &WriteRequest,
+    ) -> Result<Option<Commit>, WriteFailure> {
         let previous = transaction
             .query_row(
                 "select intent, generation, receipt from operations where id = ?1",
@@ -184,32 +181,24 @@ impl Database {
             )
             .optional()
             .map_err(|error| WriteFailure::Storage(error.to_string()))?;
-        if let Some((intent, generation, value)) = previous {
-            if intent != request.intent {
-                return Err(WriteFailure::Conflict);
-            }
-            let receipt: Receipt = serde_json::from_str(&value)
-                .map_err(|error| WriteFailure::Storage(error.to_string()))?;
-            return Ok(Commit {
-                generation,
-                receipt,
-                replayed: true,
-            });
-        }
-        let current = transaction
-            .query_row(
-                "select generation from store_meta where id = 1",
-                [],
-                |row| row.get::<_, u64>(0),
-            )
-            .map_err(|error| WriteFailure::Storage(error.to_string()))?;
-        if current != request.generation {
+        let Some((intent, generation, value)) = previous else {
+            return Ok(None);
+        };
+        if intent != request.intent {
             return Err(WriteFailure::Conflict);
         }
-        let generation = current
-            .checked_add(1)
-            .filter(|value| *value <= i64::MAX as u64)
-            .ok_or_else(|| WriteFailure::Storage("account store generation exhausted".into()))?;
+        let receipt: Receipt = serde_json::from_str(&value)
+            .map_err(|error| WriteFailure::Storage(error.to_string()))?;
+        Ok(Some(Commit {
+            generation,
+            receipt,
+            replayed: true,
+        }))
+    }
+
+    fn encode_records(
+        request: &WriteRequest,
+    ) -> Result<(Vec<(String, String)>, Receipt), WriteFailure> {
         let mut encoded = Vec::new();
         let mut receipt = None;
         let mut bytes = 0usize;
@@ -237,6 +226,34 @@ impl Database {
         }
         let receipt = receipt
             .ok_or_else(|| WriteFailure::Storage("account write target is missing".into()))?;
+        Ok((encoded, receipt))
+    }
+
+    fn write(data: &Path, request: &WriteRequest) -> Result<Commit, WriteFailure> {
+        let mut connection = Self::connect(data).map_err(WriteFailure::Storage)?;
+        #[cfg(feature = "profile-sync")]
+        crate::sync_store::Store::schema(&connection).map_err(WriteFailure::Storage)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| WriteFailure::Storage(error.to_string()))?;
+        if let Some(replayed) = Self::replay_operation(&transaction, request)? {
+            return Ok(replayed);
+        }
+        let current = transaction
+            .query_row(
+                "select generation from store_meta where id = 1",
+                [],
+                |row| row.get::<_, u64>(0),
+            )
+            .map_err(|error| WriteFailure::Storage(error.to_string()))?;
+        if current != request.generation {
+            return Err(WriteFailure::Conflict);
+        }
+        let generation = current
+            .checked_add(1)
+            .filter(|value| *value <= i64::MAX as u64)
+            .ok_or_else(|| WriteFailure::Storage("account store generation exhausted".into()))?;
+        let (encoded, receipt) = Self::encode_records(request)?;
         let mut directory = match &request.directory {
             Some(id) => NewDirectory::create(data, id, request.exclusive)?,
             None => NewDirectory { created: None },

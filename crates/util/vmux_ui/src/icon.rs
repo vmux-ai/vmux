@@ -126,7 +126,17 @@ impl LineIcon {
     }
 
     pub fn paths(self) -> &'static [&'static str] {
-        match self {
+        if let Some(paths) = self.primary_paths() {
+            return paths;
+        }
+        if let Some(paths) = self.secondary_paths() {
+            return paths;
+        }
+        self.tertiary_paths()
+    }
+
+    fn primary_paths(self) -> Option<&'static [&'static str]> {
+        let paths: &'static [&'static str] = match self {
             Self::AlertCircle => &[
                 "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
                 "M12 8v4",
@@ -179,6 +189,13 @@ impl LineIcon {
                 "M13 14H7",
             ],
             Self::FastForward => &["m13 19 9-7-9-7v14Z", "m2 19 9-7-9-7v14Z"],
+            _ => return None,
+        };
+        Some(paths)
+    }
+
+    fn secondary_paths(self) -> Option<&'static [&'static str]> {
+        let paths: &'static [&'static str] = match self {
             Self::GitBranch => &[
                 "M6 3v12",
                 "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
@@ -249,6 +266,13 @@ impl LineIcon {
                 "M3.3 7 12 12l8.7-5",
                 "M12 22V12",
             ],
+            _ => return None,
+        };
+        Some(paths)
+    }
+
+    fn tertiary_paths(self) -> &'static [&'static str] {
+        match self {
             Self::Pause => &["M6 4h4v16H6Z", "M14 4h4v16h-4Z"],
             Self::Planet => &[
                 "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z",
@@ -307,6 +331,7 @@ impl LineIcon {
                 "M9 4v16",
                 "M15 4v16",
             ],
+            _ => unreachable!("handled by primary_paths or secondary_paths"),
         }
     }
 }
