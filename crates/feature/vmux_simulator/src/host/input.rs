@@ -268,7 +268,7 @@ fn handle_native_key(
 #[derive(Message)]
 struct SimulatorInputRequest {
     view: Option<Entity>,
-    input: SimulatorKeyboardInput,
+    input: AxeKeyboardStep,
 }
 
 #[derive(Message)]
@@ -278,19 +278,50 @@ struct SimulatorClipboardInputRequest {
 }
 
 #[derive(Clone)]
-enum SimulatorKeyboardInput {
-    Text(String),
-    Key(u16),
-    ModifiedKey {
-        code: u16,
-        modifiers: SimulatorKeyModifiers,
-    },
-    HardwareButton(HardwareButton),
+struct AxeKeyboardStep {
+    text: Option<String>,
+    command: Option<String>,
+}
+
+impl AxeKeyboardStep {
+    fn text(value: String) -> Self {
+        Self {
+            text: Some(value),
+            command: None,
+        }
+    }
+
+    fn key(code: u16) -> Self {
+        Self {
+            text: None,
+            command: Some(format!("key {code}")),
+        }
+    }
+
+    fn modified_key(code: u16, modifiers: SimulatorKeyModifiers) -> Self {
+        let modifiers = modifiers
+            .hid_codes()
+            .iter()
+            .map(u8::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        Self {
+            text: None,
+            command: Some(format!("key-combo --modifiers {modifiers} --key {code}")),
+        }
+    }
+
+    fn hardware_button(button: HardwareButton) -> Self {
+        Self {
+            text: None,
+            command: Some(format!("button {}", button.as_arg())),
+        }
+    }
 }
 
 #[derive(Component)]
 pub(super) struct SimulatorKeyboard {
-    sender: mpsc::Sender<SimulatorKeyboardInput>,
+    sender: mpsc::Sender<AxeKeyboardStep>,
 }
 
 impl SimulatorKeyboard {
@@ -306,7 +337,7 @@ impl SimulatorKeyboard {
         Ok(Self { sender })
     }
 
-    fn dispatch(&self, input: SimulatorKeyboardInput) {
+    fn dispatch(&self, input: AxeKeyboardStep) {
         if self.sender.send(input).is_err() {
             error!("simulator keyboard worker stopped");
         }
@@ -321,7 +352,7 @@ struct SimulatorKeyboardRunner {
 impl SimulatorKeyboardRunner {
     const MAX_BATCH_KEYS: usize = 256;
 
-    fn run(&self, receiver: mpsc::Receiver<SimulatorKeyboardInput>) {
+    fn run(&self, receiver: mpsc::Receiver<AxeKeyboardStep>) {
         while let Ok(first) = receiver.recv() {
             let batch = SimulatorKeyboardBatch::from_receiver(first, &receiver);
             if let Err(error) = self.execute(batch) {
@@ -355,14 +386,11 @@ impl SimulatorKeyboardRunner {
 }
 
 struct SimulatorKeyboardBatch {
-    inputs: Vec<SimulatorKeyboardInput>,
+    inputs: Vec<AxeKeyboardStep>,
 }
 
 impl SimulatorKeyboardBatch {
-    fn from_receiver(
-        first: SimulatorKeyboardInput,
-        receiver: &mpsc::Receiver<SimulatorKeyboardInput>,
-    ) -> Self {
+    fn from_receiver(first: AxeKeyboardStep, receiver: &mpsc::Receiver<AxeKeyboardStep>) -> Self {
         let mut inputs = vec![first];
         while inputs.len() < SimulatorKeyboardRunner::MAX_BATCH_KEYS {
             let Ok(input) = receiver.try_recv() else {
@@ -377,12 +405,13 @@ impl SimulatorKeyboardBatch {
         let mut steps = Vec::new();
         let mut text = String::new();
         for input in self.inputs {
-            match input {
-                SimulatorKeyboardInput::Text(value) => text.push_str(&value),
-                other => {
-                    Self::push_text(&mut steps, &mut text);
-                    steps.push(Self::step(other));
-                }
+            if let Some(value) = input.text {
+                text.push_str(&value);
+                continue;
+            }
+            if let Some(command) = input.command {
+                Self::push_text(&mut steps, &mut text);
+                steps.push(command);
             }
         }
         Self::push_text(&mut steps, &mut text);
@@ -395,25 +424,6 @@ impl SimulatorKeyboardBatch {
         }
         steps.push(format!("type {}", Self::quote(text)));
         text.clear();
-    }
-
-    fn step(input: SimulatorKeyboardInput) -> String {
-        match input {
-            SimulatorKeyboardInput::Text(text) => format!("type {}", Self::quote(&text)),
-            SimulatorKeyboardInput::Key(code) => format!("key {code}"),
-            SimulatorKeyboardInput::ModifiedKey { code, modifiers } => {
-                let modifiers = modifiers
-                    .hid_codes()
-                    .iter()
-                    .map(u8::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",");
-                format!("key-combo --modifiers {modifiers} --key {code}")
-            }
-            SimulatorKeyboardInput::HardwareButton(button) => {
-                format!("button {}", button.as_arg())
-            }
-        }
     }
 
     fn quote(text: &str) -> String {
@@ -436,6 +446,10 @@ pub(super) struct DeviceTouchSession {
     last: Option<(f32, f32)>,
     focus: Option<(f32, f32)>,
     dragging: bool,
+}
+
+impl DeviceTouchSession {
+    const DRAG_THRESHOLD: f32 = 6.0;
 }
 
 #[derive(Component)]
@@ -569,6 +583,16 @@ impl DeviceCoordinates {
         Some(Self { points, pixels })
     }
 
+    fn from_components(
+        points: Option<&DevicePoints>,
+        pixels: Option<&DevicePixels>,
+    ) -> Result<Self, String> {
+        let points = points.ok_or("simulator point dimensions are unavailable")?;
+        let pixels = pixels.ok_or("simulator pixel dimensions are unavailable")?;
+        Self::new((points.0, points.1), (pixels.0, pixels.1))
+            .ok_or_else(|| "simulator dimensions are invalid".to_string())
+    }
+
     pub fn point(&self, pixel: (u32, u32)) -> (f32, f32) {
         let max_pixel_x = self.pixels.0.saturating_sub(1).max(1) as f32;
         let max_pixel_y = self.pixels.1.saturating_sub(1).max(1) as f32;
@@ -585,8 +609,6 @@ fn touch(
     trigger: On<UiInput<SimulatorTouch>>,
     mut attachments: Query<(&DevicePoints, &HidBroker, &mut DeviceTouchSession)>,
 ) {
-    const DRAG_THRESHOLD: f32 = 6.0;
-
     let Ok((points, hid, mut session)) = attachments.get_mut(trigger.event().webview) else {
         return;
     };
@@ -609,7 +631,7 @@ fn touch(
                 return;
             };
             let distance = ((point.0 - start.0).powi(2) + (point.1 - start.1).powi(2)).sqrt();
-            if !session.dragging && distance >= DRAG_THRESHOLD {
+            if !session.dragging && distance >= DeviceTouchSession::DRAG_THRESHOLD {
                 session.dragging = true;
             }
             session.last = Some(point);
@@ -664,7 +686,7 @@ fn text(
 ) {
     requests.write(SimulatorInputRequest {
         view: Some(trigger.event().webview),
-        input: SimulatorKeyboardInput::Text(trigger.event().payload.text.clone()),
+        input: AxeKeyboardStep::text(trigger.event().payload.text.clone()),
     });
 }
 
@@ -674,7 +696,7 @@ fn key(
 ) {
     requests.write(SimulatorInputRequest {
         view: Some(trigger.event().webview),
-        input: SimulatorKeyboardInput::Key(trigger.event().payload.code),
+        input: AxeKeyboardStep::key(trigger.event().payload.code),
     });
 }
 
@@ -684,10 +706,10 @@ fn modified_key(
 ) {
     requests.write(SimulatorInputRequest {
         view: Some(trigger.event().webview),
-        input: SimulatorKeyboardInput::ModifiedKey {
-            code: trigger.event().payload.code,
-            modifiers: trigger.event().payload.modifiers,
-        },
+        input: AxeKeyboardStep::modified_key(
+            trigger.event().payload.code,
+            trigger.event().payload.modifiers,
+        ),
     });
 }
 
@@ -697,7 +719,7 @@ fn hardware_button(
 ) {
     requests.write(SimulatorInputRequest {
         view: Some(trigger.event().webview),
-        input: SimulatorKeyboardInput::HardwareButton(trigger.event().payload.button),
+        input: AxeKeyboardStep::hardware_button(trigger.event().payload.button),
     });
 }
 
@@ -757,7 +779,7 @@ fn handle_button_requests(
     for request in requests.read() {
         inputs.write(SimulatorInputRequest {
             view: request.view,
-            input: SimulatorKeyboardInput::HardwareButton(request.button),
+            input: AxeKeyboardStep::hardware_button(request.button),
         });
     }
 }
@@ -800,7 +822,7 @@ fn handle_tap_requests(
         let Ok((_, _, _, points, pixels, hid)) = attachments.get(target) else {
             continue;
         };
-        let result = match (control_coordinates(points, pixels), hid) {
+        let result = match (DeviceCoordinates::from_components(points, pixels), hid) {
             (Ok(coordinates), Some(hid)) => {
                 hid.dispatch(HidRequest::tap(coordinates.point((request.x, request.y))));
                 Ok(format!(
@@ -838,7 +860,7 @@ fn handle_swipe_requests(
         let Ok((_, _, _, points, pixels, hid)) = attachments.get(target) else {
             continue;
         };
-        let result = match (control_coordinates(points, pixels), hid) {
+        let result = match (DeviceCoordinates::from_components(points, pixels), hid) {
             (Ok(coordinates), Some(hid)) => {
                 let from = coordinates.point((request.start_x, request.start_y));
                 let to = coordinates.point((request.end_x, request.end_y));
@@ -878,7 +900,7 @@ fn handle_type_text_requests(
         };
         inputs.write(SimulatorInputRequest {
             view: Some(target),
-            input: SimulatorKeyboardInput::Text(request.text.clone()),
+            input: AxeKeyboardStep::text(request.text.clone()),
         });
         responses.write(SimulatorControlResponse {
             request_id: request.request_id,
@@ -907,7 +929,7 @@ fn handle_key_press_requests(
         };
         inputs.write(SimulatorInputRequest {
             view: Some(target),
-            input: SimulatorKeyboardInput::Key(u16::from(request.keycode)),
+            input: AxeKeyboardStep::key(u16::from(request.keycode)),
         });
         responses.write(SimulatorControlResponse {
             request_id: request.request_id,
@@ -941,23 +963,13 @@ fn handle_button_press_requests(
         };
         inputs.write(SimulatorInputRequest {
             view: Some(target),
-            input: SimulatorKeyboardInput::HardwareButton(button),
+            input: AxeKeyboardStep::hardware_button(button),
         });
         responses.write(SimulatorControlResponse {
             request_id: request.request_id,
             result: Ok("pressed simulator hardware button".to_string()),
         });
     }
-}
-
-fn control_coordinates(
-    points: Option<&DevicePoints>,
-    pixels: Option<&DevicePixels>,
-) -> Result<DeviceCoordinates, String> {
-    let points = points.ok_or("simulator point dimensions are unavailable")?;
-    let pixels = pixels.ok_or("simulator pixel dimensions are unavailable")?;
-    DeviceCoordinates::new((points.0, points.1), (pixels.0, pixels.1))
-        .ok_or_else(|| "simulator dimensions are invalid".to_string())
 }
 
 fn send_clipboard_requests(
@@ -1121,10 +1133,10 @@ mod tests {
     fn keyboard_batch_preserves_order_and_quotes_text() {
         let batch = SimulatorKeyboardBatch {
             inputs: vec![
-                SimulatorKeyboardInput::Text("a".into()),
-                SimulatorKeyboardInput::Text("\"".into()),
-                SimulatorKeyboardInput::Key(42),
-                SimulatorKeyboardInput::Text("\\".into()),
+                AxeKeyboardStep::text("a".into()),
+                AxeKeyboardStep::text("\"".into()),
+                AxeKeyboardStep::key(42),
+                AxeKeyboardStep::text("\\".into()),
             ],
         };
 

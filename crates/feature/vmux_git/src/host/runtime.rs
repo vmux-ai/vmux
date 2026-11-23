@@ -6,13 +6,6 @@ pub use vmux_ecs::blocking::BlockingTask as GitTask;
 #[cfg(test)]
 use vmux_ecs::blocking::CancellationGroup as GitCancellationGroup;
 
-const INTERACTIVE_WORKER_COUNT: usize = 4;
-const INTERACTIVE_QUEUE_CAPACITY: usize = 64;
-const BACKGROUND_WORKER_COUNT: usize = 2;
-const BACKGROUND_QUEUE_CAPACITY: usize = 256;
-const OPERATION_WORKER_COUNT: usize = 1;
-const OPERATION_QUEUE_CAPACITY: usize = 8;
-
 #[derive(Resource)]
 pub struct GitRuntime {
     interactive: BlockingPool,
@@ -25,24 +18,30 @@ impl Default for GitRuntime {
         Self {
             interactive: BlockingPool::new(
                 "vmux-git",
-                INTERACTIVE_WORKER_COUNT,
-                INTERACTIVE_QUEUE_CAPACITY,
+                Self::INTERACTIVE_WORKER_COUNT,
+                Self::INTERACTIVE_QUEUE_CAPACITY,
             ),
             background: BlockingPool::new(
                 "vmux-git-background",
-                BACKGROUND_WORKER_COUNT,
-                BACKGROUND_QUEUE_CAPACITY,
+                Self::BACKGROUND_WORKER_COUNT,
+                Self::BACKGROUND_QUEUE_CAPACITY,
             ),
             operations: BlockingPool::new(
                 "vmux-git-operation",
-                OPERATION_WORKER_COUNT,
-                OPERATION_QUEUE_CAPACITY,
+                Self::OPERATION_WORKER_COUNT,
+                Self::OPERATION_QUEUE_CAPACITY,
             ),
         }
     }
 }
 
 impl GitRuntime {
+    const INTERACTIVE_WORKER_COUNT: usize = 4;
+    const INTERACTIVE_QUEUE_CAPACITY: usize = 64;
+    const BACKGROUND_WORKER_COUNT: usize = 2;
+    const BACKGROUND_QUEUE_CAPACITY: usize = 256;
+    const OPERATION_WORKER_COUNT: usize = 1;
+    const OPERATION_QUEUE_CAPACITY: usize = 8;
     pub fn spawn<T: Send + 'static>(
         &self,
         wake: Option<EventLoopProxy<WinitUserEvent>>,
@@ -121,7 +120,10 @@ mod tests {
             assert!(Instant::now() < deadline);
             std::thread::yield_now();
         }
-        assert_eq!(maximum.load(Ordering::SeqCst), INTERACTIVE_WORKER_COUNT);
+        assert_eq!(
+            maximum.load(Ordering::SeqCst),
+            GitRuntime::INTERACTIVE_WORKER_COUNT
+        );
     }
 
     #[test]

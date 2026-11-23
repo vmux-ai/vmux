@@ -54,13 +54,10 @@ shape: (
     (key: "crates/feature/vmux_account/src/wire.rs||enum:Request", fingerprint: "f70795182e26859a", role: Boundary, owner: "crates/feature/vmux_account/src/wire.rs||enum:Request", reason: "Externally tagged serde Account JSON request vocabulary for one bounded QUIC exchange; systems own transitions and retries."),
     (key: "crates/feature/vmux_account/src/wire.rs||enum:Response", fingerprint: "ca4e0ca91ccc224a", role: Boundary, owner: "crates/feature/vmux_account/src/wire.rs||enum:Response", reason: "Externally tagged serde Account JSON response vocabulary decoded into owned native facts before connection systems adopt it."),
     (key: "crates/feature/vmux_account/src/relay.rs||enum:Step", fingerprint: "83ff71f62ce947a3", role: Phase, owner: "crates/feature/vmux_account/src/relay.rs||struct:Peer", reason: "Required unit phase of one accepted enrolled-device authentication/Relay-assertion renewal attempt; typed requests and operation owners remain separate."),
+    (key: "crates/feature/vmux_account/src/mutations.rs||enum:WriteFailure", fingerprint: "faa8ea4daa07e66b", role: Boundary, owner: "crates/feature/vmux_account/src/local.rs||impl:Database", reason: "SQLite generation conflict or storage IO error returned by Database::write."),
   ],
   bodies: [
     (key: "crates/feature/vmux_account/src/local.rs||impl:Database::write", fingerprint: "6bebcd068928b502", boundary: "crates/feature/vmux_account/src/local.rs||impl:Database", reason: "One bounded SQLite record/receipt/outbox/checkpoint transaction and requested profile-directory IO; generation/idempotency guards and rollback are native atomicity, while all value selection and reconciliation remain in registered systems."),
-  ],
-  debt: [
-    (key: "crates/feature/vmux_account/src/account.rs||enum:Set", fingerprint: "a9ac5cdbeb7790de", issue: "VMX-253", finding: "AU-13"),
-    (key: "crates/feature/vmux_account/src/mutations.rs||enum:WriteFailure", fingerprint: "faa8ea4daa07e66b", issue: "VMX-253", finding: "AU-13"),
   ],
 ),
 )

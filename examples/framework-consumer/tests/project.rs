@@ -7,9 +7,9 @@ use bevy_ecs::system::SystemState;
 use vmux_app::ecs::{Operation, OperationState};
 use vmux_app::project::contract::ProjectArchiveRequest;
 use vmux_app::project::{
-    AliasCompleted, AliasRequest, Error, LoadCompleted, LoadRequest, Mutation, ProjectId,
-    ProjectSaved, Registrations, Root, Snapshot, WriteCompleted, WriteRequest, WriteResult,
-    WriteTaskRequest,
+    AliasCompleted, AliasRequest, ArchiveProjectRequest, Error, LoadCompleted, LoadRequest,
+    ProjectId, ProjectSaved, Registrations, RemoveProjectRequest, Root, SaveProjectRequest,
+    Snapshot, WriteCompleted, WriteResult, WriteTaskRequest,
 };
 
 struct Consumer(App);
@@ -44,38 +44,26 @@ impl Consumer {
         state.get(self.0.world()).unwrap().snapshot(Path::new(path))
     }
 
-    fn submit(&mut self, root: &str, mutation: Mutation) -> Entity {
+    fn submit(&mut self, request: impl Bundle) -> Entity {
         let operation = Operation::bundle("consumer-project").unwrap();
-        let entity = self
-            .0
-            .world_mut()
-            .spawn((
-                operation,
-                WriteRequest {
-                    root: root.into(),
-                    mutation,
-                },
-            ))
-            .id();
+        let entity = self.0.world_mut().spawn((operation, request)).id();
         self.0.update();
         entity
     }
 
     fn save(&mut self, root: &str, name: &str, revision: u64) -> Entity {
-        self.submit(
-            root,
-            Mutation::Save {
-                expected: revision,
-                project: ProjectSaved {
-                    root: root.into(),
-                    id: ProjectId("shared-id".into()),
-                    directory: Path::new(root).join("checkout"),
-                    name: name.into(),
-                    repository: None,
-                    revision: 0,
-                },
+        self.submit(SaveProjectRequest {
+            root: root.into(),
+            expected: revision,
+            project: ProjectSaved {
+                root: root.into(),
+                id: ProjectId("shared-id".into()),
+                directory: Path::new(root).join("checkout"),
+                name: name.into(),
+                repository: None,
+                revision: 0,
             },
-        )
+        })
     }
 
     fn requests(&mut self) -> Vec<WriteTaskRequest> {
@@ -88,13 +76,11 @@ impl Consumer {
 
     fn archive(&mut self, root: &str, payload: &str) -> Entity {
         let request: ProjectArchiveRequest = serde_json::from_str(payload).unwrap();
-        self.submit(
-            root,
-            Mutation::Archive {
-                url: request.url,
-                archived: request.archived,
-            },
-        )
+        self.submit(ArchiveProjectRequest {
+            root: root.into(),
+            url: request.url,
+            archived: request.archived,
+        })
     }
 
     fn complete(&mut self, request: WriteTaskRequest, result: Result<BTreeSet<String>, Error>) {
@@ -242,7 +228,10 @@ fn accepted_removal_keeps_alias_lookup_and_write_independent_of_the_requester() 
     consumer.save("/projects", "Original", 0);
     let request = consumer.requests().pop().unwrap();
     consumer.complete(request, Ok(BTreeSet::new()));
-    let requester = consumer.submit("/projects", Mutation::Remove("shared-id".into()));
+    let requester = consumer.submit(RemoveProjectRequest {
+        root: "/projects".into(),
+        url: "shared-id".into(),
+    });
     let alias = consumer.alias_requests().pop().unwrap();
     assert!(consumer.requests().is_empty());
     consumer.0.world_mut().despawn(requester);

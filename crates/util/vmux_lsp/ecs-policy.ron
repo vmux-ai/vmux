@@ -14,9 +14,4 @@ values: [
     (key: "crates/util/vmux_lsp/src/lib.rs||struct:WireReply", owner: "crates/util/vmux_lsp/src/lib.rs||struct:Request", lifetime: "one bounded wire response receiver owned by its canonical request Component"),
     (key: "crates/util/vmux_lsp/src/diagnostics.rs||struct:ReceivedDiagnostics", owner: "crates/util/vmux_lsp/src/diagnostics.rs||struct:DiagnosticsInbox", lifetime: "one raw LSP wire envelope in the scoped IO mailbox"),
 ],
-shape: (
-  debt: [
-    (key: "crates/util/vmux_lsp/src/document.rs||fn:open", fingerprint: "d011c52f06db9ca4", issue: "VMX-253", finding: "AU-14"),
-  ],
-),
 )

@@ -27,8 +27,8 @@ use vmux_session::{CatalogSnapshot, SessionSummaryProjection};
 
 use super::project_form::ProjectFormPlugin;
 use super::project_store::{
-    Mutation, ProjectSaved, ProjectStorePlugin, Registrations, Snapshot, StoreSet, WriteCompleted,
-    WriteRequest,
+    ArchiveProjectRequest, ProjectSaved, ProjectStorePlugin, Registrations, RemoveProjectRequest,
+    SaveProjectRequest, Snapshot, StoreSet, WriteCompleted,
 };
 
 use crate::project::{
@@ -806,12 +806,10 @@ fn archive(
     };
     commands.spawn((
         operation,
-        WriteRequest {
+        ArchiveProjectRequest {
             root: root.to_path_buf(),
-            mutation: Mutation::Archive {
-                url: request.url.clone(),
-                archived: request.archived,
-            },
+            url: request.url.clone(),
+            archived: request.archived,
         },
         PendingArchive {
             webview: trigger.event().webview,
@@ -903,9 +901,9 @@ fn delete(
             Operation::bundle("project.delete").unwrap().running(),
             Deletion,
             pending,
-            WriteRequest {
+            RemoveProjectRequest {
                 root: root.to_path_buf(),
-                mutation: Mutation::Remove(url.clone()),
+                url: url.clone(),
             },
         ));
         return;
@@ -1348,7 +1346,7 @@ fn finish_deletes(
                 Deletion,
                 ProjectDeleteTask,
                 DeletionResult,
-                WriteRequest,
+                RemoveProjectRequest,
             )>();
             if let Some(webview) = current {
                 let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
@@ -1562,12 +1560,10 @@ fn finish_imports(
                 .remove::<(ChildOf, ProjectImportTask)>()
                 .insert((
                     Registration,
-                    WriteRequest {
+                    SaveProjectRequest {
                         root: operation.root.clone(),
-                        mutation: Mutation::Save {
-                            expected: 0,
-                            project: project.clone(),
-                        },
+                        expected: 0,
+                        project: project.clone(),
                     },
                 ));
             continue;
@@ -1653,12 +1649,10 @@ fn finish_repository_operations(
                 .remove::<(ChildOf, PendingSource)>()
                 .insert((
                     Registration,
-                    WriteRequest {
+                    SaveProjectRequest {
                         root: operation.root.clone(),
-                        mutation: Mutation::Save {
-                            expected: 0,
-                            project: source.0.clone(),
-                        },
+                        expected: 0,
+                        project: source.0.clone(),
                     },
                 ));
             continue;

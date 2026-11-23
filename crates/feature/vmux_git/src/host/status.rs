@@ -24,9 +24,6 @@ use super::repository::GitRepository;
 use super::runtime::{GitRuntime, GitTask};
 use super::watch::GitWatch;
 
-const STATUS_DEBOUNCE: Duration = Duration::from_millis(120);
-const DIFF_CONTEXT_LINES: usize = 3;
-
 pub(super) struct StatusPlugin;
 
 impl Plugin for StatusPlugin {
@@ -68,6 +65,8 @@ pub struct FileGit {
 }
 
 impl FileGit {
+    const DIFF_CONTEXT_LINES: usize = 3;
+
     pub fn new(path: impl AsRef<Path>, document: u64) -> Self {
         Self {
             document,
@@ -108,6 +107,8 @@ pub(super) struct FileGitStates<'w, 's> {
 }
 
 impl FileGitStates<'_, '_> {
+    const STATUS_DEBOUNCE: Duration = Duration::from_millis(120);
+
     pub(super) fn contains(&self, entity: Entity) -> bool {
         self.files.contains(entity)
     }
@@ -160,7 +161,7 @@ impl FileGitStates<'_, '_> {
         entity: Entity,
         wake: Option<EventLoopProxy<WinitUserEvent>>,
     ) -> Option<GitStatusRefresh> {
-        self.schedule(entity, STATUS_DEBOUNCE, wake, true)
+        self.schedule(entity, Self::STATUS_DEBOUNCE, wake, true)
     }
 
     pub(super) fn apply_status(&mut self, entity: Entity, event: GitFileStatus) {
@@ -345,8 +346,8 @@ impl FileGitStates<'_, '_> {
             if matches!(line.kind, DiffKind::Context) {
                 continue;
             }
-            let start = index.saturating_sub(DIFF_CONTEXT_LINES);
-            let end = (index + DIFF_CONTEXT_LINES + 1).min(lines.len());
+            let start = index.saturating_sub(FileGit::DIFF_CONTEXT_LINES);
+            let end = (index + FileGit::DIFF_CONTEXT_LINES + 1).min(lines.len());
             visible[start..end].fill(true);
         }
         for (start, end) in &file.revealed_diff.0 {
@@ -668,15 +669,9 @@ impl GitStatusRequestInput {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum GitStatusBatchKey {
-    Repository(PathBuf),
-    Discover,
-}
-
 #[derive(Component)]
 struct GitStatusTask {
-    key: GitStatusBatchKey,
+    key: Option<PathBuf>,
     requests: Vec<GitStatusRequestIdentity>,
     task: GitTask<GitStatusResults>,
 }
@@ -776,12 +771,11 @@ impl GitStatusResults {
     }
 }
 
-type ChangedDiffSource<'a> = (Entity, Ref<'a, GitDiffSource>);
 type ChangedDiffSourceFilter = (Changed<GitDiffSource>, With<FileGit>);
 
 #[derive(SystemParam)]
 struct ChangedDiffSources<'w, 's> {
-    values: Query<'w, 's, ChangedDiffSource<'static>, ChangedDiffSourceFilter>,
+    values: Query<'w, 's, (Entity, Ref<'static, GitDiffSource>), ChangedDiffSourceFilter>,
 }
 
 fn file_added(
@@ -812,7 +806,9 @@ fn refresh_changed_sources(
         if source.is_added() {
             continue;
         }
-        if let Some(refresh) = files.schedule(entity, STATUS_DEBOUNCE, wake.clone(), false) {
+        if let Some(refresh) =
+            files.schedule(entity, FileGitStates::STATUS_DEBOUNCE, wake.clone(), false)
+        {
             commands.entity(entity).insert(refresh);
         }
     }
@@ -954,15 +950,13 @@ fn dispatch_requests(
     runtime: Res<GitRuntime>,
     mut commands: Commands,
 ) {
-    let active: HashSet<GitStatusBatchKey> = tasks.iter().map(|task| task.key.clone()).collect();
-    let mut batches: HashMap<GitStatusBatchKey, Vec<GitStatusRequestInput>> = HashMap::new();
+    let active: HashSet<Option<PathBuf>> = tasks.iter().map(|task| task.key.clone()).collect();
+    let mut batches: HashMap<Option<PathBuf>, Vec<GitStatusRequestInput>> = HashMap::new();
     for (webview, request) in &pending {
-        let key = match request.repo_root.as_ref() {
-            Some(root) => {
-                GitStatusBatchKey::Repository(PathIdentity::lexical(root).into_path_buf())
-            }
-            None => GitStatusBatchKey::Discover,
-        };
+        let key = request
+            .repo_root
+            .as_ref()
+            .map(|root| PathIdentity::lexical(root).into_path_buf());
         if active.contains(&key) {
             continue;
         }

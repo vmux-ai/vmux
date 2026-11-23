@@ -10,13 +10,6 @@ use std::os::unix::fs::symlink;
 
 use super::vault::{KnowledgeVault, SkillsDir};
 
-const KNOWLEDGE_START: &str = "<!-- vmux-knowledge:start -->";
-const KNOWLEDGE_END: &str = "<!-- vmux-knowledge:end -->";
-const CODEX_SKILLS_START: &str = "# vmux-knowledge-skills:start";
-const CODEX_SKILLS_END: &str = "# vmux-knowledge-skills:end";
-const MIN_CODEX_PROJECT_DOC_BYTES: usize = 1024 * 1024;
-const CODEX_PROJECT_DOC_HEADROOM: usize = 256 * 1024;
-
 struct AgentConfigPaths {
     claude_instructions: PathBuf,
     claude_settings: PathBuf,
@@ -29,9 +22,27 @@ struct AgentConfigPaths {
     vibe_config: PathBuf,
 }
 
-struct AgentConfigAccess;
+impl KnowledgeVault {
+    pub(crate) fn sync_agent_configs(&self) -> io::Result<()> {
+        let _access = AgentConfigPaths::lock()?;
+        self.memories().import_external()?;
+        let skills = self.skills().into_path();
+        let memories = self.memories().into_path();
+        std::fs::create_dir_all(&skills)?;
+        std::fs::create_dir_all(&memories)?;
+        let canonical = self.root().join("AGENTS.md");
+        AgentConfigPaths::from_env().sync(&skills, &memories, &canonical)
+    }
+}
 
-impl AgentConfigAccess {
+impl AgentConfigPaths {
+    const KNOWLEDGE_START: &'static str = "<!-- vmux-knowledge:start -->";
+    const KNOWLEDGE_END: &'static str = "<!-- vmux-knowledge:end -->";
+    const CODEX_SKILLS_START: &'static str = "# vmux-knowledge-skills:start";
+    const CODEX_SKILLS_END: &'static str = "# vmux-knowledge-skills:end";
+    const MIN_CODEX_PROJECT_DOC_BYTES: usize = 1024 * 1024;
+    const CODEX_PROJECT_DOC_HEADROOM: usize = 256 * 1024;
+
     fn lock() -> io::Result<MutexGuard<'static, ()>> {
         static ACCESS: OnceLock<Mutex<()>> = OnceLock::new();
         ACCESS
@@ -39,9 +50,7 @@ impl AgentConfigAccess {
             .lock()
             .map_err(|error| io::Error::other(error.to_string()))
     }
-}
 
-impl AgentConfigPaths {
     fn from_env() -> Self {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -67,545 +76,528 @@ impl AgentConfigPaths {
             vibe_config: vibe.join("config.toml"),
         }
     }
-}
 
-impl KnowledgeVault {
-    pub(crate) fn sync_agent_configs(&self) -> io::Result<()> {
-        let _access = AgentConfigAccess::lock()?;
-        self.memories().import_external()?;
-        let skills = self.skills().into_path();
-        let memories = self.memories().into_path();
-        std::fs::create_dir_all(&skills)?;
-        std::fs::create_dir_all(&memories)?;
-        let canonical = self.root().join("AGENTS.md");
-        sync_external_agent_configs_from(
-            &AgentConfigPaths::from_env(),
-            &skills,
-            &memories,
-            &canonical,
-        )
+    fn sync(&self, skills_root: &Path, memories_root: &Path, canonical: &Path) -> io::Result<()> {
+        let skills = SkillsDir::at(skills_root).skills();
+        let mut error = None;
+        Self::keep_first_error(
+            &mut error,
+            Self::link_instructions(&self.claude_instructions, canonical),
+        );
+        let claude_memories = memories_root.join("claude").join("auto");
+        Self::keep_first_error(
+            &mut error,
+            std::fs::create_dir_all(&claude_memories)
+                .and_then(|_| Self::sync_claude_settings(&self.claude_settings, &claude_memories)),
+        );
+        Self::keep_first_error(
+            &mut error,
+            Self::sync_claude_skills(&self.claude_skills, skills_root, &skills),
+        );
+        Self::keep_first_error(
+            &mut error,
+            Self::link_instructions(&self.codex_instructions, canonical),
+        );
+        Self::keep_first_error(
+            &mut error,
+            Self::sync_codex_config(&self.codex_config, &skills, 0),
+        );
+        Self::keep_first_error(
+            &mut error,
+            Self::redirect_empty_directory(
+                &self.codex_memories,
+                &memories_root.join("codex").join("local"),
+            ),
+        );
+        Self::keep_first_error(
+            &mut error,
+            Self::redirect_empty_directory(
+                &self.codex_extension_memories,
+                &memories_root.join("codex").join("extensions"),
+            ),
+        );
+        Self::keep_first_error(
+            &mut error,
+            Self::link_instructions(&self.vibe_instructions, canonical),
+        );
+        Self::keep_first_error(
+            &mut error,
+            Self::sync_vibe_config(&self.vibe_config, skills_root),
+        );
+        error.map_or(Ok(()), Err)
     }
-}
 
-fn sync_external_agent_configs_from(
-    paths: &AgentConfigPaths,
-    skills_root: &Path,
-    memories_root: &Path,
-    canonical: &Path,
-) -> io::Result<()> {
-    let skills = SkillsDir::at(skills_root).skills();
-    let mut error = None;
-    keep_first_error(
-        &mut error,
-        link_instructions(&paths.claude_instructions, canonical),
-    );
-    let claude_memories = memories_root.join("claude").join("auto");
-    keep_first_error(
-        &mut error,
-        std::fs::create_dir_all(&claude_memories)
-            .and_then(|_| sync_claude_settings(&paths.claude_settings, &claude_memories)),
-    );
-    keep_first_error(
-        &mut error,
-        sync_claude_skills(&paths.claude_skills, skills_root, &skills),
-    );
-    keep_first_error(
-        &mut error,
-        link_instructions(&paths.codex_instructions, canonical),
-    );
-    keep_first_error(
-        &mut error,
-        sync_codex_config(&paths.codex_config, &skills, 0),
-    );
-    keep_first_error(
-        &mut error,
-        redirect_empty_directory(
-            &paths.codex_memories,
-            &memories_root.join("codex").join("local"),
-        ),
-    );
-    keep_first_error(
-        &mut error,
-        redirect_empty_directory(
-            &paths.codex_extension_memories,
-            &memories_root.join("codex").join("extensions"),
-        ),
-    );
-    keep_first_error(
-        &mut error,
-        link_instructions(&paths.vibe_instructions, canonical),
-    );
-    keep_first_error(
-        &mut error,
-        sync_vibe_config(&paths.vibe_config, skills_root),
-    );
-    error.map_or(Ok(()), Err)
-}
-
-fn keep_first_error(first: &mut Option<io::Error>, result: io::Result<()>) {
-    if first.is_none()
-        && let Err(error) = result
-    {
-        *first = Some(error);
+    fn keep_first_error(first: &mut Option<io::Error>, result: io::Result<()>) {
+        if first.is_none()
+            && let Err(error) = result
+        {
+            *first = Some(error);
+        }
     }
-}
 
-#[cfg(unix)]
-fn link_instructions(path: &Path, canonical: &Path) -> io::Result<()> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            if metadata.file_type().is_symlink() {
-                if symlink_points_to(path, canonical)? {
+    #[cfg(unix)]
+    fn link_instructions(path: &Path, canonical: &Path) -> io::Result<()> {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    if Self::symlink_points_to(path, canonical)? {
+                        return Ok(());
+                    }
+                    bevy::log::warn!(
+                        "vmux Knowledge: leaving existing symlink {} untouched (it points outside the Knowledge vault)",
+                        path.display()
+                    );
                     return Ok(());
                 }
-                bevy::log::warn!(
-                    "vmux Knowledge: leaving existing symlink {} untouched (it points outside the Knowledge vault)",
-                    path.display()
-                );
-                return Ok(());
+                let existing = Self::read_optional(path)?;
+                if !existing.contains(Self::KNOWLEDGE_START) {
+                    bevy::log::warn!(
+                        "vmux Knowledge: leaving existing {} untouched; edit {} to share it across agents",
+                        path.display(),
+                        canonical.display()
+                    );
+                    return Ok(());
+                }
+                Self::ensure_canonical(canonical)?;
+                Self::seed_canonical(canonical, &existing)?;
+                Self::back_up(path)?;
             }
-            let existing = read_optional(path)?;
-            if !existing.contains(KNOWLEDGE_START) {
-                bevy::log::warn!(
-                    "vmux Knowledge: leaving existing {} untouched; edit {} to share it across agents",
-                    path.display(),
-                    canonical.display()
-                );
-                return Ok(());
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if Self::read_optional(canonical)?.is_empty() {
+                    return Ok(());
+                }
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
             }
-            ensure_canonical(canonical)?;
-            seed_canonical(canonical, &existing)?;
-            back_up(path)?;
+            Err(error) => return Err(error),
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            if read_optional(canonical)?.is_empty() {
-                return Ok(());
-            }
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
+        symlink(canonical, path)
+    }
+
+    #[cfg(not(unix))]
+    fn link_instructions(_path: &Path, _canonical: &Path) -> io::Result<()> {
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn ensure_canonical(canonical: &Path) -> io::Result<()> {
+        if canonical.exists() {
+            return Ok(());
         }
-        Err(error) => return Err(error),
-    }
-    symlink(canonical, path)
-}
-
-#[cfg(not(unix))]
-fn link_instructions(_path: &Path, _canonical: &Path) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn ensure_canonical(canonical: &Path) -> io::Result<()> {
-    if canonical.exists() {
-        return Ok(());
-    }
-    if let Some(parent) = canonical.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(canonical, "")
-}
-
-#[cfg(unix)]
-fn symlink_points_to(path: &Path, canonical: &Path) -> io::Result<bool> {
-    let target = std::fs::read_link(path)?;
-    let target = if target.is_absolute() {
-        target
-    } else {
-        path.parent().unwrap_or_else(|| Path::new("/")).join(target)
-    };
-    Ok(target == canonical)
-}
-
-#[cfg(unix)]
-fn seed_canonical(canonical: &Path, existing: &str) -> io::Result<()> {
-    if !read_optional(canonical)?.is_empty() {
-        return Ok(());
-    }
-    let leftover = merge_managed_section(existing, "", KNOWLEDGE_START, KNOWLEDGE_END)?;
-    let leftover = leftover.trim();
-    if leftover.is_empty() {
-        return Ok(());
-    }
-    std::fs::write(canonical, format!("{leftover}\n"))
-}
-
-#[cfg(unix)]
-fn back_up(path: &Path) -> io::Result<()> {
-    let mut backup = path.as_os_str().to_owned();
-    backup.push(".bak");
-    std::fs::rename(path, backup)
-}
-
-fn merge_managed_section(
-    existing: &str,
-    body: &str,
-    start_marker: &str,
-    end_marker: &str,
-) -> io::Result<String> {
-    let start = existing.find(start_marker);
-    let end = existing.find(end_marker);
-    if start.is_some() != end.is_some() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("incomplete {start_marker} section"),
-        ));
-    }
-    let without_managed = match (start, end) {
-        (Some(start), Some(end)) if end >= start => {
-            let end = end + end_marker.len();
-            let before = &existing[..start];
-            let after = existing[end..]
-                .strip_prefix('\n')
-                .unwrap_or(&existing[end..]);
-            format!("{before}{after}")
+        if let Some(parent) = canonical.parent() {
+            std::fs::create_dir_all(parent)?;
         }
-        (Some(_), Some(_)) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("invalid {start_marker} section"),
-            ));
-        }
-        (None, None) => existing.to_string(),
-        _ => unreachable!(),
-    };
-    if body.is_empty() {
-        return Ok(without_managed);
+        std::fs::write(canonical, "")
     }
-    let separator = if without_managed.is_empty() || without_managed.ends_with("\n\n") {
-        ""
-    } else if without_managed.ends_with('\n') {
-        "\n"
-    } else {
-        "\n\n"
-    };
-    Ok(format!(
-        "{without_managed}{separator}{start_marker}\n{}\n{end_marker}\n",
-        body.trim_end()
-    ))
-}
 
-fn sync_claude_settings(path: &Path, memories: &Path) -> io::Result<()> {
-    let existing = read_optional(path)?;
-    let mut settings = if existing.is_empty() {
-        serde_json::json!({})
-    } else {
-        serde_json::from_str::<serde_json::Value>(&existing)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
-    };
-    let object = settings.as_object_mut().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Claude settings root must be an object",
-        )
-    })?;
-    object.insert(
-        "autoMemoryDirectory".to_string(),
-        serde_json::Value::String(memories.to_string_lossy().into_owned()),
-    );
-    let mut updated = serde_json::to_string_pretty(&settings)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    updated.push('\n');
-    write_changed(path, &existing, &updated)
-}
-
-#[cfg(unix)]
-fn sync_claude_skills(
-    destination: &Path,
-    skills_root: &Path,
-    skills: &[PathBuf],
-) -> io::Result<()> {
-    std::fs::create_dir_all(destination)?;
-    let desired = skills.iter().cloned().collect::<HashSet<_>>();
-    for entry in std::fs::read_dir(destination)?.flatten() {
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if !file_type.is_symlink() {
-            continue;
-        }
-        let Ok(target) = std::fs::read_link(entry.path()) else {
-            continue;
-        };
+    #[cfg(unix)]
+    fn symlink_points_to(path: &Path, canonical: &Path) -> io::Result<bool> {
+        let target = std::fs::read_link(path)?;
         let target = if target.is_absolute() {
             target
         } else {
-            destination.join(target)
+            path.parent().unwrap_or_else(|| Path::new("/")).join(target)
         };
-        if target.starts_with(skills_root) && !desired.contains(&target) {
-            std::fs::remove_file(entry.path())?;
-        }
+        Ok(target == canonical)
     }
-    for skill in skills {
-        let Some(name) = skill.file_name() else {
-            continue;
-        };
-        let link = destination.join(name);
-        match std::fs::symlink_metadata(&link) {
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => symlink(skill, link)?,
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(())
-}
 
-#[cfg(unix)]
-fn redirect_empty_directory(path: &Path, target: &Path) -> io::Result<()> {
-    std::fs::create_dir_all(target)?;
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            let link = std::fs::read_link(path)?;
-            let link = if link.is_absolute() {
-                link
-            } else {
-                path.parent().unwrap_or_else(|| Path::new("/")).join(link)
-            };
-            if link == target {
-                return Ok(());
-            }
+    #[cfg(unix)]
+    fn seed_canonical(canonical: &Path, existing: &str) -> io::Result<()> {
+        if !Self::read_optional(canonical)?.is_empty() {
+            return Ok(());
+        }
+        let leftover =
+            Self::merge_managed_section(existing, "", Self::KNOWLEDGE_START, Self::KNOWLEDGE_END)?;
+        let leftover = leftover.trim();
+        if leftover.is_empty() {
+            return Ok(());
+        }
+        std::fs::write(canonical, format!("{leftover}\n"))
+    }
+
+    #[cfg(unix)]
+    fn back_up(path: &Path) -> io::Result<()> {
+        let mut backup = path.as_os_str().to_owned();
+        backup.push(".bak");
+        std::fs::rename(path, backup)
+    }
+
+    fn merge_managed_section(
+        existing: &str,
+        body: &str,
+        start_marker: &str,
+        end_marker: &str,
+    ) -> io::Result<String> {
+        let start = existing.find(start_marker);
+        let end = existing.find(end_marker);
+        if start.is_some() != end.is_some() {
             return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!("{} points to {}", path.display(), link.display()),
+                io::ErrorKind::InvalidData,
+                format!("incomplete {start_marker} section"),
             ));
         }
-        Ok(metadata) if metadata.is_dir() => {
-            if std::fs::read_dir(path)?.next().is_some() {
-                return Ok(());
+        let without_managed = match (start, end) {
+            (Some(start), Some(end)) if end >= start => {
+                let end = end + end_marker.len();
+                let before = &existing[..start];
+                let after = existing[end..]
+                    .strip_prefix('\n')
+                    .unwrap_or(&existing[end..]);
+                format!("{before}{after}")
             }
-            std::fs::remove_dir(path)?;
+            (Some(_), Some(_)) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("invalid {start_marker} section"),
+                ));
+            }
+            (None, None) => existing.to_string(),
+            _ => unreachable!(),
+        };
+        if body.is_empty() {
+            return Ok(without_managed);
         }
-        Ok(_) => return Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
+        let separator = if without_managed.is_empty() || without_managed.ends_with("\n\n") {
+            ""
+        } else if without_managed.ends_with('\n') {
+            "\n"
+        } else {
+            "\n\n"
+        };
+        Ok(format!(
+            "{without_managed}{separator}{start_marker}\n{}\n{end_marker}\n",
+            body.trim_end()
+        ))
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    symlink(target, path)
-}
 
-#[cfg(not(unix))]
-fn redirect_empty_directory(_path: &Path, _target: &Path) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn sync_claude_skills(
-    _destination: &Path,
-    _skills_root: &Path,
-    _skills: &[PathBuf],
-) -> io::Result<()> {
-    Ok(())
-}
-
-fn sync_codex_config(path: &Path, skills: &[PathBuf], memories_bytes: usize) -> io::Result<()> {
-    let existing = read_optional(path)?;
-    let minimum =
-        MIN_CODEX_PROJECT_DOC_BYTES.max(memories_bytes.saturating_add(CODEX_PROJECT_DOC_HEADROOM));
-    let with_limit = ensure_root_integer(&existing, "project_doc_max_bytes", minimum);
-    let block = skills
-        .iter()
-        .map(|skill| {
-            format!(
-                "[[skills.config]]\npath = {}\nenabled = true",
-                serde_json::to_string(skill.to_string_lossy().as_ref())
-                    .unwrap_or_else(|_| "\"\"".to_string())
+    fn sync_claude_settings(path: &Path, memories: &Path) -> io::Result<()> {
+        let existing = Self::read_optional(path)?;
+        let mut settings = if existing.is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str::<serde_json::Value>(&existing)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+        };
+        let object = settings.as_object_mut().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Claude settings root must be an object",
             )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let updated = merge_managed_section(&with_limit, &block, CODEX_SKILLS_START, CODEX_SKILLS_END)?;
-    write_changed(path, &existing, &updated)
-}
-
-fn ensure_root_integer(existing: &str, key: &str, minimum: usize) -> String {
-    if let Some(range) = root_assignment_line(existing, key) {
-        let line = &existing[range.clone()];
-        let value = line
-            .split_once('=')
-            .map(|(_, value)| value)
-            .unwrap_or_default()
-            .split('#')
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .parse::<usize>()
-            .unwrap_or_default();
-        if value >= minimum {
-            return existing.to_string();
-        }
-        return format!(
-            "{}{} = {}{}",
-            &existing[..range.start],
-            key,
-            minimum,
-            &existing[range.end..]
+        })?;
+        object.insert(
+            "autoMemoryDirectory".to_string(),
+            serde_json::Value::String(memories.to_string_lossy().into_owned()),
         );
-    }
-    if existing.is_empty() {
-        format!("{key} = {minimum}\n")
-    } else {
-        format!("{key} = {minimum}\n\n{existing}")
-    }
-}
-
-fn sync_vibe_config(path: &Path, skills_root: &Path) -> io::Result<()> {
-    let existing = read_optional(path)?;
-    let mut values = if existing.is_empty() {
-        Vec::new()
-    } else {
-        let parsed = existing
-            .parse::<toml::Value>()
+        let mut updated = serde_json::to_string_pretty(&settings)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        match parsed.get("skill_paths") {
-            Some(value) => value
-                .as_array()
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "skill_paths must be an array")
-                })?
-                .iter()
-                .map(|value| {
-                    value.as_str().map(str::to_string).ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "skill_paths entries must be strings",
-                        )
-                    })
-                })
-                .collect::<io::Result<Vec<_>>>()?,
-            None => Vec::new(),
-        }
-    };
-    let knowledge = skills_root.to_string_lossy().into_owned();
-    if !values.contains(&knowledge) {
-        values.push(knowledge);
+        updated.push('\n');
+        Self::write_changed(path, &existing, &updated)
     }
-    let rendered = format!(
-        "[{}]",
-        values
-            .iter()
-            .map(|value| serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string()))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    let updated = replace_root_array(&existing, "skill_paths", &rendered);
-    write_changed(path, &existing, &updated)
-}
 
-fn replace_root_array(existing: &str, key: &str, rendered: &str) -> String {
-    if let Some(range) = root_array_assignment(existing, key) {
-        return format!(
-            "{}{} = {}{}",
-            &existing[..range.start],
-            key,
-            rendered,
-            &existing[range.end..]
-        );
-    }
-    if existing.is_empty() {
-        format!("{key} = {rendered}\n")
-    } else {
-        format!("{key} = {rendered}\n\n{existing}")
-    }
-}
-
-fn root_assignment_line(text: &str, key: &str) -> Option<Range<usize>> {
-    let mut offset = 0;
-    for line in text.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('[') {
-            return None;
-        }
-        if assignment_value_offset(trimmed, key).is_some() {
-            let indentation = line.len() - trimmed.len();
-            let end = offset + line.trim_end_matches('\n').len();
-            return Some(offset + indentation..end);
-        }
-        offset += line.len();
-    }
-    None
-}
-
-fn root_array_assignment(text: &str, key: &str) -> Option<Range<usize>> {
-    let mut offset = 0;
-    for line in text.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('[') {
-            return None;
-        }
-        if let Some(value_offset) = assignment_value_offset(trimmed, key) {
-            let start = offset + line.len() - trimmed.len();
-            let value_start = start + value_offset;
-            let suffix = &text[value_start..];
-            let array_start = suffix.find('[')?;
-            let array_end = array_end(&suffix[array_start..])?;
-            return Some(start..value_start + array_start + array_end);
-        }
-        offset += line.len();
-    }
-    None
-}
-
-fn assignment_value_offset(line: &str, key: &str) -> Option<usize> {
-    let rest = line.strip_prefix(key)?;
-    if rest
-        .chars()
-        .next()
-        .is_some_and(|character| character.is_alphanumeric() || character == '_')
-    {
-        return None;
-    }
-    let equals = rest.find('=')?;
-    Some(key.len() + equals + 1)
-}
-
-fn array_end(text: &str) -> Option<usize> {
-    let mut depth = 0usize;
-    let mut quoted = None;
-    let mut escaped = false;
-    for (index, character) in text.char_indices() {
-        if let Some(quote) = quoted {
-            if escaped {
-                escaped = false;
-            } else if quote == '"' && character == '\\' {
-                escaped = true;
-            } else if character == quote {
-                quoted = None;
+    #[cfg(unix)]
+    fn sync_claude_skills(
+        destination: &Path,
+        skills_root: &Path,
+        skills: &[PathBuf],
+    ) -> io::Result<()> {
+        std::fs::create_dir_all(destination)?;
+        let desired = skills.iter().cloned().collect::<HashSet<_>>();
+        for entry in std::fs::read_dir(destination)?.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_symlink() {
+                continue;
             }
-            continue;
+            let Ok(target) = std::fs::read_link(entry.path()) else {
+                continue;
+            };
+            let target = if target.is_absolute() {
+                target
+            } else {
+                destination.join(target)
+            };
+            if target.starts_with(skills_root) && !desired.contains(&target) {
+                std::fs::remove_file(entry.path())?;
+            }
         }
-        match character {
-            '"' | '\'' => quoted = Some(character),
-            '[' => depth += 1,
-            ']' => {
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    return Some(index + character.len_utf8());
+        for skill in skills {
+            let Some(name) = skill.file_name() else {
+                continue;
+            };
+            let link = destination.join(name);
+            match std::fs::symlink_metadata(&link) {
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => symlink(skill, link)?,
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn redirect_empty_directory(path: &Path, target: &Path) -> io::Result<()> {
+        std::fs::create_dir_all(target)?;
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                let link = std::fs::read_link(path)?;
+                let link = if link.is_absolute() {
+                    link
+                } else {
+                    path.parent().unwrap_or_else(|| Path::new("/")).join(link)
+                };
+                if link == target {
+                    return Ok(());
                 }
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("{} points to {}", path.display(), link.display()),
+                ));
             }
-            _ => {}
+            Ok(metadata) if metadata.is_dir() => {
+                if std::fs::read_dir(path)?.next().is_some() {
+                    return Ok(());
+                }
+                std::fs::remove_dir(path)?;
+            }
+            Ok(_) => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        symlink(target, path)
+    }
+
+    #[cfg(not(unix))]
+    fn redirect_empty_directory(_path: &Path, _target: &Path) -> io::Result<()> {
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn sync_claude_skills(
+        _destination: &Path,
+        _skills_root: &Path,
+        _skills: &[PathBuf],
+    ) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn sync_codex_config(path: &Path, skills: &[PathBuf], memories_bytes: usize) -> io::Result<()> {
+        let existing = Self::read_optional(path)?;
+        let minimum = Self::MIN_CODEX_PROJECT_DOC_BYTES
+            .max(memories_bytes.saturating_add(Self::CODEX_PROJECT_DOC_HEADROOM));
+        let with_limit = Self::ensure_root_integer(&existing, "project_doc_max_bytes", minimum);
+        let block = skills
+            .iter()
+            .map(|skill| {
+                format!(
+                    "[[skills.config]]\npath = {}\nenabled = true",
+                    serde_json::to_string(skill.to_string_lossy().as_ref())
+                        .unwrap_or_else(|_| "\"\"".to_string())
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let updated = Self::merge_managed_section(
+            &with_limit,
+            &block,
+            Self::CODEX_SKILLS_START,
+            Self::CODEX_SKILLS_END,
+        )?;
+        Self::write_changed(path, &existing, &updated)
+    }
+
+    fn ensure_root_integer(existing: &str, key: &str, minimum: usize) -> String {
+        if let Some(range) = Self::root_assignment_line(existing, key) {
+            let line = &existing[range.clone()];
+            let value = line
+                .split_once('=')
+                .map(|(_, value)| value)
+                .unwrap_or_default()
+                .split('#')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .parse::<usize>()
+                .unwrap_or_default();
+            if value >= minimum {
+                return existing.to_string();
+            }
+            return format!(
+                "{}{} = {}{}",
+                &existing[..range.start],
+                key,
+                minimum,
+                &existing[range.end..]
+            );
+        }
+        if existing.is_empty() {
+            format!("{key} = {minimum}\n")
+        } else {
+            format!("{key} = {minimum}\n\n{existing}")
         }
     }
-    None
-}
 
-fn read_optional(path: &Path) -> io::Result<String> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => Ok(text),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(String::new()),
-        Err(error) => Err(error),
+    fn sync_vibe_config(path: &Path, skills_root: &Path) -> io::Result<()> {
+        let existing = Self::read_optional(path)?;
+        let mut values = if existing.is_empty() {
+            Vec::new()
+        } else {
+            let parsed = existing
+                .parse::<toml::Value>()
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            match parsed.get("skill_paths") {
+                Some(value) => value
+                    .as_array()
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "skill_paths must be an array")
+                    })?
+                    .iter()
+                    .map(|value| {
+                        value.as_str().map(str::to_string).ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "skill_paths entries must be strings",
+                            )
+                        })
+                    })
+                    .collect::<io::Result<Vec<_>>>()?,
+                None => Vec::new(),
+            }
+        };
+        let knowledge = skills_root.to_string_lossy().into_owned();
+        if !values.contains(&knowledge) {
+            values.push(knowledge);
+        }
+        let rendered = format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|value| serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let updated = Self::replace_root_array(&existing, "skill_paths", &rendered);
+        Self::write_changed(path, &existing, &updated)
     }
-}
 
-fn write_changed(path: &Path, existing: &str, updated: &str) -> io::Result<()> {
-    if existing == updated {
-        return Ok(());
+    fn replace_root_array(existing: &str, key: &str, rendered: &str) -> String {
+        if let Some(range) = Self::root_array_assignment(existing, key) {
+            return format!(
+                "{}{} = {}{}",
+                &existing[..range.start],
+                key,
+                rendered,
+                &existing[range.end..]
+            );
+        }
+        if existing.is_empty() {
+            format!("{key} = {rendered}\n")
+        } else {
+            format!("{key} = {rendered}\n\n{existing}")
+        }
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+
+    fn root_assignment_line(text: &str, key: &str) -> Option<Range<usize>> {
+        let mut offset = 0;
+        for line in text.split_inclusive('\n') {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with('[') {
+                return None;
+            }
+            if Self::assignment_value_offset(trimmed, key).is_some() {
+                let indentation = line.len() - trimmed.len();
+                let end = offset + line.trim_end_matches('\n').len();
+                return Some(offset + indentation..end);
+            }
+            offset += line.len();
+        }
+        None
     }
-    std::fs::write(path, updated)
+
+    fn root_array_assignment(text: &str, key: &str) -> Option<Range<usize>> {
+        let mut offset = 0;
+        for line in text.split_inclusive('\n') {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with('[') {
+                return None;
+            }
+            if let Some(value_offset) = Self::assignment_value_offset(trimmed, key) {
+                let start = offset + line.len() - trimmed.len();
+                let value_start = start + value_offset;
+                let suffix = &text[value_start..];
+                let array_start = suffix.find('[')?;
+                let array_end = Self::array_end(&suffix[array_start..])?;
+                return Some(start..value_start + array_start + array_end);
+            }
+            offset += line.len();
+        }
+        None
+    }
+
+    fn assignment_value_offset(line: &str, key: &str) -> Option<usize> {
+        let rest = line.strip_prefix(key)?;
+        if rest
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_alphanumeric() || character == '_')
+        {
+            return None;
+        }
+        let equals = rest.find('=')?;
+        Some(key.len() + equals + 1)
+    }
+
+    fn array_end(text: &str) -> Option<usize> {
+        let mut depth = 0usize;
+        let mut quoted = None;
+        let mut escaped = false;
+        for (index, character) in text.char_indices() {
+            if let Some(quote) = quoted {
+                if escaped {
+                    escaped = false;
+                } else if quote == '"' && character == '\\' {
+                    escaped = true;
+                } else if character == quote {
+                    quoted = None;
+                }
+                continue;
+            }
+            match character {
+                '"' | '\'' => quoted = Some(character),
+                '[' => depth += 1,
+                ']' => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        return Some(index + character.len_utf8());
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn read_optional(path: &Path) -> io::Result<String> {
+        match std::fs::read_to_string(path) {
+            Ok(text) => Ok(text),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn write_changed(path: &Path, existing: &str, updated: &str) -> io::Result<()> {
+        if existing == updated {
+            return Ok(());
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, updated)
+    }
 }
 
 #[cfg(test)]
@@ -642,9 +634,16 @@ mod tests {
         std::fs::create_dir_all(paths.claude_instructions.parent().unwrap()).unwrap();
         std::fs::create_dir_all(paths.codex_config.parent().unwrap()).unwrap();
         std::fs::create_dir_all(paths.vibe_config.parent().unwrap()).unwrap();
-        let claude_file =
-            format!("claude user\n\n{KNOWLEDGE_START}\nold memory\n{KNOWLEDGE_END}\n");
-        let block_only = format!("{KNOWLEDGE_START}\nold memory\n{KNOWLEDGE_END}\n");
+        let claude_file = format!(
+            "claude user\n\n{}\nold memory\n{}\n",
+            AgentConfigPaths::KNOWLEDGE_START,
+            AgentConfigPaths::KNOWLEDGE_END
+        );
+        let block_only = format!(
+            "{}\nold memory\n{}\n",
+            AgentConfigPaths::KNOWLEDGE_START,
+            AgentConfigPaths::KNOWLEDGE_END
+        );
         std::fs::write(&paths.claude_instructions, &claude_file).unwrap();
         std::fs::write(&paths.claude_settings, "{\"userSetting\":true}\n").unwrap();
         std::fs::write(&paths.codex_instructions, &block_only).unwrap();
@@ -656,13 +655,18 @@ mod tests {
         )
         .unwrap();
 
-        sync_external_agent_configs_from(&paths, &skills, &memories, &canonical).unwrap();
-        sync_external_agent_configs_from(&paths, &skills, &memories, &canonical).unwrap();
+        paths.sync(&skills, &memories, &canonical).unwrap();
+        paths.sync(&skills, &memories, &canonical).unwrap();
 
         let canonical_text = std::fs::read_to_string(&canonical).unwrap();
         assert_eq!(canonical_text, "claude user\n");
         assert!(!canonical_text.contains("old memory"));
-        assert_eq!(canonical_text.matches(KNOWLEDGE_START).count(), 0);
+        assert_eq!(
+            canonical_text
+                .matches(AgentConfigPaths::KNOWLEDGE_START)
+                .count(),
+            0
+        );
         for path in [
             &paths.claude_instructions,
             &paths.codex_instructions,
@@ -703,14 +707,17 @@ mod tests {
         let codex = std::fs::read_to_string(&paths.codex_config).unwrap();
         assert!(codex.contains("model = \"gpt\""));
         assert!(codex.contains(&skills.join("caveman").to_string_lossy().to_string()));
-        assert_eq!(codex.matches(CODEX_SKILLS_START).count(), 1);
+        assert_eq!(
+            codex.matches(AgentConfigPaths::CODEX_SKILLS_START).count(),
+            1
+        );
         assert!(
             codex
                 .parse::<toml::Value>()
                 .unwrap()
                 .get("project_doc_max_bytes")
                 .and_then(toml::Value::as_integer)
-                .is_some_and(|value| value >= MIN_CODEX_PROJECT_DOC_BYTES as i64)
+                .is_some_and(|value| value >= AgentConfigPaths::MIN_CODEX_PROJECT_DOC_BYTES as i64)
         );
         let vibe = std::fs::read_to_string(&paths.vibe_config)
             .unwrap()
@@ -746,7 +753,7 @@ mod tests {
         let canonical = temp.path().join("knowledge/AGENTS.md");
         let path = temp.path().join("claude/CLAUDE.md");
 
-        link_instructions(&path, &canonical).unwrap();
+        AgentConfigPaths::link_instructions(&path, &canonical).unwrap();
 
         assert!(!path.exists());
         assert!(std::fs::symlink_metadata(&path).is_err());
@@ -762,7 +769,7 @@ mod tests {
         std::fs::write(&canonical, "shared config\n").unwrap();
         let path = temp.path().join("claude/CLAUDE.md");
 
-        link_instructions(&path, &canonical).unwrap();
+        AgentConfigPaths::link_instructions(&path, &canonical).unwrap();
 
         assert_eq!(std::fs::read_link(&path).unwrap(), canonical);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "shared config\n");
@@ -775,10 +782,14 @@ mod tests {
         let canonical = temp.path().join("knowledge/AGENTS.md");
         let path = temp.path().join("claude/CLAUDE.md");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let original = format!("hand config\n\n{KNOWLEDGE_START}\nmemory\n{KNOWLEDGE_END}\n");
+        let original = format!(
+            "hand config\n\n{}\nmemory\n{}\n",
+            AgentConfigPaths::KNOWLEDGE_START,
+            AgentConfigPaths::KNOWLEDGE_END
+        );
         std::fs::write(&path, &original).unwrap();
 
-        link_instructions(&path, &canonical).unwrap();
+        AgentConfigPaths::link_instructions(&path, &canonical).unwrap();
 
         assert_eq!(
             std::fs::read_to_string(&canonical).unwrap(),
@@ -796,7 +807,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
 
         std::fs::write(&canonical, "hand config\nedited\n").unwrap();
-        link_instructions(&path, &canonical).unwrap();
+        AgentConfigPaths::link_instructions(&path, &canonical).unwrap();
         assert_eq!(
             std::fs::read_to_string(&canonical).unwrap(),
             "hand config\nedited\n"
@@ -813,10 +824,14 @@ mod tests {
         std::fs::write(&canonical, "shared config\n").unwrap();
         let path = temp.path().join("codex/AGENTS.md");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let original = format!("codex preamble\n{KNOWLEDGE_START}\nmemory\n{KNOWLEDGE_END}\n");
+        let original = format!(
+            "codex preamble\n{}\nmemory\n{}\n",
+            AgentConfigPaths::KNOWLEDGE_START,
+            AgentConfigPaths::KNOWLEDGE_END
+        );
         std::fs::write(&path, &original).unwrap();
 
-        link_instructions(&path, &canonical).unwrap();
+        AgentConfigPaths::link_instructions(&path, &canonical).unwrap();
 
         assert_eq!(
             std::fs::read_to_string(&canonical).unwrap(),
@@ -837,7 +852,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "my own rules\n").unwrap();
 
-        link_instructions(&path, &canonical).unwrap();
+        AgentConfigPaths::link_instructions(&path, &canonical).unwrap();
 
         assert!(
             !std::fs::symlink_metadata(&path)
@@ -846,7 +861,11 @@ mod tests {
                 .is_symlink()
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "my own rules\n");
-        assert!(read_optional(&canonical).unwrap().is_empty());
+        assert!(
+            AgentConfigPaths::read_optional(&canonical)
+                .unwrap()
+                .is_empty()
+        );
         let mut backup = path.clone().into_os_string();
         backup.push(".bak");
         assert!(!Path::new(&backup).exists());
@@ -864,7 +883,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         symlink(&dotfiles, &path).unwrap();
 
-        link_instructions(&path, &canonical).unwrap();
+        AgentConfigPaths::link_instructions(&path, &canonical).unwrap();
 
         assert!(
             std::fs::symlink_metadata(&path)
@@ -874,17 +893,32 @@ mod tests {
         );
         assert_eq!(std::fs::read_link(&path).unwrap(), dotfiles);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "dotfiles rules\n");
-        assert!(read_optional(&canonical).unwrap().is_empty());
+        assert!(
+            AgentConfigPaths::read_optional(&canonical)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
     fn rejects_incomplete_managed_sections() {
         assert!(
-            merge_managed_section(KNOWLEDGE_START, "memory", KNOWLEDGE_START, KNOWLEDGE_END)
-                .is_err()
+            AgentConfigPaths::merge_managed_section(
+                AgentConfigPaths::KNOWLEDGE_START,
+                "memory",
+                AgentConfigPaths::KNOWLEDGE_START,
+                AgentConfigPaths::KNOWLEDGE_END,
+            )
+            .is_err()
         );
         assert!(
-            merge_managed_section(KNOWLEDGE_END, "memory", KNOWLEDGE_START, KNOWLEDGE_END).is_err()
+            AgentConfigPaths::merge_managed_section(
+                AgentConfigPaths::KNOWLEDGE_END,
+                "memory",
+                AgentConfigPaths::KNOWLEDGE_START,
+                AgentConfigPaths::KNOWLEDGE_END,
+            )
+            .is_err()
         );
     }
 
@@ -897,7 +931,7 @@ mod tests {
         std::fs::create_dir_all(&source).unwrap();
         std::fs::write(source.join("existing.md"), "memory").unwrap();
 
-        redirect_empty_directory(&source, &target).unwrap();
+        AgentConfigPaths::redirect_empty_directory(&source, &target).unwrap();
 
         assert!(source.is_dir());
         assert_eq!(

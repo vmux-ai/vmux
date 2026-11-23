@@ -14,6 +14,10 @@ pub(super) struct SpaceIdentity<'w, 's> {
 }
 
 impl SpaceIdentity<'_, '_> {
+    pub(super) fn bootstrap_id() -> SpaceId {
+        SpaceId(crate::model::BOOTSTRAP_SPACE_ID.into())
+    }
+
     pub(super) fn suggested(&self, excluded: &[&str]) -> String {
         let start = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

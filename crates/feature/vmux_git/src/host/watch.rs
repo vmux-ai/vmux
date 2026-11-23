@@ -187,7 +187,7 @@ fn initialize(world: &mut World) {
     let retry_wake = proxy
         .clone()
         .map(|proxy| (world.resource::<GitWatchDeadline>().clone(), proxy));
-    let events = GitWatchEvents::start(proxy);
+    let events = GitWatch::start_events(proxy);
     let tx = events.sender;
     match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
         if !GitWatch::should_forward(&result) {
@@ -502,11 +502,6 @@ struct RepoInfoLease {
 type ActiveOwner = Or<(With<PagePresented>, With<vmux_ecs::KeyboardOwner>)>;
 type ActivatedOwner = Or<(Added<PagePresented>, Added<vmux_ecs::KeyboardOwner>)>;
 
-const REPO_INFO_IDLE_TTL: Duration = Duration::from_secs(300);
-const WATCH_RETRY_DELAY: Duration = Duration::from_secs(1);
-const REPO_INFO_OWNER_PATH_LIMIT: usize = 256;
-const REPO_INFO_CACHE_CAPACITY: usize = 1024;
-const REPO_INFO_LOAD_BUDGET: usize = 16;
 const REPO_INFO_WATCH_BUDGET: usize = 4;
 
 #[derive(Component)]
@@ -524,6 +519,18 @@ pub struct RepoInfoCache {
 }
 
 impl RepoInfoCache {
+    const IDLE_TTL: Duration = Duration::from_secs(300);
+    const WATCH_RETRY_DELAY: Duration = Duration::from_secs(1);
+    const OWNER_PATH_LIMIT: usize = 256;
+    const CACHE_CAPACITY: usize = 1024;
+    const LOAD_BUDGET: usize = 16;
+    const WATCH_EVENT_LIMIT: usize = 8192;
+    const WATCH_INPUT_CAPACITY: usize = 64;
+    const WATCH_OUTPUT_CAPACITY: usize = 1;
+    const WATCH_DEBOUNCE: Duration = Duration::from_millis(500);
+    const WATCH_MAX_LATENCY: Duration = Duration::from_secs(2);
+    const WATCH_TARGET_LIMIT: usize = 128;
+    const CANONICAL_CAP: usize = 4096;
     fn evict_inactive(&mut self, watch: &mut GitWatch, active: &HashSet<PathBuf>) {
         for path in self.inactive_paths(active) {
             if let Some(targets) = watch.repo_info_subscriptions.remove(&path) {
@@ -543,7 +550,7 @@ impl RepoInfoCache {
             repositories: HashMap::new(),
             leases: HashMap::new(),
             maintenance_dirty: true,
-            next_gc: Instant::now() + REPO_INFO_IDLE_TTL,
+            next_gc: Instant::now() + RepoInfoCache::IDLE_TTL,
             watch_cursor: 0,
             wake,
         }
@@ -596,7 +603,7 @@ impl RepoInfoCache {
         let mut observed = HashSet::new();
         for path in paths {
             observed.insert(self.entry_path(&path));
-            if observed.len() >= REPO_INFO_OWNER_PATH_LIMIT {
+            if observed.len() >= RepoInfoCache::OWNER_PATH_LIMIT {
                 break;
             }
         }
@@ -637,7 +644,7 @@ impl RepoInfoCache {
 
     fn request(&mut self, path: PathBuf) -> Option<super::worktree::RepoInfo> {
         if !self.entries.contains_key(&path) {
-            if self.entries.len() >= REPO_INFO_CACHE_CAPACITY {
+            if self.entries.len() >= RepoInfoCache::CACHE_CAPACITY {
                 let leased = self
                     .leases
                     .values()
@@ -655,7 +662,7 @@ impl RepoInfoCache {
                     self.remove(&expired);
                 }
             }
-            if self.entries.len() >= REPO_INFO_CACHE_CAPACITY {
+            if self.entries.len() >= RepoInfoCache::CACHE_CAPACITY {
                 return None;
             }
             self.maintenance_dirty = true;
@@ -684,7 +691,9 @@ impl RepoInfoCache {
     fn entry_path(&mut self, path: &Path) -> PathBuf {
         let requested = path.to_path_buf();
         let path = PathIdentity::resolve(path).into_path_buf();
-        if self.canonical.len() >= CANONICAL_CAP && !self.canonical.contains_key(&requested) {
+        if self.canonical.len() >= RepoInfoCache::CANONICAL_CAP
+            && !self.canonical.contains_key(&requested)
+        {
             self.canonical.clear();
         }
         self.canonical.insert(requested, path.clone());
@@ -712,7 +721,7 @@ impl RepoInfoCache {
         if let Some(known) = self.canonical.get(path) {
             return known.clone();
         }
-        if self.canonical.len() >= CANONICAL_CAP {
+        if self.canonical.len() >= RepoInfoCache::CANONICAL_CAP {
             self.canonical.clear();
         }
         let resolved = PathIdentity::lexical(path).into_path_buf();
@@ -736,7 +745,7 @@ impl RepoInfoCache {
             if entry.pending.is_some() || active.contains(path) {
                 continue;
             }
-            if entry.last_accessed.elapsed() >= REPO_INFO_IDLE_TTL {
+            if entry.last_accessed.elapsed() >= RepoInfoCache::IDLE_TTL {
                 inactive.push(path.clone());
             }
         }
@@ -760,19 +769,11 @@ impl RepoInfoCache {
             .entries
             .iter()
             .filter(|(path, entry)| !active.contains(*path) && entry.pending.is_none())
-            .map(|(_, entry)| entry.last_accessed + REPO_INFO_IDLE_TTL)
+            .map(|(_, entry)| entry.last_accessed + RepoInfoCache::IDLE_TTL)
             .min()
-            .unwrap_or(now + REPO_INFO_IDLE_TTL);
+            .unwrap_or(now + RepoInfoCache::IDLE_TTL);
     }
 }
-
-const WATCH_EVENT_LIMIT: usize = 8192;
-const WATCH_INPUT_CAPACITY: usize = 64;
-const WATCH_OUTPUT_CAPACITY: usize = 1;
-const WATCH_DEBOUNCE: Duration = Duration::from_millis(500);
-const WATCH_MAX_LATENCY: Duration = Duration::from_secs(2);
-const WATCH_TARGET_LIMIT: usize = 128;
-const CANONICAL_CAP: usize = 4096;
 
 #[derive(Default)]
 struct GitWatchBatch {
@@ -786,7 +787,7 @@ impl GitWatchBatch {
             if self.overflow || GitWatchTarget::is_lock_path(&path) {
                 continue;
             }
-            if !self.paths.contains(&path) && self.paths.len() >= WATCH_EVENT_LIMIT {
+            if !self.paths.contains(&path) && self.paths.len() >= RepoInfoCache::WATCH_EVENT_LIMIT {
                 self.paths.clear();
                 self.overflow = true;
                 continue;
@@ -813,7 +814,7 @@ struct GitWatchSender {
 
 impl GitWatchSender {
     fn send(&self, mut paths: Vec<PathBuf>) {
-        if paths.len() > WATCH_EVENT_LIMIT {
+        if paths.len() > RepoInfoCache::WATCH_EVENT_LIMIT {
             paths.clear();
             self.overflow.store(true, Ordering::Release);
         }
@@ -833,8 +834,10 @@ struct GitWatchEvents {
 
 impl GitWatchEvents {
     fn start(proxy: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>) -> Self {
-        let (input_tx, input_rx) = mpsc::sync_channel::<Vec<PathBuf>>(WATCH_INPUT_CAPACITY);
-        let (output_tx, output_rx) = mpsc::sync_channel::<GitWatchBatch>(WATCH_OUTPUT_CAPACITY);
+        let (input_tx, input_rx) =
+            mpsc::sync_channel::<Vec<PathBuf>>(RepoInfoCache::WATCH_INPUT_CAPACITY);
+        let (output_tx, output_rx) =
+            mpsc::sync_channel::<GitWatchBatch>(RepoInfoCache::WATCH_OUTPUT_CAPACITY);
         let overflow = Arc::new(AtomicBool::new(false));
         let worker_overflow = Arc::clone(&overflow);
         let worker = std::thread::Builder::new()
@@ -848,8 +851,10 @@ impl GitWatchEvents {
                         batch.mark_overflow();
                     }
                     let mut disconnected = false;
-                    while let Some(remaining) = WATCH_MAX_LATENCY.checked_sub(started.elapsed()) {
-                        let timeout = WATCH_DEBOUNCE.min(remaining);
+                    while let Some(remaining) =
+                        RepoInfoCache::WATCH_MAX_LATENCY.checked_sub(started.elapsed())
+                    {
+                        let timeout = RepoInfoCache::WATCH_DEBOUNCE.min(remaining);
                         match input_rx.recv_timeout(timeout) {
                             Ok(paths) => batch.extend(paths),
                             Err(mpsc::RecvTimeoutError::Timeout) => break,
@@ -1059,6 +1064,10 @@ impl GitWatchSubscription {
 }
 
 impl GitWatch {
+    fn start_events(proxy: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>) -> GitWatchEvents {
+        GitWatchEvents::start(proxy)
+    }
+
     fn has_page_subscription(&self, entity: Entity, path: &Path) -> bool {
         let path = PathIdentity::lexical(path);
         self.subscriptions.get(&entity).is_some_and(|subscription| {
@@ -1101,7 +1110,7 @@ impl GitWatch {
         let repo_root = prepared.repo_root;
         let targets = prepared.targets;
         let complete = self.acquire_targets(&targets);
-        let retry_at = Instant::now() + WATCH_RETRY_DELAY;
+        let retry_at = Instant::now() + RepoInfoCache::WATCH_RETRY_DELAY;
         let previous = self.subscriptions.insert(
             entity,
             GitSubscription {
@@ -1216,7 +1225,7 @@ impl GitWatch {
             return;
         };
         subscription.complete = complete;
-        subscription.retry_at = now + WATCH_RETRY_DELAY;
+        subscription.retry_at = now + RepoInfoCache::WATCH_RETRY_DELAY;
         let retry_at = subscription.retry_at;
         if complete {
             self.add_subscription_owner(entity, &targets);
@@ -1231,11 +1240,11 @@ impl GitWatch {
             .iter()
             .filter(|target| !self.watch_references.contains_key(*target))
             .count();
-        if self.watch_references.len().saturating_add(missing) > WATCH_TARGET_LIMIT {
+        if self.watch_references.len().saturating_add(missing) > RepoInfoCache::WATCH_TARGET_LIMIT {
             bevy::log::warn!(
                 current = self.watch_references.len(),
                 requested = missing,
-                limit = WATCH_TARGET_LIMIT,
+                limit = RepoInfoCache::WATCH_TARGET_LIMIT,
                 "git watch target limit reached"
             );
             return false;
@@ -1679,7 +1688,7 @@ fn start_repo_info_loads(mut repo_info: Single<&mut RepoInfoCache>, runtime: Res
     let paths = repo_info
         .dirty
         .iter()
-        .take(REPO_INFO_LOAD_BUDGET)
+        .take(RepoInfoCache::LOAD_BUDGET)
         .cloned()
         .collect::<Vec<_>>();
     for path in paths {
@@ -1815,7 +1824,9 @@ fn info(
     }
     repo_info.schedule_next_gc(&active, now);
     if retry_watch {
-        repo_info.next_gc = repo_info.next_gc.min(now + WATCH_RETRY_DELAY);
+        repo_info.next_gc = repo_info
+            .next_gc
+            .min(now + RepoInfoCache::WATCH_RETRY_DELAY);
     }
     if pending_watch && !retry_watch {
         repo_info.next_gc = repo_info.next_gc.min(now + Duration::from_millis(16));
@@ -2080,7 +2091,7 @@ mod tests {
     #[test]
     fn watch_target_limit_rejects_new_targets() {
         let mut watch = GitWatch::test();
-        for index in 0..WATCH_TARGET_LIMIT {
+        for index in 0..RepoInfoCache::WATCH_TARGET_LIMIT {
             watch.watch_references.insert(
                 GitWatchTarget {
                     path: PathBuf::from(format!("/tmp/vmux-git-watch-{index}")),
@@ -2097,7 +2108,10 @@ mod tests {
         };
 
         assert!(!watch.acquire_targets(std::slice::from_ref(&target)));
-        assert_eq!(watch.watch_references.len(), WATCH_TARGET_LIMIT);
+        assert_eq!(
+            watch.watch_references.len(),
+            RepoInfoCache::WATCH_TARGET_LIMIT
+        );
         assert!(!watch.watch_references.contains_key(&target));
     }
 
@@ -2105,7 +2119,7 @@ mod tests {
     fn incomplete_subscription_retries_after_capacity_is_released() {
         let repository = tempfile::tempdir().unwrap();
         let mut watch = GitWatch::test();
-        for index in 0..WATCH_TARGET_LIMIT {
+        for index in 0..RepoInfoCache::WATCH_TARGET_LIMIT {
             watch.watch_references.insert(
                 GitWatchTarget {
                     path: PathBuf::from(format!("/tmp/vmux-git-watch-retry-{index}")),
@@ -2135,7 +2149,7 @@ mod tests {
 
         let released = watch.watch_references.keys().next().cloned().unwrap();
         watch.watch_references.remove(&released);
-        watch.retry_subscription(entity, Instant::now() + WATCH_RETRY_DELAY);
+        watch.retry_subscription(entity, Instant::now() + RepoInfoCache::WATCH_RETRY_DELAY);
 
         assert!(watch.subscriptions[&entity].complete);
         assert_eq!(watch.watch_references.get(&target), Some(&1));
@@ -2145,7 +2159,7 @@ mod tests {
     fn event_burst_collapses_to_one_overflow_refresh() {
         let mut batch = GitWatchBatch::default();
         batch.extend(
-            (0..=WATCH_EVENT_LIMIT)
+            (0..=RepoInfoCache::WATCH_EVENT_LIMIT)
                 .map(|index| PathBuf::from(format!("/tmp/vmux-git-event-{index}"))),
         );
 
@@ -2305,7 +2319,7 @@ mod tests {
                         dirty: false,
                         branches_dirty: false,
                         watch_attempted: true,
-                        last_accessed: Instant::now() - REPO_INFO_IDLE_TTL,
+                        last_accessed: Instant::now() - RepoInfoCache::IDLE_TTL,
                         pending: None,
                     },
                 ),
@@ -2394,25 +2408,28 @@ mod tests {
         let mut cache = RepoInfoCache::new(None);
         let owner = Entity::from_bits(1);
         let paths = std::iter::repeat_n(PathBuf::from("/tmp/vmux-repository-repeated"), 64).chain(
-            (0..REPO_INFO_OWNER_PATH_LIMIT + 32)
+            (0..RepoInfoCache::OWNER_PATH_LIMIT + 32)
                 .map(|index| PathBuf::from(format!("/tmp/vmux-repository-{index}"))),
         );
 
         cache.observe_active_paths(owner, paths);
 
-        assert_eq!(cache.leases[&owner].paths.len(), REPO_INFO_OWNER_PATH_LIMIT);
-        assert_eq!(cache.entries.len(), REPO_INFO_OWNER_PATH_LIMIT);
+        assert_eq!(
+            cache.leases[&owner].paths.len(),
+            RepoInfoCache::OWNER_PATH_LIMIT
+        );
+        assert_eq!(cache.entries.len(), RepoInfoCache::OWNER_PATH_LIMIT);
     }
 
     #[test]
     fn repository_info_cache_capacity_is_bounded() {
         let mut cache = RepoInfoCache::new(None);
-        for index in 0..REPO_INFO_CACHE_CAPACITY + 32 {
+        for index in 0..RepoInfoCache::CACHE_CAPACITY + 32 {
             let path = PathBuf::from(format!("/tmp/vmux-cache-{index}"));
             let _ = cache.snapshot(&path);
         }
 
-        assert_eq!(cache.entries.len(), REPO_INFO_CACHE_CAPACITY);
+        assert_eq!(cache.entries.len(), RepoInfoCache::CACHE_CAPACITY);
     }
 
     #[test]

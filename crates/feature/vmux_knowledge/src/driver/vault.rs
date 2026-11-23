@@ -8,18 +8,28 @@ use super::markdown::MarkdownMetadata;
 
 use std::os::unix::fs::PermissionsExt;
 
-const MAX_SKILLS: usize = 64;
-const MAX_EMBEDDED_BYTES: usize = 24 * 1024;
-const KNOWLEDGE_SECTIONS: [&str; 5] = ["skills", "memories", "projects", "meetings", "handbook"];
-const LEGACY_KNOWLEDGE_SECTIONS: [&str; 4] = ["decisions", "runbooks", "research", "templates"];
-const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
-
 #[derive(Clone, Component)]
 pub struct KnowledgeVault {
     root: PathBuf,
 }
 
 impl KnowledgeVault {
+    const KNOWLEDGE_SECTIONS: [&'static str; 5] =
+        ["skills", "memories", "projects", "meetings", "handbook"];
+    const LEGACY_KNOWLEDGE_SECTIONS: [&'static str; 4] =
+        ["decisions", "runbooks", "research", "templates"];
+    const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
+
+    #[cfg(unix)]
+    fn apply_privacy(path: &Path, mode: u32) -> io::Result<()> {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+    }
+
+    #[cfg(not(unix))]
+    fn apply_privacy(_path: &Path, _mode: u32) -> io::Result<()> {
+        Ok(())
+    }
+
     pub fn user() -> Self {
         Self::at(
             vmux_ecs::profile::ProfilePaths::current()
@@ -42,13 +52,13 @@ impl KnowledgeVault {
 
     pub(crate) fn ensure(&self) -> io::Result<()> {
         std::fs::create_dir_all(&self.root)?;
-        Privacy::Directory.apply(&self.root)?;
-        for directory in KNOWLEDGE_SECTIONS {
+        Self::apply_privacy(&self.root, 0o700)?;
+        for directory in Self::KNOWLEDGE_SECTIONS {
             let path = self.root.join(directory);
             std::fs::create_dir_all(&path)?;
-            Privacy::Directory.apply(&path)?;
+            Self::apply_privacy(&path, 0o700)?;
         }
-        for directory in LEGACY_KNOWLEDGE_SECTIONS {
+        for directory in Self::LEGACY_KNOWLEDGE_SECTIONS {
             let _ = std::fs::remove_dir(self.root.join(directory));
         }
         Ok(())
@@ -86,7 +96,7 @@ impl KnowledgeVault {
         if content.is_empty() {
             return Err("knowledge content is empty".to_string());
         }
-        if content.len() > MAX_NOTE_BYTES {
+        if content.len() > Self::MAX_NOTE_BYTES {
             return Err("knowledge content exceeds 2 MiB".to_string());
         }
         let note = NotePath::parse(path, title)?;
@@ -115,9 +125,7 @@ impl KnowledgeVault {
             .map_err(|error| error.to_string())?;
         file.write_all(source.as_bytes())
             .map_err(|error| error.to_string())?;
-        Privacy::File
-            .apply(&destination)
-            .map_err(|error| error.to_string())?;
+        Self::apply_privacy(&destination, 0o600).map_err(|error| error.to_string())?;
         Ok(destination)
     }
 
@@ -128,9 +136,7 @@ impl KnowledgeVault {
             return Err("knowledge root cannot be a symlink".to_string());
         }
         std::fs::create_dir_all(&self.root).map_err(|error| error.to_string())?;
-        Privacy::Directory
-            .apply(&self.root)
-            .map_err(|error| error.to_string())?;
+        Self::apply_privacy(&self.root, 0o700).map_err(|error| error.to_string())?;
         let canonical_root = self
             .root
             .canonicalize()
@@ -148,9 +154,7 @@ impl KnowledgeVault {
                 Ok(_) => {}
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
                     std::fs::create_dir(&parent).map_err(|error| error.to_string())?;
-                    Privacy::Directory
-                        .apply(&parent)
-                        .map_err(|error| error.to_string())?;
+                    Self::apply_privacy(&parent, 0o700).map_err(|error| error.to_string())?;
                 }
                 Err(error) => return Err(error.to_string()),
             }
@@ -172,7 +176,7 @@ impl NotePath {
     fn parse(requested: Option<&str>, title: &str) -> Result<Self, String> {
         let relative = match requested.map(str::trim).filter(|path| !path.is_empty()) {
             Some(path) => PathBuf::from(path),
-            None => PathBuf::from("projects").join(format!("{}.md", NoteSlug::from(title))),
+            None => PathBuf::from("projects").join(format!("{}.md", Self::slug(title))),
         };
         if relative.is_absolute() {
             return Err("knowledge path must be relative".to_string());
@@ -188,7 +192,7 @@ impl NotePath {
             return Err("knowledge path must include a section and file name".to_string());
         }
         let section = components[0].to_string_lossy();
-        if !KNOWLEDGE_SECTIONS.contains(&section.as_ref()) {
+        if !KnowledgeVault::KNOWLEDGE_SECTIONS.contains(&section.as_ref()) {
             return Err(
                 "knowledge path must start with skills, memories, projects, meetings, or handbook"
                     .to_string(),
@@ -213,12 +217,8 @@ impl NotePath {
     fn file_name(&self) -> &OsStr {
         &self.file_name
     }
-}
 
-struct NoteSlug(String);
-
-impl From<&str> for NoteSlug {
-    fn from(title: &str) -> Self {
+    fn slug(title: &str) -> String {
         let mut slug = String::new();
         let mut separator = false;
         for character in title.chars().flat_map(char::to_lowercase) {
@@ -237,15 +237,9 @@ impl From<&str> for NoteSlug {
         }
         let slug = slug.trim_matches('-');
         if slug.is_empty() {
-            return Self("note".to_string());
+            return "note".to_string();
         }
-        Self(slug.to_string())
-    }
-}
-
-impl std::fmt::Display for NoteSlug {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
+        slug.to_string()
     }
 }
 
@@ -268,31 +262,12 @@ impl MarkdownPath<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
-enum Privacy {
-    Directory,
-    File,
-}
-
-impl Privacy {
-    #[cfg(unix)]
-    fn apply(self, path: &Path) -> io::Result<()> {
-        let mode = match self {
-            Self::Directory => 0o700,
-            Self::File => 0o600,
-        };
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-    }
-
-    #[cfg(not(unix))]
-    fn apply(self, _path: &Path) -> io::Result<()> {
-        Ok(())
-    }
-}
-
 pub struct SkillsDir(PathBuf);
 
 impl SkillsDir {
+    const MAX_SKILLS: usize = 64;
+    const MAX_EMBEDDED_BYTES: usize = 24 * 1024;
+
     pub fn at(path: impl Into<PathBuf>) -> Self {
         Self(path.into())
     }
@@ -332,7 +307,7 @@ impl SkillsDir {
 
     pub fn prompt(&self) -> String {
         let mut files = SkillTree(&self.0).files();
-        files.truncate(MAX_SKILLS);
+        files.truncate(Self::MAX_SKILLS);
         if files.is_empty() {
             return String::new();
         }
@@ -346,7 +321,7 @@ impl SkillsDir {
             let Ok(body) = std::fs::read_to_string(&path) else {
                 continue;
             };
-            if embedded + body.len() > MAX_EMBEDDED_BYTES {
+            if embedded + body.len() > Self::MAX_EMBEDDED_BYTES {
                 continue;
             }
             embedded += body.len();
@@ -518,7 +493,7 @@ impl ExternalMemories {
 
     fn import(&self) -> io::Result<usize> {
         std::fs::create_dir_all(&self.destination)?;
-        Privacy::Directory.apply(&self.destination)?;
+        KnowledgeVault::apply_privacy(&self.destination, 0o700)?;
 
         let mut imported = self.import_claude()?;
         imported += MemoryTree {
@@ -622,34 +597,24 @@ impl Frontmatter<'_> {
         if !edit.remove && !original.eq_ignore_ascii_case(key) && self.has_property(key) {
             return Err(format!("property already exists: {key}"));
         }
-        let Some(slot) = self.slot(original) else {
+        let Some((start, end, present)) = self.slot(original) else {
             if edit.remove {
                 return Ok(text.to_string());
             }
             let source = PropertySource::from(edit).render()?;
             return Ok(format!("---\n{source}---\n\n{text}"));
         };
-        match slot {
-            PropertySlot::Present { start, end } => {
-                let mut output = text.to_string();
-                if edit.remove {
-                    output.replace_range(start..end, "");
-                    return Ok(output);
-                }
-                let source = PropertySource::from(edit).render()?;
-                output.replace_range(start..end, &source);
-                Ok(output)
-            }
-            PropertySlot::Absent { close } => {
-                if edit.remove {
-                    return Ok(text.to_string());
-                }
-                let source = PropertySource::from(edit).render()?;
-                let mut output = text.to_string();
-                output.insert_str(close, &source);
-                Ok(output)
-            }
+        if !present && edit.remove {
+            return Ok(text.to_string());
         }
+        let mut output = text.to_string();
+        if edit.remove {
+            output.replace_range(start..end, "");
+            return Ok(output);
+        }
+        let source = PropertySource::from(edit).render()?;
+        output.replace_range(start..end, &source);
+        Ok(output)
     }
 
     fn has_property(&self, key: &str) -> bool {
@@ -661,7 +626,7 @@ impl Frontmatter<'_> {
         false
     }
 
-    fn slot(&self, key: &str) -> Option<PropertySlot> {
+    fn slot(&self, key: &str) -> Option<(usize, usize, bool)> {
         let mut lines = self.0.split_inclusive('\n');
         let first = lines.next()?;
         if first.trim_end_matches(['\r', '\n']) != "---" {
@@ -677,12 +642,12 @@ impl Frontmatter<'_> {
                     found = Some((start, offset));
                 }
                 if key.is_empty() {
-                    return Some(PropertySlot::Absent { close: offset });
+                    return Some((offset, offset, false));
                 }
                 let Some((start, end)) = found else {
-                    return Some(PropertySlot::Absent { close: offset });
+                    return Some((offset, offset, false));
                 };
-                return Some(PropertySlot::Present { start, end });
+                return Some((start, end, true));
             }
             if !value.starts_with([' ', '\t'])
                 && let Some((candidate, _)) = value.split_once(':')
@@ -699,12 +664,6 @@ impl Frontmatter<'_> {
         }
         None
     }
-}
-
-#[derive(Clone, Copy)]
-enum PropertySlot {
-    Present { start: usize, end: usize },
-    Absent { close: usize },
 }
 
 struct PropertySource<'a> {
@@ -741,7 +700,7 @@ impl PropertySource<'_> {
                 }
                 let mut source = format!("{key}:\n");
                 for value in &clean {
-                    source.push_str(&format!("  - {}\n", YamlScalar(value)));
+                    source.push_str(&format!("  - {}\n", Self::quote(value)));
                 }
                 Ok(source)
             }
@@ -766,13 +725,21 @@ impl PropertySource<'_> {
                     } else {
                         format!("[[{value}]]")
                     };
-                Ok(format!("{key}: {}\n", YamlScalar(&value)))
+                Ok(format!("{key}: {}\n", Self::quote(&value)))
             }
             KnowledgePropertyKind::Date | KnowledgePropertyKind::Text => {
                 let value = clean.first().map(String::as_str).unwrap_or_default();
-                Ok(format!("{key}: {}\n", YamlScalar(value)))
+                Ok(format!("{key}: {}\n", Self::quote(value)))
             }
         }
+    }
+
+    fn quote(value: &str) -> String {
+        let escaped = value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace(['\r', '\n'], " ");
+        format!("\"{escaped}\"")
     }
 
     fn clean_values(&self) -> Vec<String> {
@@ -784,19 +751,6 @@ impl PropertySource<'_> {
             }
         }
         clean
-    }
-}
-
-struct YamlScalar<'a>(&'a str);
-
-impl std::fmt::Display for YamlScalar<'_> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let escaped = self
-            .0
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace(['\r', '\n'], " ");
-        write!(formatter, "\"{escaped}\"")
     }
 }
 

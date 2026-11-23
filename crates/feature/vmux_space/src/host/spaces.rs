@@ -1,7 +1,11 @@
 use bevy::prelude::*;
 
 #[derive(Component, Default)]
-#[require(super::SpacesUiStateUpdates, SpaceSelection, SpacesPageSnapshot)]
+#[require(
+    vmux_ecs::UiState<vmux_api::space::SpacesUiState>,
+    SpaceSelection,
+    SpacesPageSnapshot
+)]
 pub struct Spaces;
 
 #[derive(Component, Default)]

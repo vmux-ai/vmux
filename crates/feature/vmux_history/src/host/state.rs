@@ -4,8 +4,6 @@ use vmux_ecs::page::PageReady;
 
 use crate::state::HistoryUiState;
 
-type HistoryUiStateUpdates = vmux_ecs::UiState<HistoryUiState>;
-
 pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
@@ -16,7 +14,7 @@ impl Plugin for StatePlugin {
 }
 
 #[derive(Component, Clone, Debug)]
-#[require(HistoryUiStateUpdates)]
+#[require(vmux_ecs::UiState<HistoryUiState>)]
 pub(super) struct HistoryPageState {
     pub(super) query: Option<String>,
     pub(super) limit: u32,

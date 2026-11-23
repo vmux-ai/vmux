@@ -18,8 +18,6 @@ use similar::{ChangeTag, TextDiff};
 use crate::event::*;
 use crate::host::parse;
 
-const MAX_DIFF_FILE_BYTES: u64 = 2 * 1024 * 1024;
-
 #[derive(Debug, Clone)]
 pub struct GitError(pub String);
 
@@ -40,24 +38,35 @@ struct BranchBase {
     merge_base: String,
 }
 
-enum DiffFileContent {
-    Text(String),
-    TooLarge(u64),
+struct DiffFileContent {
+    text: Option<String>,
+    too_large_bytes: u64,
 }
 
 impl DiffFileContent {
-    fn text(self) -> Option<String> {
-        match self {
-            Self::Text(content) => Some(content),
-            Self::TooLarge(_) => None,
+    fn from_text(content: String) -> Self {
+        Self {
+            text: Some(content),
+            too_large_bytes: 0,
         }
     }
 
+    fn too_large(bytes: u64) -> Self {
+        Self {
+            text: None,
+            too_large_bytes: bytes,
+        }
+    }
+
+    fn text(self) -> Option<String> {
+        self.text
+    }
+
     fn unavailable_line(&self, file: &Path) -> Option<DiffLine> {
-        let Self::TooLarge(bytes) = self else {
+        if self.text.is_some() {
             return None;
-        };
-        let megabytes = *bytes as f64 / (1024.0 * 1024.0);
+        }
+        let megabytes = self.too_large_bytes as f64 / (1024.0 * 1024.0);
         let text = format!("Preview unavailable for this {megabytes:.1} MB file");
         Some(DiffLine {
             kind: DiffKind::Context,
@@ -114,6 +123,18 @@ impl DiffSource {
             Self::Review(document) => document.window(repository.path(), top_line, rows),
         }
     }
+
+    #[cfg(test)]
+    fn take_highlighted_lines(&self) -> usize {
+        match self {
+            Self::Review(document) => document
+                .highlight
+                .as_ref()
+                .map(|highlight| highlight.lock().unwrap().take_highlighted_lines())
+                .unwrap_or(0),
+            Self::ReadyLines(_) | Self::SourceLines(_) => 0,
+        }
+    }
 }
 
 pub(crate) struct ReviewDiffDocument {
@@ -125,12 +146,6 @@ pub(crate) struct ReviewDiffDocument {
     highlight: Option<Mutex<super::highlight::FileHighlight>>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ReviewDiffText {
-    Raw,
-    Path,
-}
-
 struct ReviewDiffEntry {
     offset: u64,
     len: u32,
@@ -138,7 +153,7 @@ struct ReviewDiffEntry {
     old_no: Option<u32>,
     new_no: Option<u32>,
     path: u32,
-    text: ReviewDiffText,
+    is_path: bool,
 }
 
 impl ReviewDiffDocument {
@@ -169,7 +184,7 @@ impl ReviewDiffDocument {
                 old_no: None,
                 new_no: None,
                 path: *path,
-                text: ReviewDiffText::Path,
+                is_path: true,
             });
             return;
         }
@@ -189,7 +204,7 @@ impl ReviewDiffDocument {
                 old_no: None,
                 new_no: None,
                 path: *path,
-                text: ReviewDiffText::Raw,
+                is_path: false,
             });
             return;
         }
@@ -223,7 +238,7 @@ impl ReviewDiffDocument {
             old_no: old,
             new_no: new,
             path: *path,
-            text: ReviewDiffText::Raw,
+            is_path: false,
         });
     }
 
@@ -261,7 +276,7 @@ impl ReviewDiffDocument {
             Self::index_line(&mut entries, &mut paths, &raw, line_offset, len, &mut state);
         }
         if !include_single_file && paths.len() <= 1 {
-            entries.retain(|entry| entry.text != ReviewDiffText::Path);
+            entries.retain(|entry| !entry.is_path);
         }
         Ok(Self {
             file: Arc::new(file),
@@ -322,16 +337,15 @@ impl ReviewDiffDocument {
                 .get(entry.path as usize)
                 .cloned()
                 .unwrap_or_default();
-            let text = match entry.text {
-                ReviewDiffText::Path => path.to_string_lossy().into_owned(),
-                ReviewDiffText::Raw => {
-                    buffer.resize(entry.len as usize, 0);
-                    file.seek(SeekFrom::Start(entry.offset))
-                        .map_err(|error| GitError(format!("failed to seek diff spool: {error}")))?;
-                    file.read_exact(&mut buffer)
-                        .map_err(|error| GitError(format!("failed to read diff spool: {error}")))?;
-                    String::from_utf8_lossy(&buffer).into_owned()
-                }
+            let text = if entry.is_path {
+                path.to_string_lossy().into_owned()
+            } else {
+                buffer.resize(entry.len as usize, 0);
+                file.seek(SeekFrom::Start(entry.offset))
+                    .map_err(|error| GitError(format!("failed to seek diff spool: {error}")))?;
+                file.read_exact(&mut buffer)
+                    .map_err(|error| GitError(format!("failed to read diff spool: {error}")))?;
+                String::from_utf8_lossy(&buffer).into_owned()
             };
             let mut kind = entry.kind;
             if kind == DiffKind::Context
@@ -409,10 +423,11 @@ impl<T> CatalogPage<T> {
         let entries = entries.into_iter().skip(offset).take(limit).collect();
         Self { entries, has_more }
     }
-}
 
-impl<T: Clone> CatalogPage<T> {
-    fn from_slice(entries: &[T], offset: usize, limit: usize) -> Self {
+    fn from_slice(entries: &[T], offset: usize, limit: usize) -> Self
+    where
+        T: Clone,
+    {
         let end = offset.saturating_add(limit).min(entries.len());
         Self {
             entries: entries.get(offset..end).unwrap_or_default().to_vec(),
@@ -671,7 +686,7 @@ impl GitRepository {
                     ahead: parsed.ahead,
                     behind: parsed.behind,
                     has_upstream: parsed.has_upstream,
-                    file_status: parsed.file_status(&path_bytes(&target)),
+                    file_status: parsed.file_status(&GitCommand::path_bytes(&target)),
                     staged_count: parsed.staged_count,
                     repo_root: repo_root.clone(),
                 }
@@ -719,7 +734,7 @@ impl GitRepository {
             if relative.as_os_str().is_empty() {
                 return true;
             }
-            candidates.push(path_bytes(relative));
+            candidates.push(GitCommand::path_bytes(relative));
         }
         if candidates.is_empty() {
             return false;
@@ -828,7 +843,7 @@ impl GitRepository {
             .as_file_mut()
             .seek(SeekFrom::Start(0))
             .map_err(|error| GitError(format!("failed to rewind diff spool: {error}")))?;
-        let highlight = if content.len() as u64 <= MAX_DIFF_FILE_BYTES {
+        let highlight = if content.len() as u64 <= GitCommand::MAX_DIFF_FILE_BYTES {
             Some(super::highlight::FileHighlight::new(
                 content.to_string(),
                 file,
@@ -1308,7 +1323,7 @@ impl GitRepository {
         if branch.selected.is_none() && !root_paths.is_empty() {
             let untracked = self.untracked_paths(&root_paths)?;
             for path in &root_paths {
-                if untracked.contains(&path_bytes(path)) {
+                if untracked.contains(&GitCommand::path_bytes(path)) {
                     self.append_untracked_diff(output, prefix, path)?;
                 }
             }
@@ -1366,25 +1381,21 @@ impl GitRepository {
             .and_then(|_| writeln!(output, "+++ b/{display}"))
             .and_then(|_| writeln!(output, "@@ -0,0 +1 @@"))
             .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
-        match content {
-            DiffFileContent::Text(content) => {
-                for (index, line) in content.lines().enumerate() {
-                    if index % 256 == 0 && super::runtime::GitRuntime::canceled() {
-                        return Err(GitError("git command canceled".to_string()));
-                    }
-                    writeln!(output, "+{line}").map_err(|error| {
-                        GitError(format!("failed to append diff spool: {error}"))
-                    })?;
+        if let Some(content) = content.text {
+            for (index, line) in content.lines().enumerate() {
+                if index % 256 == 0 && super::runtime::GitRuntime::canceled() {
+                    return Err(GitError("git command canceled".to_string()));
                 }
+                writeln!(output, "+{line}")
+                    .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
             }
-            DiffFileContent::TooLarge(bytes) => {
-                let megabytes = bytes as f64 / (1024.0 * 1024.0);
-                writeln!(
-                    output,
-                    "+Preview unavailable for this {megabytes:.1} MB file"
-                )
-                .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
-            }
+        } else {
+            let megabytes = content.too_large_bytes as f64 / (1024.0 * 1024.0);
+            writeln!(
+                output,
+                "+Preview unavailable for this {megabytes:.1} MB file"
+            )
+            .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
         }
         Ok(())
     }
@@ -1441,8 +1452,8 @@ impl GitRepository {
         if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
             return Err(GitError("branch diff only reads regular files".to_string()));
         }
-        if metadata.len() > MAX_DIFF_FILE_BYTES {
-            return Ok(DiffFileContent::TooLarge(metadata.len()));
+        if metadata.len() > GitCommand::MAX_DIFF_FILE_BYTES {
+            return Ok(DiffFileContent::too_large(metadata.len()));
         }
         let mut file = OpenOptions::new()
             .read(true)
@@ -1455,18 +1466,18 @@ impl GitRepository {
         if !opened.file_type().is_file() {
             return Err(GitError("branch diff only reads regular files".to_string()));
         }
-        if opened.len() > MAX_DIFF_FILE_BYTES {
-            return Ok(DiffFileContent::TooLarge(opened.len()));
+        if opened.len() > GitCommand::MAX_DIFF_FILE_BYTES {
+            return Ok(DiffFileContent::too_large(opened.len()));
         }
         let mut bytes = Vec::with_capacity(opened.len() as usize);
         Read::by_ref(&mut file)
-            .take(MAX_DIFF_FILE_BYTES + 1)
+            .take(GitCommand::MAX_DIFF_FILE_BYTES + 1)
             .read_to_end(&mut bytes)
             .map_err(|error| GitError(format!("failed to read diff file: {error}")))?;
-        if bytes.len() as u64 > MAX_DIFF_FILE_BYTES {
-            return Ok(DiffFileContent::TooLarge(bytes.len() as u64));
+        if bytes.len() as u64 > GitCommand::MAX_DIFF_FILE_BYTES {
+            return Ok(DiffFileContent::too_large(bytes.len() as u64));
         }
-        Ok(DiffFileContent::Text(
+        Ok(DiffFileContent::from_text(
             String::from_utf8_lossy(&bytes).into_owned(),
         ))
     }
@@ -1692,7 +1703,7 @@ impl GitRepository {
 
     fn run(&self, args: &[&str]) -> Result<String, GitError> {
         let (stdout, stderr, ok) =
-            GitCommand::run_with_timeout(&self.0, args, GIT_OPERATION_TIMEOUT)?;
+            GitCommand::run_with_timeout(&self.0, args, GitCommand::OPERATION_TIMEOUT)?;
         if ok {
             Ok(stdout)
         } else {
@@ -1714,7 +1725,7 @@ impl GitRepository {
 
     fn operation(&self, args: &[&str]) -> Result<String, GitError> {
         let (stdout, stderr, ok) =
-            GitCommand::run_with_timeout(&self.0, args, GIT_OPERATION_TIMEOUT)?;
+            GitCommand::run_with_timeout(&self.0, args, GitCommand::OPERATION_TIMEOUT)?;
         if !ok {
             return Err(GitCommand::error(&stdout, &stderr));
         }
@@ -1881,31 +1892,7 @@ impl GitRepository {
     }
 }
 
-const FALLBACK_LOCAL_ENV_VARS: &[&str] = &[
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_COMMON_DIR",
-    "GIT_CONFIG",
-    "GIT_CONFIG_COUNT",
-    "GIT_CONFIG_PARAMETERS",
-    "GIT_DIR",
-    "GIT_GRAFT_FILE",
-    "GIT_IMPLICIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_NO_REPLACE_OBJECTS",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_PREFIX",
-    "GIT_REPLACE_REF_BASE",
-    "GIT_SHALLOW_FILE",
-    "GIT_WORK_TREE",
-];
-
 pub(crate) struct GitCommand;
-
-const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
-const GIT_OPERATION_TIMEOUT: Duration = Duration::from_secs(900);
-const GIT_COMMAND_POLL: Duration = Duration::from_millis(50);
-const GIT_IO_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
-const GIT_OUTPUT_LIMIT: usize = 32 * 1024 * 1024;
 
 struct GitOutputCapture {
     bytes: Vec<u8>,
@@ -1935,7 +1922,7 @@ impl GitChild {
     fn pause(&mut self, deadline: Instant) {
         let remaining = deadline.saturating_duration_since(Instant::now());
         std::thread::sleep(remaining.min(self.poll_delay));
-        self.poll_delay = self.poll_delay.saturating_mul(2).min(GIT_COMMAND_POLL);
+        self.poll_delay = self.poll_delay.saturating_mul(2).min(GitCommand::POLL);
     }
 
     fn stop(&mut self) -> std::io::Result<ExitStatus> {
@@ -2001,7 +1988,7 @@ impl GitOutputCapture {
                 break;
             }
             let before = used.fetch_add(read, Ordering::AcqRel);
-            let remaining = GIT_OUTPUT_LIMIT.saturating_sub(before);
+            let remaining = GitCommand::OUTPUT_LIMIT.saturating_sub(before);
             let kept = read.min(remaining);
             bytes.extend_from_slice(&chunk[..kept]);
             if kept != read {
@@ -2019,7 +2006,7 @@ impl GitCommand {
         VARS.get_or_init(|| {
             let mut command = Command::new("git");
             command.args(["rev-parse", "--local-env-vars"]);
-            Self::output_raw(&mut command, None, GIT_COMMAND_TIMEOUT)
+            Self::output_raw(&mut command, None, GitCommand::TIMEOUT)
                 .ok()
                 .filter(|out| out.status.success())
                 .map(|out| {
@@ -2032,7 +2019,7 @@ impl GitCommand {
                 })
                 .filter(|vars| !vars.is_empty())
                 .unwrap_or_else(|| {
-                    FALLBACK_LOCAL_ENV_VARS
+                    GitCommand::FALLBACK_LOCAL_ENV_VARS
                         .iter()
                         .map(|s| s.to_string())
                         .collect()
@@ -2050,7 +2037,7 @@ impl GitCommand {
     }
 
     pub(crate) fn run(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
-        Self::run_with_timeout(root, args, GIT_COMMAND_TIMEOUT)
+        Self::run_with_timeout(root, args, GitCommand::TIMEOUT)
     }
 
     pub(super) fn run_with_timeout(
@@ -2090,11 +2077,11 @@ impl GitCommand {
     fn output_with_input(root: &Path, args: &[&str], input: &[u8]) -> Result<Output, GitError> {
         let mut command = Self::command(root);
         command.env("GIT_OPTIONAL_LOCKS", "0").args(args);
-        Self::output_raw(&mut command, Some(input), GIT_COMMAND_TIMEOUT)
+        Self::output_raw(&mut command, Some(input), GitCommand::TIMEOUT)
     }
 
     fn output(command: &mut Command) -> Result<Output, GitError> {
-        Self::output_raw(command, None, GIT_COMMAND_TIMEOUT)
+        Self::output_raw(command, None, GitCommand::TIMEOUT)
     }
 
     fn spool(command: &mut Command) -> Result<tempfile::NamedTempFile, GitError> {
@@ -2146,7 +2133,7 @@ impl GitCommand {
         {
             return Err(GitError(format!("failed to read git stderr: {error}")));
         }
-        let deadline = Instant::now() + GIT_COMMAND_TIMEOUT;
+        let deadline = Instant::now() + GitCommand::TIMEOUT;
         let mut interrupted = None;
         let status = loop {
             if overflow.load(Ordering::Acquire) {
@@ -2178,7 +2165,7 @@ impl GitCommand {
         };
         let stderr = Self::receive(
             stderr_rx,
-            Instant::now() + GIT_IO_DRAIN_TIMEOUT,
+            Instant::now() + GitCommand::IO_DRAIN_TIMEOUT,
             "git stderr",
         )?
         .map_err(|error| GitError(format!("failed to read git stderr: {error}")))?;
@@ -2314,7 +2301,7 @@ impl GitCommand {
         };
         let (status, interrupted) =
             Self::wait_for_child(&mut child, &overflow, Instant::now() + timeout)?;
-        let drain_deadline = Instant::now() + GIT_IO_DRAIN_TIMEOUT;
+        let drain_deadline = Instant::now() + GitCommand::IO_DRAIN_TIMEOUT;
         let write = writer.map(|writer| Self::receive(writer, drain_deadline, "git stdin"));
         let stdout = Self::receive(stdout_rx, drain_deadline, "git stdout");
         let stderr = Self::receive(stderr_rx, drain_deadline, "git stderr");
@@ -2352,26 +2339,50 @@ impl GitCommand {
             error.to_string()
         })
     }
-}
 
-#[cfg(unix)]
-fn path_bytes(path: &Path) -> Vec<u8> {
-    path.as_os_str().as_bytes().to_vec()
-}
+    const MAX_DIFF_FILE_BYTES: u64 = 2 * 1024 * 1024;
+    const FALLBACK_LOCAL_ENV_VARS: &'static [&'static str] = &[
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_DIR",
+        "GIT_GRAFT_FILE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_NO_REPLACE_OBJECTS",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PREFIX",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
+    ];
+    const TIMEOUT: Duration = Duration::from_secs(120);
+    const OPERATION_TIMEOUT: Duration = Duration::from_secs(900);
+    const POLL: Duration = Duration::from_millis(50);
+    const IO_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+    const OUTPUT_LIMIT: usize = 32 * 1024 * 1024;
 
-#[cfg(not(unix))]
-fn path_bytes(path: &Path) -> Vec<u8> {
-    path.to_string_lossy().as_bytes().to_vec()
-}
+    #[cfg(unix)]
+    fn path_bytes(path: &Path) -> Vec<u8> {
+        path.as_os_str().as_bytes().to_vec()
+    }
 
-#[cfg(unix)]
-fn path_from_bytes(bytes: &[u8]) -> PathBuf {
-    PathBuf::from(OsString::from_vec(bytes.to_vec()))
-}
+    #[cfg(not(unix))]
+    fn path_bytes(path: &Path) -> Vec<u8> {
+        path.to_string_lossy().as_bytes().to_vec()
+    }
 
-#[cfg(not(unix))]
-fn path_from_bytes(bytes: &[u8]) -> PathBuf {
-    PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+    #[cfg(unix)]
+    fn path_from_bytes(bytes: &[u8]) -> PathBuf {
+        PathBuf::from(OsString::from_vec(bytes.to_vec()))
+    }
+
+    #[cfg(not(unix))]
+    fn path_from_bytes(bytes: &[u8]) -> PathBuf {
+        PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+    }
 }
 
 pub(crate) struct RequestPath<'a> {
@@ -2427,16 +2438,18 @@ impl GitBranchFileEntries {
         previous: Option<&[u8]>,
         change: GitPathChange,
     ) -> GitBranchFileEntry {
-        let path = prefix.join(path_from_bytes(path));
-        let encoded_path = path_bytes(&path);
-        let previous = previous.map(|previous| prefix.join(path_from_bytes(previous)));
+        let path = prefix.join(GitCommand::path_from_bytes(path));
+        let encoded_path = GitCommand::path_bytes(&path);
+        let previous = previous.map(|previous| prefix.join(GitCommand::path_from_bytes(previous)));
         GitBranchFileEntry {
             path: path.to_string_lossy().into_owned(),
             path_bytes: encoded_path,
             previous_path: previous
                 .as_ref()
                 .map(|previous| previous.to_string_lossy().into_owned()),
-            previous_path_bytes: previous.as_ref().map(|previous| path_bytes(previous)),
+            previous_path_bytes: previous
+                .as_ref()
+                .map(|previous| GitCommand::path_bytes(previous)),
             change,
         }
     }
@@ -2451,7 +2464,7 @@ impl<'a> RequestPath<'a> {
         if self.bytes.is_empty() {
             return PathBuf::from(self.display);
         }
-        repo_root.join(path_from_bytes(self.bytes))
+        repo_root.join(GitCommand::path_from_bytes(self.bytes))
     }
 }
 
@@ -2809,7 +2822,6 @@ pub(crate) mod test_repo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::highlight::Highlighter;
 
     use std::ffi::OsStr;
     use std::fs::{FileTimes, OpenOptions};
@@ -3276,7 +3288,7 @@ mod tests {
         test_repo::run(repo.path(), &["commit", "-qm", "base"]);
         test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
         let file = std::fs::File::create(repo.path().join("large.bin")).unwrap();
-        file.set_len(MAX_DIFF_FILE_BYTES + 1).unwrap();
+        file.set_len(GitCommand::MAX_DIFF_FILE_BYTES + 1).unwrap();
 
         let lines = GitRepository::at(repo.path())
             .branch_diff_lines_for_paths("feature", &[b"large.bin".to_vec()])
@@ -3405,12 +3417,11 @@ mod tests {
             .branch_files_catalog("feature")
             .unwrap()
             .page(0, 80);
-        Highlighter::take_line_count();
         let file_source = repository.diff_source(&checkout).unwrap();
-        assert_eq!(Highlighter::take_line_count(), 0);
+        assert_eq!(file_source.take_highlighted_lines(), 0);
         let (_, initial) = file_source.window(&repository, 0, 3).unwrap();
         assert_eq!(initial.len(), 3);
-        assert!(Highlighter::take_line_count() <= 3);
+        assert!(file_source.take_highlighted_lines() <= 3);
         let (_, file_lines) = file_source.window(&repository, 0, u32::MAX).unwrap();
         let snapshot = GitRepositorySnapshot::load(parent.path()).unwrap();
         let branch = snapshot
@@ -4154,14 +4165,12 @@ mod tests {
             if staged_only {
                 repository.stage(&file).unwrap();
             }
-            Highlighter::take_line_count();
-
             let source = repository.diff_source(&file).unwrap();
 
-            assert_eq!(Highlighter::take_line_count(), 0);
+            assert_eq!(source.take_highlighted_lines(), 0);
             let (total, initial) = source.window(&repository, 0, 8).unwrap();
             assert_eq!(initial.len(), 8);
-            assert!(Highlighter::take_line_count() <= 8);
+            assert!(source.take_highlighted_lines() <= 8);
             if staged_only {
                 assert_eq!(initial[0].kind, DiffKind::Staged);
                 assert_eq!((initial[0].old_no, initial[0].new_no), (Some(1), Some(1)));

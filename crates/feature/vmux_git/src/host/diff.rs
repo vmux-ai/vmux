@@ -105,25 +105,25 @@ impl GitDiffTarget {
                 repo_root,
                 path: PathBuf::new(),
                 path_bytes: Vec::new(),
-                scope: DiffScope::Branch(controller.selected_branch.clone()),
+                scope: DiffScope::branch(controller.selected_branch.clone()),
             }),
             GitPanel::Commits if !controller.selected_commit.is_empty() => Some(Self {
                 repo_root,
                 path: PathBuf::new(),
                 path_bytes: Vec::new(),
-                scope: DiffScope::Commit(controller.selected_commit.clone()),
+                scope: DiffScope::commit(controller.selected_commit.clone()),
             }),
             GitPanel::Stash if !controller.selected_stash.is_empty() => Some(Self {
                 repo_root,
                 path: PathBuf::new(),
                 path_bytes: Vec::new(),
-                scope: DiffScope::Stash(controller.selected_stash.clone()),
+                scope: DiffScope::stash(controller.selected_stash.clone()),
             }),
             GitPanel::Files if !controller.selected_abs_path.is_empty() => Some(Self {
                 repo_root,
                 path: PathBuf::from(&controller.selected_abs_path),
                 path_bytes: controller.selected_path_bytes.clone(),
-                scope: DiffScope::File,
+                scope: DiffScope::file(),
             }),
             _ => None,
         }
@@ -135,7 +135,7 @@ impl GitDiffTarget {
             repo_root,
             path: file.path().into(),
             path_bytes: Vec::new(),
-            scope: DiffScope::File,
+            scope: DiffScope::file(),
         })
     }
 }
@@ -762,7 +762,7 @@ impl GitDiffQuery {
                 repo_root: PathBuf::from("/repo"),
                 path: PathBuf::from("/repo/file.rs"),
                 path_bytes: Vec::new(),
-                scope: DiffScope::File,
+                scope: DiffScope::file(),
             },
             generation,
             revision: 0,
@@ -774,7 +774,7 @@ impl GitDiffQuery {
     }
 
     pub(super) fn cache_source(&mut self, source: Option<DiffSource>, has_more: bool) {
-        if !matches!(self.target.scope, DiffScope::Branch(_)) {
+        if !self.target.scope.is_branch() {
             self.cached_source = has_more.then_some(source).flatten();
         }
     }
@@ -866,7 +866,7 @@ fn sync_page_targets(
                 PrefetchBudget,
             )>();
         }
-        if let DiffScope::Branch(reference) = &target.scope
+        if let Some(reference) = target.scope.branch_reference()
             && branch_files.as_ref().is_none_or(|query| {
                 !query.ready || !query.current(&target.repo_root, reference, page_revision)
             })
@@ -1162,9 +1162,7 @@ fn start_pending_seek(
     mut commands: Commands,
 ) {
     for (entity, state, mut query, budget, pending) in &mut pages {
-        if pending.generation != query.generation
-            || !matches!(query.target.scope, DiffScope::Branch(_))
-        {
+        if pending.generation != query.generation || !query.target.scope.is_branch() {
             commands.entity(entity).remove::<PendingGitDiffSeek>();
             continue;
         }
@@ -1294,7 +1292,7 @@ fn start_requests(
         owner
             .remove::<(PendingGitDiff, PendingGitDiffSeek)>()
             .insert((query, sequence, PrefetchBudget::fresh()));
-        if matches!(target.scope, DiffScope::Branch(_))
+        if target.scope.is_branch()
             && let Some(branch_files) = branch_files
         {
             let mut cursor = BranchDiffCursor::new(branch_files.catalog.clone());
@@ -1365,7 +1363,7 @@ mod tests {
             }
             let mut query = GitDiffQuery::for_test(1);
             query.target.path = PathBuf::new();
-            query.target.scope = DiffScope::Branch("feature".to_string());
+            query.target.scope = DiffScope::branch("feature".to_string());
             query.page_revision = Some(1);
             query.revision = 4;
             let request = crate::event::GitRepositoryRequest::project(
@@ -1640,7 +1638,7 @@ mod tests {
             repo_root: repo.path().to_path_buf(),
             path: PathBuf::new(),
             path_bytes: Vec::new(),
-            scope: DiffScope::Branch("feature".into()),
+            scope: DiffScope::branch("feature".into()),
         };
         let mut app = App::new();
         app.add_plugins((
@@ -1764,7 +1762,7 @@ mod tests {
                         repo_root: repo_root.clone(),
                         path: PathBuf::new(),
                         path_bytes: Vec::new(),
-                        scope: DiffScope::Branch("old".to_string()),
+                        scope: DiffScope::branch("old".to_string()),
                     },
                     generation: 1,
                     revision: 1,
@@ -1782,7 +1780,7 @@ mod tests {
                 GitRepository::at(repo_root),
                 DiffJob {
                     path: PathBuf::new(),
-                    scope: DiffScope::Branch("old".to_string()),
+                    scope: DiffScope::branch("old".to_string()),
                     branch_paths: Vec::new(),
                     cached_source: None,
                     branch_source: PathBuf::new(),
@@ -1823,7 +1821,7 @@ mod tests {
             repo_root: repo.path().to_path_buf(),
             path: file.clone(),
             path_bytes: b"file.rs".to_vec(),
-            scope: DiffScope::File,
+            scope: DiffScope::file(),
         };
         let mut app = App::new();
         app.add_plugins((
@@ -2139,7 +2137,7 @@ mod tests {
                                 repo_root: "/repo".into(),
                                 path: "/repo/a.rs".into(),
                                 path_bytes: Vec::new(),
-                                scope: DiffScope::File,
+                                scope: DiffScope::file(),
                             },
                             file: None,
                             page_revision: None,
@@ -2164,7 +2162,7 @@ mod tests {
                         repo_root: "/repo".into(),
                         path: "/repo/b.rs".into(),
                         path_bytes: Vec::new(),
-                        scope: DiffScope::File,
+                        scope: DiffScope::file(),
                     },
                     file: None,
                     page_revision: None,
@@ -2215,7 +2213,7 @@ mod tests {
                         repo_root: "/repo".into(),
                         path: "/repo/a.rs".into(),
                         path_bytes: Vec::new(),
-                        scope: DiffScope::File,
+                        scope: DiffScope::file(),
                     },
                     file: None,
                     page_revision: None,
@@ -2304,7 +2302,7 @@ mod tests {
                 repo_root: "/repo".into(),
                 path: "/repo/a.rs".into(),
                 path_bytes: Vec::new(),
-                scope: DiffScope::File,
+                scope: DiffScope::file(),
             },
             generation: 3,
             revision: 0,

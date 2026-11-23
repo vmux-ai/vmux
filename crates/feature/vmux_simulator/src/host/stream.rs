@@ -144,18 +144,17 @@ impl StreamServer {
     }
 
     fn pipe(mut socket: TcpStream, stream: Option<SharedStream>, capability: &str) {
-        let after = match Self::read_request(&mut socket, capability) {
-            Ok(StreamRequest::Frames { after }) => after,
-            Ok(StreamRequest::Preflight) => {
-                let _ = Self::write_preflight(&mut socket);
-                return;
-            }
-            Err(_) => return,
+        let Ok(request) = Self::read_request(&mut socket, capability) else {
+            return;
         };
+        if request.preflight {
+            let _ = Self::write_preflight(&mut socket);
+            return;
+        }
         let Some(stream) = stream else {
             return;
         };
-        Self::write_bgra(socket, stream, after);
+        Self::write_bgra(socket, stream, request.after);
     }
 
     fn shared_stream(
@@ -293,9 +292,9 @@ impl StreamServer {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StreamRequest {
-    Frames { after: u64 },
-    Preflight,
+struct StreamRequest {
+    preflight: bool,
+    after: u64,
 }
 
 impl StreamRequest {
@@ -311,10 +310,14 @@ impl StreamRequest {
             return None;
         }
         match method {
-            "GET" => Some(Self::Frames {
+            "GET" => Some(Self {
+                preflight: false,
                 after: Self::after_generation(query),
             }),
-            "OPTIONS" => Some(Self::Preflight),
+            "OPTIONS" => Some(Self {
+                preflight: true,
+                after: 0,
+            }),
             _ => None,
         }
     }
@@ -536,7 +539,10 @@ mod tests {
                 b"OPTIONS /secret HTTP/1.1\r\nAccess-Control-Request-Private-Network: true\r\n\r\n",
                 "secret"
             ),
-            Some(StreamRequest::Preflight)
+            Some(StreamRequest {
+                preflight: true,
+                after: 0,
+            })
         );
     }
 
@@ -566,7 +572,10 @@ mod tests {
     fn a_frame_request_carries_the_generation_it_has_already_drawn() {
         assert_eq!(
             StreamRequest::parse(b"GET /secret?after=42 HTTP/1.1\r\n\r\n", "secret"),
-            Some(StreamRequest::Frames { after: 42 })
+            Some(StreamRequest {
+                preflight: false,
+                after: 42,
+            })
         );
     }
 }

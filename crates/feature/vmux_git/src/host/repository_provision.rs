@@ -13,9 +13,6 @@ use bevy::winit::EventLoopProxyWrapper;
 use super::repository::GitCommand;
 use super::runtime::{GitRuntime, GitTask};
 
-const PROVISION_TIMEOUT: Duration = Duration::from_secs(900);
-const PROVISION_BACKLOG_LIMIT: usize = 8;
-
 pub(super) struct RepositoryProvisionPlugin;
 
 impl Plugin for RepositoryProvisionPlugin {
@@ -86,12 +83,18 @@ struct PendingRepositoryProvision {
     operation: RepositoryProvisionOperation,
 }
 
+impl PendingRepositoryProvision {
+    const BACKLOG_LIMIT: usize = 8;
+}
+
 struct RepositoryStaging {
     destination: PathBuf,
     directory: tempfile::TempDir,
 }
 
 impl RepositoryStaging {
+    const TIMEOUT: Duration = Duration::from_secs(900);
+
     fn for_destination(destination: &Path) -> Result<Self, String> {
         if destination.exists() {
             return Err("repository destination already exists".to_string());
@@ -114,7 +117,7 @@ impl RepositoryStaging {
         let (stdout, stderr, ok) = GitCommand::run_with_timeout(
             self.directory.path(),
             &["init", "--quiet", "--initial-branch", initial_branch],
-            PROVISION_TIMEOUT,
+            Self::TIMEOUT,
         )
         .map_err(|error| error.0)?;
         self.finish(&stdout, &stderr, ok)
@@ -124,7 +127,7 @@ impl RepositoryStaging {
         let (stdout, stderr, ok) = GitCommand::run_with_timeout(
             self.directory.path(),
             &["clone", "--", remote, "."],
-            PROVISION_TIMEOUT,
+            Self::TIMEOUT,
         )
         .map_err(|error| error.0)?;
         self.finish(&stdout, &stderr, ok)
@@ -247,7 +250,8 @@ fn queue(
             }
             continue;
         }
-        if pending.iter().count() + running.iter().count() + queued.len() >= PROVISION_BACKLOG_LIMIT
+        if pending.iter().count() + running.iter().count() + queued.len()
+            >= PendingRepositoryProvision::BACKLOG_LIMIT
         {
             completed.write(RepositoryProvisionCompleted {
                 requester: request.requester,

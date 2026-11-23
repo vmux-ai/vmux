@@ -1851,7 +1851,7 @@ fn load_on_startup(
             }
         }
     }
-    normalize_workspace_resources_if_needed(path);
+    WorkspaceStoreSource::normalize_if_needed(path);
     let exists = path.exists();
     restore.store_present = exists;
     if exists {
@@ -2192,26 +2192,26 @@ impl RestoreFailure {
     }
 }
 
-fn normalize_workspace_resources_if_needed(path: &Path) {
-    let Ok(body) = std::fs::read_to_string(path) else {
-        return;
-    };
-    let Some(normalized) = WorkspaceStoreSource(&body).without_resources() else {
-        return;
-    };
-    if let Err(error) = std::fs::write(path, normalized) {
-        warn!(
-            "Failed to remove legacy workspace resources from {:?}: {error}",
-            path
-        );
-    } else {
-        info!("Removed legacy workspace resources from {:?}", path);
-    }
-}
-
 struct WorkspaceStoreSource<'a>(&'a str);
 
 impl WorkspaceStoreSource<'_> {
+    fn normalize_if_needed(path: &Path) {
+        let Ok(body) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let Some(normalized) = WorkspaceStoreSource(&body).without_resources() else {
+            return;
+        };
+        if let Err(error) = std::fs::write(path, normalized) {
+            warn!(
+                "Failed to remove legacy workspace resources from {:?}: {error}",
+                path
+            );
+        } else {
+            info!("Removed legacy workspace resources from {:?}", path);
+        }
+    }
+
     fn without_resources(&self) -> Option<String> {
         let marker = self.0.find("resources:")? + "resources:".len();
         let open = marker + self.0[marker..].find('{')?;

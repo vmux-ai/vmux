@@ -16,19 +16,19 @@ impl vmux_feature::manifest::FeatureManifestSource for Feature {
 pub mod event;
 pub mod state;
 
-pub const FILES_HOST: &str = "files";
 pub const GIT_PAGE_URL: &str = "git://";
-const LEGACY_GIT_PAGE_URL: &str = "vmux://git/";
 
 pub struct GitUrl;
 
 impl GitUrl {
+    pub(crate) const LEGACY_PAGE_URL: &'static str = "vmux://git/";
+
     pub fn file_hash(path: &[u8]) -> String {
         format!("diff-{:x}", sha2::Sha256::digest(path))
     }
 
     pub fn is_page(value: &str) -> bool {
-        value.starts_with(GIT_PAGE_URL) || value.starts_with(LEGACY_GIT_PAGE_URL)
+        value.starts_with(GIT_PAGE_URL) || value.starts_with(Self::LEGACY_PAGE_URL)
     }
 
     pub fn parse(value: &str) -> Option<std::path::PathBuf> {
@@ -37,7 +37,7 @@ impl GitUrl {
     }
 
     fn parse_with_home(value: &str, home: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
-        let path = if value.starts_with(LEGACY_GIT_PAGE_URL) {
+        let path = if value.starts_with(Self::LEGACY_PAGE_URL) {
             let parsed = url::Url::parse(value).ok()?;
             let mut segments = parsed.path_segments()?;
             crate::state::GitPanel::from_route(segments.next()?)?;
@@ -129,7 +129,7 @@ impl GitUrl {
     }
 
     pub fn selection(value: &str) -> Option<String> {
-        if value.starts_with(LEGACY_GIT_PAGE_URL) {
+        if value.starts_with(Self::LEGACY_PAGE_URL) {
             let parsed = url::Url::parse(value).ok()?;
             if Self::panel(value) == Some(crate::state::GitPanel::Branches) {
                 return None;
@@ -179,7 +179,7 @@ impl GitUrl {
 
     #[cfg(host)]
     pub(crate) fn canonical_legacy(value: &str) -> Option<String> {
-        if !value.starts_with(LEGACY_GIT_PAGE_URL) {
+        if !value.starts_with(Self::LEGACY_PAGE_URL) {
             return None;
         }
         let Some(path) = Self::parse(value) else {

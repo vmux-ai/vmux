@@ -51,28 +51,6 @@ impl ListPager {
     }
 }
 
-fn span_style(span: &StyledSpan) -> String {
-    let [lr, lg, lb] = span.light_fg;
-    let [dr, dg, db] = span.dark_fg;
-    let mut s = format!("--syntax-light:rgb({lr},{lg},{lb});--syntax-dark:rgb({dr},{dg},{db});");
-    if span.bold {
-        s.push_str("font-weight:700;");
-    }
-    if span.italic {
-        s.push_str("font-style:italic;");
-    }
-    s
-}
-
-fn opt_no(n: Option<u32>) -> String {
-    n.map(|v| v.to_string()).unwrap_or_default()
-}
-
-fn hunk_end(lines: &[DiffLine], index: usize) -> Option<u32> {
-    let hunk = lines.get(index)?.hunk?;
-    (lines.get(index + 1).and_then(|line| line.hunk) != Some(hunk)).then_some(hunk)
-}
-
 struct DiffPresentation(DiffKind);
 
 impl From<DiffKind> for DiffPresentation {
@@ -82,6 +60,29 @@ impl From<DiffKind> for DiffPresentation {
 }
 
 impl DiffPresentation {
+    fn span_style(span: &StyledSpan) -> String {
+        let [lr, lg, lb] = span.light_fg;
+        let [dr, dg, db] = span.dark_fg;
+        let mut s =
+            format!("--syntax-light:rgb({lr},{lg},{lb});--syntax-dark:rgb({dr},{dg},{db});");
+        if span.bold {
+            s.push_str("font-weight:700;");
+        }
+        if span.italic {
+            s.push_str("font-style:italic;");
+        }
+        s
+    }
+
+    fn opt_no(n: Option<u32>) -> String {
+        n.map(|v| v.to_string()).unwrap_or_default()
+    }
+
+    fn hunk_end(lines: &[DiffLine], index: usize) -> Option<u32> {
+        let hunk = lines.get(index)?.hunk?;
+        (lines.get(index + 1).and_then(|line| line.hunk) != Some(hunk)).then_some(hunk)
+    }
+
     fn sign(&self) -> &'static str {
         match self.0 {
             DiffKind::Add => DiffTone::Added.sign(),
@@ -763,7 +764,8 @@ impl DiffViewState {
                             GitDiffRow::Line(index) => {
                                 let index = index as usize;
                                 let line = &rows[index];
-                                let hunk = hunk_end(rows, index).filter(|_| show_hunk_actions);
+                                let hunk = DiffPresentation::hunk_end(rows, index)
+                                    .filter(|_| show_hunk_actions);
                                 rsx! {
                                     DiffLineRow {
                                         key: "line-{index}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
@@ -923,12 +925,12 @@ fn DiffLineRow(
                     span {
                         class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/45 group-hover:text-muted-foreground/75",
                         style: "width:calc(var(--cw, 1ch) * {gutter_width} + 1rem);",
-                        "{opt_no(line.old_no)}"
+                        "{DiffPresentation::opt_no(line.old_no)}"
                     }
                     span {
                         class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/55 group-hover:text-muted-foreground/85",
                         style: "width:calc(var(--cw, 1ch) * {gutter_width} + 1rem);",
-                        "{opt_no(line.new_no)}"
+                        "{DiffPresentation::opt_no(line.new_no)}"
                     }
                     span {
                         class: "flex w-6 shrink-0 items-center justify-center font-semibold {presentation.text_class()}",
@@ -937,7 +939,7 @@ fn DiffLineRow(
                 }
                 span { class: "min-w-0 px-2 pr-8",
                     for (j, styled) in line.spans.iter().enumerate() {
-                        span { key: "{j}", class: "syntax-token", style: "{span_style(styled)}", "{styled.text}" }
+                        span { key: "{j}", class: "syntax-token", style: "{DiffPresentation::span_style(styled)}", "{styled.text}" }
                     }
                 }
             }
@@ -1105,15 +1107,6 @@ impl DiffNextRequest {
     }
 }
 
-const DIFF_LINE_HEIGHT: f64 = 20.0;
-const DIFF_GAP_HEIGHT: f64 = 34.0;
-const DIFF_FILE_HEADER_HEIGHT: f64 = 36.0;
-const DIFF_SECTION_GAP: f64 = 12.0;
-const DIFF_PLACEHOLDER_HEIGHT: f64 = 180.0;
-const DIFF_RENDER_OVERSCAN: f64 = 4800.0;
-const DIFF_RENDER_GUARD: f64 = 1600.0;
-const DIFF_RENDER_STEP: f64 = 640.0;
-
 #[derive(Clone, Copy, Default, PartialEq)]
 struct DiffRenderWindow {
     top: f64,
@@ -1121,9 +1114,18 @@ struct DiffRenderWindow {
 }
 
 impl DiffRenderWindow {
+    const LINE_HEIGHT: f64 = 20.0;
+    const GAP_HEIGHT: f64 = 34.0;
+    const FILE_HEADER_HEIGHT: f64 = 36.0;
+    const SECTION_GAP: f64 = 12.0;
+    const PLACEHOLDER_HEIGHT: f64 = 180.0;
+    const OVERSCAN: f64 = 4800.0;
+    const GUARD: f64 = 1600.0;
+    const STEP: f64 = 640.0;
+
     fn at(top: f64, height: f64) -> Self {
         Self {
-            top: (top.max(0.0) / DIFF_RENDER_STEP).floor() * DIFF_RENDER_STEP,
+            top: (top.max(0.0) / Self::STEP).floor() * Self::STEP,
             height: height.max(3200.0),
         }
     }
@@ -1134,8 +1136,8 @@ impl DiffRenderWindow {
 
     fn range(self) -> (f64, f64) {
         (
-            (self.top - DIFF_RENDER_OVERSCAN).max(0.0),
-            self.top + self.height + DIFF_RENDER_OVERSCAN,
+            (self.top - Self::OVERSCAN).max(0.0),
+            self.top + self.height + Self::OVERSCAN,
         )
     }
 
@@ -1144,9 +1146,9 @@ impl DiffRenderWindow {
         let guarded_start = if start == 0.0 {
             0.0
         } else {
-            start + DIFF_RENDER_GUARD
+            start + Self::GUARD
         };
-        let guarded_end = (end - DIFF_RENDER_GUARD).max(guarded_start);
+        let guarded_end = (end - Self::GUARD).max(guarded_start);
         top >= guarded_start && top + height <= guarded_end
     }
 
@@ -1224,7 +1226,8 @@ impl DiffLayout {
             if let Some(section) = sections.last_mut() {
                 let hunk_control = match row {
                     GitDiffRow::Line(index) => {
-                        hunk_controls && hunk_end(lines, *index as usize).is_some()
+                        hunk_controls
+                            && DiffPresentation::hunk_end(lines, *index as usize).is_some()
                     }
                     GitDiffRow::Gap { .. } => false,
                 };
@@ -1702,7 +1705,7 @@ impl DiffSection {
 
     fn margin(&self, index: usize) -> f64 {
         if self.file_path.is_some() && index > 0 {
-            DIFF_SECTION_GAP
+            DiffRenderWindow::SECTION_GAP
         } else {
             0.0
         }
@@ -1716,12 +1719,12 @@ impl DiffSection {
 
     fn height(&self, index: usize, identity: &str, collapsed: &HashSet<String>) -> f64 {
         if self.placeholder {
-            return self.margin(index) + DIFF_PLACEHOLDER_HEIGHT;
+            return self.margin(index) + DiffRenderWindow::PLACEHOLDER_HEIGHT;
         }
         let header = self
             .file_path
             .as_ref()
-            .map(|_| DIFF_FILE_HEADER_HEIGHT)
+            .map(|_| DiffRenderWindow::FILE_HEADER_HEIGHT)
             .unwrap_or_default();
         let rows = if self.collapsed(identity, collapsed) {
             0.0
@@ -1746,7 +1749,7 @@ impl DiffSection {
             + self
                 .file_path
                 .as_ref()
-                .map(|_| DIFF_FILE_HEADER_HEIGHT)
+                .map(|_| DiffRenderWindow::FILE_HEADER_HEIGHT)
                 .unwrap_or_default();
         let local_start = (range_start - content_start).max(0.0);
         let local_end = (range_end - content_start).max(0.0);
@@ -1955,8 +1958,10 @@ struct DiffRowHeight;
 impl DiffRowHeight {
     fn of(row: GitDiffRow, hunk_control: bool) -> f64 {
         match row {
-            GitDiffRow::Line(_) => DIFF_LINE_HEIGHT + if hunk_control { 36.0 } else { 0.0 },
-            GitDiffRow::Gap { .. } => DIFF_GAP_HEIGHT,
+            GitDiffRow::Line(_) => {
+                DiffRenderWindow::LINE_HEIGHT + if hunk_control { 36.0 } else { 0.0 }
+            }
+            GitDiffRow::Gap { .. } => DiffRenderWindow::GAP_HEIGHT,
         }
     }
 }
@@ -2966,17 +2971,17 @@ mod tests {
             true,
         );
         let section = &visible.sections[0];
-        let rendered = section.rows.len() as f64 * DIFF_LINE_HEIGHT;
+        let rendered = section.rows.len() as f64 * DiffRenderWindow::LINE_HEIGHT;
 
         assert!(section.rows.len() < 500);
         assert_eq!(
             visible.top_spacer
-                + DIFF_FILE_HEADER_HEIGHT
+                + DiffRenderWindow::FILE_HEADER_HEIGHT
                 + section.top_spacer
                 + rendered
                 + section.bottom_spacer
                 + visible.bottom_spacer,
-            500.0 * DIFF_LINE_HEIGHT + DIFF_FILE_HEADER_HEIGHT,
+            500.0 * DiffRenderWindow::LINE_HEIGHT + DiffRenderWindow::FILE_HEADER_HEIGHT,
         );
     }
 
@@ -2999,7 +3004,9 @@ mod tests {
             geometry
                 .file_at(
                     &layout,
-                    DIFF_FILE_HEADER_HEIGHT + DIFF_LINE_HEIGHT + DIFF_SECTION_GAP,
+                    DiffRenderWindow::FILE_HEADER_HEIGHT
+                        + DiffRenderWindow::LINE_HEIGHT
+                        + DiffRenderWindow::SECTION_GAP,
                 )
                 .as_deref(),
             Some("src/second.rs")

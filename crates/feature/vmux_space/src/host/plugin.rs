@@ -36,7 +36,6 @@ use vmux_layout::{
 use vmux_setting::{AgentSettings, SpaceOverrides, SpaceProject, TerminalSettings};
 use vmux_setting::{AppSettings, SettingsLoadSet, SettingsSaveRequest};
 
-use super::SpacesUiStateUpdates;
 use super::agent::SpaceAgentPlugin;
 use super::identity::SpaceIdentity;
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
@@ -46,14 +45,11 @@ use crate::event::{
     SpaceFormOpenRequest, SpaceFormRegenerateRequest, SpaceFormState, SpaceOpenPageRequest,
     SpaceRenameRequest, SpaceRow, SpacesListEvent, SpacesUiState,
 };
-use crate::model::BOOTSTRAP_SPACE_ID;
 use vmux_api::command_bar::{CommandBarPicker, OpenRequest as CommandBarOpenUrlRequest};
 use vmux_ui::i18n::{Locale, TranslationValue, translate, translate_with};
 
 #[vmux_page::page]
 pub struct SpacePlugin;
-
-const PICKER_ID: &str = "space";
 
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
@@ -162,7 +158,7 @@ fn ensure_bootstrap(
     }
     commands.spawn((
         Space,
-        SpaceId(BOOTSTRAP_SPACE_ID.into()),
+        SpaceIdentity::bootstrap_id(),
         Name::new(identity.suggested(&[])),
         vmux_layout::profile::Profile {
             name: profile.label().unwrap_or("Personal").to_string(),
@@ -211,7 +207,7 @@ fn open_command_bar(
             .map(|locale| locale.0.clone())
             .unwrap_or_else(Locale::preferred);
         open.write(CommandBarOpenRequest::picker_with(
-            CommandBarPicker::new(PICKER_ID),
+            CommandBarPicker::new(SpaceContribution::PICKER_ID),
             Vec::new(),
             String::new(),
             locale.translate("command-switch-space"),
@@ -223,6 +219,10 @@ fn open_command_bar(
 
 #[derive(Component)]
 struct SpaceContribution(String);
+
+impl SpaceContribution {
+    const PICKER_ID: &'static str = "space";
+}
 
 #[derive(Component)]
 struct ManageSpacesContribution;
@@ -247,7 +247,7 @@ fn contribute(
     let picker = request
         .picker
         .as_ref()
-        .is_some_and(|picker| picker.is(PICKER_ID));
+        .is_some_and(|picker| picker.is(SpaceContribution::PICKER_ID));
     if request.picker.is_some() && !picker {
         return;
     }
@@ -606,7 +606,7 @@ fn broadcast_spaces_to_views(
     browsers: NonSend<Browsers>,
     space_window: SpaceWindow,
     layout_ui: Query<(), With<LayoutUiStateUpdates>>,
-    spaces_ui: Query<(), With<SpacesUiStateUpdates>>,
+    spaces_ui: Query<(), With<vmux_ecs::UiState<SpacesUiState>>>,
     mut commands: Commands,
 ) {
     for (entity, selection, snapshot, sent) in &mut views {
@@ -2044,52 +2044,36 @@ mod tests {
 
     #[test]
     fn unset_startup_dir_is_unchanged_without_relevant_updates() {
-        #[derive(Resource, Default)]
-        struct ChangeCount(u32);
-
-        fn count_changes(
-            effective: Single<Ref<EffectiveStartupDir>, With<Space>>,
-            mut count: ResMut<ChangeCount>,
-        ) {
-            if effective.is_changed() {
-                count.0 += 1;
-            }
-        }
-
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .init_resource::<ChangeCount>()
-            .add_systems(
-                Update,
-                (
-                    update_effective_startup,
-                    count_changes.after(update_effective_startup),
-                ),
-            );
-        app.world_mut()
-            .spawn((Space, SpaceId("work".into()), Active));
+            .add_systems(Update, update_effective_startup);
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("work".into()), Active))
+            .id();
 
         app.update();
+        let first_changed = app
+            .world()
+            .entity(space)
+            .get_ref::<EffectiveStartupDir>()
+            .unwrap()
+            .last_changed();
         app.update();
 
-        assert_eq!(app.world().resource::<ChangeCount>().0, 1);
+        assert_eq!(
+            app.world()
+                .entity(space)
+                .get_ref::<EffectiveStartupDir>()
+                .unwrap()
+                .last_changed(),
+            first_changed
+        );
     }
 
     #[test]
     fn effective_startup_dir_is_unchanged_without_relevant_updates() {
-        #[derive(Resource, Default)]
-        struct ChangeCount(u32);
-
-        fn count_changes(
-            effective: Single<Ref<EffectiveStartupDir>, With<Space>>,
-            mut count: ResMut<ChangeCount>,
-        ) {
-            if effective.is_changed() {
-                count.0 += 1;
-            }
-        }
-
         let dir = tempfile::tempdir().unwrap();
         let mut settings = test_settings();
         settings.spaces.insert(
@@ -2103,21 +2087,29 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .insert_resource(settings)
-            .init_resource::<ChangeCount>()
-            .add_systems(
-                Update,
-                (
-                    update_effective_startup,
-                    count_changes.after(update_effective_startup),
-                ),
-            );
-        app.world_mut()
-            .spawn((Space, SpaceId("work".into()), Active));
+            .add_systems(Update, update_effective_startup);
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("work".into()), Active))
+            .id();
 
         app.update();
+        let first_changed = app
+            .world()
+            .entity(space)
+            .get_ref::<EffectiveStartupDir>()
+            .unwrap()
+            .last_changed();
         app.update();
 
-        assert_eq!(app.world().resource::<ChangeCount>().0, 1);
+        assert_eq!(
+            app.world()
+                .entity(space)
+                .get_ref::<EffectiveStartupDir>()
+                .unwrap()
+                .last_changed(),
+            first_changed
+        );
     }
 
     #[test]

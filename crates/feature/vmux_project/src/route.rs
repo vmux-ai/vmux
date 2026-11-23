@@ -60,80 +60,7 @@ impl ProjectRoute {
     pub fn is_root(value: &str) -> bool {
         value.trim_end_matches('/') == Self::ROOT.trim_end_matches('/')
     }
-}
 
-#[cfg(all(test, feature = "filesystem", unix))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn directory_attachments_open_managed_external_and_worktree_paths() {
-        let root = tempfile::tempdir().unwrap();
-        let external = tempfile::tempdir().unwrap();
-        let managed = root.path().join("managed");
-        std::fs::create_dir(&managed).unwrap();
-        let worktree = external.path().join("worktree");
-        std::fs::create_dir(&worktree).unwrap();
-        std::fs::write(
-            worktree.join(".git"),
-            "gitdir: /tmp/repository/worktrees/test",
-        )
-        .unwrap();
-        for path in [&managed, &worktree, &external.path().to_path_buf()] {
-            let url = ProjectRoute::attach(root.path(), path).unwrap();
-            assert_eq!(
-                ProjectRoute::resolve(&url, root.path()).unwrap().unwrap(),
-                path.canonicalize().unwrap()
-            );
-            assert_eq!(ProjectRoute::attach(root.path(), path).unwrap(), url);
-        }
-        assert_eq!(
-            std::fs::read_dir(root.path().join("imported"))
-                .unwrap()
-                .count(),
-            2
-        );
-    }
-
-    #[test]
-    fn route_round_trips_a_project_path() {
-        let root = tempfile::tempdir().unwrap();
-        let project = root.path().join("github.com/example/a project");
-        std::fs::create_dir_all(&project).unwrap();
-
-        let url = ProjectRoute::from_path(root.path(), &project).unwrap();
-        let resolved = ProjectRoute::resolve(&url, root.path()).unwrap().unwrap();
-
-        assert_eq!(url, "vmux://projects/github.com/example/a%20project");
-        assert_eq!(resolved, project.canonicalize().unwrap());
-    }
-
-    #[test]
-    fn route_rejects_parent_directory_segments() {
-        let root = tempfile::tempdir().unwrap();
-
-        let result = ProjectRoute::resolve("vmux://projects/%2E%2E", root.path())
-            .unwrap()
-            .unwrap_err();
-
-        assert_eq!(result, "project URL contains an invalid path");
-    }
-
-    #[test]
-    fn route_rejects_unmanaged_symlinks_outside_the_projects_root() {
-        let root = tempfile::tempdir().unwrap();
-        let external = tempfile::tempdir().unwrap();
-        std::os::unix::fs::symlink(external.path(), root.path().join("external")).unwrap();
-
-        let result = ProjectRoute::resolve("vmux://projects/external", root.path())
-            .unwrap()
-            .unwrap_err();
-
-        assert_eq!(result, "project is unavailable");
-    }
-}
-
-impl ProjectRoute {
     pub fn route_path(
         value: &str,
         root: &std::path::Path,
@@ -206,5 +133,76 @@ impl ProjectRoute {
         }
         drop(segments);
         Some(url.to_string())
+    }
+}
+
+#[cfg(all(test, feature = "filesystem", unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directory_attachments_open_managed_external_and_worktree_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let managed = root.path().join("managed");
+        std::fs::create_dir(&managed).unwrap();
+        let worktree = external.path().join("worktree");
+        std::fs::create_dir(&worktree).unwrap();
+        std::fs::write(
+            worktree.join(".git"),
+            "gitdir: /tmp/repository/worktrees/test",
+        )
+        .unwrap();
+        for path in [&managed, &worktree, &external.path().to_path_buf()] {
+            let url = ProjectRoute::attach(root.path(), path).unwrap();
+            assert_eq!(
+                ProjectRoute::resolve(&url, root.path()).unwrap().unwrap(),
+                path.canonicalize().unwrap()
+            );
+            assert_eq!(ProjectRoute::attach(root.path(), path).unwrap(), url);
+        }
+        assert_eq!(
+            std::fs::read_dir(root.path().join("imported"))
+                .unwrap()
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn route_round_trips_a_project_path() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("github.com/example/a project");
+        std::fs::create_dir_all(&project).unwrap();
+
+        let url = ProjectRoute::from_path(root.path(), &project).unwrap();
+        let resolved = ProjectRoute::resolve(&url, root.path()).unwrap().unwrap();
+
+        assert_eq!(url, "vmux://projects/github.com/example/a%20project");
+        assert_eq!(resolved, project.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn route_rejects_parent_directory_segments() {
+        let root = tempfile::tempdir().unwrap();
+
+        let result = ProjectRoute::resolve("vmux://projects/%2E%2E", root.path())
+            .unwrap()
+            .unwrap_err();
+
+        assert_eq!(result, "project URL contains an invalid path");
+    }
+
+    #[test]
+    fn route_rejects_unmanaged_symlinks_outside_the_projects_root() {
+        let root = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(external.path(), root.path().join("external")).unwrap();
+
+        let result = ProjectRoute::resolve("vmux://projects/external", root.path())
+            .unwrap()
+            .unwrap_err();
+
+        assert_eq!(result, "project is unavailable");
     }
 }

@@ -204,6 +204,20 @@ fn delete(
     }
 }
 
+impl SelectProjectTool {
+    fn trimmed_path(&self) -> Option<String> {
+        let value = self.path.as_deref()?.trim();
+        (!value.is_empty()).then(|| value.to_string())
+    }
+}
+
+impl CreateWorktreeTool {
+    fn trimmed(value: Option<&str>) -> Option<String> {
+        let value = value?.trim();
+        (!value.is_empty()).then(|| value.to_string())
+    }
+}
+
 fn select_project(
     mut commands: Commands,
     requests: Query<
@@ -213,9 +227,7 @@ fn select_project(
 ) {
     for (entity, name, anchor, args) in &requests {
         let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| match args
-            .path
-            .clone()
-            .and_then(Trimmed::into_option)
+            .trimmed_path()
         {
             Some(path) => AgentRequest::encode(&AgentChooseWorkspaceAtPath { anchor, path }),
             None => AgentRequest::encode(&AgentChooseWorkspace { anchor }),
@@ -233,7 +245,7 @@ fn create_worktree(
 ) {
     for (entity, name, anchor, args) in &requests {
         let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
-            if let Some(branch) = args.branch.clone().and_then(Trimmed::into_option) {
+            if let Some(branch) = CreateWorktreeTool::trimmed(args.branch.as_deref()) {
                 AgentRequest::encode(&AgentCreateWorktreeOnBranch {
                     anchor,
                     branch,
@@ -242,22 +254,13 @@ fn create_worktree(
             } else {
                 AgentRequest::encode(&AgentPrepareWorktree {
                     anchor,
-                    path: args.path.clone().and_then(Trimmed::into_option),
-                    task: args.task.clone().and_then(Trimmed::into_option),
+                    path: CreateWorktreeTool::trimmed(args.path.as_deref()),
+                    task: CreateWorktreeTool::trimmed(args.task.as_deref()),
                     create: args.create,
                 })
             }
         });
         commands.entity(entity).insert(ToolCommand(command));
-    }
-}
-
-struct Trimmed;
-
-impl Trimmed {
-    fn into_option(value: String) -> Option<String> {
-        let value = value.trim();
-        (!value.is_empty()).then(|| value.to_string())
     }
 }
 

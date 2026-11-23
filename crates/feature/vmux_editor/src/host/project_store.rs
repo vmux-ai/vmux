@@ -14,7 +14,8 @@ use vmux_project::{ProjectPlugin, Root};
 use crate::project::ProjectRoute;
 
 pub(super) use vmux_project::{
-    Mutation, ProjectSaved, Snapshot, StoreSet, WriteCompleted, WriteRequest,
+    ArchiveProjectRequest, ProjectSaved, RemoveProjectRequest, SaveProjectRequest, Snapshot,
+    StoreSet, WriteCompleted,
 };
 
 pub(super) struct ProjectStorePlugin;

@@ -20,7 +20,7 @@ use crate::project::{
 
 use super::project::{GitHubRepository, ProjectImport, ProjectName};
 use super::project_store::{
-    Mutation, ProjectSaved, Registrations, StoreSet, WriteCompleted, WriteRequest,
+    ProjectSaved, Registrations, SaveProjectRequest, StoreSet, WriteCompleted,
 };
 
 pub(super) struct ProjectFormPlugin;
@@ -590,18 +590,16 @@ fn finish_validations(
         match result {
             Ok(plan) => {
                 commands.entity(entity).insert((
-                    WriteRequest {
+                    SaveProjectRequest {
                         root: plan.root.clone(),
-                        mutation: Mutation::Save {
-                            expected: plan.request.revision,
-                            project: ProjectSaved {
-                                root: plan.root,
-                                id: plan.id,
-                                directory: plan.directory,
-                                name: plan.request.name.trim().to_string(),
-                                repository: plan.repository,
-                                revision: 0,
-                            },
+                        expected: plan.request.revision,
+                        project: ProjectSaved {
+                            root: plan.root,
+                            id: plan.id,
+                            directory: plan.directory,
+                            name: plan.request.name.trim().to_string(),
+                            repository: plan.repository,
+                            revision: 0,
                         },
                     },
                     PendingCommit {
