@@ -2,7 +2,7 @@
 
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::CefEmbeddedHosts;
+use bevy_cef_core::prelude::{CefEmbeddedHosts, CefSchemeRoute};
 pub use command::{
     NavigationOperation, NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomChange,
     ZoomRequest,
@@ -107,9 +107,51 @@ impl HostedPageLifecycle {
     }
 }
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BridgeOrigin(pub &'static str);
+
+impl BridgeOrigin {
+    const BUILTIN: &[&'static str] = &[
+        "chat.mistral.ai",
+        "chat.local.mistral.ai:8443",
+        "chromewebstore.google.com",
+    ];
+}
+
 pub struct BrowserPlugin;
 
 impl BrowserPlugin {
+    fn scheme_routes(embedded_scheme: &str, manifests: &[PageManifest]) -> Vec<CefSchemeRoute> {
+        let mut routes = Vec::new();
+        for manifest in manifests {
+            let Some((scheme, _)) = manifest.url.split_once("://") else {
+                continue;
+            };
+            if scheme.is_empty() || scheme == embedded_scheme || matches!(scheme, "http" | "https")
+            {
+                continue;
+            }
+            if routes
+                .iter()
+                .any(|existing: &CefSchemeRoute| existing.scheme == scheme)
+            {
+                continue;
+            }
+            let host = manifest.embedded_host();
+            let file_scheme = scheme == "file";
+            routes.push(CefSchemeRoute {
+                scheme: scheme.to_string(),
+                host: host.host.clone(),
+                default_document: host.default_document,
+                trusted_ipc: file_scheme,
+                extension_free: file_scheme,
+                register_handler: file_scheme,
+                strip_self_host: scheme == host.host,
+            });
+        }
+        routes
+    }
+
     pub fn configure_schedule(app: &mut App) -> &mut App {
         app.configure_sets(
             Update,
@@ -146,14 +188,26 @@ impl Plugin for BrowserPlugin {
             BrowserToolPlugin,
             platform::BrowserPlatformPlugin,
         ));
+        for authority in BridgeOrigin::BUILTIN {
+            app.world_mut().spawn(BridgeOrigin(authority));
+        }
+        let embedded_scheme = compile_time_cef_embedded_scheme().to_string();
         let mut manifests = app.world_mut().query::<&PageManifest>();
+        let page_manifests: Vec<PageManifest> = manifests.iter(app.world()).copied().collect();
         let embedded_hosts = CefEmbeddedHosts(
-            manifests
-                .iter(app.world())
+            page_manifests
+                .iter()
                 .map(PageManifest::embedded_host)
                 .collect(),
         );
+        let scheme_routes = Self::scheme_routes(&embedded_scheme, &page_manifests);
+        let mut origins = app.world_mut().query::<&BridgeOrigin>();
+        let bridge_origins: Vec<String> = origins
+            .iter(app.world())
+            .map(|origin| origin.0.to_string())
+            .collect();
         Self::configure_schedule(app)
+            .add_systems(Startup, sync_embedded_page_config)
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<WebviewLoadCompleted>()
             .add_plugins(vmux_layout::LayoutContractPlugin)
@@ -163,7 +217,10 @@ impl Plugin for BrowserPlugin {
                     root_cache_path: host::CefStartup::root_cache_path(),
                     locale: startup_locale.value().to_string(),
                     accept_language_list: startup_accept_language_list,
+                    embedded_scheme,
                     embedded_hosts,
+                    scheme_routes,
+                    bridge_origins,
                     #[cfg(target_os = "macos")]
                     os_crypt_key_provider: host::CefStartup::os_crypt_key_provider(),
                     ..default()
@@ -209,6 +266,35 @@ impl Plugin for BrowserPlugin {
                 window_drag::WindowDragPlugin,
             ));
     }
+}
+
+fn sync_embedded_page_config(
+    manifests: Query<&PageManifest>,
+    origins: Query<&BridgeOrigin>,
+    config: Option<ResMut<CefEmbeddedPageConfig>>,
+) {
+    let embedded_scheme = compile_time_cef_embedded_scheme().to_string();
+    let page_manifests: Vec<PageManifest> = manifests.iter().copied().collect();
+    let embedded_hosts = CefEmbeddedHosts(
+        page_manifests
+            .iter()
+            .map(PageManifest::embedded_host)
+            .collect(),
+    );
+    let scheme_routes = BrowserPlugin::scheme_routes(&embedded_scheme, &page_manifests);
+    let mut bridge_origins = Vec::new();
+    for origin in &origins {
+        if !bridge_origins.iter().any(|existing| existing == origin.0) {
+            bridge_origins.push(origin.0.to_string());
+        }
+    }
+    let next = CefEmbeddedPageConfig::new(embedded_scheme, embedded_hosts)
+        .with_scheme_routes(scheme_routes)
+        .with_bridge_origins(bridge_origins);
+    if let Some(mut current) = config {
+        *current = next.clone();
+    }
+    bevy_cef_core::prelude::try_set_cef_embedded_page_config(next);
 }
 
 fn sync_cef_backend(

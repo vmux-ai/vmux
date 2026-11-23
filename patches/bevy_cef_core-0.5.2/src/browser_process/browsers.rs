@@ -155,7 +155,7 @@ static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
 /// scripts from hijacking the editor's keyboard handling, while extensions keep working on
 /// real web pages, which stay on the shared (extension-enabled) context.
 fn requires_extension_free_context(uri: &str) -> bool {
-    uri.starts_with("file://")
+    resolved_cef_embedded_page_config().requires_extension_free_context(uri)
 }
 
 /// Disk profile root for [`RequestContextSettings::cache_path`], aligned with `CefPlugin::root_cache_path` in the `bevy_cef` crate.
@@ -364,47 +364,8 @@ impl Browsers {
             bin_ipc_context.clone(),
         );
 
-        // `RequestContext::register_scheme_handler_factory` is not always enough: some navigations
-        // still consult the process-wide factories registered via `cef_register_scheme_handler_factory`
-        // (see CEF capi). Without this, custom embedded scheme URLs can yield ERR_UNKNOWN_URL_SCHEME
-        // despite `on_register_custom_schemes` and per-context registration.
-        let requester_for_global = requester.clone();
-        REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES.call_once(move || {
-            let cfg = resolved_cef_embedded_page_config();
-            let ct = compile_time_cef_embedded_scheme();
-            if cfg.scheme != ct {
-                bevy::log::warn!(
-                    "bevy_cef_core: runtime embedded scheme {:?} != build-time scheme {:?}; rebuild bevy_cef_core with the same scheme as CefPlugin.embedded_scheme (optional env BEVY_CEF_EMBEDDED_SCHEME during that build)",
-                    cfg.scheme.as_str(),
-                    ct
-                );
-            }
-            let emb_scheme = cfg.scheme.clone();
-            let mut embedded_factory =
-                LocalSchemaHandlerBuilder::build(requester_for_global.clone());
-            let ok_embedded = register_scheme_handler_factory(
-                Some(&emb_scheme.as_str().into()),
-                None,
-                Some(&mut embedded_factory),
-            );
-            assert_eq!(
-                ok_embedded, 1,
-                "cef_register_scheme_handler_factory(embedded page scheme) failed with code {ok_embedded}"
-            );
-            let mut files_factory =
-                LocalSchemaHandlerBuilder::build(requester_for_global.clone());
-            let ok_files = register_scheme_handler_factory(
-                Some(&crate::util::FILES_SCHEME.into()),
-                None,
-                Some(&mut files_factory),
-            );
-            assert_eq!(
-                ok_files, 1,
-                "cef_register_scheme_handler_factory(files scheme) failed with code {ok_files}"
-            );
-        });
+        Self::register_global_scheme_handlers(requester.clone());
 
-        // Holds the per-browser ephemeral context when not using `shared_disk_context`.
         #[allow(unused_assignments)]
         let mut ephemeral_local: Option<RequestContext> = None;
         let color_scheme = self.color_scheme;
@@ -426,43 +387,8 @@ impl Browsers {
             }
         };
 
-        #[cfg(target_os = "macos")]
-        let window_info = {
-            let parent = match _window_handle {
-                Some(RawWindowHandle::AppKit(handle)) => handle.ns_view.as_ptr(),
-                _ => std::ptr::null_mut(),
-            };
-            if windowed {
-                WindowInfo::default().set_as_child(
-                    parent,
-                    &Rect {
-                        x: 0,
-                        y: 0,
-                        width: webview_size.x.max(1.0) as i32,
-                        height: webview_size.y.max(1.0) as i32,
-                    },
-                )
-            } else {
-                WindowInfo {
-                    windowless_rendering_enabled: true as _,
-                    external_begin_frame_enabled: false as _,
-                    parent_view: parent,
-                    shared_texture_enabled: shared_texture as _,
-                    ..Default::default()
-                }
-            }
-        };
-        #[cfg(not(target_os = "macos"))]
-        let window_info = WindowInfo {
-            windowless_rendering_enabled: true as _,
-            external_begin_frame_enabled: false as _,
-            #[cfg(target_os = "windows")]
-            parent_window: match _window_handle {
-                Some(RawWindowHandle::Win32(handle)) => cef_dll_sys::HWND(handle.hwnd.get() as _),
-                _ => cef_dll_sys::HWND(std::ptr::null_mut()),
-            },
-            ..Default::default()
-        };
+        let window_info =
+            Self::browser_window_info(_window_handle, webview_size, windowed, shared_texture);
 
         let browser = browser_host_create_browser_sync(
             Some(&window_info),
@@ -485,6 +411,128 @@ impl Browsers {
         .expect("Failed to create browser");
         let host = browser.host().expect("Failed to get browser host");
         Self::apply_emulated_color_scheme(&host, color_scheme);
+        let webview_browser = Self::build_webview_browser(
+            browser,
+            host,
+            size,
+            device_scale,
+            windowless_frame_rate,
+            windowed,
+            native_liquid_glass,
+            bin_ipc_context,
+            allow_native_focus,
+            webview_popup_sender,
+            texture_wake,
+        );
+        self.browsers.insert(webview, webview_browser);
+    }
+
+    fn register_global_scheme_handlers(requester: Requester) {
+        REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES.call_once(move || {
+            let cfg = resolved_cef_embedded_page_config();
+            let ct = compile_time_cef_embedded_scheme();
+            if cfg.scheme != ct {
+                bevy::log::warn!(
+                    "bevy_cef_core: runtime embedded scheme {:?} != build-time scheme {:?}",
+                    cfg.scheme.as_str(),
+                    ct
+                );
+            }
+            let emb_scheme = cfg.scheme.clone();
+            let mut embedded_factory = LocalSchemaHandlerBuilder::build(requester.clone());
+            let ok_embedded = register_scheme_handler_factory(
+                Some(&emb_scheme.as_str().into()),
+                None,
+                Some(&mut embedded_factory),
+            );
+            assert_eq!(
+                ok_embedded, 1,
+                "cef_register_scheme_handler_factory(embedded page scheme) failed with code {ok_embedded}"
+            );
+            for route in &cfg.scheme_routes {
+                if !route.register_handler {
+                    continue;
+                }
+                let mut route_factory = LocalSchemaHandlerBuilder::build(requester.clone());
+                let ok_route = register_scheme_handler_factory(
+                    Some(&route.scheme.as_str().into()),
+                    None,
+                    Some(&mut route_factory),
+                );
+                assert_eq!(
+                    ok_route, 1,
+                    "cef_register_scheme_handler_factory({}) failed with code {ok_route}",
+                    route.scheme
+                );
+            }
+        });
+    }
+
+    fn browser_window_info(
+        window_handle: Option<RawWindowHandle>,
+        webview_size: Vec2,
+        windowed: bool,
+        shared_texture: bool,
+    ) -> WindowInfo {
+        let _ = (window_handle, webview_size, windowed, shared_texture);
+        #[cfg(target_os = "macos")]
+        {
+            let parent = match window_handle {
+                Some(RawWindowHandle::AppKit(handle)) => handle.ns_view.as_ptr(),
+                _ => std::ptr::null_mut(),
+            };
+            if windowed {
+                WindowInfo::default().set_as_child(
+                    parent,
+                    &Rect {
+                        x: 0,
+                        y: 0,
+                        width: webview_size.x.max(1.0) as i32,
+                        height: webview_size.y.max(1.0) as i32,
+                    },
+                )
+            } else {
+                WindowInfo {
+                    windowless_rendering_enabled: true as _,
+                    external_begin_frame_enabled: false as _,
+                    parent_view: parent,
+                    shared_texture_enabled: shared_texture as _,
+                    ..Default::default()
+                }
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            WindowInfo {
+                windowless_rendering_enabled: true as _,
+                external_begin_frame_enabled: false as _,
+                #[cfg(target_os = "windows")]
+                parent_window: match window_handle {
+                    Some(RawWindowHandle::Win32(handle)) => {
+                        cef_dll_sys::HWND(handle.hwnd.get() as _)
+                    }
+                    _ => cef_dll_sys::HWND(std::ptr::null_mut()),
+                },
+                ..Default::default()
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_webview_browser(
+        browser: Browser,
+        host: BrowserHost,
+        size: SharedViewSize,
+        device_scale: SharedDeviceScaleFactor,
+        windowless_frame_rate: i32,
+        windowed: bool,
+        native_liquid_glass: bool,
+        bin_ipc_context: BinIpcContext,
+        allow_native_focus: bool,
+        webview_popup_sender: WebviewPopupSenderInner,
+        texture_wake: Option<TextureWake>,
+    ) -> WebviewBrowser {
+        let _ = native_liquid_glass;
         if !windowed {
             host.was_hidden(0);
         }
@@ -502,7 +550,7 @@ impl Browsers {
             (windowed && native_liquid_glass).then(|| Self::create_native_liquid_glass(&host));
         #[cfg(target_os = "macos")]
         let native_liquid_glass = native_liquid_glass.flatten();
-        let webview_browser = WebviewBrowser {
+        WebviewBrowser {
             #[cfg(target_os = "macos")]
             child_window: std::cell::RefCell::new(None),
             #[cfg(target_os = "macos")]
@@ -538,8 +586,7 @@ impl Browsers {
             #[cfg(target_os = "macos")]
             agent_badge_img: RefCell::new(None),
             last_badge: Cell::new(None),
-        };
-        self.browsers.insert(webview, webview_browser);
+        }
     }
 
     /// Returns `true` if [`Self::create_browser`] has already succeeded for this webview entity.
@@ -2202,6 +2249,7 @@ impl Browsers {
     ///
     /// The browser will be removed from the hash map after closing.
     pub fn close(&mut self, webview: &Entity) {
+        crate::browser_process::permission_handler::revoke_webview_permissions(*webview);
         if let Some(browser) = self.browsers.remove(webview) {
             #[cfg(target_os = "macos")]
             {
@@ -2502,17 +2550,22 @@ impl Browsers {
             Some(&mut RequestContextHandlerBuilder::build()),
         );
         if let Some(context) = context.as_mut() {
-            let emb_scheme = resolved_cef_embedded_page_config().scheme.clone();
+            let cfg = resolved_cef_embedded_page_config();
             context.register_scheme_handler_factory(
-                Some(&emb_scheme.as_str().into()),
+                Some(&cfg.scheme.as_str().into()),
                 None,
                 Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
             );
-            context.register_scheme_handler_factory(
-                Some(&crate::util::FILES_SCHEME.into()),
-                None,
-                Some(&mut LocalSchemaHandlerBuilder::build(requester)),
-            );
+            for route in &cfg.scheme_routes {
+                if !route.register_handler {
+                    continue;
+                }
+                context.register_scheme_handler_factory(
+                    Some(&route.scheme.as_str().into()),
+                    None,
+                    Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
+                );
+            }
         }
         self.shared_disk_context = context;
     }
@@ -2530,17 +2583,22 @@ impl Browsers {
             Some(&mut RequestContextHandlerBuilder::build()),
         );
         if let Some(context) = context.as_mut() {
-            let emb_scheme = resolved_cef_embedded_page_config().scheme.clone();
+            let cfg = resolved_cef_embedded_page_config();
             context.register_scheme_handler_factory(
-                Some(&emb_scheme.as_str().into()),
+                Some(&cfg.scheme.as_str().into()),
                 None,
                 Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
             );
-            context.register_scheme_handler_factory(
-                Some(&crate::util::FILES_SCHEME.into()),
-                None,
-                Some(&mut LocalSchemaHandlerBuilder::build(requester)),
-            );
+            for route in &cfg.scheme_routes {
+                if !route.register_handler {
+                    continue;
+                }
+                context.register_scheme_handler_factory(
+                    Some(&route.scheme.as_str().into()),
+                    None,
+                    Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
+                );
+            }
         }
         context
     }
@@ -2923,7 +2981,6 @@ impl Browsers {
 
 #[cfg(test)]
 mod tests {
-    use super::requires_extension_free_context;
     use super::{
         BACKGROUND_WINDOWLESS_FRAME_RATE, DEFAULT_WINDOWLESS_FRAME_RATE,
         HIDDEN_WINDOWLESS_FRAME_RATE, MAX_CEF_WHEEL_DELTA, cef_mouse_wheel_event,
@@ -2937,15 +2994,25 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn only_file_scheme_uses_extension_free_context() {
-        assert!(requires_extension_free_context(
-            "file:///Users/x/Projects/readme.md"
-        ));
-        assert!(requires_extension_free_context("file://"));
-        assert!(!requires_extension_free_context("vmux://layout/"));
-        assert!(!requires_extension_free_context("https://example.com/"));
-        assert!(!requires_extension_free_context("http://example.com/"));
-        assert!(!requires_extension_free_context("about:blank"));
+    fn registered_extension_free_scheme_route_selects_extension_free_context() {
+        let default_cfg = crate::util::CefEmbeddedPageConfig::default();
+        assert!(!default_cfg.requires_extension_free_context("file:///Users/x/Projects/readme.md"));
+
+        let cfg = default_cfg.with_scheme_routes(vec![crate::util::CefSchemeRoute {
+            scheme: "file".to_string(),
+            host: "files".to_string(),
+            default_document: "files/index.html".to_string(),
+            trusted_ipc: true,
+            extension_free: true,
+            register_handler: true,
+            strip_self_host: false,
+        }]);
+        assert!(cfg.requires_extension_free_context("file:///Users/x/Projects/readme.md"));
+        assert!(cfg.requires_extension_free_context("file://"));
+        assert!(!cfg.requires_extension_free_context("vmux://layout/"));
+        assert!(!cfg.requires_extension_free_context("https://example.com/"));
+        assert!(!cfg.requires_extension_free_context("http://example.com/"));
+        assert!(!cfg.requires_extension_free_context("about:blank"));
     }
 
     #[test]

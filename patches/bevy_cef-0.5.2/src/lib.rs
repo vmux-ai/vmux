@@ -22,8 +22,9 @@ use crate::renderer_state::WebviewRendererStatePlugin;
 use crate::zoom::ZoomPlugin;
 use bevy::prelude::*;
 use bevy_cef_core::prelude::{
-    CefAcceptLanguageList, CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions,
-    CommandLineConfig, compile_time_cef_embedded_scheme, try_set_cef_embedded_page_config,
+    CefAcceptLanguageList, CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions, CefSchemeRoute,
+    CommandLineConfig, MediaAllowlistLease, compile_time_cef_embedded_scheme,
+    try_set_cef_embedded_page_config,
 };
 
 pub mod prelude {
@@ -35,12 +36,22 @@ pub mod prelude {
     pub use bevy_cef_core::prelude::{
         BinIpcBlocked, BinIpcEpoch, BinIpcNavigationRevision, BinIpcSurfaceGeneration, Browsers,
         CefAcceptLanguageList, CefColorMode, CefColorScheme, CefDiskProfileRoot, CefEmbeddedHost,
-        CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions, CefTransitionCore,
-        CefTransitionQualifiers, CommandLineConfig, MediaPermissionRequest, PointerButton,
-        WebviewCefStateEvent, WebviewCommittedNavigationEvent, WebviewLoadingStateEvent,
-        WebviewPopupEvent, compile_time_cef_embedded_scheme, resolve_media_permission,
-        resolved_cef_embedded_page_config, set_media_allowlist,
+        CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions, CefSchemeRoute, CefTransitionCore,
+        CefTransitionQualifiers, CommandLineConfig, MediaAllowlistLease, MediaPermissionRequest,
+        PointerButton, WebviewCefStateEvent, WebviewCommittedNavigationEvent,
+        WebviewLoadingStateEvent, WebviewPopupEvent, compile_time_cef_embedded_scheme,
+        expire_pending_permissions, resolve_media_permission, resolved_cef_embedded_page_config,
+        revoke_all_permissions, revoke_webview_permissions, set_media_allowlist,
     };
+}
+
+#[derive(Resource)]
+struct MediaAllowlistOwner(#[allow(dead_code)] MediaAllowlistLease);
+
+impl Drop for MediaAllowlistOwner {
+    fn drop(&mut self) {
+        bevy_cef_core::prelude::revoke_all_permissions();
+    }
 }
 
 pub struct RunOnMainThread;
@@ -77,6 +88,8 @@ pub struct CefPlugin {
     pub accept_language_list: String,
     pub embedded_scheme: String,
     pub embedded_hosts: CefEmbeddedHosts,
+    pub scheme_routes: Vec<CefSchemeRoute>,
+    pub bridge_origins: Vec<String>,
     #[cfg(target_os = "macos")]
     pub os_crypt_key_provider: Option<CefOsCryptKeyProvider>,
 }
@@ -91,6 +104,8 @@ impl Default for CefPlugin {
             accept_language_list: "en-US,en;q=0.9".to_string(),
             embedded_scheme: compile_time_cef_embedded_scheme().to_string(),
             embedded_hosts: CefEmbeddedHosts::default(),
+            scheme_routes: Vec::new(),
+            bridge_origins: Vec::new(),
             #[cfg(target_os = "macos")]
             os_crypt_key_provider: None,
         }
@@ -99,45 +114,55 @@ impl Default for CefPlugin {
 
 impl Plugin for CefPlugin {
     fn build(&self, app: &mut App) {
-        try_set_cef_embedded_page_config(CefEmbeddedPageConfig::new(
-            self.embedded_scheme.clone(),
-            self.embedded_hosts.clone(),
-        ));
-        app.insert_resource(bevy_cef_core::prelude::CefDiskProfileRoot(
-            self.root_cache_path.clone(),
-        ))
-        .insert_resource(CefAcceptLanguageList(self.accept_language_list.clone()))
-        .add_plugins((
-            CustomSchemePlugin,
-            MessageLoopPlugin {
-                config: self.command_line_config.clone(),
-                extensions: self.extensions.clone(),
-                root_cache_path: self.root_cache_path.clone(),
-                locale: self.locale.clone(),
-                accept_language_list: self.accept_language_list.clone(),
-                #[cfg(target_os = "macos")]
-                os_crypt_key_provider: self.os_crypt_key_provider,
-            },
-            WebviewCoreComponentsPlugin,
-            WebviewPlugin,
-            IpcPlugin,
-            SystemCursorIconPlugin,
-            WebviewLoadingStatePlugin,
-            WebviewCefStatePlugin,
-            WebviewPopupPlugin,
-            WebviewRendererStatePlugin,
-            NavigationPlugin,
-            ZoomPlugin,
-            AudioMutePlugin,
-        ));
+        let embedded_config =
+            CefEmbeddedPageConfig::new(self.embedded_scheme.clone(), self.embedded_hosts.clone())
+                .with_scheme_routes(self.scheme_routes.clone())
+                .with_bridge_origins(self.bridge_origins.clone());
+        try_set_cef_embedded_page_config(embedded_config.clone());
+        app.insert_resource(embedded_config)
+            .insert_resource(MediaAllowlistOwner(MediaAllowlistLease::acquire()))
+            .insert_resource(bevy_cef_core::prelude::CefDiskProfileRoot(
+                self.root_cache_path.clone(),
+            ))
+            .insert_resource(CefAcceptLanguageList(self.accept_language_list.clone()))
+            .add_plugins((
+                CustomSchemePlugin,
+                MessageLoopPlugin {
+                    config: self.command_line_config.clone(),
+                    extensions: self.extensions.clone(),
+                    root_cache_path: self.root_cache_path.clone(),
+                    locale: self.locale.clone(),
+                    accept_language_list: self.accept_language_list.clone(),
+                    #[cfg(target_os = "macos")]
+                    os_crypt_key_provider: self.os_crypt_key_provider,
+                },
+                WebviewCoreComponentsPlugin,
+                WebviewPlugin,
+                IpcPlugin,
+                SystemCursorIconPlugin,
+                WebviewLoadingStatePlugin,
+                WebviewCefStatePlugin,
+                WebviewPopupPlugin,
+                WebviewRendererStatePlugin,
+                NavigationPlugin,
+                ZoomPlugin,
+                AudioMutePlugin,
+            ));
         app.init_resource::<bevy_cef_core::prelude::CefColorScheme>()
             .add_systems(
                 Update,
-                sync_color_scheme
-                    .before(CefSystems::CreateAndResize)
-                    .run_if(resource_changed::<bevy_cef_core::prelude::CefColorScheme>),
+                (
+                    sync_color_scheme
+                        .before(CefSystems::CreateAndResize)
+                        .run_if(resource_changed::<bevy_cef_core::prelude::CefColorScheme>),
+                    expire_media_permissions,
+                ),
             );
     }
+}
+
+fn expire_media_permissions() {
+    bevy_cef_core::prelude::expire_pending_permissions();
 }
 
 fn sync_color_scheme(

@@ -1545,3 +1545,75 @@ mod open_in_place_flow {
         assert!(page_opens.0.is_empty());
     }
 }
+
+mod embedded_route_registration {
+    use super::*;
+    use vmux_ecs::page::{PageManifest, PagePlacement};
+
+    #[test]
+    fn non_embedded_page_manifests_derive_canonical_scheme_routes() {
+        let manifests = [
+            PageManifest {
+                route: "file://",
+                url: "file://",
+                asset_host: "files",
+                owns_subtree: true,
+                title: "Files",
+                title_message_id: None,
+                replaces_command: None,
+                keywords: &[],
+                icon: None,
+                command_bar: false,
+                startup: false,
+                reports_title: false,
+                placement: PagePlacement::DEFAULT,
+            },
+            PageManifest {
+                route: "git://",
+                url: "git://",
+                asset_host: "git",
+                owns_subtree: true,
+                title: "Git",
+                title_message_id: None,
+                replaces_command: None,
+                keywords: &[],
+                icon: None,
+                command_bar: false,
+                startup: false,
+                reports_title: false,
+                placement: PagePlacement::DEFAULT,
+            },
+            PageManifest {
+                route: "vmux://history/",
+                url: "vmux://history/",
+                asset_host: "history",
+                owns_subtree: true,
+                title: "History",
+                title_message_id: None,
+                replaces_command: None,
+                keywords: &[],
+                icon: None,
+                command_bar: false,
+                startup: false,
+                reports_title: false,
+                placement: PagePlacement::DEFAULT,
+            },
+        ];
+
+        let routes = BrowserPlugin::scheme_routes("vmux", &manifests);
+        assert_eq!(routes.len(), 2);
+        assert_eq!(routes[0].scheme, "file");
+        assert_eq!(routes[0].host, "files");
+        assert!(routes[0].trusted_ipc);
+        assert!(routes[0].extension_free);
+        assert!(routes[0].register_handler);
+        assert!(!routes[0].strip_self_host);
+
+        assert_eq!(routes[1].scheme, "git");
+        assert_eq!(routes[1].host, "git");
+        assert!(!routes[1].trusted_ipc);
+        assert!(!routes[1].extension_free);
+        assert!(!routes[1].register_handler);
+        assert!(routes[1].strip_self_host);
+    }
+}
