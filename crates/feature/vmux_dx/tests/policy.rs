@@ -12231,6 +12231,33 @@ impl Inventory {
                 self.used(entry)
                     && (self.component_alias(entry, policy, &mut visiting.clone())
                         || self.query_alias_owner(entry, policy, &mut visiting.clone())
+                        || entry.field_paths.iter().any(|path| {
+                            self.framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                                .is_some_and(|handle| {
+                                    matches!(
+                                        handle.as_str(),
+                                        "Query"
+                                            | "ParamSet"
+                                            | "With"
+                                            | "Without"
+                                            | "Changed"
+                                            | "Added"
+                                            | "Or"
+                                            | "Has"
+                                            | "Ref"
+                                            | "Mut"
+                                            | "Res"
+                                            | "ResMut"
+                                            | "Single"
+                                            | "NonSend"
+                                            | "NonSendMut"
+                                            | "MessageReader"
+                                            | "MessageWriter"
+                                            | "MessageMutator"
+                                            | "RemovedComponents"
+                                    )
+                                })
+                        })
                         || entry.fields.iter().any(|field| {
                             matches!(
                                 field.as_str(),
@@ -12241,11 +12268,17 @@ impl Inventory {
                                     | "Changed"
                                     | "Added"
                                     | "Or"
+                                    | "Has"
+                                    | "Ref"
+                                    | "Mut"
                                     | "Res"
                                     | "ResMut"
                                     | "Single"
+                                    | "NonSend"
+                                    | "NonSendMut"
                                     | "MessageReader"
                                     | "MessageWriter"
+                                    | "RemovedComponents"
                             )
                         }))
             }
@@ -12493,19 +12526,91 @@ impl Inventory {
     }
 
     fn is_external_io_handle_path(resolved: &str) -> bool {
-        const PREFIXES: &[&str] = &[
-            "std::fs::",
-            "std::process::",
-            "std::net::",
-            "std::os::unix::net::",
-            "std::os::fd::",
-            "std::os::unix::io::",
-            "std::sync::mpsc::",
+        const EXACT: &[&str] = &[
+            "std::fs::File",
+            "std::fs::ReadDir",
+            "std::fs::DirEntry",
+            "std::fs::FileType",
+            "std::fs::Metadata",
+            "std::io::BufReader",
+            "std::io::BufWriter",
+            "std::io::Stdin",
+            "std::io::Stdout",
+            "std::io::Stderr",
+            "std::io::PipeReader",
+            "std::io::PipeWriter",
+            "std::io::Result",
+            "std::io::Error",
+            "std::process::Child",
+            "std::process::ChildStdin",
+            "std::process::ChildStdout",
+            "std::process::ChildStderr",
+            "std::process::Command",
+            "std::net::TcpStream",
+            "std::net::TcpListener",
+            "std::net::UdpSocket",
+            "std::os::unix::net::UnixStream",
+            "std::os::unix::net::UnixListener",
+            "std::os::unix::net::UnixDatagram",
+            "std::os::fd::OwnedFd",
+            "std::os::fd::RawFd",
+            "std::os::unix::io::OwnedFd",
+            "std::os::unix::io::RawFd",
+            "std::sync::mpsc::Sender",
+            "std::sync::mpsc::Receiver",
+            "std::sync::mpsc::SyncSender",
             "std::thread::JoinHandle",
+            "tokio::runtime::Runtime",
+            "tokio::runtime::Handle",
+            "tokio::task::JoinHandle",
+            "tokio::task::AbortHandle",
+            "tokio::task::JoinSet",
+            "tokio::sync::mpsc::Sender",
+            "tokio::sync::mpsc::Receiver",
+            "tokio::sync::mpsc::UnboundedSender",
+            "tokio::sync::mpsc::UnboundedReceiver",
+            "tokio::sync::oneshot::Sender",
+            "tokio::sync::oneshot::Receiver",
+            "tokio::sync::watch::Sender",
+            "tokio::sync::watch::Receiver",
+            "tokio::sync::broadcast::Sender",
+            "tokio::sync::broadcast::Receiver",
+            "tokio::sync::Notify",
+            "tokio::sync::Semaphore",
+            "tokio::sync::Mutex",
+            "tokio::sync::RwLock",
+            "tokio::sync::OwnedSemaphorePermit",
+            "tokio::net::TcpStream",
+            "tokio::net::TcpListener",
+            "tokio::net::UdpSocket",
+            "tokio::net::UnixStream",
+            "tokio::net::UnixListener",
+            "tokio::process::Child",
+            "tokio::process::ChildStdin",
+            "tokio::process::ChildStdout",
+            "tokio::process::ChildStderr",
+            "tokio::process::Command",
+            "tokio::io::BufReader",
+            "tokio::io::BufWriter",
+            "tokio::io::ReadHalf",
+            "tokio::io::WriteHalf",
+            "tokio::fs::File",
+            "tokio::time::Interval",
+            "tokio_util::sync::CancellationToken",
+        ];
+        if EXACT.contains(&resolved) {
+            return true;
+        }
+        const PREFIXES: &[&str] = &[
+            "async_io::",
+            "socket2::",
+            "libc::",
+            "nix::",
+            "rustix::",
+            "signal_hook::",
             "crossbeam_channel::",
             "async_channel::",
             "flume::",
-            "tokio::",
             "quinn::",
             "rustls::",
             "rcgen::",
@@ -13778,12 +13883,14 @@ impl Inventory {
             self.ensure_renderer_graph();
             self.ensure_stateless_adapters();
             self.ensure_drop_guards();
+            self.ensure_native_io_adapters();
             let jobs = self.job_adapters.borrow();
             let dtos = self.serde_dtos.borrow();
             let cmds = self.ecs_commands.borrow();
             let renderers = self.renderer_graph.borrow();
             let adapters = self.stateless_adapters.borrow();
             let guards = self.drop_guards.borrow();
+            let native_io = self.native_io_adapters.borrow();
             for owner in self.entries.values() {
                 if !owner.production || owner.local || owner.dynamic || owner.opaque {
                     continue;
@@ -13802,6 +13909,9 @@ impl Inventory {
                             .as_ref()
                             .is_some_and(|keys| keys.contains(&owner.key))
                         || guards
+                            .as_ref()
+                            .is_some_and(|keys| keys.contains(&owner.key))
+                        || native_io
                             .as_ref()
                             .is_some_and(|keys| keys.contains(&owner.key));
                 if !valid_root {
@@ -13843,6 +13953,7 @@ impl Inventory {
             drop(renderers);
             drop(adapters);
             drop(guards);
+            drop(native_io);
             while let Some(owner_key) = queue.pop() {
                 let owner = &self.entries[&owner_key];
                 let mut sources = vec![owner];
@@ -25079,4 +25190,34 @@ fn wave8_native_io_handle_adapters_prove_used_wrappers_and_reject_plain_or_dead_
             "expected rejected Wave 8 entry: {key}"
         );
     }
+}
+
+#[test]
+fn wave9_query_filter_aliases_and_libc_io_handles_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use bevy_ecs::query::Changed as ComponentChanged; struct Pid(libc::pid_t); impl Pid { fn raw(&self) -> libc::pid_t { self.0 } } struct AddressModel { addr: std::net::SocketAddr, items: Vec<String> } #[derive(Component)] struct Root(u32); #[derive(Component)] struct Loaded; type ChangedRoots<'w, 's> = Query<'w, 's, &'static Root, ComponentChanged<Root>>; type Unloaded = (Without<Loaded>,); fn run(changed: ChangedRoots, unloaded: Query<&Root, Unloaded>) { let _ = (changed, unloaded, Pid(1).raw(), std::mem::size_of::<AddressModel>()); } struct DemoPlugin; impl Plugin for DemoPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, run); } }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/feature/demo/src/lib.rs||struct:Pid",
+        "crates/feature/demo/src/lib.rs||impl:Pid",
+        "crates/feature/demo/src/lib.rs||alias:ChangedRoots",
+        "crates/feature/demo/src/lib.rs||alias:Unloaded",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved Wave 9 entry: {key}"
+        );
+    }
+    assert!(
+        !inventory.canonical(
+            &inventory.entries["crates/feature/demo/src/lib.rs||struct:AddressModel"],
+            &policy,
+            &mut BTreeSet::new()
+        ),
+        "expected SocketAddr value model to stay rejected"
+    );
 }
