@@ -152,139 +152,255 @@ struct AcpServiceConnection {
 }
 
 impl AcpServiceConnection {
-    async fn dispatch(&mut self, message: ClientMessage) -> Result<(), ClientMessage> {
-        self.catalog_tasks.retain(|_, task| !task.is_finished());
-        match message {
-            ClientMessage::SubscribeAgentCommands => {
-                if let Some(task) = self.command_subscription.take() {
-                    task.abort();
-                }
-                let mut messages = self.service.outbound.subscribe();
-                let outbound = self.outbound.clone();
-                self.command_subscription = Some(tokio::spawn(async move {
-                    loop {
-                        match messages.recv().await {
-                            Ok(message) => {
-                                if outbound.send(message).is_err() {
-                                    break;
-                                }
-                            }
-                            Err(broadcast::error::RecvError::Lagged(dropped)) => {
-                                tracing::warn!(dropped, "agent stream lagged; frames were dropped");
-                            }
-                            Err(broadcast::error::RecvError::Closed) => break,
+    fn subscribe_agent_commands(&mut self) {
+        if let Some(task) = self.command_subscription.take() {
+            task.abort();
+        }
+        let mut messages = self.service.outbound.subscribe();
+        let outbound = self.outbound.clone();
+        self.command_subscription = Some(tokio::spawn(async move {
+            loop {
+                match messages.recv().await {
+                    Ok(message) => {
+                        if outbound.send(message).is_err() {
+                            break;
                         }
                     }
-                }));
+                    Err(broadcast::error::RecvError::Lagged(dropped)) => {
+                        tracing::warn!(dropped, "agent stream lagged; frames were dropped");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
             }
-            ClientMessage::AgentRequest {
-                request_id,
+        }));
+    }
+
+    fn forward_agent_request(
+        &self,
+        request_id: AgentRequestId,
+        anchor: Option<vmux_ecs::ProcessId>,
+        request: AgentRequest,
+    ) {
+        let broker = self.service.broker.clone();
+        let outbound = self.outbound.clone();
+        tokio::spawn(async move {
+            let message = match broker.command(request_id, anchor, request).await {
+                Ok(result) => ServiceMessage::AgentCommandResult { request_id, result },
+                Err(message) => ServiceMessage::Error { message },
+            };
+            let _ = outbound.send(message);
+        });
+    }
+
+    fn forward_agent_query(&self, request_id: AgentRequestId, query: AgentRequest) {
+        let service = self.service.clone();
+        let broker = self.service.broker.clone();
+        let outbound = self.outbound.clone();
+        tokio::spawn(async move {
+            let message = match service.process_response(request_id, &query).await {
+                Ok(Some(message)) => message,
+                Ok(None) => match broker.query(request_id, query).await {
+                    Ok(message) => message,
+                    Err(message) => ServiceMessage::Error { message },
+                },
+                Err(message) => ServiceMessage::Error { message },
+            };
+            let _ = outbound.send(message);
+        });
+    }
+
+    async fn resolve_query_result(&self, result: AgentQueryResult) {
+        let request_id = result.request_id;
+        let message = ServiceMessage::AgentQueryResult(result);
+        if !self
+            .service
+            .broker
+            .resolve_query(request_id, message.clone())
+            .await
+            && let Ok(content) = AgentContent::try_from(message)
+        {
+            self.service
+                .broker
+                .resolve_tool(request_id, content.content, content.is_error)
+                .await;
+        }
+    }
+
+    async fn resolve_command_response(
+        &self,
+        request_id: AgentRequestId,
+        result: AgentCommandResult,
+    ) {
+        if !self
+            .service
+            .broker
+            .resolve_command(request_id, result.clone())
+            .await
+        {
+            let content = AgentContent::from(result);
+            self.service
+                .broker
+                .resolve_tool(request_id, content.content, content.is_error)
+                .await;
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn spawn_acp_agent(
+        &mut self,
+        sid: String,
+        agent_id: String,
+        command: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+        cwd: String,
+        anchor: vmux_ecs::ProcessId,
+        mcp_command: Option<String>,
+        mcp_args: Vec<String>,
+        resume_acp_session_id: Option<String>,
+    ) {
+        if let Err(message) = self
+            .service
+            .sessions
+            .spawn(
+                sid.clone(),
+                agent_id,
+                command,
+                args,
+                env,
+                PathBuf::from(cwd),
                 anchor,
-                request,
-            } => {
-                let broker = self.service.broker.clone();
-                let outbound = self.outbound.clone();
-                tokio::spawn(async move {
-                    let message = match broker.command(request_id, anchor, request).await {
-                        Ok(result) => ServiceMessage::AgentCommandResult { request_id, result },
-                        Err(message) => ServiceMessage::Error { message },
-                    };
-                    let _ = outbound.send(message);
-                });
-            }
-            ClientMessage::AgentQuery { request_id, query } => {
-                let service = self.service.clone();
-                let broker = self.service.broker.clone();
-                let outbound = self.outbound.clone();
-                tokio::spawn(async move {
-                    let message = match service.process_response(request_id, &query).await {
-                        Ok(Some(message)) => message,
-                        Ok(None) => match broker.query(request_id, query).await {
-                            Ok(message) => message,
-                            Err(message) => ServiceMessage::Error { message },
-                        },
-                        Err(message) => ServiceMessage::Error { message },
-                    };
-                    let _ = outbound.send(message);
-                });
-            }
-            ClientMessage::AgentQueryResult(result) => {
-                let request_id = result.request_id;
-                let message = ServiceMessage::AgentQueryResult(result);
-                if !self
-                    .service
-                    .broker
-                    .resolve_query(request_id, message.clone())
-                    .await
-                    && let Ok(content) = AgentContent::try_from(message)
-                {
-                    self.service
-                        .broker
-                        .resolve_tool(request_id, content.content, content.is_error)
-                        .await;
-                }
-            }
-            ClientMessage::AgentCommandResponse { request_id, result } => {
-                if !self
-                    .service
-                    .broker
-                    .resolve_command(request_id, result.clone())
-                    .await
-                {
-                    let content = AgentContent::from(result);
-                    self.service
-                        .broker
-                        .resolve_tool(request_id, content.content, content.is_error)
-                        .await;
-                }
-            }
-            ClientMessage::Shared(
-                SharedMessage::ListSessions
-                | SharedMessage::AgentNewChat { .. }
-                | SharedMessage::AgentListAgents
-                | SharedMessage::AgentListTeam
-                | SharedMessage::AgentListModels { .. }
-                | SharedMessage::AgentSelectModel { .. }
-                | SharedMessage::AgentSetEffort { .. }
-                | SharedMessage::AgentListMedia { .. },
-            ) => {
+                self.service.processes.clone(),
+                mcp_command,
+                mcp_args,
+                resume_acp_session_id,
+            )
+            .await
+        {
+            let _ = self.outbound.send(ServiceMessage::Error { message });
+            return;
+        }
+        self.attach(sid, false).await;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn list_acp_sessions(
+        &mut self,
+        request_id: u64,
+        agent_id: String,
+        agent_name: String,
+        command: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+        cwd: String,
+    ) {
+        if let Some(task) = self.catalog_tasks.remove(&request_id) {
+            task.abort();
+        }
+        let outbound = self.outbound.clone();
+        let task = tokio::spawn(async move {
+            let result = CatalogDriver::list(CatalogRequest {
+                command,
+                args,
+                env,
+                cwd: PathBuf::from(cwd),
+            })
+            .await;
+            let (supported, sessions, error) = match result {
+                Ok(result) => (result.supported, result.sessions, None),
+                Err(error) => (false, Vec::new(), Some(error)),
+            };
+            let _ = outbound.send(ServiceMessage::AcpSessionCatalog {
+                request_id,
+                agent_id,
+                agent_name,
+                supported,
+                sessions,
+                error,
+            });
+        });
+        self.catalog_tasks.insert(request_id, task);
+    }
+
+    async fn dispatch_shared(&mut self, message: SharedMessage) -> Result<(), SharedMessage> {
+        match message {
+            SharedMessage::ListSessions
+            | SharedMessage::AgentNewChat { .. }
+            | SharedMessage::AgentListAgents
+            | SharedMessage::AgentListTeam
+            | SharedMessage::AgentListModels { .. }
+            | SharedMessage::AgentSelectModel { .. }
+            | SharedMessage::AgentSetEffort { .. }
+            | SharedMessage::AgentListMedia { .. } => {
                 tracing::warn!("local socket: ignoring a remote-only request");
             }
-            ClientMessage::Shared(SharedMessage::AgentAttach { sid }) => {
-                self.attach(sid, true).await;
-            }
-            ClientMessage::DetachAgentSession { sid } => {
-                self.detach(&sid);
-            }
-            ClientMessage::Shared(SharedMessage::AgentInput {
+            SharedMessage::AgentAttach { sid } => self.attach(sid, true).await,
+            SharedMessage::AgentInput {
                 sid,
                 text,
                 context,
                 attachments,
                 preferred_mode,
-            }) => {
-                self.service
-                    .sessions
-                    .input(
-                        sid,
-                        AcpInput::User {
-                            text,
-                            context,
-                            attachments,
-                            preferred_mode,
-                        },
-                    )
-                    .await;
+            } => {
+                let input = AcpInput::User {
+                    text,
+                    context,
+                    attachments,
+                    preferred_mode,
+                };
+                self.service.sessions.input(sid, input).await;
             }
-            ClientMessage::RebindAcpWorkspace { sid, cwd } => {
-                if let Err(message) = self
-                    .service
-                    .sessions
-                    .rebind_cwd(sid, PathBuf::from(cwd))
+            SharedMessage::AgentCancel { sid } => {
+                self.service.sessions.input(sid, AcpInput::Cancel).await;
+            }
+            SharedMessage::AgentApprove {
+                sid,
+                call_id,
+                decision,
+            } => {
+                let input = AcpInput::Approve { call_id, decision };
+                self.service.sessions.input(sid, input).await;
+            }
+            other => return Err(other),
+        }
+        Ok(())
+    }
+
+    async fn rebind_acp_workspace(&self, sid: String, cwd: String) {
+        if let Err(message) = self
+            .service
+            .sessions
+            .rebind_cwd(sid, PathBuf::from(cwd))
+            .await
+        {
+            let _ = self.outbound.send(ServiceMessage::Error { message });
+        }
+    }
+
+    async fn dispatch(&mut self, message: ClientMessage) -> Result<(), ClientMessage> {
+        self.catalog_tasks.retain(|_, task| !task.is_finished());
+        match message {
+            ClientMessage::SubscribeAgentCommands => self.subscribe_agent_commands(),
+            ClientMessage::AgentRequest {
+                request_id,
+                anchor,
+                request,
+            } => self.forward_agent_request(request_id, anchor, request),
+            ClientMessage::AgentQuery { request_id, query } => {
+                self.forward_agent_query(request_id, query);
+            }
+            ClientMessage::AgentQueryResult(result) => self.resolve_query_result(result).await,
+            ClientMessage::AgentCommandResponse { request_id, result } => {
+                self.resolve_command_response(request_id, result).await;
+            }
+            ClientMessage::Shared(shared) => {
+                self.dispatch_shared(shared)
                     .await
-                {
-                    let _ = self.outbound.send(ServiceMessage::Error { message });
-                }
+                    .map_err(ClientMessage::Shared)?;
+            }
+            ClientMessage::DetachAgentSession { sid } => self.detach(&sid),
+            ClientMessage::RebindAcpWorkspace { sid, cwd } => {
+                self.rebind_acp_workspace(sid, cwd).await;
             }
             ClientMessage::AcpSetSessionConfig {
                 sid,
@@ -292,30 +408,12 @@ impl AcpServiceConnection {
                 config_id,
                 value,
             } => {
-                self.service
-                    .sessions
-                    .input(
-                        sid,
-                        AcpInput::SetConfig {
-                            request_id,
-                            config_id,
-                            value,
-                        },
-                    )
-                    .await;
-            }
-            ClientMessage::Shared(SharedMessage::AgentCancel { sid }) => {
-                self.service.sessions.input(sid, AcpInput::Cancel).await;
-            }
-            ClientMessage::Shared(SharedMessage::AgentApprove {
-                sid,
-                call_id,
-                decision,
-            }) => {
-                self.service
-                    .sessions
-                    .input(sid, AcpInput::Approve { call_id, decision })
-                    .await;
+                let input = AcpInput::SetConfig {
+                    request_id,
+                    config_id,
+                    value,
+                };
+                self.service.sessions.input(sid, input).await;
             }
             ClientMessage::CloseAgentSession { sid } => {
                 self.service.sessions.close(sid.clone()).await;
@@ -343,28 +441,19 @@ impl AcpServiceConnection {
                 mcp_args,
                 resume_acp_session_id,
             } => {
-                if let Err(message) = self
-                    .service
-                    .sessions
-                    .spawn(
-                        sid.clone(),
-                        agent_id,
-                        command,
-                        args,
-                        env,
-                        PathBuf::from(cwd),
-                        anchor,
-                        self.service.processes.clone(),
-                        mcp_command,
-                        mcp_args,
-                        resume_acp_session_id,
-                    )
-                    .await
-                {
-                    let _ = self.outbound.send(ServiceMessage::Error { message });
-                    return Ok(());
-                }
-                self.attach(sid, false).await;
+                self.spawn_acp_agent(
+                    sid,
+                    agent_id,
+                    command,
+                    args,
+                    env,
+                    cwd,
+                    anchor,
+                    mcp_command,
+                    mcp_args,
+                    resume_acp_session_id,
+                )
+                .await;
             }
             ClientMessage::ListAcpSessions {
                 request_id,
@@ -374,34 +463,7 @@ impl AcpServiceConnection {
                 args,
                 env,
                 cwd,
-            } => {
-                if let Some(task) = self.catalog_tasks.remove(&request_id) {
-                    task.abort();
-                }
-                let outbound = self.outbound.clone();
-                let task = tokio::spawn(async move {
-                    let result = CatalogDriver::list(CatalogRequest {
-                        command,
-                        args,
-                        env,
-                        cwd: PathBuf::from(cwd),
-                    })
-                    .await;
-                    let (supported, sessions, error) = match result {
-                        Ok(result) => (result.supported, result.sessions, None),
-                        Err(error) => (false, Vec::new(), Some(error)),
-                    };
-                    let _ = outbound.send(ServiceMessage::AcpSessionCatalog {
-                        request_id,
-                        agent_id,
-                        agent_name,
-                        supported,
-                        sessions,
-                        error,
-                    });
-                });
-                self.catalog_tasks.insert(request_id, task);
-            }
+            } => self.list_acp_sessions(request_id, agent_id, agent_name, command, args, env, cwd),
             ClientMessage::CancelAcpSessionCatalog { request_id } => {
                 if let Some(task) = self.catalog_tasks.remove(&request_id) {
                     task.abort();

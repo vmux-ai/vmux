@@ -1722,6 +1722,88 @@ impl SourceChanges {
     }
 }
 
+#[derive(SystemParam)]
+struct RuntimeActivation<'w, 's> {
+    runtime: Query<'w, 's, (Entity, &'static mut Runtime, &'static SourcePaths)>,
+    native_sources: NativeSources<'w, 's>,
+    commands: Commands<'w, 's>,
+}
+
+impl RuntimeActivation<'_, '_> {
+    fn apply(
+        &mut self,
+        sources: HashSet<SourceKind>,
+        watch_codex_activity: bool,
+        manager: bool,
+        conversation_paths: HashSet<ConversationTarget>,
+        wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
+    ) {
+        if sources.is_empty() && !watch_codex_activity && conversation_paths.is_empty() {
+            for (entity, _, _) in &mut self.runtime {
+                self.commands.entity(entity).despawn();
+            }
+            return;
+        }
+        if let Ok((_, mut runtime, paths)) = self.runtime.single_mut() {
+            if let Some(watch) = &mut runtime.conversation_watch {
+                watch.set_paths(conversation_paths);
+            }
+            if runtime.sources != sources
+                || runtime.watch_codex_activity != watch_codex_activity
+                || runtime.manager != manager
+            {
+                let requested = sources
+                    .difference(&runtime.sources)
+                    .copied()
+                    .collect::<HashSet<_>>();
+                runtime.sources = sources;
+                runtime.watch_codex_activity = watch_codex_activity;
+                runtime.manager = manager;
+                runtime.ensure_watches(paths);
+                for source in requested {
+                    self.native_sources.queue(source);
+                }
+            }
+            return;
+        }
+        let Some(paths) = SourcePaths::current() else {
+            return;
+        };
+        let events = SourceWatchEvents::start(wake);
+        let mut conversation_watch = ConversationWatch::start(events.sender.clone());
+        conversation_watch.set_paths(conversation_paths);
+        let sender = events.sender;
+        let watched_paths = paths.clone();
+        let watcher =
+            notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
+                let Ok(event) = result else {
+                    return;
+                };
+                if !event.kind.is_create() && !event.kind.is_modify() && !event.kind.is_remove() {
+                    return;
+                }
+                for change in watched_paths.changes(&event) {
+                    let _ = sender.send(change);
+                }
+            });
+        let mut runtime = Runtime {
+            changes: Mutex::new(events.receiver),
+            watcher: watcher.ok(),
+            watched: HashMap::new(),
+            sources: sources.clone(),
+            watch_codex_activity,
+            manager,
+            conversation_watch: Some(conversation_watch),
+        };
+        runtime.ensure_watches(&paths);
+        self.commands
+            .spawn((Name::new("ACP provider session catalog"), runtime, paths));
+        for source in sources {
+            self.native_sources.queue(source);
+        }
+    }
+}
+
 fn activate(
     manager_activity: Activity<SessionManagerView>,
     session_activity: Activity<SessionView>,
@@ -1740,10 +1822,8 @@ fn activate(
         With<Session>,
     >,
     mut dirty: ResMut<ActivationDirty>,
-    mut runtime: Query<(Entity, &mut Runtime, &SourcePaths)>,
-    mut native_sources: NativeSources,
+    mut activation: RuntimeActivation,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut commands: Commands,
 ) {
     if !dirty.0 {
         return;
@@ -1764,36 +1844,29 @@ fn activate(
     } else {
         HashSet::new()
     };
-    let watch_codex_activity = manager;
+    let mut watch_codex_activity = manager;
     let mut sources = if manager {
         available.clone()
     } else {
         HashSet::new()
     };
-    let mut watch_codex_activity = watch_codex_activity;
-    if !manager {
-        for (entity, kind, _, _, _, _) in &sessions {
-            let Some(agent) = kind.0.strip_prefix("acp:") else {
-                continue;
-            };
+    let mut conversation_paths = HashSet::new();
+    for (entity, kind, sid, file, state, watched) in &sessions {
+        if !manager && let Some(agent) = kind.0.strip_prefix("acp:") {
             let family = AgentFamily::of(agent);
             if viewed.contains(&entity) && family == codex_family {
                 watch_codex_activity = true;
             }
-            let Some(source) = SourceKind::for_family(&family) else {
-                continue;
-            };
-            if available.contains(&source) {
+            if let Some(source) = SourceKind::for_family(&family)
+                && available.contains(&source)
+            {
                 sources.insert(source);
             }
         }
-    }
-    let mut conversation_paths = HashSet::new();
-    for (entity, kind, sid, file, state, watched) in &sessions {
-        if !viewed.contains(&entity) || ConversationSource::new(kind, sid, 0).is_none() {
-            continue;
-        }
-        if let (Some(file), Some(RunState::Errored(_))) = (file, state) {
+        if viewed.contains(&entity)
+            && ConversationSource::new(kind, sid, 0).is_some()
+            && let (Some(file), Some(RunState::Errored(_))) = (file, state)
+        {
             let paths = watched
                 .map(|watched| watched.0.clone())
                 .unwrap_or_else(|| vec![file.0.clone()]);
@@ -1805,69 +1878,14 @@ fn activate(
             }
         }
     }
-    if sources.is_empty() && !watch_codex_activity && conversation_paths.is_empty() {
-        for (entity, _, _) in &mut runtime {
-            commands.entity(entity).despawn();
-        }
-        return;
-    }
-    if let Ok((_, mut runtime, paths)) = runtime.single_mut() {
-        if let Some(watch) = &mut runtime.conversation_watch {
-            watch.set_paths(conversation_paths);
-        }
-        if runtime.sources != sources
-            || runtime.watch_codex_activity != watch_codex_activity
-            || runtime.manager != manager
-        {
-            let requested = sources
-                .difference(&runtime.sources)
-                .copied()
-                .collect::<HashSet<_>>();
-            runtime.sources = sources;
-            runtime.watch_codex_activity = watch_codex_activity;
-            runtime.manager = manager;
-            runtime.ensure_watches(paths);
-            for source in requested {
-                native_sources.queue(source);
-            }
-        }
-        return;
-    }
-    let Some(paths) = SourcePaths::current() else {
-        return;
-    };
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let events = SourceWatchEvents::start(wake);
-    let mut conversation_watch = ConversationWatch::start(events.sender.clone());
-    conversation_watch.set_paths(conversation_paths);
-    let sender = events.sender;
-    let watched_paths = paths.clone();
-    let watcher =
-        notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
-            let Ok(event) = result else {
-                return;
-            };
-            if !event.kind.is_create() && !event.kind.is_modify() && !event.kind.is_remove() {
-                return;
-            }
-            for change in watched_paths.changes(&event) {
-                let _ = sender.send(change);
-            }
-        });
-    let mut runtime = Runtime {
-        changes: Mutex::new(events.receiver),
-        watcher: watcher.ok(),
-        watched: HashMap::new(),
-        sources: sources.clone(),
+    activation.apply(
+        sources,
         watch_codex_activity,
         manager,
-        conversation_watch: Some(conversation_watch),
-    };
-    runtime.ensure_watches(&paths);
-    commands.spawn((Name::new("ACP provider session catalog"), runtime, paths));
-    for source in sources {
-        native_sources.queue(source);
-    }
+        conversation_paths,
+        wake,
+    );
 }
 
 fn mark_activation_dirty(

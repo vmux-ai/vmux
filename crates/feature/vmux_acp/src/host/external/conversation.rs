@@ -37,6 +37,110 @@ impl ReadResult {
 pub(super) struct ChatDecoder;
 
 impl ChatDecoder {
+    fn decode_content_blocks(
+        content: &serde_json::Value,
+        text: &mut Vec<String>,
+        blocks: &mut Vec<AssistantBlock>,
+        results: &mut Vec<Message>,
+    ) {
+        if let Some(value) = content.as_str() {
+            text.push(value.to_string());
+        }
+        let Some(values) = content.as_array() else {
+            return;
+        };
+        for block in values {
+            match block
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+            {
+                "text" | "input_text" | "output_text" => {
+                    if let Some(value) = block.get("text").and_then(serde_json::Value::as_str) {
+                        text.push(value.to_string());
+                    }
+                }
+                "thinking" => {
+                    if let Some(value) = block.get("thinking").and_then(serde_json::Value::as_str) {
+                        blocks.push(AssistantBlock::Thinking(value.into()));
+                    }
+                }
+                "tool_use" => {
+                    blocks.push(AssistantBlock::ToolUse {
+                        call_id: block
+                            .get("id")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .into(),
+                        name: block
+                            .get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .into(),
+                        args: block
+                            .get("input")
+                            .map(serde_json::Value::to_string)
+                            .unwrap_or_else(|| "{}".into()),
+                        kind: None,
+                        parent_call_id: None,
+                    });
+                }
+                "tool_result" => results.push(Message::ToolResult {
+                    call_id: block
+                        .get("tool_use_id")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .into(),
+                    content: block
+                        .get("content")
+                        .map(|value| JsonText::new(value).text())
+                        .unwrap_or_default(),
+                    is_error: block
+                        .get("is_error")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                }),
+                _ => {}
+            }
+        }
+    }
+
+    fn decode_tool_calls(message: &serde_json::Value, blocks: &mut Vec<AssistantBlock>) {
+        let Some(calls) = message
+            .get("tool_calls")
+            .and_then(serde_json::Value::as_array)
+        else {
+            return;
+        };
+        for call in calls {
+            let function = call.get("function").unwrap_or(call);
+            let arguments = function
+                .get("arguments")
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| value.to_string())
+                })
+                .unwrap_or_else(|| "{}".into());
+            blocks.push(AssistantBlock::ToolUse {
+                call_id: call
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .into(),
+                name: function
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .into(),
+                args: arguments,
+                kind: None,
+                parent_call_id: None,
+            });
+        }
+    }
+
     pub(super) fn record(value: &serde_json::Value) -> Vec<Message> {
         if value.get("isMeta").and_then(serde_json::Value::as_bool) == Some(true)
             || value
@@ -71,102 +175,9 @@ impl ChatDecoder {
             blocks.push(AssistantBlock::Thinking(reasoning.into()));
         }
         if let Some(content) = content {
-            if let Some(value) = content.as_str() {
-                text.push(value.to_string());
-            }
-            if let Some(values) = content.as_array() {
-                for block in values {
-                    match block
-                        .get("type")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or_default()
-                    {
-                        "text" | "input_text" | "output_text" => {
-                            if let Some(value) =
-                                block.get("text").and_then(serde_json::Value::as_str)
-                            {
-                                text.push(value.to_string());
-                            }
-                        }
-                        "thinking" => {
-                            if let Some(value) =
-                                block.get("thinking").and_then(serde_json::Value::as_str)
-                            {
-                                blocks.push(AssistantBlock::Thinking(value.into()));
-                            }
-                        }
-                        "tool_use" => {
-                            blocks.push(AssistantBlock::ToolUse {
-                                call_id: block
-                                    .get("id")
-                                    .and_then(serde_json::Value::as_str)
-                                    .unwrap_or_default()
-                                    .into(),
-                                name: block
-                                    .get("name")
-                                    .and_then(serde_json::Value::as_str)
-                                    .unwrap_or_default()
-                                    .into(),
-                                args: block
-                                    .get("input")
-                                    .map(serde_json::Value::to_string)
-                                    .unwrap_or_else(|| "{}".into()),
-                                kind: None,
-                                parent_call_id: None,
-                            });
-                        }
-                        "tool_result" => results.push(Message::ToolResult {
-                            call_id: block
-                                .get("tool_use_id")
-                                .and_then(serde_json::Value::as_str)
-                                .unwrap_or_default()
-                                .into(),
-                            content: block
-                                .get("content")
-                                .map(|value| JsonText::new(value).text())
-                                .unwrap_or_default(),
-                            is_error: block
-                                .get("is_error")
-                                .and_then(serde_json::Value::as_bool)
-                                .unwrap_or(false),
-                        }),
-                        _ => {}
-                    }
-                }
-            }
+            Self::decode_content_blocks(content, &mut text, &mut blocks, &mut results);
         }
-        if let Some(calls) = message
-            .get("tool_calls")
-            .and_then(serde_json::Value::as_array)
-        {
-            for call in calls {
-                let function = call.get("function").unwrap_or(call);
-                let arguments = function
-                    .get("arguments")
-                    .map(|value| {
-                        value
-                            .as_str()
-                            .map(str::to_string)
-                            .unwrap_or_else(|| value.to_string())
-                    })
-                    .unwrap_or_else(|| "{}".into());
-                blocks.push(AssistantBlock::ToolUse {
-                    call_id: call
-                        .get("id")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or_default()
-                        .into(),
-                    name: function
-                        .get("name")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or_default()
-                        .into(),
-                    args: arguments,
-                    kind: None,
-                    parent_call_id: None,
-                });
-            }
-        }
+        Self::decode_tool_calls(message, &mut blocks);
         let text = text.join("\n");
         let mut messages = Vec::new();
         match role {
@@ -453,42 +464,27 @@ impl FileConversation {
     pub(super) const TAIL_BYTES: u64 = 16 * 1024 * 1024;
     pub(super) const TAIL_MESSAGES: usize = 512;
 
-    pub(super) fn read(
-        path: &Path,
-        cursor: Option<u64>,
-        known: Option<&FileFacts>,
-        tail_bytes: u64,
-        mut decoder: impl Decoder,
-    ) -> Result<ReadResult, String> {
-        let mut file = File::open(path).map_err(|error| error.to_string())?;
-        let metadata = file.metadata().map_err(|error| error.to_string())?;
-        let physical_length = metadata.len();
-        let identity = Self::identity(path, &metadata)?;
-        let length = Self::complete_length(&mut file, physical_length)?;
+    fn read_prefix(file: &mut File) -> Result<Vec<u8>, String> {
         file.seek(SeekFrom::Start(0))
             .map_err(|error| error.to_string())?;
         let mut prefix = Vec::new();
-        Read::by_ref(&mut file)
+        Read::by_ref(file)
             .take(4096)
             .read_to_end(&mut prefix)
             .map_err(|error| error.to_string())?;
-        let unchanged = known.is_none_or(|known| {
-            known.identity == identity
-                && physical_length >= known.length
-                && prefix.starts_with(&known.prefix)
-        });
-        let incremental = cursor.filter(|cursor| unchanged && *cursor <= length);
-        let tail = incremental.is_none();
-        let start = incremental.unwrap_or_else(|| length.saturating_sub(tail_bytes));
-        let end = if tail {
-            length
-        } else {
-            start.saturating_add(Self::TAIL_BYTES).min(length)
-        };
-        let start_aligned = Self::line_boundary(&mut file, start)?;
-        let end_aligned = Self::line_boundary(&mut file, end)?;
-        file.seek(SeekFrom::Start(start))
-            .map_err(|error| error.to_string())?;
+        Ok(prefix)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn read_window(
+        file: File,
+        start: u64,
+        end: u64,
+        start_aligned: bool,
+        end_aligned: bool,
+        tail: bool,
+        mut decoder: impl Decoder,
+    ) -> Result<(VecDeque<(Message, (u64, usize))>, bool, Option<u64>, u64), String> {
         let mut reader = BufReader::new(file.take(end.saturating_sub(start)));
         let skipped = if start > 0 && !start_aligned {
             reader
@@ -519,10 +515,46 @@ impl FileConversation {
                 break;
             }
         }
+        let consumed = base.saturating_add(lines.consumed() as u64).min(end);
+        Ok((messages, discarded, partial_start, consumed))
+    }
+
+    pub(super) fn read(
+        path: &Path,
+        cursor: Option<u64>,
+        known: Option<&FileFacts>,
+        tail_bytes: u64,
+        decoder: impl Decoder,
+    ) -> Result<ReadResult, String> {
+        let mut file = File::open(path).map_err(|error| error.to_string())?;
+        let metadata = file.metadata().map_err(|error| error.to_string())?;
+        let physical_length = metadata.len();
+        let identity = Self::identity(path, &metadata)?;
+        let length = Self::complete_length(&mut file, physical_length)?;
+        let prefix = Self::read_prefix(&mut file)?;
+        let unchanged = known.is_none_or(|known| {
+            known.identity == identity
+                && physical_length >= known.length
+                && prefix.starts_with(&known.prefix)
+        });
+        let incremental = cursor.filter(|cursor| unchanged && *cursor <= length);
+        let tail = incremental.is_none();
+        let start = incremental.unwrap_or_else(|| length.saturating_sub(tail_bytes));
+        let end = if tail {
+            length
+        } else {
+            start.saturating_add(Self::TAIL_BYTES).min(length)
+        };
+        let start_aligned = Self::line_boundary(&mut file, start)?;
+        let end_aligned = Self::line_boundary(&mut file, end)?;
+        file.seek(SeekFrom::Start(start))
+            .map_err(|error| error.to_string())?;
+        let (messages, discarded, partial_start, consumed) =
+            Self::read_window(file, start, end, start_aligned, end_aligned, tail, decoder)?;
         let cursor = if tail {
             length
         } else {
-            partial_start.unwrap_or_else(|| base.saturating_add(lines.consumed() as u64).min(end))
+            partial_start.unwrap_or(consumed)
         };
         let mut history = Received::messages(Vec::new(), tail);
         let before = if tail && (discarded || start > 0) {
@@ -563,46 +595,42 @@ impl FileConversation {
         })
     }
 
-    pub(super) fn before(
-        path: &Path,
+    fn push_reversed_line(
+        line: &mut [u8],
+        byte_offset: u64,
         boundary: vmux_session::history::Boundary,
-        known: Option<&FileFacts>,
-        mut decoder: impl Decoder,
-    ) -> Result<ReadResult, String> {
-        let mut file = File::open(path).map_err(|error| error.to_string())?;
-        let metadata = file.metadata().map_err(|error| error.to_string())?;
-        let length = metadata.len();
-        let identity = Self::identity(path, &metadata)?;
-        let mut prefix = Vec::new();
-        Read::by_ref(&mut file)
-            .take(4096)
-            .read_to_end(&mut prefix)
-            .map_err(|error| error.to_string())?;
-        if boundary.byte > length
-            || known.is_some_and(|known| {
-                known.identity != identity
-                    || length < known.length
-                    || !prefix.starts_with(&known.prefix)
-            })
-        {
-            return Err("provider history changed during pagination".into());
+        decoder: &mut impl Decoder,
+        records: &mut VecDeque<(HistoryBoundary, Message)>,
+    ) -> bool {
+        line.reverse();
+        if let Ok(text) = std::str::from_utf8(line) {
+            for (message, content) in decoder.messages(text).into_iter().enumerate().rev() {
+                let record = HistoryBoundary {
+                    byte: byte_offset,
+                    message,
+                };
+                if record < boundary {
+                    records.push_front((record, content));
+                    if records.len() == Self::TAIL_MESSAGES {
+                        return true;
+                    }
+                }
+            }
         }
-        let end = if boundary.message > 0 {
-            file.seek(SeekFrom::Start(boundary.byte))
-                .map_err(|error| error.to_string())?;
-            let mut line = Vec::new();
-            let size = BufReader::new(Read::by_ref(&mut file).take(PROVIDER_LINE_LIMIT as u64 + 1))
-                .read_until(b'\n', &mut line)
-                .map_err(|error| error.to_string())?;
-            boundary.byte.saturating_add(size as u64).min(length)
-        } else {
-            boundary.byte
-        };
+        false
+    }
+
+    fn scan_before(
+        file: &mut File,
+        end: u64,
+        boundary: vmux_session::history::Boundary,
+        mut ignore: bool,
+        mut decoder: impl Decoder,
+    ) -> Result<(u64, VecDeque<(HistoryBoundary, Message)>), String> {
         let mut position = end;
         let mut scanned = 0u64;
         let mut line = Vec::new();
         let mut oversized = false;
-        let mut ignore = boundary.message == 0 && !Self::line_boundary(&mut file, boundary.byte)?;
         let mut records = VecDeque::new();
         let mut block = [0u8; 64 * 1024];
         'scan: while position > 0 {
@@ -617,23 +645,18 @@ impl FileConversation {
                 scanned += 1;
                 position = at;
                 if block[index] == b'\n' {
-                    if !ignore && !oversized && !line.is_empty() {
-                        line.reverse();
-                        if let Ok(text) = std::str::from_utf8(&line) {
-                            let messages = decoder.messages(text);
-                            for (message, content) in messages.into_iter().enumerate().rev() {
-                                let record = HistoryBoundary {
-                                    byte: at + 1,
-                                    message,
-                                };
-                                if record < boundary {
-                                    records.push_front((record, content));
-                                    if records.len() == Self::TAIL_MESSAGES {
-                                        break 'scan;
-                                    }
-                                }
-                            }
-                        }
+                    if !ignore
+                        && !oversized
+                        && !line.is_empty()
+                        && Self::push_reversed_line(
+                            &mut line,
+                            at + 1,
+                            boundary,
+                            &mut decoder,
+                            &mut records,
+                        )
+                    {
+                        break 'scan;
                     }
                     line.clear();
                     oversized = false;
@@ -660,19 +683,44 @@ impl FileConversation {
             && !line.is_empty()
             && records.len() < Self::TAIL_MESSAGES
         {
-            line.reverse();
-            if let Ok(text) = std::str::from_utf8(&line) {
-                for (message, content) in decoder.messages(text).into_iter().enumerate().rev() {
-                    let record = HistoryBoundary { byte: 0, message };
-                    if record < boundary {
-                        records.push_front((record, content));
-                        if records.len() == Self::TAIL_MESSAGES {
-                            break;
-                        }
-                    }
-                }
-            }
+            Self::push_reversed_line(&mut line, 0, boundary, &mut decoder, &mut records);
         }
+        Ok((position, records))
+    }
+
+    pub(super) fn before(
+        path: &Path,
+        boundary: vmux_session::history::Boundary,
+        known: Option<&FileFacts>,
+        decoder: impl Decoder,
+    ) -> Result<ReadResult, String> {
+        let mut file = File::open(path).map_err(|error| error.to_string())?;
+        let metadata = file.metadata().map_err(|error| error.to_string())?;
+        let length = metadata.len();
+        let identity = Self::identity(path, &metadata)?;
+        let prefix = Self::read_prefix(&mut file)?;
+        if boundary.byte > length
+            || known.is_some_and(|known| {
+                known.identity != identity
+                    || length < known.length
+                    || !prefix.starts_with(&known.prefix)
+            })
+        {
+            return Err("provider history changed during pagination".into());
+        }
+        let end = if boundary.message > 0 {
+            file.seek(SeekFrom::Start(boundary.byte))
+                .map_err(|error| error.to_string())?;
+            let mut line = Vec::new();
+            let size = BufReader::new(Read::by_ref(&mut file).take(PROVIDER_LINE_LIMIT as u64 + 1))
+                .read_until(b'\n', &mut line)
+                .map_err(|error| error.to_string())?;
+            boundary.byte.saturating_add(size as u64).min(length)
+        } else {
+            boundary.byte
+        };
+        let ignore = boundary.message == 0 && !Self::line_boundary(&mut file, boundary.byte)?;
+        let (position, records) = Self::scan_before(&mut file, end, boundary, ignore, decoder)?;
         let before = if records.len() == Self::TAIL_MESSAGES {
             records
                 .front()
