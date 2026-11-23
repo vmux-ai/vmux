@@ -41,10 +41,7 @@ pub struct Distribution {
 pub struct BinaryTarget {
     pub archive: String,
     pub cmd: String,
-    #[serde(
-        default,
-        deserialize_with = "super::registry_driver::deserialize_sha256"
-    )]
+    #[serde(default, deserialize_with = "BinaryTarget::deserialize_sha256")]
     pub sha256: Option<Sha256Digest>,
     #[serde(default)]
     pub args: Vec<String>,

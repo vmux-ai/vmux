@@ -15,13 +15,6 @@ use vmux_api::protocol::AcpProviderSession;
 
 use super::agent_process::AgentProcess;
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
-const MAX_PAGES: usize = 100;
-const MAX_SESSIONS: usize = 50_000;
-const MAX_CATALOG_BYTES: usize = 32 * 1024 * 1024;
-const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
-
 pub(crate) struct CatalogRequest {
     pub command: String,
     pub args: Vec<String>,
@@ -46,6 +39,8 @@ struct BoundedLineReader<R> {
 struct CatalogBudget(usize);
 
 impl CatalogBudget {
+    const MAX_CATALOG_BYTES: usize = 32 * 1024 * 1024;
+
     fn accept(&mut self, session: &AcpProviderSession) -> bool {
         let bytes = session
             .id
@@ -55,7 +50,7 @@ impl CatalogBudget {
             .saturating_add(session.updated_at.len())
             .saturating_add(64);
         let next = self.0.saturating_add(bytes);
-        if next > MAX_CATALOG_BYTES {
+        if next > Self::MAX_CATALOG_BYTES {
             return false;
         }
         self.0 = next;
@@ -64,11 +59,13 @@ impl CatalogBudget {
 }
 
 impl<R> BoundedLineReader<R> {
+    const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
     fn new(inner: R) -> Self {
         Self {
             inner,
             line_bytes: 0,
-            max_line_bytes: MAX_FRAME_BYTES,
+            max_line_bytes: Self::MAX_FRAME_BYTES,
         }
     }
 
@@ -120,6 +117,11 @@ impl<R: AsyncRead + Unpin> AsyncRead for BoundedLineReader<R> {
 }
 
 impl CatalogDriver {
+    const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+    const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+    const MAX_PAGES: usize = 100;
+    const MAX_SESSIONS: usize = 50_000;
+
     pub(crate) async fn list(request: CatalogRequest) -> Result<CatalogResult, String> {
         if !request.cwd.is_dir() {
             return Err(format!(
@@ -153,7 +155,7 @@ impl CatalogDriver {
         )
         .compat();
         let transport = agent_client_protocol::ByteStreams::new(stdin, stdout);
-        let result = tokio::time::timeout(REQUEST_TIMEOUT, async move {
+        let result = tokio::time::timeout(Self::REQUEST_TIMEOUT, async move {
             Client
                 .connect_with(transport, async move |connection| {
                     let initialize = InitializeRequest::new(ProtocolVersion::V1);
@@ -172,7 +174,7 @@ impl CatalogDriver {
                     let mut cursor = None;
                     let mut sessions = Vec::new();
                     let mut budget = CatalogBudget::default();
-                    for _ in 0..MAX_PAGES {
+                    for _ in 0..Self::MAX_PAGES {
                         let request = ListSessionsRequest::new().cursor(cursor.clone());
                         let response = connection.send_request(request).block_task().await?;
                         for session in response.sessions {
@@ -182,7 +184,7 @@ impl CatalogDriver {
                                 title: session.title.unwrap_or_default(),
                                 updated_at: session.updated_at.unwrap_or_default(),
                             };
-                            if sessions.len() == MAX_SESSIONS || !budget.accept(&session) {
+                            if sessions.len() == Self::MAX_SESSIONS || !budget.accept(&session) {
                                 return Ok(CatalogResult {
                                     supported: true,
                                     sessions,
@@ -206,7 +208,7 @@ impl CatalogDriver {
         })
         .await
         .map_err(|_| "ACP session/list timed out".to_string())?;
-        let _ = tokio::time::timeout(SHUTDOWN_TIMEOUT, process.stop()).await;
+        let _ = tokio::time::timeout(Self::SHUTDOWN_TIMEOUT, process.stop()).await;
         result
     }
 }
@@ -230,7 +232,7 @@ mod tests {
 
     #[test]
     fn catalog_budget_rejects_entries_beyond_the_frame_budget() {
-        let mut budget = CatalogBudget(MAX_CATALOG_BYTES - 64);
+        let mut budget = CatalogBudget(CatalogBudget::MAX_CATALOG_BYTES - 64);
         let session = AcpProviderSession {
             id: "x".into(),
             cwd: String::new(),

@@ -53,12 +53,16 @@ impl RegistryAgent {
     }
 }
 
-pub(super) fn deserialize_sha256<'de, D>(deserializer: D) -> Result<Option<Sha256Digest>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<String>::deserialize(deserializer)?;
-    value
-        .map(|value| Sha256Digest::parse(&value).map_err(serde::de::Error::custom))
-        .transpose()
+impl BinaryTarget {
+    pub(super) fn deserialize_sha256<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<Sha256Digest>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Option::<String>::deserialize(deserializer)?;
+        value
+            .map(|value| Sha256Digest::parse(&value).map_err(serde::de::Error::custom))
+            .transpose()
+    }
 }

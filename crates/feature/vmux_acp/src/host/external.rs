@@ -189,10 +189,6 @@ impl bevy::prelude::Plugin for HistoryReadPlugin {
     }
 }
 
-const SCAN_DEBOUNCE: Duration = Duration::from_millis(350);
-const SCAN_MAX_LATENCY: Duration = Duration::from_secs(2);
-const ACTIVITY_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
-const CONVERSATION_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const CATALOG_CONCURRENCY: usize = 2;
 const CATALOG_REQUEST_TIMEOUT: Duration = Duration::from_secs(32);
 const PROVIDER_READ_LIMIT: usize = 256 * 1024 * 1024;
@@ -273,10 +269,8 @@ struct CatalogStarted(Instant);
 #[derive(Component)]
 struct AcpCatalogRead;
 
-struct CatalogCwd;
-
-impl CatalogCwd {
-    fn current() -> Option<PathBuf> {
+impl AcpCatalogRead {
+    fn current_cwd() -> Option<PathBuf> {
         std::env::var_os("HOME")
             .map(PathBuf::from)
             .filter(|path| path.is_dir())
@@ -509,7 +503,7 @@ fn begin_catalogs(
     let Some(settings) = settings else {
         return;
     };
-    let Some(cwd) = CatalogCwd::current() else {
+    let Some(cwd) = AcpCatalogRead::current_cwd() else {
         return;
     };
     control.refresh = false;
@@ -873,7 +867,7 @@ fn receive_catalogs(
         }
         let result = match &received.error {
             Some(error) => Err(error.clone()),
-            None => Ok(AcpCatalog::sessions(received)),
+            None => Ok(received.sessions()),
         };
         canonical.write(CatalogReceived {
             operation,
@@ -883,11 +877,9 @@ fn receive_catalogs(
     }
 }
 
-struct AcpCatalog;
-
-impl AcpCatalog {
-    fn sessions(received: &AcpCatalogReceived) -> Vec<ProviderSession> {
-        let mut sessions = received
+impl AcpCatalogReceived {
+    fn sessions(&self) -> Vec<ProviderSession> {
+        let mut sessions = self
             .sessions
             .iter()
             .filter(|session| !session.id.trim().is_empty())
@@ -899,10 +891,10 @@ impl AcpCatalog {
                     session.title.clone()
                 };
                 ProviderSession {
-                    kind: format!("acp:{}", received.agent_id),
+                    kind: format!("acp:{}", self.agent_id),
                     sid: session.id.clone(),
-                    agent: received.agent_id.clone(),
-                    agent_name: received.agent_name.clone(),
+                    agent: self.agent_id.clone(),
+                    agent_name: self.agent_name.clone(),
                     name: name.clone(),
                     description: String::new(),
                     cwd: session.cwd.clone(),
@@ -1494,6 +1486,8 @@ struct ConversationWatch {
 }
 
 impl ConversationWatch {
+    const POLL_INTERVAL: Duration = Duration::from_millis(250);
+
     fn start(changes: mpsc::Sender<SourceChange>) -> Self {
         let (sender, receiver) = mpsc::channel::<HashSet<ConversationTarget>>();
         let worker = std::thread::Builder::new()
@@ -1507,7 +1501,7 @@ impl ConversationWatch {
                             Err(_) => break,
                         }
                     } else {
-                        match receiver.recv_timeout(CONVERSATION_POLL_INTERVAL) {
+                        match receiver.recv_timeout(Self::POLL_INTERVAL) {
                             Ok(paths) => paths,
                             Err(mpsc::RecvTimeoutError::Disconnected) => break,
                             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -1665,6 +1659,10 @@ struct SourceChanges {
 }
 
 impl SourceChanges {
+    const SCAN_DEBOUNCE: Duration = Duration::from_millis(350);
+    const SCAN_MAX_LATENCY: Duration = Duration::from_secs(2);
+    const ACTIVITY_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+
     fn insert(&mut self, change: SourceChange) {
         match change {
             SourceChange::Scan(source) => {
@@ -1704,9 +1702,9 @@ impl SourceChanges {
             && !self.codex_archives
             && (!self.codex_activity.is_empty() || !self.conversations.is_empty())
         {
-            ACTIVITY_REFRESH_INTERVAL
+            Self::ACTIVITY_REFRESH_INTERVAL
         } else {
-            SCAN_DEBOUNCE
+            Self::SCAN_DEBOUNCE
         }
     }
 
@@ -1715,9 +1713,9 @@ impl SourceChanges {
             && !self.codex_archives
             && (!self.codex_activity.is_empty() || !self.conversations.is_empty())
         {
-            ACTIVITY_REFRESH_INTERVAL
+            Self::ACTIVITY_REFRESH_INTERVAL
         } else {
-            SCAN_MAX_LATENCY
+            Self::SCAN_MAX_LATENCY
         }
     }
 }
@@ -2999,9 +2997,8 @@ fn open(
 struct ProviderResumePending;
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
-enum ProviderResumeStatus {
-    Loading,
-    Failed,
+struct ProviderResumeStatus {
+    failed: bool,
 }
 
 fn resume_sources(
@@ -3070,11 +3067,7 @@ fn resume_sources(
         let removed = tombstones.contains(&kind, &sid);
         let ready = !removed && (existing || cwd.is_some());
         let failed = removed || !ready && !catalog.loading();
-        let next = if failed {
-            ProviderResumeStatus::Failed
-        } else {
-            ProviderResumeStatus::Loading
-        };
+        let next = ProviderResumeStatus { failed };
         if !current || status != Some(&next) {
             commands.entity(view).insert((
                 ProviderKind(kind.clone()),
@@ -3117,7 +3110,7 @@ fn publish_provider_status(
         let pending = vmux_session::state::PendingProvider {
             kind: kind.0.clone(),
             sid: sid.0.clone(),
-            failed: *status == ProviderResumeStatus::Failed,
+            failed: status.failed,
         };
         if published
             .get(view)
@@ -3787,12 +3780,14 @@ mod tests {
             [vmux_api::session::Message::user("live update")]
         );
         watch.set_paths(HashSet::new());
-        std::thread::sleep(CONVERSATION_POLL_INTERVAL * 2);
+        std::thread::sleep(ConversationWatch::POLL_INTERVAL * 2);
         while events.receiver.try_recv().is_ok() {}
         file.write_all(b"after detach\n").unwrap();
         file.flush().unwrap();
         assert!(matches!(
-            events.receiver.recv_timeout(CONVERSATION_POLL_INTERVAL * 3),
+            events
+                .receiver
+                .recv_timeout(ConversationWatch::POLL_INTERVAL * 3),
             Err(mpsc::RecvTimeoutError::Timeout)
         ));
     }
@@ -4599,7 +4594,7 @@ mod tests {
         };
 
         assert_eq!(
-            AcpCatalog::sessions(&received),
+            received.sessions(),
             vec![ProviderSession {
                 kind: "acp:example-acp".into(),
                 sid: "provider-session".into(),
@@ -4873,7 +4868,7 @@ mod tests {
         fixture.app.update();
         assert!(matches!(
             fixture.app.world().get::<ProviderResumeStatus>(view),
-            Some(ProviderResumeStatus::Loading)
+            Some(ProviderResumeStatus { failed: false })
         ));
         assert!(fixture.pages().is_empty());
         fixture.app.world_mut().write_message(CatalogReceived {

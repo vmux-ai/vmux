@@ -56,13 +56,6 @@ use vmux_process::{ProcessLaunch, ProcessRuntime, ProcessUpdate};
 use agent_client_protocol::schema::v1::PermissionOptionKind as Kind;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
-const PROMPT_MEDIA_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
-const APPROVAL_DETAILS_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
-const ACP_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-const STDERR_TAIL_CAPACITY: usize = 50;
-const STDERR_TAIL_SHOWN: usize = 8;
-
 #[derive(Default)]
 pub(super) struct AcpMcpServers {
     builtin: Option<McpServer>,
@@ -632,9 +625,12 @@ impl PromptCompletion {
 struct AcpStderrTail(Mutex<VecDeque<String>>);
 
 impl AcpStderrTail {
+    const CAPACITY: usize = 50;
+    const SHOWN: usize = 8;
+
     fn push(&self, line: String) {
         let mut tail = self.0.lock().unwrap();
-        if tail.len() >= STDERR_TAIL_CAPACITY {
+        if tail.len() >= Self::CAPACITY {
             tail.pop_front();
         }
         tail.push_back(line);
@@ -754,15 +750,8 @@ impl AcpShared {
         self.cwd.lock().unwrap().clone()
     }
 
-    pub fn rebind_cwd(&self, cwd: PathBuf) -> Result<(), String> {
-        let cwd = cwd
-            .canonicalize()
-            .map_err(|error| format!("invalid workspace directory: {error}"))?;
-        if !cwd.is_dir() {
-            return Err("workspace path is not a directory".to_string());
-        }
+    pub(super) fn set_cwd(&self, cwd: PathBuf) {
         *self.cwd.lock().unwrap() = cwd;
-        Ok(())
     }
 
     pub(super) fn publish_workspace_change(&self, workspace: &WorkspaceLocation) {
@@ -797,7 +786,7 @@ impl AcpShared {
     }
 
     fn stderr_detail(&self) -> String {
-        self.stderr_tail.detail(STDERR_TAIL_SHOWN)
+        self.stderr_tail.detail(AcpStderrTail::SHOWN)
     }
 }
 
@@ -805,7 +794,7 @@ async fn resolve_approval_details(
     request: &RequestPermissionRequest,
     shared: &AcpShared,
 ) -> Option<(String, String)> {
-    let deadline = tokio::time::Instant::now() + APPROVAL_DETAILS_WAIT;
+    let deadline = tokio::time::Instant::now() + AcpDriver::APPROVAL_DETAILS_WAIT;
     let mut updates = shared.projector_updates.subscribe();
     let query = ApprovalDetailsQuery::from_request(request);
     let fallback = query.fallback();
@@ -858,7 +847,7 @@ async fn prompt_content_blocks(
     capabilities: &PromptCapabilities,
 ) -> Vec<ContentBlock> {
     let mut blocks = Vec::with_capacity(attachments.len() + 1);
-    let mut remaining_media_bytes = PROMPT_MEDIA_TOTAL_LIMIT;
+    let mut remaining_media_bytes = AcpDriver::PROMPT_MEDIA_TOTAL_LIMIT;
     let text = AgentPromptEnvelope::compose(text, context);
     if !text.is_empty() {
         blocks.push(ContentBlock::Text(TextContent::new(text)));
@@ -867,7 +856,7 @@ async fn prompt_content_blocks(
         let uri = AcpAttachment(attachment).uri();
         let media_supported = (capabilities.image && attachment.mime_type.starts_with("image/"))
             || (capabilities.audio && attachment.mime_type.starts_with("audio/"));
-        let limit = PROMPT_MEDIA_FILE_LIMIT.min(remaining_media_bytes);
+        let limit = AcpDriver::PROMPT_MEDIA_FILE_LIMIT.min(remaining_media_bytes);
         let encoded = if media_supported && attachment.size <= limit && limit > 0 {
             encoded_media(attachment.path.clone(), limit).await
         } else {
@@ -901,6 +890,13 @@ async fn prompt_content_blocks(
 pub(super) struct AcpDriver;
 
 impl AcpDriver {
+    const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
+    const PROMPT_MEDIA_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
+    const APPROVAL_DETAILS_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
+    const STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+    const TERMINAL_COLS: u16 = 80;
+    const TERMINAL_ROWS: u16 = 24;
+
     fn is_permissionless_tool(name: &str) -> bool {
         if AcpToolCallId::is_conversation_title(name) {
             return true;
@@ -1263,27 +1259,29 @@ impl AcpDriver {
         init.client_capabilities.fs.read_text_file = true;
         init.client_capabilities.fs.write_text_file = true;
         init.client_capabilities.terminal = true;
-        let init_resp =
-            match tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(init).block_task())
-                .await
-            {
-                Ok(Ok(resp)) => resp,
-                Ok(Err(err)) => {
-                    shared.fail_startup(format!(
-                        "agent failed to start: {err}{}",
-                        shared.stderr_detail()
-                    ));
-                    return None;
-                }
-                Err(_) => {
-                    shared.fail_startup(format!(
-                        "agent did not start within {}s{}",
-                        ACP_STARTUP_TIMEOUT.as_secs(),
-                        shared.stderr_detail()
-                    ));
-                    return None;
-                }
-            };
+        let init_resp = match tokio::time::timeout(
+            AcpDriver::STARTUP_TIMEOUT,
+            cx.send_request(init).block_task(),
+        )
+        .await
+        {
+            Ok(Ok(resp)) => resp,
+            Ok(Err(err)) => {
+                shared.fail_startup(format!(
+                    "agent failed to start: {err}{}",
+                    shared.stderr_detail()
+                ));
+                return None;
+            }
+            Err(_) => {
+                shared.fail_startup(format!(
+                    "agent did not start within {}s{}",
+                    AcpDriver::STARTUP_TIMEOUT.as_secs(),
+                    shared.stderr_detail()
+                ));
+                return None;
+            }
+        };
         tracing::info!(target: "acp", sid = %shared.sid, "initialize answered");
         let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
         let mcp_servers =
@@ -1319,14 +1317,16 @@ impl AcpDriver {
             let shared = shared.clone();
             let cx = cx.clone();
             async move {
-                let answered =
-                    tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(load).block_task())
-                        .await;
+                let answered = tokio::time::timeout(
+                    AcpDriver::STARTUP_TIMEOUT,
+                    cx.send_request(load).block_task(),
+                )
+                .await;
                 let Ok(loaded) = answered else {
                     tracing::warn!(
                         target: "acp",
                         "session/load did not answer within {}s",
-                        ACP_STARTUP_TIMEOUT.as_secs()
+                        AcpDriver::STARTUP_TIMEOUT.as_secs()
                     );
                     return Err("session/load timed out".to_string());
                 };
@@ -1379,7 +1379,7 @@ impl AcpDriver {
             let cx = cx.clone();
             async move {
                 match tokio::time::timeout(
-                    ACP_STARTUP_TIMEOUT,
+                    AcpDriver::STARTUP_TIMEOUT,
                     cx.send_request(new_session).block_task(),
                 )
                 .await
@@ -1395,7 +1395,7 @@ impl AcpDriver {
                     Ok(Err(err)) => Err(err.to_string()),
                     Err(_) => Err(format!(
                         "no answer within {}s{}",
-                        ACP_STARTUP_TIMEOUT.as_secs(),
+                        AcpDriver::STARTUP_TIMEOUT.as_secs(),
                         shared.stderr_detail()
                     )),
                 }
@@ -1668,9 +1668,6 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr, shared: Arc<AcpShared
     shared.report_startup_exit();
 }
 
-const ACP_TERMINAL_COLS: u16 = 80;
-const ACP_TERMINAL_ROWS: u16 = 24;
-
 async fn create_terminal(
     shared: &AcpShared,
     req: CreateTerminalRequest,
@@ -1715,8 +1712,8 @@ async fn create_terminal(
             args: args.clone(),
             cwd: cwd.clone(),
             env,
-            cols: ACP_TERMINAL_COLS,
-            rows: ACP_TERMINAL_ROWS,
+            cols: AcpDriver::TERMINAL_COLS,
+            rows: AcpDriver::TERMINAL_ROWS,
             keep_after_exit: true,
         })
         .await?;
@@ -1946,10 +1943,6 @@ mod tests {
         assert!(AcpStderrTail::default().detail(8).is_empty());
     }
 
-    fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
-        PermissionOption::new(id.to_string(), id.to_string(), kind)
-    }
-
     #[tokio::test]
     async fn prompt_content_embeds_supported_images() {
         let directory = tempfile::tempdir().unwrap();
@@ -2000,13 +1993,13 @@ mod tests {
         let path = directory.path().join("large.png");
         std::fs::File::create(&path)
             .unwrap()
-            .set_len(PROMPT_MEDIA_FILE_LIMIT + 1)
+            .set_len(AcpDriver::PROMPT_MEDIA_FILE_LIMIT + 1)
             .unwrap();
         let attachment = AgentAttachment {
             path: path.to_string_lossy().into_owned(),
             name: "large.png".into(),
             mime_type: "image/png".into(),
-            size: PROMPT_MEDIA_FILE_LIMIT + 1,
+            size: AcpDriver::PROMPT_MEDIA_FILE_LIMIT + 1,
         };
         let mut capabilities = PromptCapabilities::default();
         capabilities.image = true;
@@ -2017,7 +2010,7 @@ mod tests {
             &blocks[0],
             ContentBlock::ResourceLink(link)
                 if link.name == "large.png"
-                    && link.size == i64::try_from(PROMPT_MEDIA_FILE_LIMIT + 1).ok()
+                    && link.size == i64::try_from(AcpDriver::PROMPT_MEDIA_FILE_LIMIT + 1).ok()
         ));
     }
 
@@ -2656,6 +2649,9 @@ mod tests {
 
     #[test]
     fn pick_permission_option_preserves_decision_scope() {
+        let opt = |id: &str, kind: PermissionOptionKind| {
+            PermissionOption::new(id.to_string(), id.to_string(), kind)
+        };
         let opts = vec![
             opt("once", PermissionOptionKind::AllowOnce),
             opt("always", PermissionOptionKind::AllowAlways),
@@ -2818,7 +2814,7 @@ mod tests {
             ProcessHarness::inactive(),
         ));
 
-        shared.rebind_cwd(target.path().to_path_buf()).unwrap();
+        shared.set_cwd(target.path().canonicalize().unwrap());
 
         assert_eq!(shared.cwd(), target.path().canonicalize().unwrap());
     }
