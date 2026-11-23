@@ -23,8 +23,6 @@ shape: (
   debt: [
   ],
   enums: [
-    (key: "crates/feature/vmux_setting/src/event.rs||enum:UpdateCheckStatus", fingerprint: "74bbb8697cb44130", role: Boundary, owner: "crates/feature/vmux_setting/src/host/projection.rs||struct:SettingsRenderProjection", reason: "Read-only updater status contract projected into the Settings UI software-update field."),
-    (key: "crates/feature/vmux_setting/src/state.rs||enum:SettingsRenderFieldKind", fingerprint: "f3243e8e04200d88", role: Boundary, owner: "crates/feature/vmux_setting/src/host/projection.rs||struct:SettingsRenderProjection", reason: "One-way UI render field projection emitted by SettingsRenderProjection into SettingsUiState."),
 ],
   bodies: [
   ],

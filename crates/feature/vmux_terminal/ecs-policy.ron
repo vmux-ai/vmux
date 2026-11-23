@@ -80,7 +80,6 @@ shape: (
   debt: [
   ],
   enums: [
-    (key: "crates/feature/vmux_terminal/src/host/agent_run.rs||enum:PlacementMode", fingerprint: "d4970af0e0b059ee", role: Boundary, owner: "crates/feature/vmux_terminal/src/host/agent_run.rs||impl:AgentRun", reason: "Wire contract scalar for placement mode validated by AgentRun."),
 ],
 ),
 )
