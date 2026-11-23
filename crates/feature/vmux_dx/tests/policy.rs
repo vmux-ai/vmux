@@ -8771,20 +8771,30 @@ impl BodyShape {
                         .is_none_or(|(_, branch)| Self::installation(branch, argument))
             }
             syn::Expr::MethodCall(value) => {
-                if !matches!(
-                    value.method.to_string().as_str(),
-                    "add_plugins"
-                        | "add_systems"
-                        | "add_observer"
-                        | "add_message"
-                        | "add_event"
-                        | "init_resource"
-                        | "init_non_send"
-                        | "insert_resource"
-                        | "register_type"
-                        | "configure_sets"
-                        | "register_required_components"
-                ) {
+                let method = value.method.to_string();
+                let zero_arg_ext = matches!(
+                    method.as_str(),
+                    "register_stored" | "add_agent_request" | "add_agent_message"
+                );
+                if zero_arg_ext && !value.args.is_empty() {
+                    return false;
+                }
+                if !zero_arg_ext
+                    && !matches!(
+                        method.as_str(),
+                        "add_plugins"
+                            | "add_systems"
+                            | "add_observer"
+                            | "add_message"
+                            | "add_event"
+                            | "init_resource"
+                            | "init_non_send"
+                            | "insert_resource"
+                            | "register_type"
+                            | "configure_sets"
+                            | "register_required_components"
+                    )
+                {
                     return false;
                 }
                 value.args.iter().all(Self::installation_argument)
@@ -9113,10 +9123,21 @@ impl<'ast> Visit<'ast> for Footprint {
                                     inner.func.as_ref(),
                                     syn::Expr::Path(path)
                                         if path.qself.is_none()
-                                            && path.path.segments.len() == 2
-                                            && path.path.segments[0].ident == "Self"
-                                            && path.path.segments[1].ident == "manifest"
+                                            && path.path.segments.len() > 1
+                                            && path
+                                                .path
+                                                .segments
+                                                .last()
+                                                .is_some_and(|segment| segment.ident == "manifest")
                                 )
+                    )
+                || call.args.len() == 2
+                    && matches!(
+                        call.args.get(1),
+                        Some(syn::Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Str(_),
+                            ..
+                        }))
                     ))
         {
             self.factories.insert(call.to_token_stream().to_string());
@@ -9127,8 +9148,11 @@ impl<'ast> Visit<'ast> for Footprint {
     }
 
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-        if !matches!(
-            call.method.to_string().as_str(),
+        let method = call.method.to_string();
+        if matches!(method.as_str(), "plugin" | "hosted") {
+            self.factories.insert(call.to_token_stream().to_string());
+        } else if !matches!(
+            method.as_str(),
             "add_plugins"
                 | "add_systems"
                 | "add_observer"
@@ -9137,6 +9161,9 @@ impl<'ast> Visit<'ast> for Footprint {
                 | "init_resource"
                 | "init_non_send"
                 | "register_type"
+                | "register_stored"
+                | "add_agent_request"
+                | "add_agent_message"
                 | "configure_sets"
                 | "register_required_components"
                 | "is_plugin_added"
@@ -9339,6 +9366,7 @@ impl Boundary {
                     }
                     if !inventory.automatic_boundary(parent)
                         && !inventory.fixture_bootstrap(parent)
+                        && !inventory.automatic_test_fixture(parent)
                         && (!parent.ecs
                             || !inventory.used(parent)
                             || !inventory.canonical(parent, policy, &mut BTreeSet::new()))
@@ -9593,6 +9621,7 @@ struct Declaration {
     page_inputs: BTreeSet<(String, String)>,
     page_components: BTreeSet<(String, String)>,
     page_input_errors: BTreeSet<String>,
+    story_components: BTreeSet<String>,
     inventory_inputs: BTreeSet<(String, String)>,
     native_class: Option<(String, Type)>,
     dom_mounts: BTreeSet<(String, String)>,
@@ -11882,6 +11911,7 @@ impl Inventory {
                 page_inputs: BTreeSet::new(),
                 page_components: BTreeSet::new(),
                 page_input_errors: BTreeSet::new(),
+                story_components: BTreeSet::new(),
                 inventory_inputs: BTreeSet::new(),
                 native_class: None,
                 dom_mounts: BTreeSet::new(),
@@ -12284,9 +12314,65 @@ impl Inventory {
             || self.framework_bootstrap(entry)
             || self.manifest_source(entry)
             || self.typed_page(entry)
+            || self.host_page_marker(entry)
+            || self.store_schema(entry)
             || self.automatic_renderer(entry)
             || self.automatic_job_adapter(entry)
             || self.automatic_pre_world_boundary(entry)
+    }
+
+    fn store_schema(&self, entry: &Declaration) -> bool {
+        if !entry.production || entry.local || entry.dynamic || entry.opaque || entry.projection {
+            return false;
+        }
+        if matches!(entry.kind, Kind::Struct) && !entry.has_fields {
+            return entry.contract_paths.iter().any(|path| {
+                self.function_reference(&entry.namespace, path, &mut BTreeSet::new())
+                    .is_some_and(|attr| {
+                        matches!(
+                            attr.key.as_str(),
+                            "crates/util/vmux_macro/src/lib.rs||fn:store"
+                                | "crates/util/vmux_macro/src/lib.rs||fn:types"
+                        ) && attr.reference_paths.contains("proc_macro_attribute")
+                    })
+            });
+        }
+        if matches!(entry.kind, Kind::Alias)
+            && entry.field_types.len() == 1
+            && let Type::Path(path) = &entry.field_types[0]
+            && path.qself.is_none()
+            && self
+                .resolve(
+                    &entry.namespace,
+                    &References::path(&path.path),
+                    &mut BTreeSet::new(),
+                )
+                .is_some_and(|target| {
+                    target.key == "crates/util/vmux_ecs/src/store.rs||struct:Types"
+                })
+            && let Some(last) = path.path.segments.last()
+            && let syn::PathArguments::AngleBracketed(arguments) = &last.arguments
+            && arguments.args.len() == 1
+            && let syn::GenericArgument::Type(Type::Path(schema)) = &arguments.args[0]
+            && schema.qself.is_none()
+        {
+            return self
+                .resolve(
+                    &entry.namespace,
+                    &References::path(&schema.path),
+                    &mut BTreeSet::new(),
+                )
+                .is_some_and(|target| self.store_schema(target));
+        }
+        false
+    }
+
+    fn host_page_marker(&self, entry: &Declaration) -> bool {
+        self.page_macro_struct(entry)
+            && entry.page_components.is_empty()
+            && entry.page_inputs.is_empty()
+            && entry.page_input_errors.is_empty()
+            && self.implementations(entry).is_empty()
     }
 
     fn automatic_pre_world_boundary(&self, entry: &Declaration) -> bool {
@@ -13192,8 +13278,51 @@ impl Inventory {
                     queue.push(child.key.clone());
                 }
             }
+            let parent_crate = parent.namespace.split("::").next();
+            for path in parent
+                .reference_paths
+                .iter()
+                .chain(parent.field_paths.iter())
+            {
+                let Some(catalog) = self.resolve_path_or_prefix(&parent.namespace, path) else {
+                    continue;
+                };
+                if catalog.namespace.split("::").next() != parent_crate
+                    || !self.real_story_catalog(catalog)
+                {
+                    continue;
+                }
+                for component in &catalog.story_components {
+                    let Some(child) = self.function_reference(
+                        &catalog.namespace,
+                        component,
+                        &mut BTreeSet::new(),
+                    ) else {
+                        continue;
+                    };
+                    if self.real_dioxus_component(child) && renderers.insert(child.key.clone()) {
+                        queue.push(child.key.clone());
+                    }
+                }
+            }
         }
         renderers
+    }
+
+    fn real_story_catalog(&self, entry: &Declaration) -> bool {
+        entry.production
+            && matches!(entry.kind, Kind::Enum)
+            && !entry.local
+            && !entry.dynamic
+            && !entry.opaque
+            && !entry.story_components.is_empty()
+            && entry.contract_paths.iter().any(|path| {
+                self.function_reference(&entry.namespace, path, &mut BTreeSet::new())
+                    .is_some_and(|attr| {
+                        attr.key == "crates/util/vmux_macro/src/lib.rs||fn:story_catalog"
+                            && attr.reference_paths.contains("proc_macro_attribute")
+                    })
+            })
     }
 
     fn resolve_path_or_prefix(&self, namespace: &str, path: &str) -> Option<&Declaration> {
@@ -13827,13 +13956,7 @@ impl Inventory {
             }
             if self
                 .resolve(&implementation.namespace, path, &mut BTreeSet::new())
-                .is_some_and(|target| {
-                    matches!(
-                        target.key.as_str(),
-                        "crates/util/vmux_ecs/src/ui_state.rs||struct:UiStatePlugin"
-                            | "crates/feature/vmux_feature/src/manifest.rs||struct:FeaturePlugin"
-                    )
-                })
+                .is_some_and(|target| self.framework_default_plugin(target))
             {
                 continue;
             }
@@ -13851,10 +13974,33 @@ impl Inventory {
         true
     }
 
+    fn framework_default_plugin(&self, target: &Declaration) -> bool {
+        matches!(
+            target.key.as_str(),
+            "crates/util/vmux_ecs/src/ui_state.rs||struct:UiStatePlugin"
+                | "crates/feature/vmux_feature/src/manifest.rs||struct:FeaturePlugin"
+                | "crates/util/vmux_ecs/src/store.rs||struct:SchemaPlugin"
+                | "crates/util/vmux_ecs/src/identity.rs||struct:IdentityIndexPlugin"
+                | "crates/util/vmux_ecs/src/jobs.rs||struct:JobPlugin"
+        )
+    }
+
     fn plugin_factory(&self, implementation: &Declaration, expression: &str) -> bool {
-        let Ok(syn::Expr::Call(call)) = syn::parse_str::<syn::Expr>(expression) else {
+        let Ok(expr) = syn::parse_str::<syn::Expr>(expression) else {
             return false;
         };
+        self.plugin_factory_expr(implementation, &expr)
+    }
+
+    fn plugin_factory_expr(&self, implementation: &Declaration, expr: &syn::Expr) -> bool {
+        match expr {
+            syn::Expr::Call(call) => self.plugin_factory_call(implementation, call),
+            syn::Expr::MethodCall(call) => self.plugin_factory_method(implementation, call),
+            _ => false,
+        }
+    }
+
+    fn plugin_factory_call(&self, implementation: &Declaration, call: &syn::ExprCall) -> bool {
         let syn::Expr::Path(value) = call.func.as_ref() else {
             return false;
         };
@@ -13865,8 +14011,8 @@ impl Inventory {
         let mut owner_path = value.path.clone();
         owner_path.segments.pop();
         let owner_ref = References::path(&owner_path);
-        if call.args.is_empty() && owner_ref == "Self" && method == "manifest" {
-            return self.page_macro_plugin_owner(implementation);
+        if call.args.is_empty() && matches!(method.as_str(), "manifest" | "url") {
+            return self.page_macro_owner_ref(implementation, &owner_ref);
         }
         let Some(owner) = self.resolve(&implementation.namespace, &owner_ref, &mut BTreeSet::new())
         else {
@@ -13883,12 +14029,117 @@ impl Inventory {
         }
         if call.args.len() == 1
             && method == "new"
-            && owner.key == "crates/feature/vmux_layout/src/hosted_page.rs||struct:HostedUiPlugin"
-            && self.page_macro_plugin_owner(implementation)
+            && owner.key
+                == "crates/feature/vmux_layout/src/host/hosted_page.rs||struct:HostedUiPlugin"
+            && self.is_manifest_call(implementation, &call.args[0])
+        {
+            return true;
+        }
+        if call.args.len() == 2
+            && matches!(method.as_str(), "page" | "subtree")
+            && owner.key == "crates/util/vmux_ecs/src/page.rs||struct:HostedPage"
+            && matches!(
+                &call.args[1],
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(_),
+                    ..
+                })
+            )
+            && (matches!(
+                &call.args[0],
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(_),
+                    ..
+                })
+            ) || self.is_url_call(implementation, &call.args[0]))
         {
             return true;
         }
         false
+    }
+
+    fn plugin_factory_method(
+        &self,
+        implementation: &Declaration,
+        call: &syn::ExprMethodCall,
+    ) -> bool {
+        let method = call.method.to_string();
+        if method == "plugin" && call.args.is_empty() {
+            return self.is_manifest_call(implementation, &call.receiver);
+        }
+        if method == "hosted" && call.args.len() == 1 {
+            let syn::Expr::MethodCall(receiver) = call.receiver.as_ref() else {
+                return false;
+            };
+            return receiver.method == "plugin"
+                && receiver.args.is_empty()
+                && self.is_manifest_call(implementation, &receiver.receiver)
+                && self.plugin_factory_expr(implementation, &call.args[0]);
+        }
+        false
+    }
+
+    fn is_manifest_call(&self, implementation: &Declaration, expr: &syn::Expr) -> bool {
+        let syn::Expr::Call(call) = expr else {
+            return false;
+        };
+        let syn::Expr::Path(value) = call.func.as_ref() else {
+            return false;
+        };
+        if value.qself.is_some()
+            || !call.args.is_empty()
+            || value.path.segments.len() < 2
+            || value.path.segments.last().unwrap().ident != "manifest"
+        {
+            return false;
+        }
+        let mut owner_path = value.path.clone();
+        owner_path.segments.pop();
+        self.page_macro_owner_ref(implementation, &References::path(&owner_path))
+    }
+
+    fn is_url_call(&self, implementation: &Declaration, expr: &syn::Expr) -> bool {
+        let syn::Expr::Call(call) = expr else {
+            return false;
+        };
+        let syn::Expr::Path(value) = call.func.as_ref() else {
+            return false;
+        };
+        if value.qself.is_some()
+            || !call.args.is_empty()
+            || value.path.segments.len() < 2
+            || value.path.segments.last().unwrap().ident != "url"
+        {
+            return false;
+        }
+        let mut owner_path = value.path.clone();
+        owner_path.segments.pop();
+        self.page_macro_owner_ref(implementation, &References::path(&owner_path))
+    }
+
+    fn page_macro_owner_ref(&self, implementation: &Declaration, owner_ref: &str) -> bool {
+        if owner_ref == "Self" {
+            return self.page_macro_plugin_owner(implementation);
+        }
+        self.resolve(&implementation.namespace, owner_ref, &mut BTreeSet::new())
+            .is_some_and(|owner| self.page_macro_struct(owner))
+    }
+
+    fn page_macro_struct(&self, owner: &Declaration) -> bool {
+        owner.production
+            && matches!(owner.kind, Kind::Struct)
+            && !owner.has_fields
+            && !owner.local
+            && !owner.dynamic
+            && !owner.opaque
+            && !owner.projection
+            && owner.contract_paths.iter().any(|path| {
+                self.function_reference(&owner.namespace, path, &mut BTreeSet::new())
+                    .is_some_and(|attr| {
+                        attr.key == "crates/util/vmux_macro/src/lib.rs||fn:page"
+                            && attr.reference_paths.contains("proc_macro_attribute")
+                    })
+            })
     }
 
     fn page_macro_plugin_owner(&self, implementation: &Declaration) -> bool {
@@ -13899,13 +14150,7 @@ impl Inventory {
         else {
             return false;
         };
-        owner.contract_paths.iter().any(|path| {
-            self.function_reference(&owner.namespace, path, &mut BTreeSet::new())
-                .is_some_and(|attr| {
-                    attr.key == "crates/util/vmux_macro/src/lib.rs||fn:page"
-                        && attr.reference_paths.contains("proc_macro_attribute")
-                })
-        })
+        self.page_macro_struct(owner)
     }
 
     fn system_set_factory(&self, namespace: &str, expression: &str) -> bool {
@@ -14156,7 +14401,7 @@ impl Inventory {
             return false;
         }
         for path in &implementation.plugin_children {
-            if !self.framework_child(&implementation.namespace, path, &mut visiting.clone()) {
+            if !self.framework_child(implementation, path, &mut visiting.clone()) {
                 return false;
             }
         }
@@ -14168,6 +14413,38 @@ impl Inventory {
         implementation: &Declaration,
         visiting: &mut BTreeSet<String>,
     ) -> bool {
+        let custom: Vec<_> = implementation
+            .plugin_arguments
+            .iter()
+            .filter(|(constructor, _)| {
+                let resolved =
+                    self.resolve(&implementation.namespace, constructor, &mut BTreeSet::new());
+                let is_framework = resolved.is_some_and(|owner| {
+                    self.framework_default_plugin(owner)
+                        || owner.key
+                            == "crates/feature/vmux_layout/src/host/hosted_page.rs||struct:HostedUiPlugin"
+                });
+                let root = resolved
+                    .map(|declaration| declaration.namespace.clone())
+                    .or_else(|| {
+                        self.external_path(
+                            &implementation.namespace,
+                            constructor,
+                            &mut BTreeSet::new(),
+                        )
+                    });
+                let is_bevy_framework = root.is_some_and(|root| {
+                    matches!(
+                        root.split("::").next(),
+                        Some("bevy" | "bevy_app" | "bevy_ecs" | "bevy_cef" | "bevy_cef_core")
+                    )
+                });
+                !is_framework && !is_bevy_framework
+            })
+            .collect();
+        if custom.is_empty() {
+            return true;
+        }
         let contexts: Vec<_> = self
             .generic_usage
             .systems
@@ -14177,7 +14454,7 @@ impl Inventory {
         if contexts.is_empty() {
             return false;
         }
-        for (constructor, arguments) in &implementation.plugin_arguments {
+        for (constructor, arguments) in custom {
             if !self.plugin_default_path(
                 &implementation.namespace,
                 constructor,
@@ -14271,7 +14548,7 @@ impl Inventory {
             }
             installed = true;
             for path in &implementation.plugin_children {
-                if !self.framework_child(&implementation.namespace, path, &mut visiting.clone()) {
+                if !self.framework_child(implementation, path, &mut visiting.clone()) {
                     return false;
                 }
             }
@@ -14281,10 +14558,11 @@ impl Inventory {
 
     fn framework_child(
         &self,
-        namespace: &str,
+        implementation: &Declaration,
         path: &str,
         visiting: &mut BTreeSet<String>,
     ) -> bool {
+        let namespace = implementation.namespace.as_str();
         if let Some(child) = self.resolve(namespace, path, &mut BTreeSet::new()) {
             return matches!(child.kind, Kind::Struct)
                 && child.production
@@ -14292,12 +14570,36 @@ impl Inventory {
                 && !child.dynamic
                 && self.framework_child_interfaces(child, visiting);
         }
-        if let Some((owner, "default")) = path.rsplit_once("::")
-            && self
-                .resolve(namespace, owner, &mut BTreeSet::new())
-                .is_some()
-        {
-            return self.plugin_default_path(namespace, owner, visiting);
+        if let Some((owner_ref, method)) = path.rsplit_once("::") {
+            if method == "manifest" && self.page_macro_owner_ref(implementation, owner_ref) {
+                return true;
+            }
+            if let Some(owner) = self.resolve(namespace, owner_ref, &mut BTreeSet::new()) {
+                if method == "default"
+                    && (self.framework_default_plugin(owner)
+                        || matches!(
+                            owner.namespace.split("::").next(),
+                            Some("bevy" | "bevy_app" | "bevy_ecs" | "bevy_cef" | "bevy_cef_core")
+                        )
+                        || self.plugin_default_path(namespace, owner_ref, visiting))
+                {
+                    return true;
+                }
+                if method == "with_post_update_flush"
+                    && owner.key == "crates/util/vmux_ecs/src/ui_state.rs||struct:UiStatePlugin"
+                {
+                    return true;
+                }
+                if method == "new"
+                    && owner.key
+                        == "crates/feature/vmux_layout/src/host/hosted_page.rs||struct:HostedUiPlugin"
+                {
+                    return true;
+                }
+                if method == "plugin" && self.typed_page(owner) {
+                    return true;
+                }
+            }
         }
         self.external_path(namespace, path, &mut BTreeSet::new())
             .is_some_and(|path| {
@@ -18267,6 +18569,7 @@ impl Declarations<'_> {
             page_inputs: references.page_inputs,
             page_components: references.page_components,
             page_input_errors: references.page_input_errors,
+            story_components: references.story_components,
             inventory_inputs: references.inventory_inputs,
             native_class: match &parsed_item {
                 Some(Item::Macro(item)) => References::native_class_ivars(item.mac.tokens.clone())
@@ -18735,6 +19038,7 @@ struct References<'a> {
     page_inputs: BTreeSet<(String, String)>,
     page_components: BTreeSet<(String, String)>,
     page_input_errors: BTreeSet<String>,
+    story_components: BTreeSet<String>,
     inventory_inputs: BTreeSet<(String, String)>,
     dom_mounts: BTreeSet<(String, String)>,
 }
@@ -18849,6 +19153,23 @@ impl<'ast> Visit<'ast> for References<'_> {
                 }
                 Err(_) => {
                     self.page_input_errors.insert(name);
+                }
+            }
+        }
+        if attribute.path().is_ident("story")
+            && let syn::Meta::List(arguments) = &attribute.meta
+        {
+            let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+            if let Ok(arguments) = parser.parse2(arguments.tokens.clone()) {
+                for argument in arguments {
+                    let syn::Meta::NameValue(argument) = argument else {
+                        continue;
+                    };
+                    if argument.path.is_ident("component")
+                        && let syn::Expr::Path(component) = argument.value
+                    {
+                        self.story_components.insert(Self::path(&component.path));
+                    }
                 }
             }
         }
@@ -19479,11 +19800,16 @@ impl References<'_> {
                         | "add_observer"
                         | "add_plugins"
                         | "add_message"
+                        | "add_event"
                         | "init_resource"
                         | "init_non_send"
                         | "insert_resource"
                         | "register_type"
+                        | "register_stored"
+                        | "add_agent_request"
+                        | "add_agent_message"
                         | "configure_sets"
+                        | "register_required_components"
                 ) =>
             {
                 self.app_receiver(&value.receiver)
@@ -21187,4 +21513,119 @@ fn zero_policy_files_requires_zero_fragments_and_passes_with_automatic_proofs() 
     )
     .unwrap();
     assert!(Policy::load(dir.path()).is_err());
+}
+
+#[test]
+fn hosted_page_builders_store_schemas_and_app_extensions_prove_stateless_plugins() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_macro/src/lib.rs",
+        "#[proc_macro_attribute] pub fn page() {} #[proc_macro_attribute] pub fn store() {} #[proc_macro_attribute] pub fn ui_state() {}",
+    );
+    inventory.source(
+        "crates/util/vmux_page/src/lib.rs",
+        "pub use vmux_macro::page;",
+    );
+    inventory.source(
+        "crates/util/vmux_api/src/lib.rs",
+        "pub use vmux_macro::ui_state;",
+    );
+    inventory.source(
+        "crates/util/vmux_ecs/src/page.rs",
+        "pub struct HostedPage; impl HostedPage { pub fn page(_url: &str, _title: &str) -> Self { Self } pub fn subtree(_url: &str, _title: &str) -> Self { Self } }",
+    );
+    inventory.source(
+        "crates/util/vmux_ecs/src/lib.rs",
+        "pub mod page; pub mod store; pub mod ui_state; pub use vmux_macro::store;",
+    );
+    inventory.source(
+        "crates/util/vmux_ecs/src/store.rs",
+        "use std::marker::PhantomData; use bevy_app::{App, Plugin}; pub struct SchemaPlugin<S>(PhantomData<fn() -> S>); impl<S> Default for SchemaPlugin<S> { fn default() -> Self { Self(PhantomData) } } impl<S> Plugin for SchemaPlugin<S> { fn build(&self, _app: &mut App) {} } pub struct Types<S>(PhantomData<fn() -> S>);",
+    );
+    inventory.source(
+        "crates/util/vmux_ecs/src/ui_state.rs",
+        "use std::marker::PhantomData; use bevy_app::{App, Plugin}; pub struct UiStatePlugin<S>(PhantomData<fn() -> S>); impl<S> Default for UiStatePlugin<S> { fn default() -> Self { Self(PhantomData) } } impl<S> Plugin for UiStatePlugin<S> { fn build(&self, _app: &mut App) {} }",
+    );
+    inventory.source(
+        "crates/feature/vmux_feature/src/lib.rs",
+        "pub mod manifest;",
+    );
+    inventory.source(
+        "crates/feature/vmux_feature/src/manifest.rs",
+        "use std::marker::PhantomData; use bevy_app::{App, Plugin}; pub struct FeaturePlugin<M>(PhantomData<fn() -> M>); impl<M> Default for FeaturePlugin<M> { fn default() -> Self { Self(PhantomData) } } impl<M> Plugin for FeaturePlugin<M> { fn build(&self, _app: &mut App) {} }",
+    );
+    inventory.source("crates/feature/vmux_layout/src/lib.rs", "pub mod host;");
+    inventory.source(
+        "crates/feature/vmux_layout/src/host.rs",
+        "pub mod hosted_page;",
+    );
+    inventory.source(
+        "crates/feature/vmux_layout/src/host/hosted_page.rs",
+        "use std::marker::PhantomData; use bevy_app::{App, Plugin}; pub struct HostedUiPlugin<M>(PhantomData<fn() -> M>); impl<M> HostedUiPlugin<M> { pub fn new<T>(_manifest: T) -> Self { Self(PhantomData) } } impl<M> Plugin for HostedUiPlugin<M> { fn build(&self, _app: &mut App) {} }",
+    );
+    inventory.source(
+        "crates/feature/sample/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use vmux_ecs::page::HostedPage; use vmux_ecs::store::{SchemaPlugin, Types}; use vmux_ecs::ui_state::UiStatePlugin; use vmux_feature::manifest::FeaturePlugin; use vmux_layout::host::hosted_page::HostedUiPlugin; #[derive(Component, Default)] struct State; #[vmux_api::ui_state] struct View { id: u64 } #[vmux_page::page] struct HostedMarker; #[vmux_ecs::store(State)] struct SampleStore; type SampleStoreTypes = Types<SampleStore>; struct Plain; type BadStoreTypes = Types<Plain>; fn tick(_: Query<&State>) {} #[vmux_page::page] struct PagePlugin; impl Plugin for PagePlugin { fn build(&self, app: &mut App) { app.add_plugins((FeaturePlugin::<State>::default(), HostedUiPlugin::<State>::new(Self::manifest()), Self::manifest().plugin().hosted(HostedPage::page(Self::url(), \"Sample\")), HostedMarker::manifest().plugin().hosted(HostedPage::subtree(HostedMarker::url(), \"Sub\")), SchemaPlugin::<SampleStore>::default(), UiStatePlugin::<View>::default())).register_stored::<State>().add_agent_message::<State>().add_agent_request::<State>().add_systems(Update, tick); } } #[vmux_page::page] struct CompositePlugin; impl Plugin for CompositePlugin { fn build(&self, app: &mut App) { app.add_plugins((FeaturePlugin::<State>::default(), HostedUiPlugin::<State>::new(Self::manifest()), PagePlugin)); } } struct SpoofPlugin; impl Plugin for SpoofPlugin { fn build(&self, app: &mut App) { app.add_plugins(Self::manifest().plugin().hosted(HostedPage::page(Self::url(), \"Bad\"))).add_systems(Update, tick); } }",
+    );
+    inventory.resolve_usage();
+    for key in [
+        "crates/feature/sample/src/lib.rs||struct:HostedMarker",
+        "crates/feature/sample/src/lib.rs||struct:SampleStore",
+        "crates/feature/sample/src/lib.rs||alias:SampleStoreTypes",
+        "crates/feature/sample/src/lib.rs||struct:PagePlugin",
+        "crates/feature/sample/src/lib.rs||impl:Plugin for PagePlugin",
+        "crates/feature/sample/src/lib.rs||struct:CompositePlugin",
+        "crates/feature/sample/src/lib.rs||impl:Plugin for CompositePlugin",
+    ] {
+        assert!(
+            inventory.automatic_boundary(&inventory.entries[key]),
+            "expected proved boundary: {key}"
+        );
+    }
+    for key in [
+        "crates/feature/sample/src/lib.rs||alias:BadStoreTypes",
+        "crates/feature/sample/src/lib.rs||struct:SpoofPlugin",
+        "crates/feature/sample/src/lib.rs||impl:Plugin for SpoofPlugin",
+    ] {
+        assert!(
+            !inventory.automatic_boundary(&inventory.entries[key]),
+            "expected rejected boundary: {key}"
+        );
+    }
+}
+
+#[test]
+fn story_catalog_proves_referenced_dioxus_story_components_only() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_macro/src/lib.rs",
+        "#[proc_macro_attribute] pub fn page() {} #[proc_macro_attribute] pub fn ui_state() {} #[proc_macro_attribute] pub fn story_catalog() {}",
+    );
+    inventory.source(
+        "crates/util/vmux_page/src/lib.rs",
+        "pub use vmux_macro::page;",
+    );
+    inventory.source(
+        "crates/util/vmux_api/src/lib.rs",
+        "pub use vmux_macro::ui_state;",
+    );
+    inventory.source(
+        "crates/feature/gallery/src/lib.rs",
+        "use dioxus::prelude::*; #[vmux_api::ui_state] struct GalleryUiState { id: u64 } #[vmux_macro::story_catalog(state = GalleryUiState)] enum Story { #[story(metadata = \"a.ron\", component = Preview)] Button } #[vmux_page::page(component = Page, states = [GalleryUiState])] struct GalleryPage; #[component] fn Page() -> Element { let _ = Story::Button; rsx! { div {} } } #[component] fn Preview() -> Element { rsx! { SubPreview {} } } #[component] fn SubPreview() -> Element { rsx! { div {} } } #[component] fn Orphan() -> Element { rsx! { div {} } }",
+    );
+    inventory.resolve_usage();
+    for key in [
+        "crates/feature/gallery/src/lib.rs||fn:Page",
+        "crates/feature/gallery/src/lib.rs||fn:Preview",
+        "crates/feature/gallery/src/lib.rs||fn:SubPreview",
+    ] {
+        assert!(
+            inventory.automatic_boundary(&inventory.entries[key]),
+            "expected proved story renderer: {key}"
+        );
+    }
+    assert!(
+        !inventory
+            .automatic_boundary(&inventory.entries["crates/feature/gallery/src/lib.rs||fn:Orphan"])
+    );
 }
