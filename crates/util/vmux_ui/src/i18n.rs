@@ -1,4 +1,3 @@
-use crate::i18n_catalogs::{AVAILABLE_LOCALES, EMBEDDED_CATALOGS};
 use fluent_bundle::{FluentArgs, FluentBundle, FluentResource};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -7,13 +6,6 @@ use std::str::FromStr;
 use unic_langid::{CharacterDirection, LanguageIdentifier};
 
 pub const DEFAULT_LOCALE: &str = "en-US";
-
-thread_local! {
-    static CURRENT_LOCALE: RefCell<Locale> = RefCell::new(Locale::preferred());
-    static BUNDLES: RefCell<HashMap<String, FluentBundle<FluentResource>>> =
-        RefCell::new(HashMap::new());
-    static EXTERNAL_CATALOGS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
-}
 
 pub fn translate(id: &str) -> String {
     Locale::current().translate(id)
@@ -31,8 +23,51 @@ pub fn translate_humanized(id: &str) -> String {
 pub struct Locale(String);
 
 impl Locale {
+    const EMBEDDED_CATALOGS: &'static [(&'static str, &'static str)] = &[
+        ("ar", include_str!("../locales/ar.ftl")),
+        ("de", include_str!("../locales/de.ftl")),
+        ("en-US", include_str!("../locales/en-US.ftl")),
+        ("es", include_str!("../locales/es.ftl")),
+        ("fr", include_str!("../locales/fr.ftl")),
+        ("it", include_str!("../locales/it.ftl")),
+        ("ja", include_str!("../locales/ja.ftl")),
+        ("ko", include_str!("../locales/ko.ftl")),
+        ("nl", include_str!("../locales/nl.ftl")),
+        ("pl", include_str!("../locales/pl.ftl")),
+        ("pt-BR", include_str!("../locales/pt-BR.ftl")),
+        ("ru", include_str!("../locales/ru.ftl")),
+        ("uk", include_str!("../locales/uk.ftl")),
+        ("zh-Hans", include_str!("../locales/zh-Hans.ftl")),
+        ("zh-Hant", include_str!("../locales/zh-Hant.ftl")),
+    ];
+
+    fn with_current_slot<R>(f: impl FnOnce(&mut Locale) -> R) -> R {
+        thread_local! {
+            static CURRENT_LOCALE: RefCell<Locale> = RefCell::new(Locale::preferred());
+        }
+        CURRENT_LOCALE.with_borrow_mut(f)
+    }
+
+    fn with_bundles<R>(
+        f: impl FnOnce(&mut HashMap<String, FluentBundle<FluentResource>>) -> R,
+    ) -> R {
+        thread_local! {
+            static BUNDLES: RefCell<HashMap<String, FluentBundle<FluentResource>>> =
+                RefCell::new(HashMap::new());
+        }
+        BUNDLES.with_borrow_mut(f)
+    }
+
+    fn with_external_catalogs<R>(f: impl FnOnce(&mut HashMap<String, String>) -> R) -> R {
+        thread_local! {
+            static EXTERNAL_CATALOGS: RefCell<HashMap<String, String>> =
+                RefCell::new(HashMap::new());
+        }
+        EXTERNAL_CATALOGS.with_borrow_mut(f)
+    }
+
     pub fn preferred() -> Self {
-        let Some(tag) = platform_locale() else {
+        let Some(tag) = sys_locale::get_locale() else {
             return Self::from(DEFAULT_LOCALE);
         };
         Self::from(tag.as_str())
@@ -50,15 +85,17 @@ impl Locale {
     }
 
     pub fn current() -> Self {
-        CURRENT_LOCALE.with_borrow(Clone::clone)
+        Self::with_current_slot(|current| current.clone())
     }
 
     pub fn available() -> impl Iterator<Item = Self> {
-        AVAILABLE_LOCALES.iter().map(|tag| Self::from(*tag))
+        Self::EMBEDDED_CATALOGS
+            .iter()
+            .map(|(tag, _)| Self::from(*tag))
     }
 
     pub fn make_current(&self) {
-        CURRENT_LOCALE.with_borrow_mut(|current| *current = self.clone());
+        Self::with_current_slot(|current| *current = self.clone());
     }
 
     pub fn as_str(&self) -> &str {
@@ -97,7 +134,20 @@ impl Locale {
         if translated != id {
             return translated;
         }
-        HumanizedMessage::from(id).0
+        Self::humanize(id)
+    }
+
+    fn humanize(id: &str) -> String {
+        let mut value = id
+            .split(['_', '-'])
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if let Some(first) = value.chars().next() {
+            let upper = first.to_uppercase().collect::<String>();
+            value.replace_range(..first.len_utf8(), &upper);
+        }
+        value
     }
 
     pub fn translate_with(&self, id: &str, args: &[(&str, TranslationValue<'_>)]) -> String {
@@ -124,10 +174,10 @@ impl Locale {
 
     pub fn register_catalog(&self, source: &str) -> Result<(), String> {
         let bundle = self.bundle_from_source(source)?;
-        EXTERNAL_CATALOGS.with_borrow_mut(|catalogs| {
+        Self::with_external_catalogs(|catalogs| {
             catalogs.insert(self.0.clone(), source.to_string());
         });
-        BUNDLES.with_borrow_mut(|bundles| {
+        Self::with_bundles(|bundles| {
             bundles.insert(self.0.clone(), bundle);
         });
         Ok(())
@@ -163,7 +213,7 @@ impl Locale {
     }
 
     fn embedded_source(&self) -> Option<&'static str> {
-        for &(tag, source) in EMBEDDED_CATALOGS {
+        for &(tag, source) in Self::EMBEDDED_CATALOGS {
             if tag == self.0 {
                 return Some(source);
             }
@@ -172,11 +222,11 @@ impl Locale {
     }
 
     fn has_external_catalog(&self) -> bool {
-        EXTERNAL_CATALOGS.with_borrow(|catalogs| catalogs.contains_key(&self.0))
+        Self::with_external_catalogs(|catalogs| catalogs.contains_key(&self.0))
     }
 
     fn format(&self, id: &str, args: &FluentArgs<'_>) -> Option<String> {
-        BUNDLES.with_borrow_mut(|bundles| {
+        Self::with_bundles(|bundles| {
             let bundle = bundles
                 .entry(self.0.clone())
                 .or_insert_with(|| self.bundle());
@@ -189,8 +239,7 @@ impl Locale {
     }
 
     fn bundle(&self) -> FluentBundle<FluentResource> {
-        let source = EXTERNAL_CATALOGS
-            .with_borrow(|catalogs| catalogs.get(&self.0).cloned())
+        let source = Self::with_external_catalogs(|catalogs| catalogs.get(&self.0).cloned())
             .or_else(|| self.embedded_source().map(str::to_string))
             .unwrap_or_else(|| {
                 Self::default_locale()
@@ -240,50 +289,37 @@ pub enum TranslationValue<'a> {
     Number(i64),
 }
 
-struct HumanizedMessage(String);
-
-impl From<&str> for HumanizedMessage {
-    fn from(id: &str) -> Self {
-        let mut value = id
-            .split(['_', '-'])
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if let Some(first) = value.chars().next() {
-            let upper = first.to_uppercase().collect::<String>();
-            value.replace_range(..first.len_utf8(), &upper);
-        }
-        Self(value)
-    }
-}
-
-fn platform_locale() -> Option<String> {
-    sys_locale::get_locale()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    fn visible(value: String) -> String {
-        value.replace(['\u{2068}', '\u{2069}'], "")
-    }
-
-    fn message_ids(source: &str) -> BTreeSet<&str> {
-        source
-            .lines()
-            .filter(|line| {
-                !line.chars().next().is_some_and(char::is_whitespace) && !line.starts_with('#')
-            })
-            .filter_map(|line| line.split_once('=').map(|(id, _)| id.trim()))
-            .collect()
-    }
-
     #[test]
     fn bundled_catalogs_parse_and_have_identical_message_ids() {
+        let message_ids = |source: &'static str| -> BTreeSet<&'static str> {
+            source
+                .lines()
+                .filter(|line| {
+                    !line.chars().next().is_some_and(char::is_whitespace) && !line.starts_with('#')
+                })
+                .filter_map(|line| line.split_once('=').map(|(id, _)| id.trim()))
+                .collect()
+        };
         let english = Locale::default_locale().embedded_source().unwrap();
-        for &(locale, source) in EMBEDDED_CATALOGS {
+        let disk_locales: BTreeSet<String> =
+            std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales"))
+                .unwrap()
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == "ftl"))
+                .map(|path| path.file_stem().unwrap().to_string_lossy().into_owned())
+                .collect();
+        let embedded_locales: BTreeSet<String> = Locale::EMBEDDED_CATALOGS
+            .iter()
+            .map(|(locale, _)| (*locale).to_string())
+            .collect();
+        assert_eq!(disk_locales, embedded_locales);
+        for &(locale, source) in Locale::EMBEDDED_CATALOGS {
             Locale::from(locale).bundle();
             assert_eq!(
                 message_ids(english),
@@ -337,6 +373,7 @@ mod tests {
 
     #[test]
     fn formats_variables_and_plurals() {
+        let visible = |value: String| value.replace(['\u{2068}', '\u{2069}'], "");
         assert_eq!(
             visible(
                 Locale::from("en-US")

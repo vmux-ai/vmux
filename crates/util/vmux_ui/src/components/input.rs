@@ -1,14 +1,9 @@
 use dioxus::prelude::*;
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::cn::cn;
 use crate::dom::DomCaret;
-
-static NEXT_ACTION_INPUT_ID: AtomicUsize = AtomicUsize::new(0);
-
-const INPUT: &str = "relative box-border flex cursor-pointer flex-row items-center justify-between gap-1 rounded-md border-0 bg-background px-3 py-2 text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] transition-colors placeholder:text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--primary)] disabled:cursor-not-allowed dark:bg-[color-mix(in_oklab,#FFFFFF26_30%,transparent)] dark:hover:bg-[color-mix(in_oklab,#FFFFFF26_50%,transparent)]";
 
 #[component]
 pub fn Input(
@@ -35,7 +30,9 @@ pub fn Input(
     attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
-    let base = attributes!(input { class: INPUT });
+    let base = attributes!(input {
+        class: "relative box-border flex cursor-pointer flex-row items-center justify-between gap-1 rounded-md border-0 bg-background px-3 py-2 text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] transition-colors placeholder:text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--primary)] disabled:cursor-not-allowed dark:bg-[color-mix(in_oklab,#FFFFFF26_30%,transparent)] dark:hover:bg-[color-mix(in_oklab,#FFFFFF26_50%,transparent)]"
+    });
     let merged = merge_attributes(vec![base, attributes]);
     rsx! {
         input {
@@ -82,12 +79,7 @@ pub fn ActionInput(
     #[props(default)] onclick: Option<EventHandler<MouseEvent>>,
     #[props(default)] onfocus: Option<EventHandler<FocusEvent>>,
 ) -> Element {
-    let id = use_hook(|| {
-        format!(
-            "vmux-action-input-{}",
-            NEXT_ACTION_INPUT_ID.fetch_add(1, Ordering::Relaxed)
-        )
-    });
+    let id = use_hook(|| format!("vmux-action-input-{}", dioxus::core::current_scope_id().0));
     let mounted_id = id.clone();
     let action_id = id.clone();
     let selection_id = id.clone();

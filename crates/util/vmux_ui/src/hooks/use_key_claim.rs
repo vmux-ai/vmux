@@ -10,32 +10,6 @@ pub enum Unclaimed {
     Forwards,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum KeyVerdict {
-    Browser,
-    Send,
-}
-
-impl KeyVerdict {
-    fn decide(
-        claims: &KeyClaimsUiState,
-        unclaimed: Unclaimed,
-        stroke: &KeyStroke,
-        wanted_locally: bool,
-    ) -> Self {
-        if wanted_locally {
-            return Self::Browser;
-        }
-        if claims.contains(stroke) {
-            return Self::Send;
-        }
-        match unclaimed {
-            Unclaimed::Types => Self::Browser,
-            Unclaimed::Forwards => Self::Send,
-        }
-    }
-}
-
 pub fn use_key_claim(
     unclaimed: Unclaimed,
     context: impl Fn() -> Vec<String> + 'static,
@@ -86,16 +60,23 @@ impl KeyClaim {
         if stroke.is_modifier_key() {
             return;
         }
-        let verdict = KeyVerdict::decide(
-            &self.claims.read(),
-            self.unclaimed,
-            &stroke,
-            wanted_locally(&stroke),
-        );
-        if verdict == KeyVerdict::Browser {
+        if !self.should_send(&stroke, wanted_locally(&stroke)) {
             return;
         }
         event.prevent_default();
         let _ = send(&stroke);
+    }
+
+    fn should_send(&self, stroke: &KeyStroke, wanted_locally: bool) -> bool {
+        if wanted_locally {
+            return false;
+        }
+        if self.claims.read().contains(stroke) {
+            return true;
+        }
+        match self.unclaimed {
+            Unclaimed::Types => false,
+            Unclaimed::Forwards => true,
+        }
     }
 }

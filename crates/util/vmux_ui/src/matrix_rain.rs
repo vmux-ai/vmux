@@ -2,15 +2,11 @@ use dioxus::prelude::*;
 
 use crate::cn::cn;
 
-const DEFAULT_COLUMNS: usize = 120;
-const COLUMN_GLYPHS: usize = 96;
-const GLYPHS: &str = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789";
-
 #[component]
 pub fn MatrixRain(
     accent_rgb: String,
     words: Vec<String>,
-    #[props(default = DEFAULT_COLUMNS)] columns: usize,
+    #[props(default = RainColumn::DEFAULT_COLUMNS)] columns: usize,
 ) -> Element {
     let accent = Accent::css(&accent_rgb);
     let head = format!(
@@ -60,7 +56,7 @@ pub fn MatrixLoader(
     label: String,
     #[props(default)] words: Vec<String>,
     #[props(default = "h-full w-full".to_string())] class: String,
-    #[props(default = DEFAULT_COLUMNS)] columns: usize,
+    #[props(default = RainColumn::DEFAULT_COLUMNS)] columns: usize,
 ) -> Element {
     let words = if words.is_empty() {
         vec!["VMUX".to_string()]
@@ -97,11 +93,15 @@ struct RainColumn {
 }
 
 impl RainColumn {
+    const DEFAULT_COLUMNS: usize = 120;
+    const COLUMN_GLYPHS: usize = 96;
+    const GLYPHS: &'static str = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789";
+
     fn at(index: usize, words: &[Vec<char>]) -> Self {
-        let glyphs: Vec<char> = GLYPHS.chars().collect();
+        let glyphs: Vec<char> = Self::GLYPHS.chars().collect();
         let word = (!words.is_empty() && index % 7 == 3).then(|| &words[index % words.len()]);
-        let mut column_glyphs = String::with_capacity(COLUMN_GLYPHS * 2);
-        for row in 0..COLUMN_GLYPHS {
+        let mut column_glyphs = String::with_capacity(Self::COLUMN_GLYPHS * 2);
+        for row in 0..Self::COLUMN_GLYPHS {
             if row > 0 {
                 column_glyphs.push('\n');
             }
@@ -176,7 +176,7 @@ mod tests {
             .chars()
             .filter(|glyph| *glyph != '\n')
             .collect();
-        assert_eq!(shown.chars().count(), COLUMN_GLYPHS);
+        assert_eq!(shown.chars().count(), RainColumn::COLUMN_GLYPHS);
         assert!(shown.starts_with("CLAUDE"), "got {shown}");
     }
 

@@ -1,7 +1,16 @@
 use dioxus::prelude::*;
 
 pub fn use_is_mac() -> bool {
-    use_hook(detect_is_mac)
+    use_hook(|| {
+        #[cfg(target_arch = "wasm32")]
+        {
+            wasm::detect_is_mac()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            false
+        }
+    })
 }
 
 pub fn use_clipboard_copy() -> Callback<String> {
@@ -23,16 +32,6 @@ pub fn use_dmg_download() -> Callback<()> {
         #[cfg(target_arch = "wasm32")]
         wasm::download();
     })
-}
-
-#[cfg(target_arch = "wasm32")]
-fn detect_is_mac() -> bool {
-    wasm::detect_is_mac()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn detect_is_mac() -> bool {
-    false
 }
 
 #[cfg(target_arch = "wasm32")]

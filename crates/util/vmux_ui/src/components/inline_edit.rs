@@ -1,8 +1,5 @@
 use crate::{focus::FocusClaim, ime::use_ime_guard, platform::Platform};
 use dioxus::prelude::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-static NEXT_INLINE_EDIT_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[component]
 pub fn EditableText(
@@ -25,12 +22,8 @@ pub fn EditableText(
     let mut draft = draft;
     let mut optimistic = use_signal(|| None::<OptimisticText>);
     let mut optimistic_generation = use_signal(|| 0u64);
-    let trigger_id = use_hook(|| {
-        format!(
-            "vmux-editable-text-{}",
-            NEXT_INLINE_EDIT_ID.fetch_add(1, Ordering::Relaxed)
-        )
-    });
+    let trigger_id =
+        use_hook(|| format!("vmux-editable-text-{}", dioxus::core::current_scope_id().0));
     let observed_value = value.clone();
     use_effect(use_reactive!(|observed_value| {
         let acknowledged = {
@@ -220,12 +213,7 @@ pub fn InlineEdit(
         on_commit,
         on_cancel,
     );
-    let id = use_hook(|| {
-        format!(
-            "vmux-inline-edit-{}",
-            NEXT_INLINE_EDIT_ID.fetch_add(1, Ordering::Relaxed)
-        )
-    });
+    let id = use_hook(|| format!("vmux-inline-edit-{}", dioxus::core::current_scope_id().0));
     rsx! {
         input {
             id: "{id}",
@@ -292,12 +280,7 @@ pub fn InlineTextarea(
         on_commit,
         on_cancel,
     );
-    let id = use_hook(|| {
-        format!(
-            "vmux-inline-edit-{}",
-            NEXT_INLINE_EDIT_ID.fetch_add(1, Ordering::Relaxed)
-        )
-    });
+    let id = use_hook(|| format!("vmux-inline-edit-{}", dioxus::core::current_scope_id().0));
     rsx! {
         textarea {
             id: "{id}",
