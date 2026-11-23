@@ -14,7 +14,6 @@ use crate::repository::Checkout;
 use crate::signals::Signals;
 use crate::storage_io::{Capture, Done, FileBytes, ReadFile, StorageJob, ToolOutput};
 use crate::tooling_io::CreateDirectory;
-use crate::work::Outcome;
 use crate::{Attempt, Completion, Lease, Settings};
 
 pub(crate) struct CliPackagePlugin;
@@ -1080,7 +1079,7 @@ fn finish(
         }
         let result = match error {
             Some(error) => Err(error.0.clone()),
-            None => Ok(Outcome::Done),
+            None => Ok(()),
         };
         completions.write(Completion {
             entity,
@@ -1230,7 +1229,7 @@ mod tests {
             ChildOf(operation),
             Attempt(1),
             OperationState::Pending,
-            crate::work::Work::CliPackage(false),
+            crate::steps::CliPackageStep(false),
         ));
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {

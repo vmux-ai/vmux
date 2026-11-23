@@ -20,7 +20,6 @@ use crate::storage_io::{
     CanonicalPath, Canonicalize, Capture, DirectoryEntries, Done, FileBytes, Inspect, Io, Open,
     OpenedFile, PathMetadata, ReadDirectory, ReadFile, Remove, StorageJob, ToolOutput,
 };
-use crate::work::Outcome;
 use crate::{Completion, Settings};
 
 pub(crate) struct StorageRuntimePlugin;
@@ -2297,10 +2296,10 @@ fn finish(
                     "Build storage: cleanup skipped after successful build: {}",
                     failed.0
                 );
-                Ok(Outcome::Done)
+                Ok(())
             }
             Some(failed) => Err(failed.0.clone()),
-            None => Ok(Outcome::Done),
+            None => Ok(()),
         };
         completions.write(Completion {
             entity,
@@ -2404,28 +2403,48 @@ mod tests {
                 ))
                 .id();
             let guard = matches!(request.kind, RequestKind::Guard);
-            let work = match request.kind {
-                RequestKind::Validate => unreachable!(),
-                RequestKind::Check => crate::work::Work::Check,
-                RequestKind::Guard => crate::work::Work::Check,
-                RequestKind::Preflight => crate::work::Work::Preflight,
-                RequestKind::Finish => crate::work::Work::Finish(request.profile.clone().unwrap()),
-                RequestKind::Report => crate::work::Work::Status,
-                RequestKind::Clean => crate::work::Work::Clean(request.apply),
-            };
             let step = app
                 .world_mut()
                 .spawn((
                     ChildOf(operation),
                     crate::Attempt(1),
                     OperationState::Pending,
-                    work,
                 ))
                 .id();
+            match request.kind {
+                RequestKind::Validate => unreachable!(),
+                RequestKind::Check | RequestKind::Guard => {
+                    app.world_mut()
+                        .entity_mut(step)
+                        .insert(crate::steps::StorageCheckStep);
+                }
+                RequestKind::Preflight => {
+                    app.world_mut()
+                        .entity_mut(step)
+                        .insert(crate::steps::StoragePreflightStep);
+                }
+                RequestKind::Finish => {
+                    app.world_mut()
+                        .entity_mut(step)
+                        .insert(crate::steps::StorageFinishStep(
+                            request.profile.clone().unwrap(),
+                        ));
+                }
+                RequestKind::Report => {
+                    app.world_mut()
+                        .entity_mut(step)
+                        .insert(crate::steps::StorageStatusStep);
+                }
+                RequestKind::Clean => {
+                    app.world_mut()
+                        .entity_mut(step)
+                        .insert(crate::steps::StorageCleanStep(request.apply));
+                }
+            }
             if guard {
                 app.world_mut()
                     .entity_mut(step)
-                    .remove::<crate::work::Work>()
+                    .remove::<crate::steps::StorageCheckStep>()
                     .insert((
                         crate::Step,
                         crate::Running,
