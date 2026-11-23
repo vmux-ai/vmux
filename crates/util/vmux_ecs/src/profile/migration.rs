@@ -14,9 +14,7 @@ impl Plugin for MigrationPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             PreStartup,
-            (seed_default_migration, drive_migration)
-                .chain()
-                .in_set(MigrationBarrierSet),
+            (seed_default, drive).chain().in_set(MigrationBarrierSet),
         )
         .add_systems(
             ProfileMigrationStep,
@@ -30,7 +28,7 @@ impl Plugin for MigrationPlugin {
                 admit_space_pruning,
                 discover_space_prune,
                 execute_prune,
-                settle_migration,
+                settle,
             )
                 .chain(),
         );
@@ -195,10 +193,7 @@ struct PruneWaitingChildren;
 #[derive(Component)]
 struct PruneSettled;
 
-fn seed_default_migration(
-    existing: Query<Entity, With<ProfileMigrationSpec>>,
-    mut commands: Commands,
-) {
+fn seed_default(existing: Query<Entity, With<ProfileMigrationSpec>>, mut commands: Commands) {
     if !existing.is_empty() {
         return;
     }
@@ -209,7 +204,7 @@ fn seed_default_migration(
     ));
 }
 
-fn drive_migration(world: &mut World) {
+fn drive(world: &mut World) {
     let mut query = world.query_filtered::<Entity, (
         With<ProfileMigrationSpec>,
         Without<MigrationPending>,
@@ -740,7 +735,7 @@ fn execute_prune(
     }
 }
 
-fn settle_migration(
+fn settle(
     roots: Query<Entity, With<PruningSpaces>>,
     active_prunes: Query<&MigrationOwner, (With<PruneNode>, Without<PruneSettled>)>,
     mut commands: Commands,
