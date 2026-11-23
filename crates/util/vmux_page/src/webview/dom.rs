@@ -1295,24 +1295,22 @@ mod tests {
         FramePoll::from(&request).unwrap()
     }
 
-    impl FramePoll {
-        fn initial(frame: &InitialFrame) -> Self {
-            let script = frame.script();
-            let json = script
-                .strip_prefix("globalThis.__vmuxInitialFrame=")
-                .unwrap()
-                .strip_suffix(';')
-                .unwrap();
-            let packet: serde_json::Value = serde_json::from_str(json).unwrap();
-            let request = wry::http::Request::builder()
-                .header(NAVIGATION_REVISION, packet["revision"].as_str().unwrap())
-                .header(FRAME_EPOCH, packet["epoch"].as_str().unwrap())
-                .header(FRAME_CAPABILITY, packet["capability"].as_str().unwrap())
-                .header(FRAME_APPLIED, packet["sequence"].as_str().unwrap())
-                .body(Vec::new())
-                .unwrap();
-            Self::from(&request).unwrap()
-        }
+    fn initial_poll(frame: &InitialFrame) -> FramePoll {
+        let script = frame.script();
+        let json = script
+            .strip_prefix("globalThis.__vmuxInitialFrame=")
+            .unwrap()
+            .strip_suffix(';')
+            .unwrap();
+        let packet: serde_json::Value = serde_json::from_str(json).unwrap();
+        let request = wry::http::Request::builder()
+            .header(NAVIGATION_REVISION, packet["revision"].as_str().unwrap())
+            .header(FRAME_EPOCH, packet["epoch"].as_str().unwrap())
+            .header(FRAME_CAPABILITY, packet["capability"].as_str().unwrap())
+            .header(FRAME_APPLIED, packet["sequence"].as_str().unwrap())
+            .body(Vec::new())
+            .unwrap();
+        FramePoll::from(&request).unwrap()
     }
 
     #[test]
@@ -1325,7 +1323,7 @@ mod tests {
         );
         dom.ipc_epoch.set(7);
         let frame = dom.initial_frame();
-        let acknowledgement = FramePoll::initial(&frame);
+        let acknowledgement = initial_poll(&frame);
 
         assert!(acknowledgement.accepted_by(&dom));
         assert!(acknowledgement.acknowledge(&dom));
@@ -1340,8 +1338,8 @@ mod tests {
             &embedding(),
             Rc::new(Cell::new(false)),
         );
-        let old = FramePoll::initial(&dom.initial_frame());
-        let current = FramePoll::initial(&dom.initial_frame());
+        let old = initial_poll(&dom.initial_frame());
+        let current = initial_poll(&dom.initial_frame());
 
         assert!(!old.accepted_by(&dom));
         assert!(!old.acknowledge(&dom));

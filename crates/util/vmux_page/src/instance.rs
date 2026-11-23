@@ -56,35 +56,37 @@ impl PageScope<'_> {
 #[allow(non_snake_case)]
 mod tests {
     use dioxus::prelude::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use super::*;
     use crate::PageDom;
 
-    thread_local! {
-        static SEEN: std::cell::RefCell<Option<String>> =
-            const { std::cell::RefCell::new(None) };
-    }
+    #[derive(Clone, Default)]
+    struct Seen(Rc<RefCell<Option<String>>>);
 
     #[component]
     fn Reader() -> Element {
         let seen = try_consume_context::<String>();
-        SEEN.with(|cell| *cell.borrow_mut() = seen);
+        let capture = consume_context::<Seen>();
+        *capture.0.borrow_mut() = seen;
         rsx! { div {} }
     }
 
     #[test]
     fn a_page_reads_its_instance_on_the_render_that_builds_the_document() {
-        SEEN.with(|cell| *cell.borrow_mut() = None);
+        let capture = Seen::default();
+        let provided = capture.clone();
 
         let mut page = PageDom::mount(
             Reader,
-            Instance::from(|scope: PageScope<'_>| scope.provide("the failure".to_string())),
+            Instance::from(move |scope: PageScope<'_>| {
+                scope.provide(provided);
+                scope.provide("the failure".to_string());
+            }),
         );
         page.rebuild();
 
-        assert_eq!(
-            SEEN.with(|cell| cell.borrow().clone()),
-            Some("the failure".to_string()),
-        );
+        assert_eq!(capture.0.borrow().clone(), Some("the failure".to_string()));
     }
 }

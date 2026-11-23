@@ -257,9 +257,9 @@ mod tests {
 
     #[test]
     fn a_route_owned_by_the_same_page_preserves_its_dom() {
-        static PAGE: Page = Page::pane("vmux://sessions/", first).owning_subtree();
+        let page = Page::pane("vmux://sessions/", first).owning_subtree();
 
-        assert!(PAGE.preserves_dom_for(&PAGE));
+        assert!(page.preserves_dom_for(&page));
     }
 
     #[test]

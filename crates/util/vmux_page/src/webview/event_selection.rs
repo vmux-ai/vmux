@@ -43,19 +43,23 @@ impl EventSelection {
 mod tests {
     use super::*;
 
-    impl EventSelection {
-        fn reported(field: &str, document: &str) -> Self {
-            let mut headers = wry::http::HeaderMap::new();
-            headers.insert(Self::FIELD, field.parse().expect("a header value"));
-            headers.insert(Self::DOCUMENT, document.parse().expect("a header value"));
+    fn reported(field: &str, document: &str) -> EventSelection {
+        let mut headers = wry::http::HeaderMap::new();
+        headers.insert(
+            EventSelection::FIELD,
+            field.parse().expect("a header value"),
+        );
+        headers.insert(
+            EventSelection::DOCUMENT,
+            document.parse().expect("a header value"),
+        );
 
-            Self::from(&headers)
-        }
+        EventSelection::from(&headers)
     }
 
     #[test]
     fn a_caret_header_answers_for_the_field_it_names_and_no_other() {
-        let selection = EventSelection::reported("vmux:prompt:3:7", "1");
+        let selection = reported("vmux:prompt:3:7", "1");
 
         assert_eq!(selection.in_field("vmux:prompt"), (3, 7));
         assert_eq!(selection.in_field("somewhere-else"), (0, 0));

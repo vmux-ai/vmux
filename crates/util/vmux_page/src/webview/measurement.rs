@@ -149,10 +149,8 @@ impl std::error::Error for Gone {}
 mod tests {
     use super::*;
 
-    impl Measurement {
-        fn poll_once(&mut self) -> Poll<MountedResult<Measured>> {
-            Pin::new(self).poll(&mut Context::from_waker(Waker::noop()))
-        }
+    fn poll_once(measurement: &mut Measurement) -> Poll<MountedResult<Measured>> {
+        Pin::new(measurement).poll(&mut Context::from_waker(Waker::noop()))
     }
 
     #[test]
@@ -163,9 +161,9 @@ mod tests {
 
         reads.answer(second.token(), Some([1.0, 2.0, 3.0, 4.0]));
 
-        assert!(matches!(first.poll_once(), Poll::Pending));
+        assert!(matches!(poll_once(&mut first), Poll::Pending));
         assert!(matches!(
-            second.poll_once(),
+            poll_once(&mut second),
             Poll::Ready(Ok([1.0, 2.0, 3.0, 4.0]))
         ));
     }
@@ -178,7 +176,7 @@ mod tests {
         }
         let mut answered = reads.ask();
         reads.answer(answered.token(), Some([0.0; 4]));
-        let _ = answered.poll_once();
+        let _ = poll_once(&mut answered);
         drop(answered);
 
         assert!(reads.slots.borrow().is_empty());
@@ -206,6 +204,6 @@ mod tests {
         reads.clear();
 
         assert_eq!(wakes.0.load(std::sync::atomic::Ordering::SeqCst), 1);
-        assert!(matches!(measurement.poll_once(), Poll::Ready(Err(_))));
+        assert!(matches!(poll_once(&mut measurement), Poll::Ready(Err(_))));
     }
 }
