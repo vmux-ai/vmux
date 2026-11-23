@@ -32,7 +32,7 @@ impl Plugin for NotificationPlugin {
 }
 
 #[derive(Component, Default)]
-struct NotificationSequence(u64);
+struct NotificationSequence(#[cfg_attr(not(target_os = "macos"), allow(dead_code))] u64);
 
 impl NotificationSequence {
     #[cfg(target_os = "macos")]
