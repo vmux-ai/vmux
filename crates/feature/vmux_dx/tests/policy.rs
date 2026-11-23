@@ -9640,6 +9640,8 @@ struct Declaration {
     page_components: BTreeSet<(String, String)>,
     page_input_errors: BTreeSet<String>,
     story_components: BTreeSet<String>,
+    launch_components: BTreeSet<String>,
+    routable_components: BTreeSet<String>,
     inventory_inputs: BTreeSet<(String, String)>,
     native_class: Option<(String, Type)>,
     dom_mounts: BTreeSet<(String, String)>,
@@ -11934,6 +11936,8 @@ impl Inventory {
                 page_components: BTreeSet::new(),
                 page_input_errors: BTreeSet::new(),
                 story_components: BTreeSet::new(),
+                launch_components: BTreeSet::new(),
+                routable_components: BTreeSet::new(),
                 inventory_inputs: BTreeSet::new(),
                 native_class: None,
                 dom_mounts: BTreeSet::new(),
@@ -12086,6 +12090,7 @@ impl Inventory {
                 && declaration.bundle_derive.is_none()
                 && declaration.generated_query.is_none()
                 && !self.automatic_owned_value(declaration)
+                && !self.contract_standard_impl(entry, declaration, policy, visiting)
                 && !policy
                     .values
                     .iter()
@@ -12341,7 +12346,128 @@ impl Inventory {
             || self.store_schema(entry)
             || self.automatic_renderer(entry)
             || self.automatic_job_adapter(entry)
+            || self.automatic_inventory_macro(entry)
             || self.automatic_pre_world_boundary(entry)
+    }
+
+    fn automatic_inventory_macro(&self, entry: &Declaration) -> bool {
+        if !matches!(entry.kind, Kind::Macro)
+            || entry.local
+            || entry.dynamic
+            || entry.inventory_inputs.is_empty()
+        {
+            return false;
+        }
+        for (interface, input) in &entry.inventory_inputs {
+            let Some(interface) =
+                self.external_path(&entry.namespace, interface, &mut BTreeSet::new())
+            else {
+                return false;
+            };
+            if !matches!(
+                interface.as_str(),
+                "inventory::collect" | "inventory::submit"
+            ) {
+                return false;
+            }
+            let Some(target) = self.resolve(&entry.namespace, input, &mut BTreeSet::new()) else {
+                return false;
+            };
+            if !matches!(target.kind, Kind::Struct)
+                || target.local
+                || target.dynamic
+                || target.opaque
+                || self.has_bevy_runtime_access(target)
+            {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn contract_standard_impl(
+        &self,
+        entry: &Declaration,
+        declaration: &Declaration,
+        policy: &Policy,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        if !entry.production
+            || !declaration.contract
+            || declaration.projection
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || self.has_bevy_runtime_access(entry)
+            || self.renderer_has_forbidden_access(entry)
+        {
+            return false;
+        }
+        let Some(interface) = entry.implemented_trait.as_deref() else {
+            return false;
+        };
+        let resolved = self.external_path(&entry.namespace, interface, &mut BTreeSet::new());
+        let standard = match resolved.as_deref() {
+            Some(
+                "std::convert::From"
+                | "core::convert::From"
+                | "std::convert::TryFrom"
+                | "core::convert::TryFrom"
+                | "std::fmt::Display"
+                | "core::fmt::Display",
+            ) => true,
+            None => {
+                matches!(interface, "From" | "TryFrom" | "Display")
+                    && !self.local_binding(&entry.namespace, interface)
+            }
+            _ => false,
+        };
+        if !standard {
+            return false;
+        }
+        let Some(Item::Impl(implementation)) = &entry.syntax else {
+            return false;
+        };
+        let Some((_, trait_path, _)) = &implementation.trait_ else {
+            return false;
+        };
+        let mut arg_paths = BTreeSet::new();
+        for segment in &trait_path.segments {
+            if let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments {
+                for argument in &arguments.args {
+                    if let syn::GenericArgument::Type(ty) = argument {
+                        Self::collect_non_collection_types(ty, &mut arg_paths);
+                    }
+                }
+            }
+        }
+        for reference in &arg_paths {
+            let Some(field) = self.resolve(&entry.namespace, reference, &mut BTreeSet::new())
+            else {
+                continue;
+            };
+            if field.key == declaration.key || field.key == entry.key {
+                continue;
+            }
+            let owned = field.contract
+                || field.ecs && self.used(field)
+                || self.automatic_owned_value(field)
+                || self.automatic_boundary(field)
+                || policy
+                    .values
+                    .iter()
+                    .any(|value| value.key == field.key && !value.lifetime.trim().is_empty())
+                || policy.boundaries.iter().any(|boundary| {
+                    boundary.key == field.key
+                        && boundary.fingerprint == field.fingerprint
+                        && boundary.valid()
+                });
+            if !owned {
+                return false;
+            }
+        }
+        let _ = visiting;
+        true
     }
 
     fn automatic_compiler_helper(&self, entry: &Declaration) -> bool {
@@ -12566,7 +12692,87 @@ impl Inventory {
                 }
             }
         }
+        let const_names: BTreeSet<&str> = self
+            .entries
+            .values()
+            .filter(|entry| self.owned_const_candidate(entry))
+            .map(|entry| entry.name.as_str())
+            .collect();
+        if !const_names.is_empty() {
+            for entry in self.entries.values() {
+                if !entry.production || entry.local || entry.dynamic || entry.opaque {
+                    continue;
+                }
+                let valid_owner =
+                    (entry.ecs || entry.bundle_derive.is_some() || entry.query_derive.is_some())
+                        && self.used(entry)
+                        || matches!(entry.kind, Kind::Function) && self.registered(entry);
+                if !valid_owner {
+                    continue;
+                }
+                let mut sources = vec![entry];
+                if matches!(entry.kind, Kind::Struct | Kind::Enum) {
+                    for implementation in self.implementations(entry) {
+                        if implementation.production
+                            && !implementation.local
+                            && !implementation.dynamic
+                            && !implementation.opaque
+                        {
+                            sources.push(implementation);
+                        }
+                    }
+                }
+                for source in sources {
+                    for path in source
+                        .field_paths
+                        .iter()
+                        .chain(source.reference_paths.iter())
+                    {
+                        let tail = path.rsplit("::").next().unwrap_or(path);
+                        if !const_names.contains(tail) {
+                            continue;
+                        }
+                        let Some(target) =
+                            self.resolve(&source.namespace, path, &mut BTreeSet::new())
+                        else {
+                            continue;
+                        };
+                        if target.key != entry.key && self.owned_const_candidate(target) {
+                            owned.insert(target.key.clone());
+                        }
+                    }
+                }
+            }
+        }
         *self.owned_values.borrow_mut() = Some(owned);
+    }
+
+    fn owned_const_candidate(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || !matches!(entry.kind, Kind::Const)
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.projection
+            || self.has_bevy_runtime_access(entry)
+        {
+            return false;
+        }
+        for path in &entry.field_paths {
+            let Some(target) = self.resolve(&entry.namespace, path, &mut BTreeSet::new()) else {
+                continue;
+            };
+            if target.key == entry.key {
+                continue;
+            }
+            let allowed = target.contract
+                || (target.ecs && self.used(target))
+                || self.plain_value_candidate(target);
+            if target.local || target.dynamic || target.opaque || !allowed {
+                return false;
+            }
+        }
+        true
     }
 
     fn collect_non_collection_types(ty: &Type, paths: &mut BTreeSet<String>) {
@@ -13141,6 +13347,17 @@ impl Inventory {
                 return true;
             }
         }
+        if self.real_routable_enum(entry) {
+            self.ensure_renderer_graph();
+            if self
+                .renderer_graph
+                .borrow()
+                .as_ref()
+                .is_some_and(|(renderers, _)| renderers.contains(&entry.key))
+            {
+                return true;
+            }
+        }
         if entry.contract_paths.iter().any(|path| {
             self.contract_kind(&entry.namespace, path, &mut BTreeSet::new())
                 .as_deref()
@@ -13350,7 +13567,7 @@ impl Inventory {
             return false;
         }
         match entry.kind {
-            Kind::Const => true,
+            Kind::Const | Kind::Function => true,
             Kind::Enum => {
                 entry
                     .enum_shape
@@ -13382,21 +13599,70 @@ impl Inventory {
         true
     }
 
+    fn has_dioxus_launch_builder(&self, entry: &Declaration) -> bool {
+        entry.reference_paths.iter().any(|path| {
+            self.external_path(&entry.namespace, path, &mut BTreeSet::new())
+                .is_some_and(|target| {
+                    target == "dioxus::LaunchBuilder"
+                        || target.starts_with("dioxus::LaunchBuilder::")
+                        || target == "dioxus::prelude::LaunchBuilder"
+                        || target.starts_with("dioxus::prelude::LaunchBuilder::")
+                })
+                || self
+                    .framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("LaunchBuilder")
+                || path.rsplit_once("::").is_some_and(|(prefix, _)| {
+                    self.framework_handle(&entry.namespace, prefix, &mut BTreeSet::new())
+                        .as_deref()
+                        == Some("LaunchBuilder")
+                })
+        })
+    }
+
+    fn real_routable_enum(&self, entry: &Declaration) -> bool {
+        entry.production
+            && matches!(entry.kind, Kind::Enum)
+            && !entry.local
+            && !entry.dynamic
+            && !entry.opaque
+            && !entry.routable_components.is_empty()
+            && entry.derive_paths.iter().any(|path| {
+                self.framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("Routable")
+            })
+    }
+
     fn collect_renderer_roots(&self) -> BTreeSet<String> {
         let mut renderers = BTreeSet::new();
         let mut queue = Vec::new();
         for entry in self.entries.values() {
-            if !entry.production || !self.typed_page(entry) {
+            if !entry.production {
                 continue;
             }
-            for (_, component) in &entry.page_components {
-                let Some(target) =
-                    self.function_reference(&entry.namespace, component, &mut BTreeSet::new())
-                else {
-                    continue;
-                };
-                if self.real_dioxus_component(target) && renderers.insert(target.key.clone()) {
-                    queue.push(target.key.clone());
+            if self.typed_page(entry) {
+                for (_, component) in &entry.page_components {
+                    let Some(target) =
+                        self.function_reference(&entry.namespace, component, &mut BTreeSet::new())
+                    else {
+                        continue;
+                    };
+                    if self.real_dioxus_component(target) && renderers.insert(target.key.clone()) {
+                        queue.push(target.key.clone());
+                    }
+                }
+            }
+            if !entry.launch_components.is_empty() && self.has_dioxus_launch_builder(entry) {
+                for component in &entry.launch_components {
+                    let Some(target) =
+                        self.function_reference(&entry.namespace, component, &mut BTreeSet::new())
+                    else {
+                        continue;
+                    };
+                    if self.real_dioxus_component(target) && renderers.insert(target.key.clone()) {
+                        queue.push(target.key.clone());
+                    }
                 }
             }
         }
@@ -13421,21 +13687,38 @@ impl Inventory {
                 let Some(catalog) = self.resolve_path_or_prefix(&parent.namespace, path) else {
                     continue;
                 };
-                if catalog.namespace.split("::").next() != parent_crate
-                    || !self.real_story_catalog(catalog)
-                {
+                if catalog.namespace.split("::").next() != parent_crate {
                     continue;
                 }
-                for component in &catalog.story_components {
-                    let Some(child) = self.function_reference(
-                        &catalog.namespace,
-                        component,
-                        &mut BTreeSet::new(),
-                    ) else {
-                        continue;
-                    };
-                    if self.real_dioxus_component(child) && renderers.insert(child.key.clone()) {
-                        queue.push(child.key.clone());
+                if self.real_story_catalog(catalog) {
+                    for component in &catalog.story_components {
+                        let Some(child) = self.function_reference(
+                            &catalog.namespace,
+                            component,
+                            &mut BTreeSet::new(),
+                        ) else {
+                            continue;
+                        };
+                        if self.real_dioxus_component(child) && renderers.insert(child.key.clone())
+                        {
+                            queue.push(child.key.clone());
+                        }
+                    }
+                }
+                if self.real_routable_enum(catalog) {
+                    renderers.insert(catalog.key.clone());
+                    for component in &catalog.routable_components {
+                        let Some(child) = self.function_reference(
+                            &catalog.namespace,
+                            component,
+                            &mut BTreeSet::new(),
+                        ) else {
+                            continue;
+                        };
+                        if self.real_dioxus_component(child) && renderers.insert(child.key.clone())
+                        {
+                            queue.push(child.key.clone());
+                        }
                     }
                 }
             }
@@ -13471,6 +13754,28 @@ impl Inventory {
     }
 
     fn collect_renderer_helpers(&self, renderers: &BTreeSet<String>) -> BTreeSet<String> {
+        let renderer_crates: BTreeSet<&str> = renderers
+            .iter()
+            .filter_map(|key| self.entries[key].namespace.split("::").next())
+            .collect();
+        let mut helper_type_names = BTreeSet::new();
+        let mut helper_fn_names = BTreeSet::new();
+        for entry in self.entries.values() {
+            if !entry
+                .namespace
+                .split("::")
+                .next()
+                .is_some_and(|krate| renderer_crates.contains(krate))
+                || !self.renderer_helper_candidate(entry)
+            {
+                continue;
+            }
+            if matches!(entry.kind, Kind::Function) {
+                helper_fn_names.insert(entry.name.as_str());
+            } else {
+                helper_type_names.insert(entry.name.as_str());
+            }
+        }
         let mut candidates = BTreeSet::new();
         let mut queue: Vec<String> = renderers.iter().cloned().collect();
         while let Some(owner_key) = queue.pop() {
@@ -13490,7 +13795,27 @@ impl Inventory {
                     .iter()
                     .chain(source.reference_paths.iter())
                 {
-                    let Some(target) = self.resolve_path_or_prefix(&source.namespace, path) else {
+                    let has_type = path
+                        .split("::")
+                        .any(|segment| helper_type_names.contains(segment));
+                    let tail = path.rsplit("::").next().unwrap_or(path);
+                    let has_fn = helper_fn_names.contains(tail);
+                    if !has_type && !has_fn {
+                        continue;
+                    }
+                    let target = if has_type {
+                        self.resolve_path_or_prefix(&source.namespace, path)
+                    } else {
+                        None
+                    }
+                    .or_else(|| {
+                        if has_fn {
+                            self.function_reference(&source.namespace, path, &mut BTreeSet::new())
+                        } else {
+                            None
+                        }
+                    });
+                    let Some(target) = target else {
                         continue;
                     };
                     if target.namespace.split("::").next() != owner_crate
@@ -13512,9 +13837,15 @@ impl Inventory {
         renderers: &BTreeSet<String>,
         candidates: &BTreeSet<String>,
     ) -> BTreeMap<String, BTreeSet<String>> {
-        let mut candidate_names = BTreeSet::new();
+        let mut candidate_type_names = BTreeSet::new();
+        let mut candidate_fn_names = BTreeSet::new();
         for key in candidates {
-            candidate_names.insert(self.entries[key].name.clone());
+            let entry = &self.entries[key];
+            if matches!(entry.kind, Kind::Function) {
+                candidate_fn_names.insert(entry.name.as_str());
+            } else {
+                candidate_type_names.insert(entry.name.as_str());
+            }
         }
         let mut referencers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for entry in self.entries.values() {
@@ -13531,13 +13862,27 @@ impl Inventory {
                 entry.key.clone()
             };
             for path in entry.field_paths.iter().chain(entry.reference_paths.iter()) {
-                if !path
+                let has_type = path
                     .split("::")
-                    .any(|segment| candidate_names.contains(segment))
-                {
+                    .any(|segment| candidate_type_names.contains(segment));
+                let tail = path.rsplit("::").next().unwrap_or(path);
+                let has_fn = candidate_fn_names.contains(tail);
+                if !has_type && !has_fn {
                     continue;
                 }
-                let Some(target) = self.resolve_path_or_prefix(&entry.namespace, path) else {
+                let target = if has_type {
+                    self.resolve_path_or_prefix(&entry.namespace, path)
+                } else {
+                    None
+                }
+                .or_else(|| {
+                    if has_fn {
+                        self.function_reference(&entry.namespace, path, &mut BTreeSet::new())
+                    } else {
+                        None
+                    }
+                });
+                let Some(target) = target else {
                     continue;
                 };
                 if !candidates.contains(&target.key) || target.key == caller_key {
@@ -13598,6 +13943,16 @@ impl Inventory {
         renderers: &BTreeSet<String>,
         surviving: &BTreeSet<String>,
     ) -> BTreeSet<String> {
+        let mut surviving_type_names = BTreeSet::new();
+        let mut surviving_fn_names = BTreeSet::new();
+        for key in surviving {
+            let entry = &self.entries[key];
+            if matches!(entry.kind, Kind::Function) {
+                surviving_fn_names.insert(entry.name.as_str());
+            } else {
+                surviving_type_names.insert(entry.name.as_str());
+            }
+        }
         let mut reachable = BTreeSet::new();
         let mut queue: Vec<String> = renderers.iter().cloned().collect();
         while let Some(owner_key) = queue.pop() {
@@ -13616,7 +13971,27 @@ impl Inventory {
                     .iter()
                     .chain(source.reference_paths.iter())
                 {
-                    let Some(target) = self.resolve_path_or_prefix(&source.namespace, path) else {
+                    let has_type = path
+                        .split("::")
+                        .any(|segment| surviving_type_names.contains(segment));
+                    let tail = path.rsplit("::").next().unwrap_or(path);
+                    let has_fn = surviving_fn_names.contains(tail);
+                    if !has_type && !has_fn {
+                        continue;
+                    }
+                    let target = if has_type {
+                        self.resolve_path_or_prefix(&source.namespace, path)
+                    } else {
+                        None
+                    }
+                    .or_else(|| {
+                        if has_fn {
+                            self.function_reference(&source.namespace, path, &mut BTreeSet::new())
+                        } else {
+                            None
+                        }
+                    });
+                    let Some(target) = target else {
                         continue;
                     };
                     if surviving.contains(&target.key) && reachable.insert(target.key.clone()) {
@@ -15655,6 +16030,11 @@ impl Inventory {
             let (prefix, name) = canonical.rsplit_once("::")?;
             let valid = match name {
                 "component" => matches!(prefix, "dioxus" | "dioxus::prelude" | "dioxus_core_macro"),
+                "Routable" => matches!(
+                    prefix,
+                    "dioxus" | "dioxus::prelude" | "dioxus_router" | "dioxus::router"
+                ),
+                "LaunchBuilder" => matches!(prefix, "dioxus" | "dioxus::prelude"),
                 "App" | "Plugin" => matches!(
                     prefix,
                     "bevy_app" | "bevy_app::prelude" | "bevy::app" | "bevy::prelude"
@@ -15866,6 +16246,8 @@ impl Inventory {
         matches!(
             name,
             "component"
+                | "Routable"
+                | "LaunchBuilder"
                 | "App"
                 | "Plugin"
                 | "Query"
@@ -17929,8 +18311,15 @@ impl Namespace {
         if let Some(source) = parts.iter().position(|part| *part == "src") {
             let package = if parts[0] == "crates" {
                 parts[2]
+            } else if source > 0 {
+                parts[source - 1]
             } else {
-                parts[1]
+                parts[0]
+            };
+            let package = if package == "website" {
+                "vmux_website"
+            } else {
+                package
             };
             let mut package = package.split("-0.").next().unwrap().replace('-', "_");
             if parts[source + 1..] == ["main.rs"] {
@@ -18635,6 +19024,9 @@ impl Declarations<'_> {
                 }
             }
         }
+        let is_routable = derive_paths
+            .iter()
+            .any(|path| path.rsplit("::").next() == Some("Routable"));
         let declaration = Declaration {
             registrations: scoped.registrations,
             generic_traits: parsed_item
@@ -18746,6 +19138,18 @@ impl Declarations<'_> {
             page_components: references.page_components,
             page_input_errors: references.page_input_errors,
             story_components: references.story_components,
+            launch_components: references.launch_components,
+            routable_components: {
+                let mut routable = references.routable_components;
+                if let Some(Item::Enum(value)) = &parsed_item
+                    && is_routable
+                {
+                    for variant in &value.variants {
+                        routable.insert(variant.ident.to_string());
+                    }
+                }
+                routable
+            },
             inventory_inputs: references.inventory_inputs,
             native_class: match &parsed_item {
                 Some(Item::Macro(item)) => References::native_class_ivars(item.mac.tokens.clone())
@@ -19215,6 +19619,8 @@ struct References<'a> {
     page_components: BTreeSet<(String, String)>,
     page_input_errors: BTreeSet<String>,
     story_components: BTreeSet<String>,
+    launch_components: BTreeSet<String>,
+    routable_components: BTreeSet<String>,
     inventory_inputs: BTreeSet<(String, String)>,
     dom_mounts: BTreeSet<(String, String)>,
 }
@@ -19348,6 +19754,12 @@ impl<'ast> Visit<'ast> for References<'_> {
                     }
                 }
             }
+        }
+        if attribute.path().is_ident("layout")
+            && let syn::Meta::List(arguments) = &attribute.meta
+            && let Ok(layout) = syn::parse2::<syn::Path>(arguments.tokens.clone())
+        {
+            self.routable_components.insert(Self::path(&layout));
         }
         visit::visit_attribute(self, attribute);
     }
@@ -19633,6 +20045,12 @@ impl<'ast> Visit<'ast> for References<'_> {
     }
 
     fn visit_expr_method_call(&mut self, value: &'ast syn::ExprMethodCall) {
+        if value.method == "launch"
+            && value.args.len() == 1
+            && let Some(syn::Expr::Path(component)) = value.args.first()
+        {
+            self.launch_components.insert(Self::path(&component.path));
+        }
         if value.method == "add_plugins" {
             for argument in &value.args {
                 self.plugin_values(argument);
@@ -21899,4 +22317,62 @@ fn pre_world_unit_enums_build_scripts_and_integration_test_fixtures_prove_safely
     );
     assert!(multi.automatic_boundary(&multi.entries[&multi.key("struct:PairPlugin")]));
     assert!(multi.automatic_boundary(&multi.entries[&multi.key("impl:Plugin for PairPlugin")]));
+}
+
+#[test]
+fn owned_consts_inventory_macros_contract_conversions_and_dioxus_launch_roots_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_macro/src/lib.rs",
+        "#[proc_macro_attribute] pub fn contract() {}",
+    );
+    inventory.source(
+        "crates/util/vmux_api/src/lib.rs",
+        "pub use vmux_macro::contract; #[contract] pub struct WireValue(pub u32);",
+    );
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use vmux_api::WireValue; const OWNED_LIMIT: usize = 8; const ORPHAN_LIMIT: usize = 9; #[derive(Component)] struct State(u32); impl State { fn limit(&self) -> usize { OWNED_LIMIT } } struct Unowned(u32); impl From<State> for WireValue { fn from(value: State) -> Self { Self(value.0) } } impl From<Unowned> for WireValue { fn from(value: Unowned) -> Self { Self(value.0) } } fn read(states: Query<&State>) { let _ = states; } struct DemoPlugin; impl Plugin for DemoPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, read); } } pub struct Entry { pub name: &'static str } inventory::collect!(Entry); inventory::submit!(Entry { name: \"demo\" });",
+    );
+    inventory.source(
+        "website/src/lib.rs",
+        "use dioxus::prelude::*; fn format_label(value: &str) -> String { value.to_string() } fn orphan_helper(value: &str) -> String { value.to_string() } #[derive(Routable, Clone, PartialEq)] pub enum Route { #[layout(Shell)] #[route(\"/\")] Home {} } #[component] fn Shell() -> Element { rsx! { div {} } } #[component] fn Home() -> Element { let _ = format_label(\"ok\"); rsx! { div {} } } #[component] fn OrphanView() -> Element { rsx! { div {} } } #[component] pub fn App() -> Element { let _ = Route::Home {}; rsx! { div {} } }",
+    );
+    inventory.source(
+        "website/src/main.rs",
+        "use dioxus::prelude::*; use vmux_website::App; fn main() { dioxus::LaunchBuilder::new().launch(App); }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/feature/demo/src/lib.rs||const:OWNED_LIMIT",
+        "crates/feature/demo/src/lib.rs||impl:From < State > for WireValue",
+        "crates/feature/demo/src/lib.rs||macro:inventory :: collect",
+        "crates/feature/demo/src/lib.rs||macro:inventory :: submit",
+        "website/src/lib.rs||fn:App",
+        "website/src/lib.rs||enum:Route",
+        "website/src/lib.rs||fn:Home",
+        "website/src/lib.rs||fn:Shell",
+        "website/src/lib.rs||fn:format_label",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved declaration: {key}"
+        );
+    }
+    assert!(inventory.automatic_enum_purpose(
+        &inventory.entries["website/src/lib.rs||enum:Route"],
+        &policy
+    ));
+    for key in [
+        "crates/feature/demo/src/lib.rs||const:ORPHAN_LIMIT",
+        "crates/feature/demo/src/lib.rs||impl:From < Unowned > for WireValue",
+        "website/src/lib.rs||fn:OrphanView",
+        "website/src/lib.rs||fn:orphan_helper",
+    ] {
+        assert!(
+            !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected rejected declaration: {key}"
+        );
+    }
 }
