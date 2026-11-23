@@ -38,6 +38,18 @@ impl TerminalProcessIndex {
     pub fn get(&self, process_id: &ProcessId) -> Option<Entity> {
         self.by_process.get(process_id).copied()
     }
+
+    #[cfg(test)]
+    pub(crate) fn pending_input(world: &mut World, terminal: Entity) -> Vec<Vec<u8>> {
+        let mut query = world.query::<(&TerminalInput, &TerminalInputTarget)>();
+        let mut pending = query
+            .iter(world)
+            .filter(|(_, target)| target.get() == terminal)
+            .map(|(input, _)| (input.sequence, input.data.clone()))
+            .collect::<Vec<_>>();
+        pending.sort_by_key(|(sequence, _)| *sequence);
+        pending.into_iter().map(|(_, data)| data).collect()
+    }
 }
 
 #[derive(Component, Default)]
@@ -137,18 +149,6 @@ fn queue_input(
     }
 }
 
-#[cfg(test)]
-pub(crate) fn pending_terminal_input(world: &mut World, terminal: Entity) -> Vec<Vec<u8>> {
-    let mut query = world.query::<(&TerminalInput, &TerminalInputTarget)>();
-    let mut pending = query
-        .iter(world)
-        .filter(|(_, target)| target.get() == terminal)
-        .map(|(input, _)| (input.sequence, input.data.clone()))
-        .collect::<Vec<_>>();
-    pending.sort_by_key(|(sequence, _)| *sequence);
-    pending.into_iter().map(|(_, data)| data).collect()
-}
-
 fn enqueue_reinput(
     mut requests: MessageReader<TerminalReinputRequest>,
     process_index: Single<&TerminalProcessIndex>,
@@ -223,11 +223,6 @@ mod tests {
         app
     }
 
-    fn indexed_entity(app: &mut App, process_id: &ProcessId) -> Option<Entity> {
-        let mut query = app.world_mut().query::<&TerminalProcessIndex>();
-        query.single(app.world()).unwrap().get(process_id)
-    }
-
     #[test]
     fn indexes_terminal_processes() {
         let mut app = app();
@@ -236,7 +231,13 @@ mod tests {
 
         app.update();
 
-        assert_eq!(indexed_entity(&mut app, &process_id), Some(entity));
+        let indexed = app
+            .world_mut()
+            .query::<&TerminalProcessIndex>()
+            .single(app.world())
+            .unwrap()
+            .get(&process_id);
+        assert_eq!(indexed, Some(entity));
     }
 
     #[test]
@@ -250,8 +251,10 @@ mod tests {
         app.world_mut().entity_mut(entity).insert(current);
         app.update();
 
-        assert_eq!(indexed_entity(&mut app, &previous), None);
-        assert_eq!(indexed_entity(&mut app, &current), Some(entity));
+        let mut query = app.world_mut().query::<&TerminalProcessIndex>();
+        let index = query.single(app.world()).unwrap();
+        assert_eq!(index.get(&previous), None);
+        assert_eq!(index.get(&current), Some(entity));
     }
 
     #[test]
@@ -264,6 +267,12 @@ mod tests {
         app.world_mut().entity_mut(entity).despawn();
         app.update();
 
-        assert_eq!(indexed_entity(&mut app, &process_id), None);
+        let indexed = app
+            .world_mut()
+            .query::<&TerminalProcessIndex>()
+            .single(app.world())
+            .unwrap()
+            .get(&process_id);
+        assert_eq!(indexed, None);
     }
 }

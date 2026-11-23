@@ -10,11 +10,7 @@ use vmux_layout::pane::{Pane, PaneSplit};
 use vmux_layout::stack::FocusedStack;
 use vmux_setting::AppSettings;
 
-#[vmux_api::contract(Copy, Eq)]
-pub enum AgentShellMode {
-    NewTab,
-    Active,
-}
+pub use super::ShellMode as AgentShellMode;
 
 #[vmux_api::agent]
 pub struct AgentNewTerminalTab {
@@ -126,14 +122,10 @@ fn run_shell(
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let mode = match request.payload.mode {
-            AgentShellMode::Active => super::ShellMode::Active,
-            AgentShellMode::NewTab => super::ShellMode::NewTab,
-        };
         run.write(super::RunShellRequest {
             command: request.payload.command.clone(),
             cwd: request.payload.cwd.clone(),
-            mode,
+            mode: request.payload.mode,
         });
         responses.write(request.reply.ok());
     }

@@ -25,7 +25,7 @@ pub struct TerminalSendRequest {
     pub terminal: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum ShellMode {
     NewTab,
     Active,

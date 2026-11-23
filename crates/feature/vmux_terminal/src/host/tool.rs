@@ -18,9 +18,6 @@ use vmux_layout::AgentPaneDirection;
 
 use std::fmt::Write;
 
-const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
-const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);
-
 pub struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
@@ -82,6 +79,22 @@ struct Run {
     mode: Option<RunMode>,
 }
 
+impl Run {
+    fn parse_target(
+        value: Option<String>,
+        field: &str,
+        target: &str,
+    ) -> Result<Option<ProcessId>, String> {
+        let Some(value) = value.filter(|value| !value.is_empty()) else {
+            return Ok(None);
+        };
+        value
+            .parse()
+            .map(Some)
+            .map_err(|_| format!("{field} is not a valid {target} id: {value}"))
+    }
+}
+
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -132,8 +145,8 @@ fn run(
                 .direction
                 .map(Into::into)
                 .unwrap_or(AgentPaneDirection::Right);
-            let terminal = ProcessTarget::parse(args.terminal.clone(), "run.terminal", "terminal")?;
-            let beside = ProcessTarget::parse(
+            let terminal = Run::parse_target(args.terminal.clone(), "run.terminal", "terminal")?;
+            let beside = Run::parse_target(
                 args.beside.clone().filter(|value| value != "self"),
                 "run.beside",
                 "page",
@@ -158,7 +171,7 @@ fn run(
                 if let Ok(request) = protocol_requests.get(entity) {
                     commands
                         .entity(entity)
-                        .insert(McpExecution::new(run_blocking(
+                        .insert(McpExecution::new(BlockingRun::execute(
                             run,
                             placement_override,
                             request.run_block_timeout(),
@@ -211,234 +224,225 @@ fn dispatch(
     }
 }
 
-struct ProcessTarget;
+struct BlockingRun;
 
-impl ProcessTarget {
-    fn parse(
-        value: Option<String>,
-        field: &str,
-        target: &str,
-    ) -> Result<Option<ProcessId>, String> {
-        let Some(value) = value.filter(|value| !value.is_empty()) else {
-            return Ok(None);
-        };
-        value
-            .parse()
-            .map(Some)
-            .map_err(|_| format!("{field} is not a valid {target} id: {value}"))
+impl BlockingRun {
+    const PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
+    const POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+    fn output_since(baseline: &str, final_text: &str) -> String {
+        final_text
+            .strip_prefix(baseline)
+            .unwrap_or(final_text)
+            .trim_matches('\n')
+            .trim_end()
+            .to_string()
     }
-}
 
-fn output_since(baseline: &str, final_text: &str) -> String {
-    final_text
-        .strip_prefix(baseline)
-        .unwrap_or(final_text)
-        .trim_matches('\n')
-        .trim_end()
-        .to_string()
-}
-
-fn run_done_token(request_id: AgentRequestId) -> String {
-    let mut token = String::with_capacity(32);
-    for byte in request_id.0 {
-        let _ = write!(&mut token, "{byte:02x}");
-    }
-    token
-}
-
-fn run_result(
-    process_id: &str,
-    exit: Option<i32>,
-    output: &str,
-    timed_out: bool,
-    run_block_timeout: Duration,
-) -> Value {
-    let mut text = format!("terminal: {process_id}\n");
-    match exit {
-        Some(code) => text.push_str(&format!("exit: {code}\n")),
-        None if timed_out => text.push_str(&format!(
-            "note: still running after {}s; call read({process_id}) to read more\n",
-            run_block_timeout.as_secs()
-        )),
-        None => {}
-    }
-    text.push_str("output:\n");
-    text.push_str(output);
-    json!({ "content": [{"type": "text", "text": text}] })
-}
-
-fn run_completion_exit(
-    result: Result<AgentRunCompletion, String>,
-    token: &str,
-    process_id: ProcessId,
-    allow_missing_process: bool,
-) -> Result<Option<i32>, String> {
-    match result {
-        Ok(AgentRunCompletion {
-            token: Some(done_token),
-            exit: Some(exit),
-        }) if done_token == token => Ok(Some(exit)),
-        Ok(_) => Ok(None),
-        Err(message)
-            if allow_missing_process && message == format!("process not found: {process_id}") =>
-        {
-            Ok(None)
+    fn done_token(request_id: AgentRequestId) -> String {
+        let mut token = String::with_capacity(32);
+        for byte in request_id.0 {
+            let _ = write!(&mut token, "{byte:02x}");
         }
-        Err(message) => Err(message),
+        token
     }
-}
 
-async fn run_blocking(
-    mut run: AgentRun,
-    placement_override: bool,
-    run_block_timeout: Duration,
-) -> Result<Value, String> {
-    let connection = ServiceConnection::connect()
-        .await
-        .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
-    let request_id = AgentRequestId::new();
-    let token = run_done_token(request_id);
-    run.done_marker = Some(token.clone());
-    let request = if placement_override {
-        AgentRequest::encode(&AgentRunWithPlacementOverride(run))
-    } else {
-        AgentRequest::encode(&run)
-    }?;
-    connection
-        .send(&ClientMessage::AgentRequest {
-            request_id,
-            anchor: None,
-            request,
-        })
-        .await
-        .map_err(|error| format!("cannot send run command: {error}"))?;
+    fn result_json(
+        process_id: &str,
+        exit: Option<i32>,
+        output: &str,
+        timed_out: bool,
+        run_block_timeout: Duration,
+    ) -> Value {
+        let mut text = format!("terminal: {process_id}\n");
+        match exit {
+            Some(code) => text.push_str(&format!("exit: {code}\n")),
+            None if timed_out => text.push_str(&format!(
+                "note: still running after {}s; call read({process_id}) to read more\n",
+                run_block_timeout.as_secs()
+            )),
+            None => {}
+        }
+        text.push_str("output:\n");
+        text.push_str(output);
+        json!({ "content": [{"type": "text", "text": text}] })
+    }
 
-    let process_id = loop {
-        let Some(message) = connection
-            .recv()
+    fn completion_exit(
+        result: Result<AgentRunCompletion, String>,
+        token: &str,
+        process_id: ProcessId,
+        allow_missing_process: bool,
+    ) -> Result<Option<i32>, String> {
+        match result {
+            Ok(AgentRunCompletion {
+                token: Some(done_token),
+                exit: Some(exit),
+            }) if done_token == token => Ok(Some(exit)),
+            Ok(_) => Ok(None),
+            Err(message)
+                if allow_missing_process
+                    && message == format!("process not found: {process_id}") =>
+            {
+                Ok(None)
+            }
+            Err(message) => Err(message),
+        }
+    }
+
+    async fn execute(
+        mut run: AgentRun,
+        placement_override: bool,
+        run_block_timeout: Duration,
+    ) -> Result<Value, String> {
+        let connection = ServiceConnection::connect()
             .await
-            .map_err(|error| format!("cannot read service response: {error}"))?
-        else {
-            return Err("vmux_service disconnected".to_string());
-        };
-        match message {
-            ServiceMessage::AgentCommandResult {
-                request_id: received,
-                result,
-            } if received == request_id => match result {
-                vmux_api::protocol::AgentCommandResult::Text(process_id) => break process_id,
-                vmux_api::protocol::AgentCommandResult::Error(message) => return Err(message),
-                other => return Err(format!("run: unexpected result: {other:?}")),
-            },
-            ServiceMessage::Error { message } => return Err(message),
-            _ => {}
-        }
-    };
-
-    let process_id = process_id
-        .parse::<ProcessId>()
-        .map_err(|_| format!("run: service returned an invalid terminal id: {process_id}"))?;
-    let start = Instant::now();
-    let baseline_text = read_full_text(&connection, process_id).await;
-    let deadline = start + run_block_timeout;
-    let materialize_deadline = start + RUN_PROCESS_MATERIALIZE_TIMEOUT;
-    let mut process_materialized = false;
-    loop {
-        let result = run_completion(&connection, process_id).await?;
-        let materialized_now = result.is_ok();
-        let allow_missing_process = !process_materialized && Instant::now() < materialize_deadline;
-        let exit = run_completion_exit(result, &token, process_id, allow_missing_process)?;
-        process_materialized |= materialized_now;
-        if let Some(exit) = exit {
-            let final_text = read_full_text(&connection, process_id).await;
-            let output = output_since(&baseline_text, &final_text);
-            return Ok(run_result(
-                &process_id.to_string(),
-                Some(exit),
-                &output,
-                false,
-                run_block_timeout,
-            ));
-        }
-        if Instant::now() >= deadline {
-            let final_text = read_full_text(&connection, process_id).await;
-            let output = output_since(&baseline_text, &final_text);
-            return Ok(run_result(
-                &process_id.to_string(),
-                None,
-                &output,
-                true,
-                run_block_timeout,
-            ));
-        }
-        tokio::time::sleep(RUN_POLL_INTERVAL).await;
-    }
-}
-
-async fn run_completion(
-    connection: &ServiceConnection,
-    process_id: ProcessId,
-) -> Result<Result<AgentRunCompletion, String>, String> {
-    let request_id = AgentRequestId::new();
-    connection
-        .send(&ClientMessage::AgentQuery {
-            request_id,
-            query: AgentRequest::encode(&AgentProcessRunCompletion { process_id })?,
-        })
-        .await
-        .map_err(|error| format!("cannot send query: {error}"))?;
-    loop {
-        let Some(message) = connection
-            .recv()
+            .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
+        let request_id = AgentRequestId::new();
+        let token = Self::done_token(request_id);
+        run.done_marker = Some(token.clone());
+        let request = if placement_override {
+            AgentRequest::encode(&AgentRunWithPlacementOverride(run))
+        } else {
+            AgentRequest::encode(&run)
+        }?;
+        connection
+            .send(&ClientMessage::AgentRequest {
+                request_id,
+                anchor: None,
+                request,
+            })
             .await
-            .map_err(|error| format!("cannot read query response: {error}"))?
-        else {
-            return Err("vmux_service disconnected".to_string());
+            .map_err(|error| format!("cannot send run command: {error}"))?;
+
+        let process_id = loop {
+            let Some(message) = connection
+                .recv()
+                .await
+                .map_err(|error| format!("cannot read service response: {error}"))?
+            else {
+                return Err("vmux_service disconnected".to_string());
+            };
+            match message {
+                ServiceMessage::AgentCommandResult {
+                    request_id: received,
+                    result,
+                } if received == request_id => match result {
+                    vmux_api::protocol::AgentCommandResult::Text(process_id) => break process_id,
+                    vmux_api::protocol::AgentCommandResult::Error(message) => return Err(message),
+                    other => return Err(format!("run: unexpected result: {other:?}")),
+                },
+                ServiceMessage::Error { message } => return Err(message),
+                _ => {}
+            }
         };
-        match message {
-            ServiceMessage::AgentQueryResult(result) if result.request_id == request_id => {
-                if result.is_error {
-                    return Ok(Err(result.content));
+
+        let process_id = process_id
+            .parse::<ProcessId>()
+            .map_err(|_| format!("run: service returned an invalid terminal id: {process_id}"))?;
+        let start = Instant::now();
+        let baseline_text = Self::read_full_text(&connection, process_id).await;
+        let deadline = start + run_block_timeout;
+        let materialize_deadline = start + Self::PROCESS_MATERIALIZE_TIMEOUT;
+        let mut process_materialized = false;
+        loop {
+            let result = Self::completion(&connection, process_id).await?;
+            let materialized_now = result.is_ok();
+            let allow_missing_process =
+                !process_materialized && Instant::now() < materialize_deadline;
+            let exit = Self::completion_exit(result, &token, process_id, allow_missing_process)?;
+            process_materialized |= materialized_now;
+            if let Some(exit) = exit {
+                let final_text = Self::read_full_text(&connection, process_id).await;
+                let output = Self::output_since(&baseline_text, &final_text);
+                return Ok(Self::result_json(
+                    &process_id.to_string(),
+                    Some(exit),
+                    &output,
+                    false,
+                    run_block_timeout,
+                ));
+            }
+            if Instant::now() >= deadline {
+                let final_text = Self::read_full_text(&connection, process_id).await;
+                let output = Self::output_since(&baseline_text, &final_text);
+                return Ok(Self::result_json(
+                    &process_id.to_string(),
+                    None,
+                    &output,
+                    true,
+                    run_block_timeout,
+                ));
+            }
+            tokio::time::sleep(Self::POLL_INTERVAL).await;
+        }
+    }
+
+    async fn completion(
+        connection: &ServiceConnection,
+        process_id: ProcessId,
+    ) -> Result<Result<AgentRunCompletion, String>, String> {
+        let request_id = AgentRequestId::new();
+        connection
+            .send(&ClientMessage::AgentQuery {
+                request_id,
+                query: AgentRequest::encode(&AgentProcessRunCompletion { process_id })?,
+            })
+            .await
+            .map_err(|error| format!("cannot send query: {error}"))?;
+        loop {
+            let Some(message) = connection
+                .recv()
+                .await
+                .map_err(|error| format!("cannot read query response: {error}"))?
+            else {
+                return Err("vmux_service disconnected".to_string());
+            };
+            match message {
+                ServiceMessage::AgentQueryResult(result) if result.request_id == request_id => {
+                    if result.is_error {
+                        return Ok(Err(result.content));
+                    }
+                    return serde_json::from_str(&result.content)
+                        .map(Ok)
+                        .map_err(|error| format!("cannot decode process completion: {error}"));
                 }
-                return serde_json::from_str(&result.content)
-                    .map(Ok)
-                    .map_err(|error| format!("cannot decode process completion: {error}"));
+                ServiceMessage::Error { message } => return Err(message),
+                _ => {}
             }
-            ServiceMessage::Error { message } => return Err(message),
-            _ => {}
         }
     }
-}
 
-async fn read_full_text(connection: &ServiceConnection, process_id: ProcessId) -> String {
-    let request_id = AgentRequestId::new();
-    if connection
-        .send(&ClientMessage::AgentQuery {
-            request_id,
-            query: match AgentRequest::encode(&AgentReadProcessTranscript { process_id }) {
-                Ok(query) => query,
-                Err(_) => return String::new(),
-            },
-        })
-        .await
-        .is_err()
-    {
-        return String::new();
-    }
-    loop {
-        let Ok(Some(message)) = connection.recv().await else {
+    async fn read_full_text(connection: &ServiceConnection, process_id: ProcessId) -> String {
+        let request_id = AgentRequestId::new();
+        if connection
+            .send(&ClientMessage::AgentQuery {
+                request_id,
+                query: match AgentRequest::encode(&AgentReadProcessTranscript { process_id }) {
+                    Ok(query) => query,
+                    Err(_) => return String::new(),
+                },
+            })
+            .await
+            .is_err()
+        {
             return String::new();
-        };
-        match message {
-            ServiceMessage::AgentQueryResult(result) if result.request_id == request_id => {
-                return if result.is_error {
-                    String::new()
-                } else {
-                    result.content
-                };
+        }
+        loop {
+            let Ok(Some(message)) = connection.recv().await else {
+                return String::new();
+            };
+            match message {
+                ServiceMessage::AgentQueryResult(result) if result.request_id == request_id => {
+                    return if result.is_error {
+                        String::new()
+                    } else {
+                        result.content
+                    };
+                }
+                ServiceMessage::Error { .. } => return String::new(),
+                _ => {}
             }
-            ServiceMessage::Error { .. } => return String::new(),
-            _ => {}
         }
     }
 }
