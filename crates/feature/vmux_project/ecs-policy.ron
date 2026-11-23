@@ -1,11 +1,6 @@
 (
 legacy: [
     (key: "crates/feature/vmux_project/src/contract.rs||impl:ProjectEntry#2", fingerprint: "e418b800aa2e3003", issue: "VMX-253"),
-    (key: "crates/feature/vmux_project/src/filesystem.rs|tests|impl:Signal", fingerprint: "0271e3ac044d04b4", issue: "VMX-253"),
-    (key: "crates/feature/vmux_project/src/filesystem.rs|tests|impl:Store", fingerprint: "80655bd43cfa1c61", issue: "VMX-253"),
-    (key: "crates/feature/vmux_project/src/filesystem.rs|tests|impl:std :: future :: Future for Signal", fingerprint: "b799af9fb12b0041", issue: "VMX-253"),
-    (key: "crates/feature/vmux_project/src/filesystem.rs|tests|struct:Signal", fingerprint: "4d75ca3c7534fd77", issue: "VMX-253"),
-    (key: "crates/feature/vmux_project/src/filesystem.rs|tests|struct:Store", fingerprint: "70dda490c0a409c3", issue: "VMX-253"),
     (key: "crates/feature/vmux_project/src/filesystem.rs||struct:LegacyArchive", fingerprint: "554d1e5d14c26e03", issue: "VMX-253"),
     (key: "crates/feature/vmux_project/src/filesystem.rs||struct:StoredSnapshot", fingerprint: "9efd8984b47d7981", issue: "VMX-253"),
     (key: "crates/feature/vmux_project/src/route.rs||impl:ProjectRoute#2", fingerprint: "ad3a0c1d8b18fb6d", issue: "VMX-253"),
@@ -38,10 +33,8 @@ values: [
 shape: (
   debt: [
     (key: "crates/feature/vmux_project/src/registration.rs||enum:Mutation", fingerprint: "5bef72928173b3e1", issue: "VMX-253", finding: "AU-13"),
-    (key: "crates/feature/vmux_project/src/registration.rs||enum:StoreSet", fingerprint: "eba5d5607878ae7b", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_project/src/contract.rs||enum:ProjectSource", fingerprint: "932d456f972efae0", issue: "VMX-253", finding: "AU-13"),
     (key: "crates/feature/vmux_project/src/registration.rs||enum:Error", fingerprint: "c4a0361c45e37f65", issue: "VMX-253", finding: "AU-13"),
-    (key: "crates/feature/vmux_project/src/contract.rs||enum:ProjectView", fingerprint: "42fc9f815811cc09", issue: "VMX-253", finding: "AU-13"),
   ],
 ),
 )

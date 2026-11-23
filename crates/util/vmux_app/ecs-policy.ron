@@ -5,9 +5,6 @@ legacy: [
     (key: "crates/util/vmux_app/src/bin/vmux_service.rs||impl:DaemonTracing", fingerprint: "92c44700f40838ab", issue: "VMX-253"),
     (key: "crates/util/vmux_app/src/bin/vmux_service.rs||struct:DaemonBootstrap", fingerprint: "9604a8b8bd1af8bf", issue: "VMX-253"),
     (key: "crates/util/vmux_app/src/bin/vmux_service.rs||struct:DaemonTracing", fingerprint: "f38ebda5f2a8c34b", issue: "VMX-253"),
-    (key: "crates/util/vmux_app/src/plugin.rs||impl:Plugin for VmuxRuntimePlugin", fingerprint: "e93c58ef2ffe398a", issue: "VMX-253"),
-    (key: "crates/util/vmux_app/src/plugin.rs||struct:VmuxRuntimePlugin", fingerprint: "764d3f2b48bcf098", issue: "VMX-253"),
-    (key: "crates/util/vmux_app/src/tool.rs||struct:VmuxToolPlugin", fingerprint: "30419701a5b8d453", issue: "VMX-253"),
 ],
 boundaries: [
     (key: "crates/util/vmux_app/src/plugin.rs||enum:VmuxPlugin", fingerprint: "efa317401e927374", interface: "Vmux application plugin composition", input: "external: selected application plugin options", output: "ECS: crates/feature/vmux_feature/src/runtime.rs||struct:Provider", lifetime: "one application host composition", bounds: "Static root/child plugin metadata and native writer-role selection only; registered domain systems own behavior", teardown: "Application teardown releases configured host/feature entities and native lifecycle owners", architecture: "ECS ownership boundaries"),

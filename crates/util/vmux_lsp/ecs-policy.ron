@@ -17,7 +17,6 @@ values: [
 shape: (
   debt: [
     (key: "crates/util/vmux_lsp/src/document.rs||fn:open", fingerprint: "d011c52f06db9ca4", issue: "VMX-253", finding: "AU-14"),
-    (key: "crates/util/vmux_lsp/src/lib.rs||enum:Set", fingerprint: "b67be15bc9032997", issue: "VMX-253", finding: "AU-13"),
   ],
 ),
 )
