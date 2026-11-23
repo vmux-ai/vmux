@@ -343,67 +343,16 @@ impl TerminalStackSpawnRequest {
         if request_cwd != desired_cwd {
             return None;
         }
-        let data = RunCommand::new(command, marker).input(shell, PagerEnv::Inherited);
+        let data = Self::format_input(shell, command, marker, false);
         match &mut self.pending_input {
             Some(input) => input.extend(data),
             None => self.pending_input = Some(data),
         }
         Some(process_id)
     }
-}
 
-#[derive(Clone, Copy, Debug)]
-struct RunCommand<'a> {
-    command: &'a str,
-    token: Option<&'a str>,
-}
-
-impl<'a> RunCommand<'a> {
-    fn new(command: &'a str, token: Option<&'a str>) -> Self {
-        Self { command, token }
-    }
-
-    fn line(&self, shell: &str, pager: PagerEnv) -> String {
-        match self.token {
-            Some(token) => command_with_marker(shell, self.command, token, pager),
-            None => self.command.to_string(),
-        }
-    }
-
-    fn input(&self, shell: &str, pager: PagerEnv) -> Vec<u8> {
-        let mut data = self.line(shell, pager).into_bytes();
-        data.push(b'\r');
-        data
-    }
-
-    fn reinput(
-        &self,
-        process_id: ProcessId,
-        launch: &TerminalLaunch,
-        pager: PagerEnv,
-    ) -> TerminalReinputRequest {
-        TerminalReinputRequest {
-            process_id,
-            data: self.input(&launch.command, pager),
-        }
-    }
-
-    fn for_new_terminal(&self, settings: &AppSettings) -> (ConfiguredShell, Vec<u8>) {
-        let shell = ConfiguredShell::from_settings(settings);
-        let input = self.input(shell.as_str(), PagerEnv::Set);
-        (shell, input)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PagerEnv {
-    Set,
-    Inherited,
-}
-
-impl PagerEnv {
-    fn prefix(self, base: &str) -> &'static str {
-        if self == Self::Inherited {
+    fn pager_prefix(base: &str, set_pager: bool) -> &'static str {
+        if !set_pager {
             return "";
         }
         match base {
@@ -414,46 +363,64 @@ impl PagerEnv {
             _ => "export GIT_PAGER=cat PAGER=cat LESS=FRX; ",
         }
     }
-}
 
-fn command_with_marker(shell: &str, command: &str, token: &str, env: PagerEnv) -> String {
-    let base = Path::new(shell)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(shell);
-    let pager = env.prefix(base);
-    let osc = RUN_OSC;
-    match base {
-        "nu" | "nushell" => format!(
-            "{pager}$env.LAST_EXIT_CODE = 0; let __vmux_status = try {{ {command}; $env.LAST_EXIT_CODE }} catch {{|error| $error.exit_code? | default 1 }}; print -rn $\"\\u{{1b}}]{osc};{token};($__vmux_status)\\u{{7}}\""
-        ),
-        "fish" => format!(
-            "{pager}{command}; set __vmux_status $status; printf '\\033]{osc};{token};%s\\007' $__vmux_status"
-        ),
-        _ => format!(
-            "{pager}{command}; __vmux_status=\"$?\"; printf '\\033]{osc};{token};%s\\007' \"$__vmux_status\""
-        ),
-    }
-}
-
-#[derive(Clone, Debug)]
-struct ConfiguredShell(String);
-
-impl ConfiguredShell {
-    fn from_settings(settings: &AppSettings) -> Self {
-        Self(settings.shell())
+    fn command_with_marker(shell: &str, command: &str, token: &str, set_pager: bool) -> String {
+        let base = Path::new(shell)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(shell);
+        let pager = Self::pager_prefix(base, set_pager);
+        let osc = RUN_OSC;
+        match base {
+            "nu" | "nushell" => format!(
+                "{pager}$env.LAST_EXIT_CODE = 0; let __vmux_status = try {{ {command}; $env.LAST_EXIT_CODE }} catch {{|error| $error.exit_code? | default 1 }}; print -rn $\"\\u{{1b}}]{osc};{token};($__vmux_status)\\u{{7}}\""
+            ),
+            "fish" => format!(
+                "{pager}{command}; set __vmux_status $status; printf '\\033]{osc};{token};%s\\007' $__vmux_status"
+            ),
+            _ => format!(
+                "{pager}{command}; __vmux_status=\"$?\"; printf '\\033]{osc};{token};%s\\007' \"$__vmux_status\""
+            ),
+        }
     }
 
-    fn as_str(&self) -> &str {
-        &self.0
+    fn format_line(shell: &str, command: &str, token: Option<&str>, set_pager: bool) -> String {
+        match token {
+            Some(token) => Self::command_with_marker(shell, command, token, set_pager),
+            None => command.to_string(),
+        }
     }
 
-    fn into_string(self) -> String {
-        self.0
+    fn format_input(shell: &str, command: &str, token: Option<&str>, set_pager: bool) -> Vec<u8> {
+        let mut data = Self::format_line(shell, command, token, set_pager).into_bytes();
+        data.push(b'\r');
+        data
     }
 
-    fn validate(&self) -> Result<(), String> {
-        let shell = &self.0;
+    fn reinput(
+        process_id: ProcessId,
+        launch: &TerminalLaunch,
+        command: &str,
+        token: Option<&str>,
+        set_pager: bool,
+    ) -> TerminalReinputRequest {
+        TerminalReinputRequest {
+            process_id,
+            data: Self::format_input(&launch.command, command, token, set_pager),
+        }
+    }
+
+    fn for_new_terminal(
+        settings: &AppSettings,
+        command: &str,
+        token: Option<&str>,
+    ) -> (String, Vec<u8>) {
+        let shell = settings.shell();
+        let input = Self::format_input(&shell, command, token, true);
+        (shell, input)
+    }
+
+    fn validate_shell(shell: &str) -> Result<(), String> {
         if vmux_path::Executable::find(shell).is_some() {
             Ok(())
         } else {
@@ -464,48 +431,24 @@ impl ConfiguredShell {
     }
 }
 
-struct RunPlacementPolicy {
-    placement_override: bool,
-}
-
-impl RunPlacementPolicy {
+impl AgentRun {
     const OVERRIDE_DISABLED: &'static str =
         "run placement overrides are disabled; omit mode, direction, and beside and retry";
 
-    fn new(placement_override: bool) -> Self {
-        Self { placement_override }
-    }
-
-    fn validate(&self, settings: &AppSettings) -> Result<(), &'static str> {
-        if self.placement_override && !settings.agent.allow_run_placement_override {
+    fn validate_placement(
+        &self,
+        placement_override: bool,
+        settings: &AppSettings,
+    ) -> Result<(), &'static str> {
+        let requested_override = placement_override
+            || self.beside.is_some()
+            || self.mode != PlacementMode::Auto
+            || self.direction != AgentPaneDirection::Right;
+        if requested_override && !settings.agent.allow_run_placement_override {
             Err(Self::OVERRIDE_DISABLED)
         } else {
             Ok(())
         }
-    }
-}
-
-struct DecodedAgentRun {
-    payload: AgentRun,
-    placement_override: bool,
-}
-
-impl DecodedAgentRun {
-    fn from_request(request: &AgentRequestInput) -> Option<Self> {
-        if let Ok(Some(payload)) = request.decode::<AgentRun>() {
-            return Some(Self {
-                payload,
-                placement_override: false,
-            });
-        }
-        let payload = request
-            .decode::<AgentRunWithPlacementOverride>()
-            .ok()
-            .flatten()?;
-        Some(Self {
-            payload: payload.0,
-            placement_override: true,
-        })
     }
 }
 
@@ -557,6 +500,20 @@ impl AgentRunContext<'_, '_> {
 
 #[derive(Component)]
 struct ReceivedRun(AgentRequestReady);
+
+impl ReceivedRun {
+    fn decode_run(&self) -> Option<(AgentRun, bool)> {
+        if let Ok(Some(payload)) = self.0.decode::<AgentRun>() {
+            return Some((payload, false));
+        }
+        let payload = self
+            .0
+            .decode::<AgentRunWithPlacementOverride>()
+            .ok()
+            .flatten()?;
+        Some((payload.0, true))
+    }
+}
 
 #[derive(Component)]
 struct BlockedRun(String);
@@ -644,11 +601,8 @@ fn run_agent_commands(
                 ReceivedRun(request),
             ))
             .id();
-        if let Some(run) =
-            DecodedAgentRun::from_request(&world.get::<ReceivedRun>(operation).unwrap().0)
-            && let Some(reason) = blocked
-                .iter()
-                .find(|reason| reason.anchor == run.payload.anchor)
+        if let Some((run, _)) = world.get::<ReceivedRun>(operation).unwrap().decode_run()
+            && let Some(reason) = blocked.iter().find(|reason| reason.anchor == run.anchor)
         {
             world
                 .entity_mut(operation)
@@ -680,22 +634,21 @@ fn prepare_run(
         return;
     };
     let request = &received.0;
-    let Some(decoded) = DecodedAgentRun::from_request(request) else {
+    let Some((run, placement_override)) = received.decode_run() else {
         commands.entity(operation).despawn();
         return;
     };
-    let run = &decoded.payload;
     let reply = AgentReply::new(request.request_id);
     let result = 'run: {
         if let Some(reason) = blocked {
             break 'run AgentCommandResult::Error(reason.0.clone());
         }
-        if let Err(error) = validate_placement(run, decoded.placement_override, &settings) {
+        if let Err(error) = run.validate_placement(placement_override, &settings) {
             break 'run AgentCommandResult::Error(error.into());
         }
         let focus = request.origin.allows_focus(run.focus);
         if let Some(process_id) = run.terminal {
-            break 'run reinput(run, process_id, &context.terminals, &mut terminal_reinput);
+            break 'run reinput(&run, process_id, &context.terminals, &mut terminal_reinput);
         }
         let Some((owner, pane)) = context.resolve_pane(run.anchor) else {
             break 'run AgentCommandResult::Error("self process not found".into());
@@ -714,7 +667,7 @@ fn prepare_run(
         };
         if run.beside.is_none() && run.mode == PlacementMode::Auto {
             for (placement, mut pending, state) in &mut pending {
-                if !pending.append(owner, run, &cwd, state) {
+                if !pending.append(owner, &run, &cwd, state) {
                     continue;
                 }
                 commands
@@ -732,13 +685,13 @@ fn prepare_run(
                 Ok(launch) => launch,
                 Err(error) => break 'run AgentCommandResult::Error(error),
             };
-            terminal_reinput.write(
-                RunCommand::new(&run.command, run.done_marker.as_deref()).reinput(
-                    candidate.pid,
-                    &launch,
-                    PagerEnv::Set,
-                ),
-            );
+            terminal_reinput.write(TerminalStackSpawnRequest::reinput(
+                candidate.pid,
+                &launch,
+                &run.command,
+                run.done_marker.as_deref(),
+                true,
+            ));
             region.run_terminal = Some(candidate.pid);
             region.run_pane = Some(candidate.pane);
             commands.entity(candidate.pane).insert(sequences.take());
@@ -750,7 +703,7 @@ fn prepare_run(
             break 'run AgentCommandResult::Text(candidate.pid.to_string());
         }
         commands.entity(operation).insert(PreparedRun {
-            run: run.clone(),
+            run,
             reply,
             owner,
             pane,
@@ -809,9 +762,12 @@ fn allocate_run(
         if context.resolve_pane(run.anchor) != Some((owner, pane)) {
             break 'run AgentCommandResult::Error("agent terminal placement source changed".into());
         }
-        let (shell, data) =
-            RunCommand::new(&run.command, run.done_marker.as_deref()).for_new_terminal(&settings);
-        if let Err(error) = shell.validate() {
+        let (shell, data) = TerminalStackSpawnRequest::for_new_terminal(
+            &settings,
+            &run.command,
+            run.done_marker.as_deref(),
+        );
+        if let Err(error) = TerminalStackSpawnRequest::validate_shell(&shell) {
             break 'run AgentCommandResult::Error(error);
         }
         let explicit = match run.beside {
@@ -854,7 +810,7 @@ fn allocate_run(
         let request = TerminalStackSpawnRequest {
             pane: anchor,
             cwd: Some(cwd),
-            shell: Some(shell.into_string()),
+            shell: Some(shell),
             agent_run: true,
             pending_input: Some(data),
             process_id: Some(process_id),
@@ -978,18 +934,6 @@ impl NextPaneSpawnSequence<'_, '_> {
     }
 }
 
-fn validate_placement(
-    run: &AgentRun,
-    placement_override: bool,
-    settings: &AppSettings,
-) -> Result<(), &'static str> {
-    let placement_override = placement_override
-        || run.beside.is_some()
-        || run.mode != PlacementMode::Auto
-        || run.direction != AgentPaneDirection::Right;
-    RunPlacementPolicy::new(placement_override).validate(settings)
-}
-
 fn reinput(
     run: &AgentRun,
     process_id: ProcessId,
@@ -1000,8 +944,13 @@ fn reinput(
         Ok(launch) => launch,
         Err(error) => return AgentCommandResult::Error(error),
     };
-    let command = RunCommand::new(&run.command, run.done_marker.as_deref());
-    writer.write(command.reinput(process_id, &launch, PagerEnv::Inherited));
+    writer.write(TerminalStackSpawnRequest::reinput(
+        process_id,
+        &launch,
+        &run.command,
+        run.done_marker.as_deref(),
+        false,
+    ));
     AgentCommandResult::Text(process_id.to_string())
 }
 
@@ -1395,8 +1344,18 @@ mod tests {
 
     #[test]
     fn only_the_first_command_in_a_terminal_sets_the_pager() {
-        let primed = command_with_marker("/opt/homebrew/bin/nu", "ls", "abc", PagerEnv::Set);
-        let later = command_with_marker("/opt/homebrew/bin/nu", "ls", "abc", PagerEnv::Inherited);
+        let primed = TerminalStackSpawnRequest::command_with_marker(
+            "/opt/homebrew/bin/nu",
+            "ls",
+            "abc",
+            true,
+        );
+        let later = TerminalStackSpawnRequest::command_with_marker(
+            "/opt/homebrew/bin/nu",
+            "ls",
+            "abc",
+            false,
+        );
 
         assert!(primed.starts_with("$env.GIT_PAGER"), "got: {primed}");
         assert!(
@@ -1410,19 +1369,29 @@ mod tests {
     #[test]
     fn command_with_marker_is_shell_aware() {
         assert_eq!(
-            command_with_marker("/opt/homebrew/bin/nu", "ls", "abc", PagerEnv::Set),
+            TerminalStackSpawnRequest::command_with_marker(
+                "/opt/homebrew/bin/nu",
+                "ls",
+                "abc",
+                true
+            ),
             "$env.GIT_PAGER = \"cat\"; $env.PAGER = \"cat\"; $env.LESS = \"FRX\"; $env.LAST_EXIT_CODE = 0; let __vmux_status = try { ls; $env.LAST_EXIT_CODE } catch {|error| $error.exit_code? | default 1 }; print -rn $\"\\u{1b}]6973;abc;($__vmux_status)\\u{7}\""
         );
         assert_eq!(
-            command_with_marker("/usr/local/bin/fish", "ls", "abc", PagerEnv::Set),
+            TerminalStackSpawnRequest::command_with_marker(
+                "/usr/local/bin/fish",
+                "ls",
+                "abc",
+                true
+            ),
             "set -gx GIT_PAGER cat; set -gx PAGER cat; set -gx LESS FRX; ls; set __vmux_status $status; printf '\\033]6973;abc;%s\\007' $__vmux_status"
         );
         assert_eq!(
-            command_with_marker("/bin/zsh", "ls", "abc", PagerEnv::Set),
+            TerminalStackSpawnRequest::command_with_marker("/bin/zsh", "ls", "abc", true),
             "export GIT_PAGER=cat PAGER=cat LESS=FRX; ls; __vmux_status=\"$?\"; printf '\\033]6973;abc;%s\\007' \"$__vmux_status\""
         );
         assert_eq!(
-            command_with_marker("/usr/bin/xonsh", "ls", "abc", PagerEnv::Set),
+            TerminalStackSpawnRequest::command_with_marker("/usr/bin/xonsh", "ls", "abc", true),
             "export GIT_PAGER=cat PAGER=cat LESS=FRX; ls; __vmux_status=\"$?\"; printf '\\033]6973;abc;%s\\007' \"$__vmux_status\""
         );
     }
@@ -1430,14 +1399,14 @@ mod tests {
     #[test]
     fn run_command_line_noop_when_token_absent() {
         assert_eq!(
-            RunCommand::new("ls -la", None).line("/bin/zsh", PagerEnv::Set),
+            TerminalStackSpawnRequest::format_line("/bin/zsh", "ls -la", None, true),
             "ls -la"
         );
     }
 
     #[test]
     fn run_command_line_embeds_marker_when_token_present() {
-        let out = RunCommand::new("ls -la", Some("tok9")).line("/bin/zsh", PagerEnv::Set);
+        let out = TerminalStackSpawnRequest::format_line("/bin/zsh", "ls -la", Some("tok9"), true);
         assert!(out.contains("ls -la"), "got: {out}");
         assert!(out.contains("]6973;tok9;"), "got: {out}");
         assert!(
@@ -1465,7 +1434,8 @@ mod tests {
             ..Default::default()
         });
 
-        let (shell, input) = RunCommand::new("cd /tmp", Some("tok9")).for_new_terminal(&settings);
+        let (shell, input) =
+            TerminalStackSpawnRequest::for_new_terminal(&settings, "cd /tmp", Some("tok9"));
 
         assert_eq!(shell.as_str(), "/opt/homebrew/bin/nu");
         let input = String::from_utf8(input).unwrap();
@@ -1481,7 +1451,12 @@ mod tests {
 
     #[test]
     fn nushell_marker_shares_one_submission_with_a_stdin_command() {
-        let line = command_with_marker("/opt/homebrew/bin/nu", "input", "tok", PagerEnv::Inherited);
+        let line = TerminalStackSpawnRequest::command_with_marker(
+            "/opt/homebrew/bin/nu",
+            "input",
+            "tok",
+            false,
+        );
 
         assert_eq!(line.matches('\r').count(), 0);
         assert!(line.contains("try { input; $env.LAST_EXIT_CODE }"));
@@ -1493,7 +1468,7 @@ mod tests {
         let shell = "/definitely/missing/vmux-terminal-shell";
 
         assert_eq!(
-            ConfiguredShell(shell.to_string()).validate(),
+            TerminalStackSpawnRequest::validate_shell(shell),
             Err(format!(
                 "terminal shell not found or not executable: {shell}"
             ))
@@ -1509,7 +1484,8 @@ mod tests {
             env: vec![],
         };
 
-        let input = RunCommand::new("pwd", Some("tok2")).input(&launch.command, PagerEnv::Set);
+        let input =
+            TerminalStackSpawnRequest::format_input(&launch.command, "pwd", Some("tok2"), true);
         let input = String::from_utf8(input).unwrap();
 
         assert!(input.contains("set __vmux_status $status"), "got: {input}");
@@ -1546,48 +1522,29 @@ mod tests {
 
     #[test]
     fn existing_agent_run_terminal_routes_input_through_terminal_queue() {
-        #[derive(Resource)]
-        struct Input {
-            process_id: ProcessId,
-            launch: TerminalLaunch,
-        }
-
-        #[derive(Resource, Default)]
-        struct Captured(Vec<TerminalReinputRequest>);
-
-        fn emit(input: Res<Input>, mut writer: MessageWriter<TerminalReinputRequest>) {
-            writer.write(RunCommand::new("pwd", Some("tok4")).reinput(
-                input.process_id,
-                &input.launch,
-                PagerEnv::Inherited,
-            ));
-        }
-
-        fn capture(
-            mut reader: MessageReader<TerminalReinputRequest>,
-            mut captured: ResMut<Captured>,
-        ) {
-            captured.0.extend(reader.read().cloned());
-        }
-
         let process_id = ProcessId::new();
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, TerminalContractPlugin))
-            .insert_resource(Input {
+        app.add_plugins((MinimalPlugins, TerminalContractPlugin));
+        let launch = TerminalLaunch {
+            command: "/usr/local/bin/fish".to_string(),
+            args: vec![],
+            cwd: String::new(),
+            env: vec![],
+        };
+        app.world_mut()
+            .write_message(TerminalStackSpawnRequest::reinput(
                 process_id,
-                launch: TerminalLaunch {
-                    command: "/usr/local/bin/fish".to_string(),
-                    args: vec![],
-                    cwd: String::new(),
-                    env: vec![],
-                },
-            })
-            .init_resource::<Captured>()
-            .add_systems(Update, (emit, capture).chain());
+                &launch,
+                "pwd",
+                Some("tok4"),
+                false,
+            ));
 
-        app.update();
-
-        let captured = &app.world().resource::<Captured>().0;
+        let captured = app
+            .world_mut()
+            .resource_mut::<Messages<TerminalReinputRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
         assert_eq!(captured.len(), 1);
         assert_eq!(captured[0].process_id, process_id);
         let input = String::from_utf8(captured[0].data.clone()).unwrap();
@@ -2030,24 +1987,74 @@ mod tests {
 
     #[test]
     fn run_placement_policy_rejects_override_by_default() {
-        let settings = test_settings();
+        let mut fixture = PlacementFixture::new();
+        let request_id = vmux_api::protocol::AgentRequestId::new();
+        fixture.app.world_mut().write_message(AgentRequestInput {
+            request_id,
+            origin: vmux_ecs::agent::CommandOrigin::User,
+            request: vmux_api::protocol::AgentRequest::encode(&AgentRunWithPlacementOverride(
+                AgentRun {
+                    anchor: fixture.process,
+                    command: "pwd".into(),
+                    direction: AgentPaneDirection::Right,
+                    focus: false,
+                    beside: None,
+                    mode: PlacementMode::Auto,
+                    terminal: None,
+                    done_marker: None,
+                },
+            ))
+            .unwrap(),
+        });
+        fixture.app.update();
+        let replies = fixture
+            .app
+            .world_mut()
+            .resource_mut::<Messages<AgentCommandResponse>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].request_id, request_id);
         assert_eq!(
-            RunPlacementPolicy::new(true).validate(&settings),
-            Err("run placement overrides are disabled; omit mode, direction, and beside and retry")
+            replies[0].result,
+            AgentCommandResult::Error(
+                "run placement overrides are disabled; omit mode, direction, and beside and retry"
+                    .into()
+            )
         );
     }
 
     #[test]
     fn run_placement_policy_allows_bare_run() {
         let settings = test_settings();
-        assert_eq!(RunPlacementPolicy::new(false).validate(&settings), Ok(()));
+        let run = AgentRun {
+            anchor: ProcessId::new(),
+            command: "pwd".into(),
+            direction: AgentPaneDirection::Right,
+            focus: false,
+            beside: None,
+            mode: PlacementMode::Auto,
+            terminal: None,
+            done_marker: None,
+        };
+        assert_eq!(run.validate_placement(false, &settings), Ok(()));
     }
 
     #[test]
     fn run_placement_policy_honors_user_opt_out() {
         let mut settings = test_settings();
         settings.agent.allow_run_placement_override = true;
-        assert_eq!(RunPlacementPolicy::new(true).validate(&settings), Ok(()));
+        let run = AgentRun {
+            anchor: ProcessId::new(),
+            command: "pwd".into(),
+            direction: AgentPaneDirection::Bottom,
+            focus: false,
+            beside: None,
+            mode: PlacementMode::Split,
+            terminal: None,
+            done_marker: None,
+        };
+        assert_eq!(run.validate_placement(true, &settings), Ok(()));
     }
 
     #[test]

@@ -1,9 +1,12 @@
 use std::collections::{HashMap, VecDeque};
 
 use bevy::{ecs::relationship::Relationship, prelude::*};
-use bevy_cef::prelude::*;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::protocol::{ClientMessage, ProcessId};
-use vmux_api::service::*;
+use vmux_api::service::{
+    ProcessEntry, ProcessKillAllEvent, ProcessKillEvent, ProcessNavigateEvent,
+    ProcessSearchRequest, ProcessUsageUiState, ProcessesUiState,
+};
 use vmux_command::{CommandInvocation, ResolvedLocale};
 use vmux_ecs::page::{Activity, PageReady};
 use vmux_ecs::service::ServiceConnected;
@@ -613,18 +616,54 @@ fn broadcast_to_monitors(
 
     for (entity, mut monitor, view_dirty) in &mut monitors {
         if dirty || monitor.cpu_history.is_empty() {
-            monitor.cpu_history.push_back(total_cpu_percent.max(0.0));
-            monitor
-                .memory_history_mb
-                .push_back(total_memory_bytes as f32 / (1024.0 * 1024.0));
-            while monitor.cpu_history.len() > PROCESS_HISTORY_LIMIT {
-                monitor.cpu_history.pop_front();
-            }
-            while monitor.memory_history_mb.len() > PROCESS_HISTORY_LIMIT {
-                monitor.memory_history_mb.pop_front();
-            }
+            monitor.record_sample(total_cpu_percent, total_memory_bytes);
         }
-        let query = monitor.query.trim().to_ascii_lowercase();
+        let state = monitor.project_ui_state(
+            connected,
+            runtime.cpu_ready,
+            total_count,
+            managed_count,
+            total_cpu_percent,
+            total_memory_bytes,
+            &processes,
+            &locale,
+        );
+        commands.trigger(UiStateWrite::<ProcessesUiState>::from_event(entity, &state));
+        if view_dirty {
+            commands.entity(entity).remove::<ProcessMonitorViewDirty>();
+        }
+    }
+    commands
+        .entity(runtime_entity)
+        .remove::<ProcessMonitorDirty>();
+}
+
+impl ProcessMonitorView {
+    fn record_sample(&mut self, total_cpu_percent: f32, total_memory_bytes: u64) {
+        self.cpu_history.push_back(total_cpu_percent.max(0.0));
+        self.memory_history_mb
+            .push_back(total_memory_bytes as f32 / (1024.0 * 1024.0));
+        while self.cpu_history.len() > PROCESS_HISTORY_LIMIT {
+            self.cpu_history.pop_front();
+        }
+        while self.memory_history_mb.len() > PROCESS_HISTORY_LIMIT {
+            self.memory_history_mb.pop_front();
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn project_ui_state(
+        &self,
+        connected: bool,
+        cpu_ready: bool,
+        total_count: u32,
+        managed_count: u32,
+        total_cpu_percent: f32,
+        total_memory_bytes: u64,
+        processes: &[ProcessEntry],
+        locale: &Locale,
+    ) -> ProcessesUiState {
+        let query = self.query.trim().to_ascii_lowercase();
         let mut visible = processes
             .iter()
             .filter(|process| {
@@ -643,45 +682,41 @@ fn broadcast_to_monitors(
                 .then_with(|| right.mem_bytes.cmp(&left.mem_bytes))
                 .then_with(|| left.pid.cmp(&right.pid))
         });
-        let peak_cpu_percent = monitor.cpu_history.iter().copied().fold(0.0_f32, f32::max);
-        let peak_memory_bytes = (monitor
+        let peak_cpu_percent = self.cpu_history.iter().copied().fold(0.0_f32, f32::max);
+        let peak_memory_bytes = (self
             .memory_history_mb
             .iter()
             .copied()
             .fold(0.0_f32, f32::max)
             * 1024.0
             * 1024.0) as u64;
-        let cpu_history = monitor.cpu_history.iter().copied().collect::<Vec<_>>();
-        let memory_history = monitor
-            .memory_history_mb
-            .iter()
-            .copied()
-            .collect::<Vec<_>>();
+        let cpu_history = self.cpu_history.iter().copied().collect::<Vec<_>>();
+        let memory_history = self.memory_history_mb.iter().copied().collect::<Vec<_>>();
         let cpu_graph = Sparkline::plot(&cpu_history, 5.0);
         let memory_graph = Sparkline::plot(&memory_history, 64.0);
-        let state = ProcessesUiState {
+        ProcessesUiState {
             connected,
-            query: monitor.query.clone(),
+            query: self.query.clone(),
             total_count,
             managed_count,
             cpu: ProcessUsageUiState {
                 label: "CPU".to_string(),
-                value: if runtime.cpu_ready {
+                value: if cpu_ready {
                     format!("{total_cpu_percent:.1}%")
                 } else {
                     String::new()
                 },
-                peak: if runtime.cpu_ready {
+                peak: if cpu_ready {
                     format!("↑ {peak_cpu_percent:.1}%")
                 } else {
                     String::new()
                 },
-                line: if runtime.cpu_ready {
+                line: if cpu_ready {
                     cpu_graph.line
                 } else {
                     String::new()
                 },
-                area: if runtime.cpu_ready {
+                area: if cpu_ready {
                     cpu_graph.area
                 } else {
                     String::new()
@@ -695,15 +730,8 @@ fn broadcast_to_monitors(
                 area: memory_graph.area,
             },
             processes: visible,
-        };
-        commands.trigger(UiStateWrite::<ProcessesUiState>::from_event(entity, &state));
-        if view_dirty {
-            commands.entity(entity).remove::<ProcessMonitorViewDirty>();
         }
     }
-    commands
-        .entity(runtime_entity)
-        .remove::<ProcessMonitorDirty>();
 }
 
 fn search(

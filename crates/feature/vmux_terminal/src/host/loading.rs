@@ -27,13 +27,15 @@ impl Plugin for LoadingPlugin {
     }
 }
 
-const SHELL_LOADING_TIMEOUT: Duration = Duration::from_secs(10);
-const SHELL_BOOT_GRACE: Duration = Duration::from_millis(250);
-
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct ShellLoading {
     pub(crate) since: Instant,
     pub(crate) announced: bool,
+}
+
+impl ShellLoading {
+    const TIMEOUT: Duration = Duration::from_secs(10);
+    const BOOT_GRACE: Duration = Duration::from_millis(250);
 }
 
 fn set_shell_icon(
@@ -72,7 +74,7 @@ fn announce_slow_shell_boot(
     mut commands: Commands,
 ) {
     for (entity, mut loading) in &mut waiting {
-        if loading.announced || loading.since.elapsed() < SHELL_BOOT_GRACE {
+        if loading.announced || loading.since.elapsed() < ShellLoading::BOOT_GRACE {
             continue;
         }
         loading.announced = true;
@@ -114,7 +116,7 @@ fn clear_shell(
     mut commands: Commands,
 ) {
     for (entity, state, output_seen) in &loading {
-        if !output_seen && state.since.elapsed() < SHELL_LOADING_TIMEOUT {
+        if !output_seen && state.since.elapsed() < ShellLoading::TIMEOUT {
             continue;
         }
         commands.entity(entity).remove::<ShellLoading>();

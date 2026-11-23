@@ -781,21 +781,21 @@ fn handle_zoom_requests(
         match request.change {
             ZoomChange::In => {
                 if is_text_grid {
-                    font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Increase);
+                    font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::increase());
                 } else if let Ok(mut zoom) = zoom_q.get_mut(webview) {
                     zoom.0 += 0.5;
                 }
             }
             ZoomChange::Out => {
                 if is_text_grid {
-                    font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Decrease);
+                    font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::decrease());
                 } else if let Ok(mut zoom) = zoom_q.get_mut(webview) {
                     zoom.0 -= 0.5;
                 }
             }
             ZoomChange::Reset => {
                 if is_text_grid {
-                    font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Reset);
+                    font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::reset());
                 } else if let Ok(mut zoom) = zoom_q.get_mut(webview) {
                     zoom.0 = 0.0;
                 }

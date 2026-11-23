@@ -37,17 +37,15 @@ fn term_open(
     }
 }
 
-const TRAILING_TRIM: &[char] = &['.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'', '>'];
-
-const LEADING_TRIM: &[char] = &['(', '[', '{', '<', '"', '\''];
-
-const MAX_LINKS_PER_LINE: usize = 16;
-
 pub(super) struct LinkDetector {
     cwd: Option<PathBuf>,
 }
 
 impl LinkDetector {
+    const TRAILING_TRIM: &[char] = &['.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'', '>'];
+    const LEADING_TRIM: &[char] = &['(', '[', '{', '<', '"', '\''];
+    const MAX_LINKS_PER_LINE: usize = 16;
+
     pub(super) fn new(cwd: Option<&Path>) -> Self {
         Self {
             cwd: cwd.map(Path::to_path_buf),
@@ -80,7 +78,7 @@ impl LinkDetector {
             }
         }
 
-        for (char_start, char_end, url) in detected.into_iter().take(MAX_LINKS_PER_LINE) {
+        for (char_start, char_end, url) in detected.into_iter().take(Self::MAX_LINKS_PER_LINE) {
             let Some(&(start_col, _)) = cols.get(char_start) else {
                 continue;
             };
@@ -112,10 +110,10 @@ impl LinkDetector {
                 i += 1;
             }
             let mut end = i;
-            while start < end && LEADING_TRIM.contains(&chars[start]) {
+            while start < end && Self::LEADING_TRIM.contains(&chars[start]) {
                 start += 1;
             }
-            while end > start && TRAILING_TRIM.contains(&chars[end - 1]) {
+            while end > start && Self::TRAILING_TRIM.contains(&chars[end - 1]) {
                 end -= 1;
             }
             if end <= start {

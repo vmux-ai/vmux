@@ -10,10 +10,10 @@ pub use host::{
     AgentShellMode, AgentTerminalSend, AwaitingProcessCreated, CommandLifecycleEvent,
     OscTitleChanged, PendingServiceCreate, PlacementMode, ProcessExited, ProcessExitedEvent,
     PtyExited, ReattachedTerminalBundle, RestartPty, RetainOnProcessExit, RunShellRequest,
-    ShellMode, Terminal, TerminalBundle, TerminalContractPlugin, TerminalFontSizeCommand,
-    TerminalGridSize, TerminalPlugin, TerminalReinputRequest, TerminalRequestPlugin,
-    TerminalRestartRequest, TerminalSendRequest, TerminalStackSpawnRequest, TerminalStackSpawnSet,
-    TerminalThemePlugin, TerminalToolPlugin, TerminalUiStateUpdates,
+    ShellMode, Terminal, TerminalBundle, TerminalContractPlugin, TerminalFontSizeChange,
+    TerminalFontSizeCommand, TerminalGridSize, TerminalPlugin, TerminalReinputRequest,
+    TerminalRequestPlugin, TerminalRestartRequest, TerminalSendRequest, TerminalStackSpawnRequest,
+    TerminalStackSpawnSet, TerminalThemePlugin, TerminalToolPlugin, TerminalUiStateUpdates,
 };
 #[cfg(host)]
 pub(crate) use host::{contract, launch, pid, plugin, process_monitor, snapshot, theme};

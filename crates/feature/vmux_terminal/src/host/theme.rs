@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::page::PageReady;
@@ -8,23 +10,67 @@ use vmux_setting::{
 
 use crate::{Terminal, event::TermThemeEvent};
 
-use std::hash::{Hash, Hasher};
-
 pub struct TerminalThemePlugin;
 
 impl Plugin for TerminalThemePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::contract::TerminalContractPlugin)
+            .init_resource::<AppliedTerminalTheme>()
             .add_systems(Update, font_size.after(vmux_command::ReadCommandRequests))
             .add_systems(Update, sync.after(font_size));
     }
 }
 
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TerminalFontSizeCommand {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminalFontSizeChange {
     Increase,
     Decrease,
     Reset,
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminalFontSizeCommand {
+    pub change: TerminalFontSizeChange,
+}
+
+impl TerminalFontSizeCommand {
+    pub fn increase() -> Self {
+        Self {
+            change: TerminalFontSizeChange::Increase,
+        }
+    }
+
+    pub fn decrease() -> Self {
+        Self {
+            change: TerminalFontSizeChange::Decrease,
+        }
+    }
+
+    pub fn reset() -> Self {
+        Self {
+            change: TerminalFontSizeChange::Reset,
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+struct AppliedTerminalTheme(Option<u64>);
+
+impl AppliedTerminalTheme {
+    fn signature(theme: &vmux_setting::TerminalTheme, colors: &TerminalColorScheme) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        colors.foreground.hash(&mut hasher);
+        colors.background.hash(&mut hasher);
+        colors.cursor.hash(&mut hasher);
+        colors.ansi.hash(&mut hasher);
+        theme.font_size.to_bits().hash(&mut hasher);
+        theme.line_height.to_bits().hash(&mut hasher);
+        theme.padding.to_bits().hash(&mut hasher);
+        theme.font_family.hash(&mut hasher);
+        theme.cursor_style.hash(&mut hasher);
+        theme.cursor_blink.hash(&mut hasher);
+        hasher.finish()
+    }
 }
 
 fn font_size(
@@ -48,10 +94,10 @@ fn font_size(
         };
         let terminal = settings.terminal.as_mut().unwrap();
         let current = terminal.themes[idx].font_size;
-        let next = match cmd {
-            TerminalFontSizeCommand::Increase => (current + 1.0).min(40.0),
-            TerminalFontSizeCommand::Decrease => (current - 1.0).max(6.0),
-            TerminalFontSizeCommand::Reset => 14.0,
+        let next = match cmd.change {
+            TerminalFontSizeChange::Increase => (current + 1.0).min(40.0),
+            TerminalFontSizeChange::Decrease => (current - 1.0).max(6.0),
+            TerminalFontSizeChange::Reset => 14.0,
         };
         if next == current {
             continue;
@@ -61,32 +107,20 @@ fn font_size(
     }
 }
 
-fn theme_signature(theme: &vmux_setting::TerminalTheme, colors: &TerminalColorScheme) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    colors.foreground.hash(&mut hasher);
-    colors.background.hash(&mut hasher);
-    colors.cursor.hash(&mut hasher);
-    colors.ansi.hash(&mut hasher);
-    theme.font_size.to_bits().hash(&mut hasher);
-    theme.line_height.to_bits().hash(&mut hasher);
-    theme.padding.to_bits().hash(&mut hasher);
-    theme.font_family.hash(&mut hasher);
-    theme.cursor_style.hash(&mut hasher);
-    theme.cursor_blink.hash(&mut hasher);
-    hasher.finish()
-}
-
 fn sync(
     terminals: Query<Entity, With<Terminal>>,
     new_terminals: Query<Entity, Added<Terminal>>,
     newly_ready: Query<Entity, (With<Terminal>, Changed<PageReady>)>,
-    browsers: NonSend<Browsers>,
+    browsers: Option<NonSend<Browsers>>,
     settings: Res<AppSettings>,
-    color_schemes: Res<TerminalColorSchemes>,
+    color_schemes: Option<Res<TerminalColorSchemes>>,
     scheme: Option<Single<&vmux_setting::ResolvedColorScheme>>,
+    mut applied: ResMut<AppliedTerminalTheme>,
     mut commands: Commands,
-    mut last_theme_hash: Local<u64>,
 ) {
+    let (Some(browsers), Some(color_schemes)) = (browsers, color_schemes) else {
+        return;
+    };
     let Some(terminal_settings) = &settings.terminal else {
         return;
     };
@@ -97,13 +131,13 @@ fn sync(
         .unwrap_or(true);
     let colors = color_schemes.resolve(&theme.color_scheme, &terminal_settings.custom_themes);
     let colors = color_schemes.for_appearance(colors, dark, &terminal_settings.custom_themes);
-    let hash = theme_signature(&theme, &colors);
+    let hash = AppliedTerminalTheme::signature(&theme, &colors);
 
-    let theme_changed = hash != *last_theme_hash;
+    let theme_changed = applied.0 != Some(hash);
     if !theme_changed && new_terminals.is_empty() && newly_ready.is_empty() {
         return;
     }
-    *last_theme_hash = hash;
+    applied.0 = Some(hash);
 
     let event = TermThemeEvent {
         foreground: colors.foreground,
@@ -136,60 +170,69 @@ fn sync(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use bevy::ecs::message::Messages;
 
-    fn terminal_theme(font_size: f32) -> vmux_setting::TerminalTheme {
-        vmux_setting::TerminalTheme {
-            name: "default".to_string(),
-            color_scheme: "catppuccin-mocha".to_string(),
-            font_family: "JetBrainsMono Nerd Font".to_string(),
-            font_size,
-            line_height: 1.2,
-            padding: 4.0,
-            cursor_style: vmux_api::terminal::CursorStyle::Block,
-            cursor_blink: true,
-            shell: "/bin/sh".to_string(),
-        }
-    }
+    use super::*;
 
-    fn settings_with_font(font_size: f32) -> AppSettings {
-        AppSettings {
-            terminal: Some(vmux_setting::TerminalSettings {
-                default_theme: "default".to_string(),
-                themes: vec![terminal_theme(font_size)],
+    struct ThemeFixture;
+
+    impl ThemeFixture {
+        fn terminal_theme(font_size: f32) -> vmux_setting::TerminalTheme {
+            vmux_setting::TerminalTheme {
+                name: "default".to_string(),
+                color_scheme: "catppuccin-mocha".to_string(),
+                font_family: "JetBrainsMono Nerd Font".to_string(),
+                font_size,
+                line_height: 1.2,
+                padding: 4.0,
+                cursor_style: vmux_api::terminal::CursorStyle::Block,
+                cursor_blink: true,
+                shell: "/bin/sh".to_string(),
+            }
+        }
+
+        fn run_font_size(start: f32, command: TerminalFontSizeCommand) -> (f32, usize) {
+            let settings = AppSettings {
+                terminal: Some(vmux_setting::TerminalSettings {
+                    default_theme: "default".to_string(),
+                    themes: vec![Self::terminal_theme(start)],
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
+            };
+            Self::run_with_settings(settings, command)
         }
-    }
 
-    fn run_font_size_command(start: f32, command: TerminalFontSizeCommand) -> (f32, usize) {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(settings_with_font(start))
-            .add_message::<TerminalFontSizeCommand>()
-            .add_message::<SettingsSaveRequest>()
-            .add_systems(Update, font_size);
-        app.world_mut()
-            .resource_mut::<Messages<TerminalFontSizeCommand>>()
-            .write(command);
-        app.update();
-        let size = app
-            .world()
-            .resource::<AppSettings>()
-            .terminal
-            .as_ref()
-            .unwrap()
-            .themes[0]
-            .font_size;
-        let saves = app
-            .world_mut()
-            .resource_mut::<Messages<SettingsSaveRequest>>()
-            .drain()
-            .count();
-        (size, saves)
+        fn run_with_settings(
+            settings: AppSettings,
+            command: TerminalFontSizeCommand,
+        ) -> (f32, usize) {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, TerminalThemePlugin))
+                .insert_resource(settings)
+                .add_message::<SettingsSaveRequest>();
+            app.world_mut()
+                .resource_mut::<Messages<TerminalFontSizeCommand>>()
+                .write(command);
+            app.update();
+            let size = app
+                .world()
+                .resource::<AppSettings>()
+                .terminal
+                .as_ref()
+                .unwrap()
+                .themes
+                .iter()
+                .find(|theme| theme.name == "default")
+                .unwrap()
+                .font_size;
+            let saves = app
+                .world_mut()
+                .resource_mut::<Messages<SettingsSaveRequest>>()
+                .drain()
+                .count();
+            (size, saves)
+        }
     }
 
     #[test]
@@ -202,66 +245,41 @@ mod tests {
             }),
             ..Default::default()
         };
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(settings)
-            .add_message::<TerminalFontSizeCommand>()
-            .add_message::<SettingsSaveRequest>()
-            .add_systems(Update, font_size);
-        app.world_mut()
-            .resource_mut::<Messages<TerminalFontSizeCommand>>()
-            .write(TerminalFontSizeCommand::Increase);
-        app.update();
-
-        let terminal = app
-            .world()
-            .resource::<AppSettings>()
-            .terminal
-            .clone()
-            .unwrap();
-        let theme = terminal
-            .themes
-            .iter()
-            .find(|theme| theme.name == "default")
-            .unwrap();
-        assert_eq!(theme.font_size, 15.0);
-        let saves = app
-            .world_mut()
-            .resource_mut::<Messages<SettingsSaveRequest>>()
-            .drain()
-            .count();
+        let (size, saves) =
+            ThemeFixture::run_with_settings(settings, TerminalFontSizeCommand::increase());
+        assert_eq!(size, 15.0);
         assert_eq!(saves, 1);
     }
 
     #[test]
     fn font_size_increase_steps_up_and_persists() {
-        let (size, writes) = run_font_size_command(14.0, TerminalFontSizeCommand::Increase);
+        let (size, writes) = ThemeFixture::run_font_size(14.0, TerminalFontSizeCommand::increase());
         assert_eq!(size, 15.0);
         assert_eq!(writes, 1);
     }
 
     #[test]
     fn font_size_decrease_steps_down_and_persists() {
-        let (size, writes) = run_font_size_command(14.0, TerminalFontSizeCommand::Decrease);
+        let (size, writes) = ThemeFixture::run_font_size(14.0, TerminalFontSizeCommand::decrease());
         assert_eq!(size, 13.0);
         assert_eq!(writes, 1);
     }
 
     #[test]
     fn font_size_increase_clamps_at_40() {
-        let (size, _) = run_font_size_command(40.0, TerminalFontSizeCommand::Increase);
+        let (size, _) = ThemeFixture::run_font_size(40.0, TerminalFontSizeCommand::increase());
         assert_eq!(size, 40.0);
     }
 
     #[test]
     fn font_size_decrease_clamps_at_6() {
-        let (size, _) = run_font_size_command(6.0, TerminalFontSizeCommand::Decrease);
+        let (size, _) = ThemeFixture::run_font_size(6.0, TerminalFontSizeCommand::decrease());
         assert_eq!(size, 6.0);
     }
 
     #[test]
     fn font_size_reset_returns_to_14() {
-        let (size, writes) = run_font_size_command(20.0, TerminalFontSizeCommand::Reset);
+        let (size, writes) = ThemeFixture::run_font_size(20.0, TerminalFontSizeCommand::reset());
         assert_eq!(size, 14.0);
         assert_eq!(writes, 1);
     }
@@ -277,11 +295,11 @@ mod tests {
             cursor: [255, 255, 255].into(),
             ansi: [[0, 0, 0]; 16].into(),
         };
-        let small = terminal_theme(14.0);
-        let large = terminal_theme(15.0);
+        let small = ThemeFixture::terminal_theme(14.0);
+        let large = ThemeFixture::terminal_theme(15.0);
         assert_ne!(
-            theme_signature(&small, &colors),
-            theme_signature(&large, &colors)
+            AppliedTerminalTheme::signature(&small, &colors),
+            AppliedTerminalTheme::signature(&large, &colors)
         );
     }
 }

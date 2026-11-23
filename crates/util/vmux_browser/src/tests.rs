@@ -1483,7 +1483,10 @@ mod open_in_place_flow {
             .resource_mut::<Messages<vmux_terminal::TerminalFontSizeCommand>>()
             .drain()
             .collect();
-        assert_eq!(cmds, vec![vmux_terminal::TerminalFontSizeCommand::Increase]);
+        assert_eq!(
+            cmds,
+            vec![vmux_terminal::TerminalFontSizeCommand::increase()]
+        );
     }
 
     #[test]
@@ -1502,7 +1505,7 @@ mod open_in_place_flow {
             .resource_mut::<Messages<vmux_terminal::TerminalFontSizeCommand>>()
             .drain()
             .collect();
-        assert_eq!(cmds, vec![vmux_terminal::TerminalFontSizeCommand::Reset]);
+        assert_eq!(cmds, vec![vmux_terminal::TerminalFontSizeCommand::reset()]);
     }
 
     #[test]
