@@ -1,5 +1,6 @@
 #[cfg(target_os = "ios")]
 mod platform {
+    use bevy_ecs::entity::Entity;
     use bevy_window::AppLifecycle;
     use objc2::rc::Retained;
     use objc2::runtime::NSObjectProtocol;
@@ -9,8 +10,10 @@ mod platform {
         UIApplicationDidBecomeActiveNotification, UIApplicationDidEnterBackgroundNotification,
         UIApplicationWillEnterForegroundNotification,
     };
+    use vmux_ecs::EntityTarget;
 
     use crate::runtime::RuntimeHandle;
+    use crate::session::MobileRoute;
 
     pub(crate) struct LifecycleGuard {
         observer: Option<Retained<LifecycleObserver>>,
@@ -35,7 +38,14 @@ mod platform {
                 );
                 return LifecycleGuard { observer: None };
             };
-            let observer = LifecycleObserver::new(mtm, self.clone());
+            let observer = {
+                let this = LifecycleObserver::alloc(mtm).set_ivars((
+                    EntityTarget::<MobileRoute>::new(Entity::PLACEHOLDER),
+                    self.clone(),
+                ));
+                let observer: Retained<LifecycleObserver> = unsafe { msg_send![super(this), init] };
+                observer
+            };
             let center = NSNotificationCenter::defaultCenter();
             unsafe {
                 center.addObserver_selector_name_object(
@@ -68,35 +78,28 @@ mod platform {
         #[unsafe(super(NSObject))]
         #[thread_kind = MainThreadOnly]
         #[name = "VmuxLifecycleObserver"]
-        #[ivars = RuntimeHandle]
+        #[ivars = (EntityTarget<MobileRoute>, RuntimeHandle)]
         struct LifecycleObserver;
 
         impl LifecycleObserver {
             #[unsafe(method(didEnterBackground:))]
             fn did_enter_background(&self, _notification: &NSNotification) {
-                self.ivars().report_lifecycle(AppLifecycle::WillSuspend);
+                self.ivars().1.report_lifecycle(AppLifecycle::WillSuspend);
             }
 
             #[unsafe(method(willEnterForeground:))]
             fn will_enter_foreground(&self, _notification: &NSNotification) {
-                self.ivars().report_lifecycle(AppLifecycle::WillResume);
+                self.ivars().1.report_lifecycle(AppLifecycle::WillResume);
             }
 
             #[unsafe(method(didBecomeActive:))]
             fn did_become_active(&self, _notification: &NSNotification) {
-                self.ivars().report_lifecycle(AppLifecycle::Running);
+                self.ivars().1.report_lifecycle(AppLifecycle::Running);
             }
         }
 
         unsafe impl NSObjectProtocol for LifecycleObserver {}
     );
-
-    impl LifecycleObserver {
-        fn new(mtm: MainThreadMarker, runtime: RuntimeHandle) -> Retained<Self> {
-            let this = Self::alloc(mtm).set_ivars(runtime);
-            unsafe { msg_send![super(this), init] }
-        }
-    }
 }
 
 #[cfg(not(target_os = "ios"))]

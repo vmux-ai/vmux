@@ -244,8 +244,6 @@ mod tests {
 
     use crate::quic::{PeerRole, RelaySetup};
 
-    const CODEC: LengthPrefixed = LengthPrefixed::new(64 * 1024);
-
     struct FailsWith(Option<ErrorKind>);
 
     impl AsyncRead for FailsWith {
@@ -268,29 +266,31 @@ mod tests {
 
     #[tokio::test]
     async fn a_frame_survives_the_round_trip() {
+        let codec = LengthPrefixed::new(64 * 1024);
         let mut wire = Vec::new();
-        CODEC
+        codec
             .write(&mut wire, b"\x00opaque\xff")
             .await
             .expect("write");
 
-        let read = CODEC.read(&mut wire.as_slice()).await.expect("read");
+        let read = codec.read(&mut wire.as_slice()).await.expect("read");
 
         assert_eq!(read.as_deref(), Some(&b"\x00opaque\xff"[..]));
     }
 
     #[tokio::test]
     async fn a_frame_cut_short_is_not_a_stream_that_ended() {
+        let codec = LengthPrefixed::new(64 * 1024);
         let mut whole = Vec::new();
-        CODEC
+        codec
             .write(&mut whole, b"twelve bytes")
             .await
             .expect("write");
 
-        let ended = CODEC.read(&mut &b""[..]).await;
-        let body_cut = CODEC.read(&mut &whole[..whole.len() - 1]).await;
-        let body_absent = CODEC.read(&mut &whole[..4]).await;
-        let prefix_cut = CODEC.read(&mut &whole[..3]).await;
+        let ended = codec.read(&mut &b""[..]).await;
+        let body_cut = codec.read(&mut &whole[..whole.len() - 1]).await;
+        let body_absent = codec.read(&mut &whole[..4]).await;
+        let prefix_cut = codec.read(&mut &whole[..3]).await;
 
         assert!(
             matches!(ended, Ok(None)),
@@ -334,17 +334,18 @@ mod tests {
 
     #[tokio::test]
     async fn a_peer_that_went_away_between_frames_ends_the_stream() {
+        let codec = LengthPrefixed::new(64 * 1024);
         for kind in [
             ErrorKind::UnexpectedEof,
             ErrorKind::ConnectionReset,
             ErrorKind::ConnectionAborted,
             ErrorKind::BrokenPipe,
         ] {
-            let read = CODEC.read(&mut FailsWith(Some(kind))).await;
+            let read = codec.read(&mut FailsWith(Some(kind))).await;
             assert!(matches!(read, Ok(None)), "{kind:?} should end the stream");
         }
 
-        let genuine = CODEC
+        let genuine = codec
             .read(&mut FailsWith(Some(ErrorKind::InvalidData)))
             .await;
         assert_eq!(
@@ -355,9 +356,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_frame_over_the_limit_is_refused_before_it_is_allocated() {
+        let codec = LengthPrefixed::new(64 * 1024);
         let tiny = LengthPrefixed::new(16);
         let mut wire = Vec::new();
-        CODEC.write(&mut wire, &[0u8; 17]).await.expect("write");
+        codec.write(&mut wire, &[0u8; 17]).await.expect("write");
 
         assert!(tiny.read(&mut wire.as_slice()).await.is_err());
         assert!(
@@ -483,24 +485,25 @@ mod tests {
 
     #[test]
     fn the_blocking_twin_draws_the_same_line() {
+        let codec = LengthPrefixed::new(64 * 1024);
         let mut whole = Vec::new();
-        CODEC
+        codec
             .write_blocking(&mut whole, b"twelve bytes")
             .expect("write");
 
         assert_eq!(
-            CODEC
+            codec
                 .read_blocking(&mut whole.as_slice())
                 .expect("read")
                 .as_deref(),
             Some(&b"twelve bytes"[..])
         );
         assert!(matches!(
-            CODEC.read_blocking(&mut FailsWith(Some(ErrorKind::ConnectionReset))),
+            codec.read_blocking(&mut FailsWith(Some(ErrorKind::ConnectionReset))),
             Ok(None)
         ));
         assert!(
-            CODEC.read_blocking(&mut &whole[..whole.len() - 1]).is_err(),
+            codec.read_blocking(&mut &whole[..whole.len() - 1]).is_err(),
             "a frame cut short must not read as a stream that ended"
         );
     }

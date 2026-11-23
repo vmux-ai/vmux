@@ -37,10 +37,6 @@ struct RuntimeInner {
     next_mount: Cell<u64>,
 }
 
-thread_local! {
-    static UI_RUNTIME: RefCell<Option<RuntimeHandle>> = const { RefCell::new(None) };
-}
-
 struct MobileRuntime {
     app: App,
     lifecycle: AppLifecycle,
@@ -132,17 +128,24 @@ impl RuntimeHandle {
             deferred: RefCell::new(Vec::new()),
             next_mount: Cell::new(0),
         }));
-        UI_RUNTIME.with_borrow_mut(|installed| *installed = Some(runtime.clone()));
+        Self::with_ui_slot(|installed| *installed = Some(runtime.clone()));
         runtime
     }
 
     pub(crate) fn ui() -> Self {
-        UI_RUNTIME.with_borrow(|installed| {
+        Self::with_ui_slot(|installed| {
             installed
                 .as_ref()
                 .expect("mobile runtime must be installed before Dioxus starts")
                 .clone()
         })
+    }
+
+    fn with_ui_slot<R>(f: impl FnOnce(&mut Option<RuntimeHandle>) -> R) -> R {
+        thread_local! {
+            static UI_RUNTIME: RefCell<Option<RuntimeHandle>> = const { RefCell::new(None) };
+        }
+        UI_RUNTIME.with_borrow_mut(f)
     }
 
     pub(crate) fn allocate_mount(&self) -> MountId {

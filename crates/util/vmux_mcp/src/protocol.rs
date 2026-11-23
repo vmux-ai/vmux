@@ -68,7 +68,7 @@ impl Plugin for McpPlugin {
                     )
                         .chain()
                         .in_set(McpSet::StartTasks),
-                    build_responses.in_set(McpSet::BuildResponses),
+                    (build_result_responses, build_error_responses).in_set(McpSet::BuildResponses),
                 ),
             );
     }
@@ -310,9 +310,12 @@ impl McpExecution {
 }
 
 #[derive(Component)]
-enum McpReply {
-    Result(Result<Value, String>),
-    ProtocolError { code: i64, message: String },
+struct McpResult(Result<Value, String>);
+
+#[derive(Component)]
+struct McpProtocolError {
+    code: i64,
+    message: String,
 }
 
 type PendingRequests<'w, 's> = Query<
@@ -373,7 +376,7 @@ fn route_request(mut commands: Commands, requests: PendingRequests, configs: Que
         "initialize" => {
             commands
                 .entity(entity)
-                .insert(McpReply::Result(Ok(McpResponse::initialize(&params.0))));
+                .insert(McpResult(Ok(McpResponse::initialize(&params.0))));
         }
         "tools/list" => {
             let mut request = commands.entity(entity);
@@ -389,7 +392,7 @@ fn route_request(mut commands: Commands, requests: PendingRequests, configs: Que
             let Some(name) = params.0.get("name").and_then(Value::as_str) else {
                 commands
                     .entity(entity)
-                    .insert(McpReply::Result(Err("tools/call missing name".to_string())));
+                    .insert(McpResult(Err("tools/call missing name".to_string())));
                 return;
             };
             let arguments = params
@@ -416,7 +419,7 @@ fn route_request(mut commands: Commands, requests: PendingRequests, configs: Que
             }
         }
         method => {
-            commands.entity(entity).insert(McpReply::ProtocolError {
+            commands.entity(entity).insert(McpProtocolError {
                 code: -32601,
                 message: format!("method not found: {method}"),
             });
@@ -434,7 +437,7 @@ fn finish_tool_errors(
             .remove::<ToolInvocation>()
             .remove::<ToolCall>()
             .remove::<ToolDispatchError>()
-            .insert(McpReply::Result(Err(error.message().to_string())));
+            .insert(McpResult(Err(error.message().to_string())));
     }
 }
 
@@ -478,7 +481,7 @@ fn start_tool_commands(
         let command = match result.0.clone() {
             Ok(command) => command,
             Err(message) => {
-                request.insert(McpReply::Result(Err(message)));
+                request.insert(McpResult(Err(message)));
                 continue;
             }
         };
@@ -502,7 +505,7 @@ fn start_tool_queries(
         let query = match result.0.clone() {
             Ok(query) => query,
             Err(message) => {
-                request.insert(McpReply::Result(Err(message)));
+                request.insert(McpResult(Err(message)));
                 continue;
             }
         };
@@ -551,37 +554,47 @@ fn poll_tool_tasks(mut commands: Commands, mut tasks: Query<(Entity, &mut McpTas
         commands
             .entity(entity)
             .remove::<McpTask>()
-            .insert(McpReply::Result(result));
+            .insert(McpResult(result));
     }
 }
 
-fn build_responses(
+fn build_result_responses(
     mut commands: Commands,
-    replies: Query<(Entity, &McpRequestId, &McpReply)>,
+    replies: Query<(Entity, &McpRequestId, &McpResult)>,
     mut output: MessageWriter<McpOutput>,
 ) {
     for (entity, id, reply) in &replies {
-        let response = match reply {
-            McpReply::Result(Ok(result)) => json!({
+        let response = match &reply.0 {
+            Ok(result) => json!({
                 "jsonrpc": "2.0",
                 "id": id.0,
                 "result": result
             }),
-            McpReply::Result(Err(message)) => json!({
+            Err(message) => json!({
                 "jsonrpc": "2.0",
                 "id": id.0,
                 "result": McpResponse::error(message)
             }),
-            McpReply::ProtocolError { code, message } => json!({
-                "jsonrpc": "2.0",
-                "id": id.0,
-                "error": {
-                    "code": code,
-                    "message": message
-                }
-            }),
         };
         output.write(McpOutput(response));
+        commands.entity(entity).despawn();
+    }
+}
+
+fn build_error_responses(
+    mut commands: Commands,
+    errors: Query<(Entity, &McpRequestId, &McpProtocolError)>,
+    mut output: MessageWriter<McpOutput>,
+) {
+    for (entity, id, error) in &errors {
+        output.write(McpOutput(json!({
+            "jsonrpc": "2.0",
+            "id": id.0,
+            "error": {
+                "code": error.code,
+                "message": error.message
+            }
+        })));
         commands.entity(entity).despawn();
     }
 }

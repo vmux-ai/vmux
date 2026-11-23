@@ -8,15 +8,6 @@ use bytes::Bytes;
 use quinn::udp::{RecvMeta, Transmit};
 use quinn::{AsyncUdpSocket, UdpPoller};
 
-const TAG_BYTES: usize = 2;
-
-const TUNNEL_LOCAL: SocketAddr = SocketAddr::new(
-    std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 2)),
-    443,
-);
-
-const INBOX_DEPTH: usize = 256;
-
 #[derive(Debug)]
 pub struct TunnelSocket {
     control: quinn::Connection,
@@ -25,9 +16,15 @@ pub struct TunnelSocket {
 
 impl TunnelSocket {
     pub const DESKTOP_TAG: u16 = 1;
+    const TAG_BYTES: usize = 2;
+    const TUNNEL_LOCAL: SocketAddr = SocketAddr::new(
+        std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 2)),
+        443,
+    );
+    const INBOX_DEPTH: usize = 256;
 
     pub fn new(control: quinn::Connection) -> Arc<Self> {
-        let (tx, rx) = tokio::sync::mpsc::channel(INBOX_DEPTH);
+        let (tx, rx) = tokio::sync::mpsc::channel(Self::INBOX_DEPTH);
         let pump = control.clone();
         tokio::spawn(async move {
             while let Ok(datagram) = pump.read_datagram().await {
@@ -43,7 +40,9 @@ impl TunnelSocket {
     }
 
     pub fn usable_mtu(&self) -> Option<usize> {
-        self.control.max_datagram_size()?.checked_sub(TAG_BYTES)
+        self.control
+            .max_datagram_size()?
+            .checked_sub(Self::TAG_BYTES)
     }
 
     pub fn relayed_peer(tag: u16) -> SocketAddr {
@@ -60,7 +59,7 @@ impl AsyncUdpSocket for TunnelSocket {
     }
 
     fn try_send(&self, transmit: &Transmit) -> io::Result<()> {
-        let mut tagged = Vec::with_capacity(TAG_BYTES + transmit.contents.len());
+        let mut tagged = Vec::with_capacity(Self::TAG_BYTES + transmit.contents.len());
         tagged.extend_from_slice(&transmit.destination.port().to_be_bytes());
         tagged.extend_from_slice(transmit.contents);
         let _ = self.control.send_datagram(Bytes::from(tagged));
@@ -91,12 +90,12 @@ impl AsyncUdpSocket for TunnelSocket {
             Poll::Pending => return Poll::Pending,
         };
 
-        if datagram.len() < TAG_BYTES {
+        if datagram.len() < Self::TAG_BYTES {
             cx.waker().wake_by_ref();
             return Poll::Pending;
         }
         let tag = u16::from_be_bytes([datagram[0], datagram[1]]);
-        let payload = &datagram[TAG_BYTES..];
+        let payload = &datagram[Self::TAG_BYTES..];
 
         let len = payload.len().min(buffer.len());
         buffer[..len].copy_from_slice(&payload[..len]);
@@ -111,7 +110,7 @@ impl AsyncUdpSocket for TunnelSocket {
     }
 
     fn local_addr(&self) -> io::Result<SocketAddr> {
-        Ok(TUNNEL_LOCAL)
+        Ok(Self::TUNNEL_LOCAL)
     }
 
     fn max_transmit_segments(&self) -> usize {

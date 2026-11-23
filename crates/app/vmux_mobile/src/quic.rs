@@ -12,10 +12,6 @@ use vmux_transport::quic::{
 use vmux_transport::{ClientCredential, DeviceId, PeerRole};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
-const SETUP: FrameStream = FrameStream::new(16 * 1024);
-const CONTROL: FrameStream = FrameStream::new(MAX_RESPONSE_BYTES);
-
 #[derive(Debug)]
 pub(crate) enum QuicError {
     Unauthorized,
@@ -114,6 +110,9 @@ impl Dialled {
 
 impl QuicApi {
     const DIAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+    const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+    const SETUP: FrameStream = FrameStream::new(16 * 1024);
+    const CONTROL: FrameStream = FrameStream::new(Self::MAX_RESPONSE_BYTES);
 
     pub(crate) fn new(endpoint: Endpoint) -> Self {
         let credential = endpoint.credential.clone();
@@ -254,13 +253,13 @@ impl QuicApi {
         };
         let frame = Frame::json(MessageType::CLIENT_SETUP, &setup)
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-        SETUP
+        Self::SETUP
             .open(&mut send, &frame)
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         send.finish()
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-        let accepted = SETUP
+        let accepted = Self::SETUP
             .accept(&mut recv)
             .await
             .map_err(|_| QuicError::from_close(connection))?
@@ -284,13 +283,13 @@ impl QuicApi {
         };
         let frame = Frame::json(MessageType::RELAY_SETUP, &setup)
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-        SETUP
+        Self::SETUP
             .open(&mut send, &frame)
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         send.finish()
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-        SETUP
+        Self::SETUP
             .accept(&mut recv)
             .await
             .map_err(|_| QuicError::from_close(control))?
@@ -311,7 +310,7 @@ impl QuicApi {
         let body = rkyv::to_bytes::<rkyv::rancor::Error>(&request)
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         let frame = Frame::new(MessageType::SESSION_EVENTS, body.to_vec());
-        CONTROL
+        Self::CONTROL
             .open(&mut send, &frame)
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
@@ -336,13 +335,13 @@ impl QuicApi {
         let body = rkyv::to_bytes::<rkyv::rancor::Error>(&message)
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         let frame = Frame::new(MessageType::CONTROL_REQUEST, body.to_vec());
-        CONTROL
+        Self::CONTROL
             .open(&mut send, &frame)
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         send.finish()
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-        let answer = CONTROL
+        let answer = Self::CONTROL
             .accept(&mut recv)
             .await
             .map_err(|_| QuicError::from_close(&connection))?;
@@ -371,14 +370,14 @@ impl Subscription {
 
     pub(crate) async fn next_frame(&mut self) -> StreamFrame {
         let frame = if self.opened {
-            match CONTROL.next(&mut self.recv).await {
+            match QuicApi::CONTROL.next(&mut self.recv).await {
                 Ok(Some(frame)) => frame,
                 Ok(None) => return StreamFrame::Ended,
                 Err(_) => return self.read_failure(),
             }
         } else {
             self.opened = true;
-            match CONTROL.accept(&mut self.recv).await {
+            match QuicApi::CONTROL.accept(&mut self.recv).await {
                 Ok(frame) => frame,
                 Err(_) => return self.read_failure(),
             }

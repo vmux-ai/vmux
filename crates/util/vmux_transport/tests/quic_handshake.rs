@@ -3,34 +3,52 @@ use std::time::Duration;
 
 use vmux_transport::quic::endpoint::{SelfSignedIdentity, Trust};
 
-fn desktop() -> (SelfSignedIdentity, SocketAddr, quinn::Endpoint) {
-    let identity = SelfSignedIdentity::generate(vec!["localhost".into(), "127.0.0.1".into()])
-        .expect("generate identity");
-    let endpoint = identity
-        .listen((Ipv4Addr::LOCALHOST, 0).into())
-        .expect("bind server");
-    let address = endpoint.local_addr().expect("local addr");
-    (identity, address, endpoint)
+struct TestDesktop {
+    identity: SelfSignedIdentity,
+    address: SocketAddr,
+    endpoint: quinn::Endpoint,
 }
 
-async fn accept_once(endpoint: quinn::Endpoint) -> bool {
-    match tokio::time::timeout(Duration::from_secs(5), endpoint.accept()).await {
-        Ok(Some(incoming)) => incoming.await.is_ok(),
-        _ => false,
+impl TestDesktop {
+    fn start() -> Self {
+        let identity = SelfSignedIdentity::generate(vec!["localhost".into(), "127.0.0.1".into()])
+            .expect("generate identity");
+        let endpoint = identity
+            .listen((Ipv4Addr::LOCALHOST, 0).into())
+            .expect("bind server");
+        let address = endpoint.local_addr().expect("local addr");
+        Self {
+            identity,
+            address,
+            endpoint,
+        }
+    }
+
+    async fn accept_once(endpoint: quinn::Endpoint) -> bool {
+        match tokio::time::timeout(Duration::from_secs(5), endpoint.accept()).await {
+            Ok(Some(incoming)) => incoming.await.is_ok(),
+            _ => false,
+        }
+    }
+
+    fn trust(&self) -> Trust {
+        Trust::Desktop {
+            fingerprint: self.identity.fingerprint.clone(),
+        }
     }
 }
 
 #[tokio::test]
 async fn the_paired_fingerprint_connects() {
-    let (identity, address, server) = desktop();
-    let accepting = tokio::spawn(accept_once(server));
+    let server = TestDesktop::start();
+    let accepting = tokio::spawn(TestDesktop::accept_once(server.endpoint));
 
     let client = Trust::Desktop {
-        fingerprint: identity.fingerprint.clone(),
+        fingerprint: server.identity.fingerprint.clone(),
     }
-    .endpoint(address)
+    .endpoint(server.address)
     .expect("bind client");
-    let connecting = client.connect(address, "localhost").expect("dial");
+    let connecting = client.connect(server.address, "localhost").expect("dial");
     let connection = tokio::time::timeout(Duration::from_secs(5), connecting)
         .await
         .expect("client did not settle")
@@ -42,16 +60,16 @@ async fn the_paired_fingerprint_connects() {
 
 #[tokio::test]
 async fn a_different_certificate_is_refused() {
-    let (_identity, address, server) = desktop();
-    let accepting = tokio::spawn(accept_once(server));
+    let server = TestDesktop::start();
+    let accepting = tokio::spawn(TestDesktop::accept_once(server.endpoint));
 
     let impostor = SelfSignedIdentity::generate(vec!["localhost".into()]).expect("second identity");
     let client = Trust::Desktop {
         fingerprint: impostor.fingerprint.clone(),
     }
-    .endpoint(address)
+    .endpoint(server.address)
     .expect("bind client");
-    let connecting = client.connect(address, "localhost").expect("dial");
+    let connecting = client.connect(server.address, "localhost").expect("dial");
     let outcome = tokio::time::timeout(Duration::from_secs(5), connecting)
         .await
         .expect("client did not settle");
@@ -68,11 +86,11 @@ async fn a_different_certificate_is_refused() {
 
 #[tokio::test]
 async fn a_private_relay_with_an_untrusted_certificate_is_refused() {
-    let (_identity, address, server) = desktop();
-    let accepting = tokio::spawn(accept_once(server));
+    let server = TestDesktop::start();
+    let accepting = tokio::spawn(TestDesktop::accept_once(server.endpoint));
 
-    let client = Trust::Relay.endpoint(address).expect("bind client");
-    let connecting = client.connect(address, "localhost").expect("dial");
+    let client = Trust::Relay.endpoint(server.address).expect("bind client");
+    let connecting = client.connect(server.address, "localhost").expect("dial");
     let outcome = tokio::time::timeout(Duration::from_secs(5), connecting)
         .await
         .expect("client did not settle");
@@ -83,8 +101,9 @@ async fn a_private_relay_with_an_untrusted_certificate_is_refused() {
 
 #[tokio::test]
 async fn a_peer_offering_another_alpn_is_rejected() {
-    let (_identity, address, server) = desktop();
-    let accepting = tokio::spawn(accept_once(server));
+    let server = TestDesktop::start();
+    let _: Trust = server.trust();
+    let accepting = tokio::spawn(TestDesktop::accept_once(server.endpoint));
 
     let mut client = quinn::Endpoint::client((Ipv4Addr::UNSPECIFIED, 0).into()).expect("bind");
     let mut crypto = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
@@ -100,7 +119,7 @@ async fn a_peer_offering_another_alpn_is_rejected() {
         quinn::crypto::rustls::QuicClientConfig::try_from(crypto).unwrap(),
     )));
 
-    let connecting = client.connect(address, "localhost").expect("dial");
+    let connecting = client.connect(server.address, "localhost").expect("dial");
     let outcome = tokio::time::timeout(Duration::from_secs(5), connecting)
         .await
         .expect("client did not settle");
@@ -117,7 +136,7 @@ async fn a_probe_completes_against_a_listener_that_answers_them() {
         .listen_answering_probes((Ipv4Addr::LOCALHOST, 0).into())
         .expect("bind server");
     let address = server.local_addr().expect("local addr");
-    let accepting = tokio::spawn(accept_once(server));
+    let accepting = tokio::spawn(TestDesktop::accept_once(server));
 
     let outcome = tokio::time::timeout(
         Duration::from_secs(5),
@@ -135,15 +154,15 @@ async fn a_probe_completes_against_a_listener_that_answers_them() {
 
 #[tokio::test]
 async fn an_ordinary_listener_refuses_a_probe() {
-    let (identity, address, server) = desktop();
-    let accepting = tokio::spawn(accept_once(server));
+    let server = TestDesktop::start();
+    let accepting = tokio::spawn(TestDesktop::accept_once(server.endpoint));
 
     let outcome = tokio::time::timeout(
         Duration::from_secs(5),
         Trust::Desktop {
-            fingerprint: identity.fingerprint.clone(),
+            fingerprint: server.identity.fingerprint.clone(),
         }
-        .probe(address, "localhost"),
+        .probe(server.address, "localhost"),
     )
     .await
     .expect("probe did not settle");
