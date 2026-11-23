@@ -468,11 +468,16 @@ impl Workspace {
         let mut policy = false;
         let mut sdk = false;
         for file in files {
-            let independent = file.starts_with("website")
+            let independent = (file.starts_with("website")
                 && !self
                     .packages
                     .iter()
-                    .any(|package| package.directory.starts_with("website"));
+                    .any(|package| package.directory.starts_with("website")))
+                || (file.starts_with("patches/cargo-packager")
+                    && !self
+                        .packages
+                        .iter()
+                        .any(|package| package.directory.starts_with("patches/cargo-packager")));
             let consumer = file.starts_with("examples/framework-consumer")
                 || file.starts_with("examples/host-consumer");
             if Scope::policy(file)
@@ -948,6 +953,8 @@ mod tests {
             "website/build.rs",
             "website/Cargo.toml",
             "website/Cargo.lock",
+            "patches/cargo-packager/src/package/mod.rs",
+            "patches/cargo-packager/src/package/dmg/mod.rs",
         ] {
             let selected = workspace
                 .select(&[path.into(), "website/ecs-policy.ron".into()])
