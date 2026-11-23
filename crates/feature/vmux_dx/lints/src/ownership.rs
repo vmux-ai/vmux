@@ -15,6 +15,7 @@ pub(super) struct Ownership<'tcx> {
     entrypoints: HashSet<DefId>,
     callers: HashMap<DefId, HashSet<DefId>>,
     systems: Vec<(DefId, GenericArgsRef<'tcx>, DefId)>,
+    bundles: Vec<(Ty<'tcx>, DefId)>,
     roles: HashMap<DefId, HashSet<&'static str>>,
     used: HashSet<DefId>,
     owners: HashMap<DefId, HashSet<DefId>>,
@@ -32,10 +33,15 @@ impl<'tcx> Ownership<'tcx> {
             let role = match (package.as_str(), name.as_str()) {
                 ("bevy_ecs", "Component") => "component",
                 ("bevy_ecs", "Resource") => "resource",
-                ("bevy_ecs", "Message" | "Event") => "message",
+                ("bevy_ecs", "Message" | "Event" | "EntityEvent") => "message",
                 ("bevy_ecs", "SystemParam") => "parameter",
                 ("bevy_ecs", "QueryData") => "query",
+                ("bevy_ecs", "SystemSet") => "system_set",
+                ("bevy_ecs", "Bundle") => "bundle",
                 ("bevy_app", "Plugin") => "plugin",
+                ("vmux_ecs", "Job") => "job",
+                ("vmux_feature", "FeatureManifestSource") => "manifest",
+                ("vmux_api", "UiState" | "UiEvent" | "Contract") => "contract",
                 _ => continue,
             };
             for implementation in implementations {
@@ -86,11 +92,21 @@ impl<'tcx> Ownership<'tcx> {
             }
             _ => return,
         };
+        let caller = expression.hir_id.owner.def_id.to_def_id();
+        if let ExprKind::MethodCall(_, _, arguments, _) = expression.kind
+            && !function.is_local()
+            && cx.tcx.crate_name(function.krate).as_str() == "bevy_ecs"
+            && matches!(
+                cx.tcx.item_name(function).as_str(),
+                "spawn" | "insert" | "try_insert"
+            )
+            && let Some(bundle) = arguments.first()
+        {
+            self.bundles
+                .push((cx.typeck_results().expr_ty(bundle), caller));
+        }
         if function.is_local() {
-            self.callers
-                .entry(function)
-                .or_default()
-                .insert(expression.hir_id.owner.def_id.to_def_id());
+            self.callers.entry(function).or_default().insert(caller);
         }
     }
 
@@ -270,9 +286,15 @@ impl<'tcx> Ownership<'tcx> {
             if !self.reachable(site, &mut HashSet::new()) {
                 continue;
             }
+            self.entrypoints.insert(function);
             let signature = cx.tcx.fn_sig(function).instantiate(cx.tcx, arguments);
             for input in signature.skip_binder().inputs() {
                 self.parameter(cx, *input, function, &mut HashSet::new());
+            }
+        }
+        for (bundle, caller) in std::mem::take(&mut self.bundles) {
+            if self.reachable(caller, &mut HashSet::new()) {
+                self.bundle_type(cx, bundle, &mut HashSet::new());
             }
         }
         for local in cx.tcx.hir_crate_items(()).definitions() {
@@ -282,6 +304,10 @@ impl<'tcx> Ownership<'tcx> {
                 DefKind::Struct | DefKind::Enum | DefKind::Union
             ) || cx.tcx.def_span(definition).from_expansion()
                 || self.stateless_plugin(cx, definition)
+                || self.stateless_system_set(cx, definition)
+                || self.stateless_manifest(cx, definition)
+                || self.concrete_job_struct(cx, definition)
+                || self.has_role(definition, "contract")
                 || self.used.contains(&definition)
                 || self
                     .owners
@@ -296,6 +322,88 @@ impl<'tcx> Ownership<'tcx> {
                 "declaration has no unique resolved registered ECS owner",
             );
         }
+    }
+
+    fn bundle_type(
+        &mut self,
+        cx: &LateContext<'tcx>,
+        ty: Ty<'tcx>,
+        visiting: &mut HashSet<Ty<'tcx>>,
+    ) {
+        if !visiting.insert(ty) {
+            return;
+        }
+        match ty.kind() {
+            TyKind::Tuple(elements) => {
+                for element in elements.iter() {
+                    self.bundle_type(cx, element, visiting);
+                }
+            }
+            TyKind::Adt(owner, arguments) => {
+                if !owner.did().is_local() {
+                    return;
+                }
+                if self.has_role(owner.did(), "component") {
+                    self.root(cx, ty);
+                    return;
+                }
+                if self.has_role(owner.did(), "bundle") {
+                    self.used.insert(owner.did());
+                    for field in owner.all_fields() {
+                        self.bundle_type(cx, field.ty(cx.tcx, arguments).skip_norm_wip(), visiting);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn stateless_system_set(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
+        if !self.has_role(definition, "system_set") {
+            return false;
+        }
+        let ty = cx
+            .tcx
+            .type_of(definition)
+            .instantiate_identity()
+            .skip_norm_wip();
+        let TyKind::Adt(owner, arguments) = ty.kind() else {
+            return false;
+        };
+        if owner.is_enum() {
+            return owner
+                .variants()
+                .iter()
+                .all(|variant| variant.fields.is_empty());
+        }
+        for field in owner.all_fields() {
+            let ty = field.ty(cx.tcx, arguments).skip_norm_wip();
+            let TyKind::Adt(marker, _) = ty.kind() else {
+                return false;
+            };
+            let package = cx.tcx.crate_name(marker.did().krate);
+            let name = cx.tcx.item_name(marker.did());
+            if package.as_str() != "core" || !matches!(name.as_str(), "PhantomData" | "TypeId") {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn stateless_manifest(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
+        if !self.has_role(definition, "manifest") {
+            return false;
+        }
+        let ty = cx
+            .tcx
+            .type_of(definition)
+            .instantiate_identity()
+            .skip_norm_wip();
+        matches!(ty.kind(), TyKind::Adt(owner, _) if owner.is_struct() && owner.all_fields().next().is_none())
+    }
+
+    fn concrete_job_struct(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
+        self.has_role(definition, "job") && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
     }
 
     fn stateless_plugin(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {

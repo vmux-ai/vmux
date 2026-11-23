@@ -473,6 +473,14 @@ fn compiler_proves_registered_ownership_and_rejects_hidden_or_unused_models() {
                 "registered system retains Local state without a canonical ECS owner @ 17:1-17:59",
             ][..],
         ),
+        (
+            "boundaries",
+            include_str!("../ui/boundaries.rs"),
+            &[
+                "declaration has no unique resolved registered ECS owner @ 16:1-16:16",
+                "declaration has no unique resolved registered ECS owner @ 29:1-29:23",
+            ][..],
+        ),
     ] {
         fixture.check(name, source, expected, "vmux_ecs_ownership");
     }
