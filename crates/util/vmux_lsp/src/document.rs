@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 
 use crate::{
     Document, DocumentBinding, DocumentConnection, DocumentPath, DocumentViews, Server,
@@ -167,36 +168,42 @@ type Existing<'w, 's> = Query<
     ),
 >;
 
-impl OpenDocument {
-    fn fail(&self, owner: Entity, message: impl Into<String>, commands: &mut Commands) {
-        commands
+#[derive(SystemParam)]
+struct DocumentOpener<'w, 's> {
+    documents: Existing<'w, 's>,
+    commands: Commands<'w, 's>,
+}
+
+impl DocumentOpener<'_, '_> {
+    fn fail(&mut self, owner: Entity, message: impl Into<String>) {
+        self.commands
             .entity(owner)
             .remove::<OpenDocument>()
             .insert(DocumentFailure(message.into()));
     }
 
     fn apply_pending(
-        &self,
+        &mut self,
+        request: &OpenDocument,
         transport: &Transport,
         uri: &str,
         pending: &mut [(Entity, PathBuf, Entity, i32, String, String)],
-        commands: &mut Commands,
     ) -> Result<Option<(Entity, i32)>, &'static str> {
         for (server, candidate, entity, version, language, text) in pending {
-            if *server != self.server || *candidate != self.path {
+            if *server != request.server || *candidate != request.path {
                 continue;
             }
-            if *language != self.language {
+            if *language != request.language {
                 return Err("document already has another language");
             }
-            if *text != self.text {
+            if *text != request.text {
                 let Some(next) = version.checked_add(1) else {
                     return Err("document version exhausted");
                 };
-                transport.did_change(uri, next, &self.text);
+                transport.did_change(uri, next, &request.text);
                 *version = next;
-                text.clone_from(&self.text);
-                commands.entity(*entity).insert((
+                text.clone_from(&request.text);
+                self.commands.entity(*entity).insert((
                     Document { version: next },
                     Contents {
                         language: language.clone(),
@@ -210,45 +217,49 @@ impl OpenDocument {
     }
 
     fn apply_existing(
-        &self,
+        &mut self,
+        request: &OpenDocument,
         transport: &Transport,
         uri: &str,
-        documents: &mut Existing,
         pending: &mut Vec<(Entity, PathBuf, Entity, i32, String, String)>,
-        commands: &mut Commands,
     ) -> Result<Option<(Entity, i32)>, &'static str> {
-        for (entity, candidate, mut document, parent, connection, closed, contents) in documents {
-            if candidate.0 != self.path
-                || parent.parent() != self.server
+        for (entity, candidate, mut document, parent, connection, closed, contents) in
+            &mut self.documents
+        {
+            if candidate.0 != request.path
+                || parent.parent() != request.server
                 || connection.0 != Some(transport.identity())
             {
                 continue;
             }
-            if !closed && contents.is_some_and(|contents| contents.language != self.language) {
+            if !closed && contents.is_some_and(|contents| contents.language != request.language) {
                 return Err("document already has another language");
             }
-            if closed || contents.is_none_or(|contents| contents.text != self.text) {
+            if closed || contents.is_none_or(|contents| contents.text != request.text) {
                 let Some(version) = document.version.checked_add(1) else {
                     return Err("document version exhausted");
                 };
                 if closed {
-                    transport.did_open(uri, &self.language, version, &self.text);
+                    transport.did_open(uri, &request.language, version, &request.text);
                 } else {
-                    transport.did_change(uri, version, &self.text);
+                    transport.did_change(uri, version, &request.text);
                 }
                 document.version = version;
-                commands.entity(entity).remove::<Closed>().insert(Contents {
-                    language: self.language.clone(),
-                    text: self.text.clone(),
-                });
+                self.commands
+                    .entity(entity)
+                    .remove::<Closed>()
+                    .insert(Contents {
+                        language: request.language.clone(),
+                        text: request.text.clone(),
+                    });
             }
             pending.push((
-                self.server,
-                self.path.clone(),
+                request.server,
+                request.path.clone(),
                 entity,
                 document.version,
-                self.language.clone(),
-                self.text.clone(),
+                request.language.clone(),
+                request.text.clone(),
             ));
             return Ok(Some((entity, document.version)));
         }
@@ -256,33 +267,34 @@ impl OpenDocument {
     }
 
     fn spawn_new(
-        &self,
+        &mut self,
+        request: &OpenDocument,
         transport: &Transport,
         uri: &str,
         path: DocumentPath,
         pending: &mut Vec<(Entity, PathBuf, Entity, i32, String, String)>,
-        commands: &mut Commands,
     ) -> (Entity, i32) {
-        transport.did_open(uri, &self.language, 1, &self.text);
-        let entity = commands
+        transport.did_open(uri, &request.language, 1, &request.text);
+        let entity = self
+            .commands
             .spawn((
-                Name::new(self.path.to_string_lossy().into_owned()),
+                Name::new(request.path.to_string_lossy().into_owned()),
                 path,
                 Document { version: 1 },
                 Contents {
-                    language: self.language.clone(),
-                    text: self.text.clone(),
+                    language: request.language.clone(),
+                    text: request.text.clone(),
                 },
-                ChildOf(self.server),
+                ChildOf(request.server),
             ))
             .id();
         pending.push((
-            self.server,
-            self.path.clone(),
+            request.server,
+            request.path.clone(),
             entity,
             1,
-            self.language.clone(),
-            self.text.clone(),
+            request.language.clone(),
+            request.text.clone(),
         ));
         (entity, 1)
     }
@@ -291,56 +303,43 @@ impl OpenDocument {
 fn open(
     requests: Query<(Entity, &OpenDocument, Option<&DocumentBinding>)>,
     servers: Servers,
-    mut documents: Existing,
-    mut commands: Commands,
+    mut opener: DocumentOpener,
 ) {
     let mut pending = Vec::<(Entity, PathBuf, Entity, i32, String, String)>::new();
     for (owner, request, binding) in &requests {
         let Ok((transport, _, stopped, failed)) = servers.get(request.server) else {
-            request.fail(owner, "language server no longer exists", &mut commands);
+            opener.fail(owner, "language server no longer exists");
             continue;
         };
         if stopped || failed {
-            request.fail(owner, "language server is unavailable", &mut commands);
+            opener.fail(owner, "language server is unavailable");
             continue;
         }
         let Some(transport) = transport else { continue };
         let path = DocumentPath(request.path.clone());
         let Some(uri) = path.uri() else {
-            request.fail(
-                owner,
-                "document path must identify an absolute file URI",
-                &mut commands,
-            );
+            opener.fail(owner, "document path must identify an absolute file URI");
             continue;
         };
-        let target = match request.apply_pending(transport, &uri, &mut pending, &mut commands) {
+        let target = match opener.apply_pending(request, transport, &uri, &mut pending) {
             Ok(Some(target)) => Some(target),
-            Ok(None) => {
-                match request.apply_existing(
-                    transport,
-                    &uri,
-                    &mut documents,
-                    &mut pending,
-                    &mut commands,
-                ) {
-                    Ok(target) => target,
-                    Err(error) => {
-                        request.fail(owner, error, &mut commands);
-                        continue;
-                    }
+            Ok(None) => match opener.apply_existing(request, transport, &uri, &mut pending) {
+                Ok(target) => target,
+                Err(error) => {
+                    opener.fail(owner, error);
+                    continue;
                 }
-            }
+            },
             Err(error) => {
-                request.fail(owner, error, &mut commands);
+                opener.fail(owner, error);
                 continue;
             }
         };
         let (document, version) = match target {
             Some(target) => target,
-            None => request.spawn_new(transport, &uri, path, &mut pending, &mut commands),
+            None => opener.spawn_new(request, transport, &uri, path, &mut pending),
         };
-        let mut owner = commands.entity(owner);
+        let mut owner = opener.commands.entity(owner);
         if binding.is_none_or(|binding| binding.document() != document) {
             owner.insert(DocumentBinding::new(document));
         }
