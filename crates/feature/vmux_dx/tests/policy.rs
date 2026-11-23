@@ -8790,7 +8790,13 @@ impl BodyShape {
                 let method = value.method.to_string();
                 let zero_arg_ext = matches!(
                     method.as_str(),
-                    "register_stored" | "add_agent_request" | "add_agent_message"
+                    "register_stored"
+                        | "add_agent_request"
+                        | "add_agent_message"
+                        | "add_service_message"
+                        | "add_tool_query"
+                        | "add_tool_command"
+                        | "register_types"
                 );
                 if zero_arg_ext && !value.args.is_empty() {
                     return false;
@@ -8803,8 +8809,11 @@ impl BodyShape {
                             | "add_observer"
                             | "add_message"
                             | "add_event"
+                            | "add_schedule"
+                            | "configure_schedules"
                             | "init_resource"
                             | "init_non_send"
+                            | "insert_non_send"
                             | "insert_resource"
                             | "register_type"
                             | "configure_sets"
@@ -9275,20 +9284,33 @@ impl<'ast> Visit<'ast> for Footprint {
                 | "add_observer"
                 | "add_message"
                 | "add_event"
+                | "add_schedule"
+                | "configure_schedules"
                 | "init_resource"
                 | "init_non_send"
+                | "insert_non_send"
                 | "register_type"
                 | "register_stored"
                 | "add_agent_request"
                 | "add_agent_message"
+                | "add_service_message"
+                | "add_tool_query"
+                | "add_tool_command"
+                | "register_types"
                 | "configure_sets"
                 | "register_required_components"
                 | "is_plugin_added"
                 | "chain"
+                | "chain_ignore_deferred"
                 | "after"
+                | "after_ignore_deferred"
                 | "before"
+                | "before_ignore_deferred"
                 | "in_set"
                 | "run_if"
+                | "distributive_run_if"
+                | "ambiguous_with"
+                | "ambiguous_with_all"
         ) {
             self.unsupported = true;
         }
@@ -12231,7 +12253,8 @@ impl Inventory {
                 }
             }
             if declaration.projection {
-                return false;
+                return declaration.contract
+                    && self.contract_standard_impl(entry, declaration, policy, visiting);
             }
             let impl_on_proved_boundary = entry.production
                 && !entry.plugin
@@ -12856,10 +12879,57 @@ impl Inventory {
                         }
                     }
                 }
+                let script_owners: Vec<String> =
+                    roots.iter().chain(finalized.iter()).cloned().collect();
+                for key in &script_owners {
+                    let Some(entry) = self.entries.get(key) else {
+                        continue;
+                    };
+                    let mut sources = vec![entry];
+                    if matches!(entry.kind, Kind::Struct | Kind::Enum) {
+                        for implementation in self.implementations(entry) {
+                            if implementation.production {
+                                sources.push(implementation);
+                            }
+                        }
+                    }
+                    for source in sources {
+                        for included in &source.included_sources {
+                            if let Some(script_key) =
+                                self.resolve_included_script(&source.path, included)
+                            {
+                                finalized.insert(script_key);
+                            }
+                        }
+                    }
+                }
                 proved = finalized;
             }
         }
         *self.adapter_helpers.borrow_mut() = Some(proved);
+    }
+
+    fn resolve_included_script(&self, source_path: &str, relative: &str) -> Option<String> {
+        let base = Path::new(source_path).parent()?;
+        let mut normalized = PathBuf::new();
+        for component in base.join(relative).components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    normalized.pop();
+                }
+                std::path::Component::Normal(part) => normalized.push(part),
+                _ => return None,
+            }
+        }
+        let target = format!(
+            "{}||script",
+            normalized.to_string_lossy().replace('\\', "/")
+        );
+        self.entries
+            .get(&target)
+            .is_some_and(|entry| matches!(entry.kind, Kind::Script))
+            .then_some(target)
     }
 
     fn automatic_ui_transport_projection(&self, entry: &Declaration) -> bool {
@@ -13154,9 +13224,69 @@ impl Inventory {
             .is_some_and(|keys| keys.contains(&entry.key))
     }
 
-    fn native_io_adapter_candidate(&self, entry: &Declaration) -> bool {
+    fn is_external_io_call_path(resolved: &str) -> bool {
+        if Self::is_external_io_handle_path(resolved)
+            || resolved
+                .rsplit_once("::")
+                .is_some_and(|(prefix, _)| Self::is_external_io_handle_path(prefix))
+        {
+            return true;
+        }
+        matches!(
+            resolved,
+            "std::fs::read"
+                | "std::fs::read_to_string"
+                | "std::fs::write"
+                | "std::fs::read_dir"
+                | "std::fs::create_dir"
+                | "std::fs::create_dir_all"
+                | "std::fs::remove_file"
+                | "std::fs::remove_dir"
+                | "std::fs::remove_dir_all"
+                | "std::fs::rename"
+                | "std::fs::copy"
+                | "std::fs::metadata"
+                | "std::fs::symlink_metadata"
+                | "std::fs::read_link"
+                | "std::fs::canonicalize"
+                | "std::fs::hard_link"
+                | "std::fs::set_permissions"
+                | "std::env::var"
+                | "std::env::var_os"
+                | "std::env::vars"
+                | "std::env::vars_os"
+                | "std::env::current_dir"
+                | "std::env::current_exe"
+                | "std::thread::spawn"
+                | "std::thread::Builder::new"
+                | "tokio::spawn"
+                | "tokio::task::spawn"
+                | "tokio::task::spawn_blocking"
+                | "tokio::fs::read"
+                | "tokio::fs::read_to_string"
+                | "tokio::fs::write"
+                | "tokio::fs::read_dir"
+                | "tokio::fs::create_dir_all"
+                | "tokio::fs::remove_file"
+                | "tokio::fs::remove_dir_all"
+                | "tokio::fs::rename"
+                | "tokio::fs::metadata"
+                | "tokio::fs::File::open"
+                | "tokio::fs::File::create"
+                | "std::fs::OpenOptions::new"
+                | "std::sync::mpsc::channel"
+                | "std::sync::mpsc::sync_channel"
+                | "tokio::sync::mpsc::channel"
+                | "tokio::sync::mpsc::unbounded_channel"
+                | "tokio::sync::oneshot::channel"
+                | "tokio::sync::watch::channel"
+                | "tokio::sync::broadcast::channel"
+        )
+    }
+
+    fn native_io_adapter_shape(&self, entry: &Declaration) -> bool {
         if !entry.production
-            || !matches!(entry.kind, Kind::Struct)
+            || !matches!(entry.kind, Kind::Struct | Kind::Enum)
             || entry.ecs
             || entry.plugin
             || entry.local
@@ -13172,11 +13302,13 @@ impl Inventory {
         {
             return false;
         }
-        let has_io_field = entry.field_paths.iter().any(|path| {
-            self.external_path(&entry.namespace, path, &mut BTreeSet::new())
-                .is_some_and(|resolved| Self::is_external_io_handle_path(&resolved))
-        });
-        if !has_io_field {
+        if matches!(entry.kind, Kind::Enum)
+            && (entry
+                .enum_shape
+                .as_ref()
+                .is_some_and(|shape| shape.component || shape.signal)
+                || self.enum_job(entry))
+        {
             return false;
         }
         for implementation in self.implementations(entry) {
@@ -13208,12 +13340,94 @@ impl Inventory {
         if self.native_io_adapters.borrow().is_some() {
             return;
         }
+        self.ensure_drop_guards();
+        let mut io_aliases: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for (ns, imports) in &self.imports {
+            for (alias, target) in &imports.aliases {
+                let first = target.split("::").next().unwrap_or("");
+                if first == "std"
+                    || first == "tokio"
+                    || first == "tokio_util"
+                    || Self::is_external_io_handle_path(&format!("{first}::"))
+                {
+                    io_aliases
+                        .entry(ns.as_str())
+                        .or_default()
+                        .insert(alias.as_str());
+                }
+            }
+        }
         let mut candidates = BTreeSet::new();
         let mut candidate_names = BTreeSet::new();
+        let mut wrapper_pool = Vec::new();
         for entry in self.entries.values() {
-            if self.native_io_adapter_candidate(entry) {
+            if !self.native_io_adapter_shape(entry) {
+                continue;
+            }
+            let has_io_field = entry.field_paths.iter().any(|path| {
+                self.external_path(&entry.namespace, path, &mut BTreeSet::new())
+                    .is_some_and(|resolved| Self::is_external_io_handle_path(&resolved))
+            });
+            let has_io_impl = !has_io_field
+                && self.implementations(entry).into_iter().any(|imp| {
+                    imp.production
+                        && imp.reference_paths.iter().any(|path| {
+                            let first = path.split("::").next().unwrap_or("");
+                            let plausible = first == "std"
+                                || first == "tokio"
+                                || first == "tokio_util"
+                                || Self::is_external_io_handle_path(&format!("{first}::"))
+                                || io_aliases
+                                    .get(imp.namespace.as_str())
+                                    .is_some_and(|set| set.contains(first));
+                            if !plausible {
+                                return false;
+                            }
+                            self.external_path(&imp.namespace, path, &mut BTreeSet::new())
+                                .is_some_and(|resolved| Self::is_external_io_call_path(&resolved))
+                        })
+                });
+            if has_io_field || has_io_impl {
                 candidates.insert(entry.key.clone());
                 candidate_names.insert(entry.name.clone());
+            } else {
+                wrapper_pool.push(entry.key.clone());
+            }
+        }
+        {
+            let guards = self.drop_guards.borrow();
+            let mut inner_keys = candidates.clone();
+            if let Some(guard_keys) = guards.as_ref() {
+                inner_keys.extend(guard_keys.iter().cloned());
+            }
+            let mut inner_names: BTreeSet<String> = inner_keys
+                .iter()
+                .filter_map(|key| self.entries.get(key).map(|e| e.name.clone()))
+                .collect();
+            loop {
+                let before = candidates.len();
+                for key in &wrapper_pool {
+                    if candidates.contains(key) {
+                        continue;
+                    }
+                    let entry = &self.entries[key];
+                    let wraps_io = entry.field_paths.iter().any(|path| {
+                        path.split("::")
+                            .any(|segment| inner_names.contains(segment))
+                            && self
+                                .resolve_path_or_prefix(&entry.namespace, path)
+                                .is_some_and(|target| inner_keys.contains(&target.key))
+                    });
+                    if wraps_io {
+                        candidates.insert(key.clone());
+                        candidate_names.insert(entry.name.clone());
+                        inner_keys.insert(key.clone());
+                        inner_names.insert(entry.name.clone());
+                    }
+                }
+                if candidates.len() == before {
+                    break;
+                }
             }
         }
         let mut proved = BTreeSet::new();
@@ -13237,7 +13451,6 @@ impl Inventory {
             self.ensure_renderer_graph();
             self.ensure_stateless_adapters();
             self.ensure_value_handles();
-            self.ensure_drop_guards();
             let jobs = self.job_adapters.borrow();
             let cmds = self.ecs_commands.borrow();
             let renderers = self.renderer_graph.borrow();
@@ -13245,7 +13458,7 @@ impl Inventory {
             let handles = self.value_handles.borrow();
             let guards = self.drop_guards.borrow();
             for owner in self.entries.values() {
-                if !owner.production || owner.local || owner.dynamic || owner.opaque {
+                if !owner.production || owner.local || owner.opaque {
                     continue;
                 }
                 let valid_root =
@@ -14676,14 +14889,13 @@ impl Inventory {
             return false;
         }
         let impls = self.implementations(entry);
-        let mut has_inherent = false;
+        let mut has_impl = false;
         for implementation in impls {
             if !implementation.production {
                 continue;
             }
             if implementation.plugin
                 || implementation.local
-                || implementation.dynamic
                 || implementation.opaque
                 || self.has_bevy_runtime_access(implementation)
             {
@@ -14697,11 +14909,10 @@ impl Inventory {
                 ) {
                     return false;
                 }
-            } else {
-                has_inherent = true;
             }
+            has_impl = true;
         }
-        has_inherent
+        has_impl
     }
 
     #[inline(never)]
@@ -14729,13 +14940,15 @@ impl Inventory {
             let cmds = self.ecs_commands.borrow();
             let dtos = self.serde_dtos.borrow();
             for owner in self.entries.values() {
-                if !owner.production || owner.local || owner.dynamic || owner.opaque {
+                if !owner.production || owner.local || owner.opaque {
                     continue;
                 }
                 let valid_root =
                     (owner.ecs || owner.bundle_derive.is_some() || owner.query_derive.is_some())
                         && self.used(owner)
                         || matches!(owner.kind, Kind::Function) && self.registered(owner)
+                        || self.automatic_binary_entrypoint(owner)
+                        || self.automatic_pre_world_boundary(owner)
                         || jobs.as_ref().is_some_and(|keys| keys.contains(&owner.key))
                         || renderers.as_ref().is_some_and(|(roots, helpers)| {
                             roots.contains(&owner.key) || helpers.contains(&owner.key)
@@ -15282,7 +15495,6 @@ impl Inventory {
     ) -> bool {
         if !entry.production
             || !declaration.contract
-            || declaration.projection
             || entry.local
             || entry.dynamic
             || entry.opaque
@@ -15295,17 +15507,48 @@ impl Inventory {
             return false;
         };
         let resolved = self.external_path(&entry.namespace, interface, &mut BTreeSet::new());
+        let is_value_trait = match resolved.as_deref() {
+            Some(
+                "std::fmt::Display"
+                | "core::fmt::Display"
+                | "std::fmt::Debug"
+                | "core::fmt::Debug"
+                | "std::default::Default"
+                | "core::default::Default"
+                | "std::clone::Clone"
+                | "core::clone::Clone"
+                | "std::cmp::PartialEq"
+                | "core::cmp::PartialEq"
+                | "std::cmp::Eq"
+                | "core::cmp::Eq"
+                | "std::hash::Hash"
+                | "core::hash::Hash",
+            ) => true,
+            None => {
+                matches!(
+                    interface,
+                    "Display" | "Debug" | "Default" | "Clone" | "PartialEq" | "Eq" | "Hash"
+                ) && !self.local_binding(&entry.namespace, interface)
+            }
+            _ => false,
+        };
+        if is_value_trait {
+            return true;
+        }
+        if declaration.projection {
+            return false;
+        }
         let standard = match resolved.as_deref() {
             Some(
                 "std::convert::From"
                 | "core::convert::From"
                 | "std::convert::TryFrom"
                 | "core::convert::TryFrom"
-                | "std::fmt::Display"
-                | "core::fmt::Display",
+                | "std::convert::AsRef"
+                | "core::convert::AsRef",
             ) => true,
             None => {
-                matches!(interface, "From" | "TryFrom" | "Display")
+                matches!(interface, "From" | "TryFrom" | "AsRef")
                     && !self.local_binding(&entry.namespace, interface)
             }
             _ => false,
@@ -15856,7 +16099,10 @@ impl Inventory {
     }
 
     fn test_scope(entry: &Declaration) -> bool {
-        !entry.production || entry.path.contains("/tests/")
+        !entry.production
+            || entry.path.contains("/tests/")
+            || entry.path.ends_with("/tests.rs")
+            || entry.path.ends_with("_tests.rs")
     }
 
     fn automatic_test_fixture(&self, entry: &Declaration) -> bool {
@@ -15966,6 +16212,18 @@ impl Inventory {
                 }
             }
         }
+        for entry in self.entries.values() {
+            if !Self::test_scope(entry) {
+                continue;
+            }
+            if entry.test || finalized.contains(&entry.key) {
+                for included in &entry.included_sources {
+                    if let Some(script_key) = self.resolve_included_script(&entry.path, included) {
+                        finalized.insert(script_key);
+                    }
+                }
+            }
+        }
         *self.test_fixtures.borrow_mut() = Some(finalized);
     }
 
@@ -16065,7 +16323,13 @@ impl Inventory {
         }
         matches!(
             entry.kind,
-            Kind::Struct | Kind::Enum | Kind::Function | Kind::Const | Kind::Static | Kind::Alias
+            Kind::Struct
+                | Kind::Enum
+                | Kind::Function
+                | Kind::Const
+                | Kind::Static
+                | Kind::Alias
+                | Kind::Trait
         )
     }
 
@@ -16455,6 +16719,9 @@ impl Inventory {
         if self.automatic_adapter_helper(entry) && !shape.component && !self.enum_job(entry) {
             return true;
         }
+        if self.automatic_native_io_adapter(entry) && !shape.component && !self.enum_job(entry) {
+            return true;
+        }
         if self.automatic_error_type(entry) && !shape.component && !self.enum_job(entry) {
             return true;
         }
@@ -16603,6 +16870,26 @@ impl Inventory {
             }
         }
         helpers.extend(contract_impls);
+        let mut included_scripts = BTreeSet::new();
+        for key in renderers.iter().chain(helpers.iter()) {
+            let entry = &self.entries[key];
+            let mut sources = vec![entry];
+            if matches!(entry.kind, Kind::Struct | Kind::Enum) {
+                for implementation in self.implementations(entry) {
+                    if implementation.production {
+                        sources.push(implementation);
+                    }
+                }
+            }
+            for source in sources {
+                for included in &source.included_sources {
+                    if let Some(script_key) = self.resolve_included_script(&source.path, included) {
+                        included_scripts.insert(script_key);
+                    }
+                }
+            }
+        }
+        helpers.extend(included_scripts);
         *self.renderer_graph.borrow_mut() = Some((renderers, helpers));
     }
 
@@ -23196,6 +23483,23 @@ impl<'ast> Visit<'ast> for References<'_> {
         }
         if value.path.is_ident("rsx") {
             self.renderer_tokens(value.tokens.clone());
+        } else if value.path.get_ident().is_some_and(|ident| {
+            matches!(
+                ident.to_string().as_str(),
+                "assert"
+                    | "assert_eq"
+                    | "assert_ne"
+                    | "debug_assert"
+                    | "debug_assert_eq"
+                    | "debug_assert_ne"
+            )
+        }) && let Ok(args) = Parser::parse2(
+            syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
+            value.tokens.clone(),
+        ) {
+            for expr in &args {
+                self.visit_expr(expr);
+            }
         }
         visit::visit_macro(self, value);
     }
@@ -26299,5 +26603,48 @@ fn wave12_adapter_helpers_impl_propagation_and_ui_transport_projections_prove_sa
             &mut BTreeSet::new()
         ),
         "expected unreferenced helper to stay rejected"
+    );
+}
+
+#[test]
+fn wave13_io_calls_included_scripts_contract_traits_and_test_macro_fixtures_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_macro/src/lib.rs",
+        "#[proc_macro_attribute] pub fn ui_state() {}",
+    );
+    inventory.source(
+        "crates/util/vmux_api/src/lib.rs",
+        "pub use vmux_macro::ui_state;",
+    );
+    inventory.script("crates/feature/demo/src/guest.sh", "#!/bin/sh\necho hi\n");
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; #[vmux_api::ui_state] struct DemoUi { label: String } impl Default for DemoUi { fn default() -> Self { Self { label: String::new() } } } struct Reader { root: std::path::PathBuf } impl Reader { fn read(&self) -> String { let _ = include_str!(\"guest.sh\"); std::fs::read_to_string(&self.root).unwrap_or_default() } } struct Wrapper { reader: Reader } impl Wrapper { fn load(&self) -> String { self.reader.read() } } struct PlainStore { items: Vec<String> } #[derive(Component)] struct State(u32); fn tick(states: Query<&State>) { let _ = (states, std::mem::size_of::<Wrapper>(), std::mem::size_of::<PlainStore>()); } struct DemoPlugin; impl Plugin for DemoPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, tick); } } #[cfg(test)] mod tests { struct AssertFixture; impl AssertFixture { fn ok() -> bool { true } } #[test] fn checks() { assert!(AssertFixture::ok()); } }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/feature/demo/src/lib.rs||impl:Default for DemoUi",
+        "crates/feature/demo/src/lib.rs||struct:Reader",
+        "crates/feature/demo/src/lib.rs||impl:Reader",
+        "crates/feature/demo/src/lib.rs||struct:Wrapper",
+        "crates/feature/demo/src/lib.rs||impl:Wrapper",
+        "crates/feature/demo/src/guest.sh||script",
+        "crates/feature/demo/src/lib.rs|tests|struct:AssertFixture",
+        "crates/feature/demo/src/lib.rs|tests|impl:AssertFixture",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved Wave 13 entry: {key}"
+        );
+    }
+    assert!(
+        !inventory.canonical(
+            &inventory.entries["crates/feature/demo/src/lib.rs||struct:PlainStore"],
+            &policy,
+            &mut BTreeSet::new()
+        ),
+        "expected plain store without IO calls to stay rejected"
     );
 }

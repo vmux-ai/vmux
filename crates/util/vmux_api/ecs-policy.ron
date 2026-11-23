@@ -43,7 +43,6 @@ boundaries: [
     (key: "crates/util/vmux_api/src/layout.rs||impl:std :: error :: Error for LayoutIdParseError", fingerprint: "c8be0bacc55c9223", interface: "Standard Error trait implementation for LayoutIdParseError", input: "ECS: crates/feature/vmux_layout/src/host/apply.rs||impl:Plugin for LayoutApplyPlugin", output: "external: standard Error source propagation", lifetime: "one error propagation", bounds: "standard error trait delegation only", teardown: "stateless trait impl", architecture: "ECS ownership boundaries", owner: Some("crates/util/vmux_api/src/layout.rs||enum:LayoutIdParseError")),
 ],
 values: [
-    (key: "crates/util/vmux_api/src/address.rs||struct:PageAddress", owner: "crates/util/vmux_ecs/src/page.rs||struct:AddressContribution", lifetime: "immutable address projection of one page entity until navigation or replacement"),
     (key: "crates/util/vmux_api/src/json_schema.rs||struct:JsonSchema", owner: "crates/feature/vmux_feature/src/manifest.rs||struct:Tool", lifetime: "Immutable validated JSON schema declaration owned by its canonical feature tool manifest."),
 ],
 shape: (
