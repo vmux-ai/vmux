@@ -131,7 +131,6 @@ values: [
     (key: "crates/util/vmux_browser/src/state.rs||struct:PageStateRemovalChanges", owner: "crates/util/vmux_browser/src/state.rs||struct:PageStateRemovals", lifetime: "one borrowed removal notification batch of the registered dirty-state receiver"),
     (key: "crates/util/vmux_browser/src/state.rs||struct:BookmarkFolders", owner: "crates/util/vmux_browser/src/state.rs||struct:BookmarkRows", lifetime: "one transient folder-choice projection from canonical bookmark entities"),
     (key: "crates/util/vmux_browser/src/state.rs||alias:PageProjectionChanged", owner: "crates/util/vmux_browser/src/state.rs||struct:StateChanges", lifetime: "Borrowed canonical page/layout/bookmark change filter of the registered StateChanges capability for one synchronous projection invocation"),
-    (key: "crates/util/vmux_browser/src/state.rs||alias:LayoutGeometryChanged", owner: "crates/util/vmux_browser/src/state.rs||struct:LayoutGeometryChanges", lifetime: "Borrowed canonical geometry change filter of the registered layout geometry capability for one system invocation"),
 ],
 shape: (
   enums: [

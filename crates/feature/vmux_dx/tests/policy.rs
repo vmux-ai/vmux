@@ -13591,9 +13591,40 @@ impl Inventory {
         }
     }
 
+    fn is_primitive_scalar(ty: &Type) -> bool {
+        match ty {
+            Type::Path(path) if path.qself.is_none() && path.path.segments.len() == 1 => {
+                let ident = path.path.segments[0].ident.to_string();
+                matches!(
+                    ident.as_str(),
+                    "bool"
+                        | "char"
+                        | "i8"
+                        | "i16"
+                        | "i32"
+                        | "i64"
+                        | "i128"
+                        | "isize"
+                        | "u8"
+                        | "u16"
+                        | "u32"
+                        | "u64"
+                        | "u128"
+                        | "usize"
+                        | "f32"
+                        | "f64"
+                )
+            }
+            Type::Paren(inner) => Self::is_primitive_scalar(&inner.elem),
+            Type::Group(inner) => Self::is_primitive_scalar(&inner.elem),
+            Type::Tuple(tuple) => tuple.elems.iter().all(Self::is_primitive_scalar),
+            _ => false,
+        }
+    }
+
     fn value_handle_candidate(&self, entry: &Declaration) -> bool {
         if !entry.production
-            || !matches!(entry.kind, Kind::Struct)
+            || !matches!(entry.kind, Kind::Struct | Kind::Enum)
             || entry.ecs
             || entry.plugin
             || entry.local
@@ -13611,10 +13642,6 @@ impl Inventory {
         {
             return false;
         }
-        let has_lifetime = matches!(
-            &entry.syntax,
-            Some(Item::Struct(structure)) if structure.generics.lifetimes().next().is_some()
-        ) && entry.field_types.iter().any(Self::type_has_direct_borrow);
         let derives_copy = entry.derive_paths.iter().any(|path| {
             match self
                 .external_path(&entry.namespace, path, &mut BTreeSet::new())
@@ -13625,8 +13652,25 @@ impl Inventory {
                 _ => false,
             }
         });
-        if !has_lifetime && !derives_copy {
-            return false;
+        if matches!(entry.kind, Kind::Enum) {
+            let valid_enum = derives_copy
+                && entry
+                    .enum_shape
+                    .as_ref()
+                    .is_some_and(|shape| !shape.component && !shape.signal)
+                && !self.enum_job(entry)
+                && entry.field_types.iter().all(Self::is_primitive_scalar);
+            if !valid_enum {
+                return false;
+            }
+        } else {
+            let has_lifetime = matches!(
+                &entry.syntax,
+                Some(Item::Struct(structure)) if structure.generics.lifetimes().next().is_some()
+            ) && entry.field_types.iter().any(Self::type_has_direct_borrow);
+            if !has_lifetime && !derives_copy {
+                return false;
+            }
         }
         for implementation in self.implementations(entry) {
             if !implementation.production {
@@ -14409,6 +14453,44 @@ impl Inventory {
             .is_some_and(|keys| keys.contains(&entry.key))
     }
 
+    fn serde_dto_forbidden_field(&self, entry: &Declaration) -> bool {
+        for path in &entry.field_paths {
+            let tail = path.rsplit("::").next().unwrap_or(path);
+            let forbidden_name = matches!(
+                tail,
+                "Mutex"
+                    | "RwLock"
+                    | "OnceLock"
+                    | "LazyLock"
+                    | "RefCell"
+                    | "AtomicBool"
+                    | "AtomicU8"
+                    | "AtomicU16"
+                    | "AtomicU32"
+                    | "AtomicU64"
+                    | "AtomicUsize"
+                    | "AtomicI8"
+                    | "AtomicI16"
+                    | "AtomicI32"
+                    | "AtomicI64"
+                    | "AtomicIsize"
+                    | "AtomicPtr"
+            );
+            if forbidden_name {
+                return true;
+            }
+            if let Some(field) = self.resolve(&entry.namespace, path, &mut BTreeSet::new()) {
+                if field.key == entry.key {
+                    continue;
+                }
+                if !field.production || field.local || field.dynamic || field.opaque {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn serde_dto_candidate(&self, entry: &Declaration) -> bool {
         if !entry.production
             || !matches!(entry.kind, Kind::Struct | Kind::Enum)
@@ -14420,7 +14502,7 @@ impl Inventory {
             || entry.bundle_derive.is_some()
             || entry.query_derive.is_some()
             || self.has_bevy_runtime_access(entry)
-            || self.renderer_helper_forbidden_field(entry)
+            || self.serde_dto_forbidden_field(entry)
         {
             return false;
         }
@@ -14443,6 +14525,9 @@ impl Inventory {
                                 | "serde::Serialize"
                                 | "serde_derive::Deserialize"
                                 | "serde_derive::Serialize"
+                                | "rkyv::Archive"
+                                | "rkyv::Serialize"
+                                | "rkyv::Deserialize"
                         )
                     })
             });
@@ -15677,6 +15762,9 @@ impl Inventory {
             }
         }
         if self.automatic_serde_dto(entry) && !shape.component && !self.enum_job(entry) {
+            return true;
+        }
+        if self.automatic_value_handle(entry) && !shape.component && !self.enum_job(entry) {
             return true;
         }
         if self.automatic_error_type(entry) && !shape.component && !self.enum_job(entry) {
@@ -25405,4 +25493,37 @@ fn wave10_cross_crate_dtos_renderer_helpers_and_timer_plugins_prove_safely() {
             "expected proved Wave 10 entry: {key}"
         );
     }
+}
+
+#[test]
+fn wave11_rkyv_dtos_copy_scalar_enums_and_map_serde_fields_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_api/src/lib.rs",
+        "use serde::{Deserialize, Serialize}; use std::collections::BTreeMap; #[derive(Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)] pub enum WireFrame { Ping, Data(Vec<u8>) } #[derive(Clone, Deserialize, Serialize)] pub struct MapSettings { pub entries: BTreeMap<String, String> }",
+    );
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use vmux_api::{MapSettings, WireFrame}; #[derive(Clone, Copy)] enum UnitVal { Auto, Px(f32) } #[derive(Component)] struct Holder { val: UnitVal, frame: Option<WireFrame>, cfg: MapSettings } fn run(holders: Query<&Holder>) { let _ = holders; } struct DemoPlugin; impl Plugin for DemoPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, run); } }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/util/vmux_api/src/lib.rs||enum:WireFrame",
+        "crates/util/vmux_api/src/lib.rs||struct:MapSettings",
+        "crates/feature/demo/src/lib.rs||enum:UnitVal",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved Wave 11 entry: {key}"
+        );
+    }
+    assert!(inventory.automatic_enum_purpose(
+        &inventory.entries["crates/util/vmux_api/src/lib.rs||enum:WireFrame"],
+        &policy
+    ));
+    assert!(inventory.automatic_enum_purpose(
+        &inventory.entries["crates/feature/demo/src/lib.rs||enum:UnitVal"],
+        &policy
+    ));
 }

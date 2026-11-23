@@ -96,11 +96,9 @@ values: [
     (key: "crates/app/vmux_desktop/src/capture_output.rs||struct:ResolvedCapture", owner: "crates/app/vmux_desktop/src/recording/lifecycle.rs||struct:Source", lifetime: "one accepted recording source geometry observation; no mutation authority or independent registry"),
     (key: "crates/app/vmux_desktop/src/permission.rs||enum:Resolution", owner: "crates/app/vmux_desktop/src/permission.rs||struct:MediaPermissionStore", lifetime: "one canonical permission evaluation before bounded native prompting"),
     (key: "crates/app/vmux_desktop/src/updater.rs||struct:UpdateProgress", owner: "crates/app/vmux_desktop/src/updater.rs||struct:UpdateChecker", lifetime: "one bounded download/install progress message from UpdateCheckJob to UpdateChecker"),
-    (key: "crates/app/vmux_desktop/src/updater.rs||enum:UpdateStage", owner: "crates/app/vmux_desktop/src/updater.rs||struct:UpdateProgress", lifetime: "one download/install progress stage reported by UpdateCheckJob"),
 ],
 shape: (
   enums: [
-    (key: "crates/app/vmux_desktop/src/updater.rs||enum:UpdateStage", fingerprint: "f4fc3bb77f21c002", role: Boundary, owner: "crates/app/vmux_desktop/src/updater.rs||impl:UpdateCheckJob", reason: "Fieldless Downloading/Installing progress stage reported by UpdateCheckJob into UpdateChecker"),
 ],
   bodies: [
     (key: "crates/app/vmux_desktop/src/splash.rs||impl:SplashState::show", fingerprint: "7a5dbd283588e3da", boundary: "crates/app/vmux_desktop/src/splash.rs||impl:SplashState", reason: "105 token-line mechanical AppKit creation of one panel with fixed backdrop, product title, spinner and canonical status label; admission, readiness and timeout policy remain in registered boot systems; native drain and Drop retain and close all handles"),

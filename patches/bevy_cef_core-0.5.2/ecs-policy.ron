@@ -57,7 +57,6 @@ boundaries: [
     (key: "patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs|impl Browsers|static:CLASS", fingerprint: "a141e1b8cf8e02ef", interface: "OnceLock caching registered VmuxFloatingSurfacePanel Objective-C AnyClass pointer", input: "ECS: crates/util/vmux_browser/src/layout_placement.rs||struct:Placement", output: "external: immutable Objective-C AnyClass reference", lifetime: "process Objective-C runtime", bounds: "registered once via ClassBuilder and read-only thereafter", teardown: "Objective-C runtime", architecture: "ECS ownership boundaries", owner: Some("patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs||impl:Browsers")),
 ],
 values: [
-    (key: "patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs||enum:PointerButton", owner: "crates/util/vmux_browser/src/input.rs||enum:PointerEffect", lifetime: "immutable CEF button encoding of one accepted canonical pointer dispatch effect"),
 ],
 shape: (
 enums: [
