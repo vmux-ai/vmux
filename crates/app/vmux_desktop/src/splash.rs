@@ -41,6 +41,50 @@ struct SplashState {
 }
 
 impl SplashState {
+    fn build_panel(mtm: MainThreadMarker, frame: NSRect) -> Retained<NSPanel> {
+        let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
+            NSPanel::alloc(mtm),
+            frame,
+            NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel,
+            NSBackingStoreType::Buffered,
+            false,
+        );
+        let window: &NSWindow = panel.as_super();
+        window.setOpaque(false);
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
+        window.setHasShadow(true);
+        unsafe { window.setReleasedWhenClosed(false) };
+        panel.setBecomesKeyOnlyIfNeeded(true);
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::FullScreenAuxiliary
+                | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+        panel
+    }
+
+    fn attach_backdrop(mtm: MainThreadMarker, container: &NSView, bounds: NSRect) {
+        let resize = NSAutoresizingMaskOptions::ViewWidthSizable
+            | NSAutoresizingMaskOptions::ViewHeightSizable;
+        if AnyClass::get(c"NSGlassEffectView").is_some() {
+            let glass = NSGlassEffectView::new(mtm);
+            glass.setStyle(NSGlassEffectViewStyle::Clear);
+            glass.setTintColor(Some(&NSColor::clearColor()));
+            let view: &NSView = &glass;
+            view.setFrame(bounds);
+            view.setAutoresizingMask(resize);
+            container.addSubview(view);
+        } else {
+            let blur = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(mtm), bounds);
+            blur.setMaterial(NSVisualEffectMaterial::HUDWindow);
+            blur.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+            blur.setState(NSVisualEffectState::Active);
+            let view: &NSView = &blur;
+            view.setAutoresizingMask(resize);
+            container.addSubview(view);
+        }
+    }
+
     fn show(&mut self, owner: Entity, boot: &SplashStatus, pages: &PageCounts) -> bool {
         if self.window.is_some() {
             return false;
@@ -63,53 +107,17 @@ impl SplashState {
             NSSize::new(W, H),
         );
 
-        let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
-            NSPanel::alloc(mtm),
-            frame,
-            NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel,
-            NSBackingStoreType::Buffered,
-            false,
-        );
+        let panel = Self::build_panel(mtm, frame);
         let window: &NSWindow = panel.as_super();
-        window.setOpaque(false);
-        window.setBackgroundColor(Some(&NSColor::clearColor()));
-        window.setHasShadow(true);
-        unsafe { window.setReleasedWhenClosed(false) };
-        panel.setBecomesKeyOnlyIfNeeded(true);
-        window.setCollectionBehavior(
-            NSWindowCollectionBehavior::CanJoinAllSpaces
-                | NSWindowCollectionBehavior::FullScreenAuxiliary
-                | NSWindowCollectionBehavior::IgnoresCycle,
-        );
 
         let bounds = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(W, H));
-        let resize = NSAutoresizingMaskOptions::ViewWidthSizable
-            | NSAutoresizingMaskOptions::ViewHeightSizable;
-
         let container = NSView::initWithFrame(NSView::alloc(mtm), bounds);
         container.setWantsLayer(true);
         if let Some(layer) = container.layer() {
             layer.setCornerRadius(20.0);
             layer.setMasksToBounds(true);
         }
-
-        if AnyClass::get(c"NSGlassEffectView").is_some() {
-            let glass = NSGlassEffectView::new(mtm);
-            glass.setStyle(NSGlassEffectViewStyle::Clear);
-            glass.setTintColor(Some(&NSColor::clearColor()));
-            let view: &NSView = &glass;
-            view.setFrame(bounds);
-            view.setAutoresizingMask(resize);
-            container.addSubview(view);
-        } else {
-            let blur = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(mtm), bounds);
-            blur.setMaterial(NSVisualEffectMaterial::HUDWindow);
-            blur.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-            blur.setState(NSVisualEffectState::Active);
-            let view: &NSView = &blur;
-            view.setAutoresizingMask(resize);
-            container.addSubview(view);
-        }
+        Self::attach_backdrop(mtm, &container, bounds);
 
         const TITLE_H: f64 = 40.0;
         let title =
