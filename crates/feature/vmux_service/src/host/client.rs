@@ -10,8 +10,6 @@ use super::supervisor::{RunningDaemon, ServiceRuntimeFiles};
 #[derive(Component)]
 pub(super) struct ServiceClient(pub(super) ServiceHandle);
 
-const MAX_SERVICE_MESSAGES_PER_DRAIN: usize = 128;
-
 pub(super) struct ServiceDrain {
     pub(super) messages: Vec<ServiceMessage>,
     pub(super) disconnected: bool,
@@ -84,6 +82,8 @@ impl ServiceNotifier {
 
 #[allow(clippy::result_large_err)]
 impl ServiceHandle {
+    const MAX_MESSAGES_PER_DRAIN: usize = 128;
+
     pub(super) fn connect(wake: Option<ServiceWake>) -> Option<Self> {
         if !Self::service_running() {
             return None;
@@ -260,8 +260,8 @@ impl ServiceHandle {
 
 impl ServiceDrain {
     fn read(rx: &std::sync::mpsc::Receiver<ServiceMessage>, disconnected: bool) -> Self {
-        let mut messages = Vec::with_capacity(MAX_SERVICE_MESSAGES_PER_DRAIN);
-        for _ in 0..MAX_SERVICE_MESSAGES_PER_DRAIN {
+        let mut messages = Vec::with_capacity(ServiceHandle::MAX_MESSAGES_PER_DRAIN);
+        for _ in 0..ServiceHandle::MAX_MESSAGES_PER_DRAIN {
             let Ok(message) = rx.try_recv() else {
                 return Self {
                     messages,
@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn service_message_drain_leaves_excess_messages_for_later_frames() {
         let (tx, rx) = std::sync::mpsc::channel();
-        for _ in 0..=MAX_SERVICE_MESSAGES_PER_DRAIN {
+        for _ in 0..=ServiceHandle::MAX_MESSAGES_PER_DRAIN {
             tx.send(ServiceMessage::ProcessList {
                 processes: Vec::new(),
             })
@@ -346,7 +346,10 @@ mod tests {
 
         let drained = ServiceDrain::read(&rx, false);
 
-        assert_eq!(drained.messages.len(), MAX_SERVICE_MESSAGES_PER_DRAIN);
+        assert_eq!(
+            drained.messages.len(),
+            ServiceHandle::MAX_MESSAGES_PER_DRAIN
+        );
         assert!(
             drained.capped,
             "hitting the cap must report capped so the caller re-wakes"

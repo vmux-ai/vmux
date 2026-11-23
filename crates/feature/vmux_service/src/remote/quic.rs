@@ -16,10 +16,6 @@ use vmux_transport::quic::{
 };
 use vmux_transport::service::RemoteDriver;
 
-const AUTHORIZATION_POLL: Duration = Duration::from_secs(1);
-
-const MAX_HELLO_BYTES: usize = 16 * 1024;
-
 #[derive(Clone, bevy_ecs::prelude::Component)]
 #[component(immutable)]
 pub(crate) struct RemoteState {
@@ -244,10 +240,6 @@ impl ActiveAuthorization {
     }
 }
 
-const SETUP: FrameStream = FrameStream::new(MAX_HELLO_BYTES);
-
-const CONTROL: FrameStream = FrameStream::new(MAX_REQUEST_BYTES);
-
 struct RemoteConnection {
     connection: quinn::Connection,
     state: RemoteState,
@@ -255,6 +247,12 @@ struct RemoteConnection {
 }
 
 impl RemoteConnection {
+    const AUTHORIZATION_POLL: Duration = Duration::from_secs(1);
+    const MAX_HELLO_BYTES: usize = 16 * 1024;
+    const MAX_REQUEST_BYTES: usize = (RECEIVE_WINDOW / 8) as usize;
+    const SETUP: FrameStream = FrameStream::new(Self::MAX_HELLO_BYTES);
+    const CONTROL: FrameStream = FrameStream::new(Self::MAX_REQUEST_BYTES);
+
     fn new(
         connection: quinn::Connection,
         state: RemoteState,
@@ -316,14 +314,14 @@ impl RemoteConnection {
                 .close(CloseCode::ProtocolError.as_u32().into(), b"setup");
             return;
         };
-        if SETUP.open(&mut send, &frame).await.is_err() || send.finish().is_err() {
+        if Self::SETUP.open(&mut send, &frame).await.is_err() || send.finish().is_err() {
             return;
         }
         let _session = self
             .state
             .sessions
             .open(self.connection.stable_id(), authorization.client_id.clone());
-        let mut authorization_poll = tokio::time::interval(AUTHORIZATION_POLL);
+        let mut authorization_poll = tokio::time::interval(Self::AUTHORIZATION_POLL);
         authorization_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         authorization_poll.tick().await;
         let mut streams = tokio::task::JoinSet::new();
@@ -363,7 +361,7 @@ impl RemoteConnection {
     }
 
     async fn read_setup(stream: &mut quinn::RecvStream) -> Result<ClientSetup, Rejection> {
-        match SETUP.accept(stream).await {
+        match Self::SETUP.accept(stream).await {
             Ok(frame) => frame
                 .read_json::<ClientSetup>(MessageType::CLIENT_SETUP)
                 .map_err(Rejection::from),
@@ -371,8 +369,6 @@ impl RemoteConnection {
         }
     }
 }
-
-const MAX_REQUEST_BYTES: usize = (RECEIVE_WINDOW / 8) as usize;
 
 struct ControlStream {
     send: quinn::SendStream,
@@ -385,7 +381,7 @@ impl ControlStream {
     }
 
     async fn dispatch(mut self, state: RemoteState) {
-        let frame = match CONTROL.accept(&mut self.recv).await {
+        let frame = match RemoteConnection::CONTROL.accept(&mut self.recv).await {
             Ok(frame) => frame,
             Err(error) => {
                 self.refuse(Rejection::from(error));
@@ -424,7 +420,11 @@ impl ControlStream {
             return;
         };
         let frame = Frame::new(MessageType::CONTROL_RESPONSE, encoded.to_vec());
-        if CONTROL.open(&mut self.send, &frame).await.is_ok() {
+        if RemoteConnection::CONTROL
+            .open(&mut self.send, &frame)
+            .await
+            .is_ok()
+        {
             let _ = self.send.finish();
         }
     }
@@ -512,10 +512,10 @@ impl SessionEventWriter {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(event).map_err(|_| ())?;
         let frame = Frame::new(MessageType::SESSION_EVENT, bytes.to_vec());
         let written = if self.opened {
-            CONTROL.send(&mut self.send, &frame).await
+            RemoteConnection::CONTROL.send(&mut self.send, &frame).await
         } else {
             self.opened = true;
-            CONTROL.open(&mut self.send, &frame).await
+            RemoteConnection::CONTROL.open(&mut self.send, &frame).await
         };
         written.map_err(|_| ())
     }
@@ -785,10 +785,13 @@ pub(crate) mod live {
                 credential,
             };
             let frame = Frame::json(MessageType::CLIENT_SETUP, &setup).expect("encode");
-            SETUP.open(&mut send, &frame).await.expect("write setup");
+            RemoteConnection::SETUP
+                .open(&mut send, &frame)
+                .await
+                .expect("write setup");
             send.finish().expect("finish setup");
 
-            match SETUP.accept(&mut recv).await {
+            match RemoteConnection::SETUP.accept(&mut recv).await {
                 Ok(frame) => {
                     let accepted = frame
                         .read_json::<SessionAccepted>(MessageType::SESSION_ACCEPTED)
@@ -815,13 +818,16 @@ pub(crate) mod live {
         let (mut send, mut recv) = connection.open_bi().await.expect("control stream");
         let body = rkyv::to_bytes::<rkyv::rancor::Error>(&message).expect("encode");
         let frame = Frame::new(MessageType::CONTROL_REQUEST, body.to_vec());
-        CONTROL
+        RemoteConnection::CONTROL
             .open(&mut send, &frame)
             .await
             .expect("write request");
         send.finish().expect("finish request");
 
-        let answer = CONTROL.accept(&mut recv).await.expect("response");
+        let answer = RemoteConnection::CONTROL
+            .accept(&mut recv)
+            .await
+            .expect("response");
         let body = answer
             .body_of(MessageType::CONTROL_RESPONSE)
             .expect("a control stream answers with a control response");
@@ -829,7 +835,7 @@ pub(crate) mod live {
     }
 
     async fn read_event(recv: &mut quinn::RecvStream) -> Option<SharedEvent> {
-        let frame = CONTROL.accept(recv).await.ok()?;
+        let frame = RemoteConnection::CONTROL.accept(recv).await.ok()?;
         let body = frame.body_of(MessageType::SESSION_EVENT).ok()?;
         rkyv::from_bytes::<SharedEvent, rkyv::rancor::Error>(body).ok()
     }
@@ -922,7 +928,7 @@ pub(crate) mod live {
             sid: "ghost".into(),
         })
         .expect("encode");
-        CONTROL
+        RemoteConnection::CONTROL
             .open(
                 &mut send,
                 &Frame::new(MessageType::SESSION_EVENTS, body.to_vec()),
@@ -952,7 +958,7 @@ pub(crate) mod live {
         let body = rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::ListSessions)
             .expect("encode")
             .to_vec();
-        CONTROL
+        RemoteConnection::CONTROL
             .open(&mut send, &Frame::new(MessageType(0x0999), body))
             .await
             .expect("write");

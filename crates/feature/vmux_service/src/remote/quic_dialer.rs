@@ -13,10 +13,6 @@ use super::quic::RemoteState;
 use crate::RemotePaths;
 use crate::pairing::Relay;
 
-const MIN_INNER_MTU: usize = 1200;
-
-const TUNNEL_OVERHEAD: usize = 64;
-
 impl RemoteState {
     pub(crate) async fn dial(self, liveness: watch::Receiver<bool>) {
         RegisteredDevice::release_stale();
@@ -53,6 +49,10 @@ struct Registration {
 }
 
 impl Registration {
+    const MIN_INNER_MTU: usize = 1200;
+    const TUNNEL_OVERHEAD: usize = 64;
+    const SETUP: FrameStream = FrameStream::new(16 * 1024);
+
     async fn hold(state: &RemoteState, liveness: &watch::Receiver<bool>) -> SessionEnd {
         let identity = match super::quic::IdentityStore::current().load_or_create() {
             Ok(identity) => identity,
@@ -106,10 +106,10 @@ impl Registration {
         let Some(budget) = socket.usable_mtu() else {
             return self.ended("the relay refused datagrams, so no packet can be tunnelled");
         };
-        if budget < MIN_INNER_MTU + TUNNEL_OVERHEAD {
+        if budget < Self::MIN_INNER_MTU + Self::TUNNEL_OVERHEAD {
             return self.ended(format!(
                 "the path to the relay carries {budget} bytes, below the {} a QUIC handshake needs",
-                MIN_INNER_MTU + TUNNEL_OVERHEAD
+                Self::MIN_INNER_MTU + Self::TUNNEL_OVERHEAD
             ));
         }
         let inner = match super::quic::InnerEndpoint::open(socket, identity) {
@@ -152,13 +152,13 @@ impl Registration {
         };
         let frame = Frame::json(MessageType::RELAY_SETUP, &setup)
             .map_err(|error| format!("encode setup: {error}"))?;
-        SETUP
+        Self::SETUP
             .open(&mut send, &frame)
             .await
             .map_err(|error| format!("write setup: {error}"))?;
         send.finish().map_err(|error| format!("finish: {error}"))?;
 
-        SETUP
+        Self::SETUP
             .accept(&mut recv)
             .await
             .map_err(|error| format!("read acceptance: {error:?}"))?
@@ -269,8 +269,6 @@ impl Drop for RegisteredDevice {
         Self::remove(&self.path);
     }
 }
-
-const SETUP: FrameStream = FrameStream::new(16 * 1024);
 
 #[cfg(test)]
 mod tests {

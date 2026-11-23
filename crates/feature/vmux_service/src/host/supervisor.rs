@@ -1,8 +1,5 @@
 use std::time::{Duration, Instant};
 
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
-const SIGTERM_GRACE: Duration = Duration::from_millis(500);
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReplaceOutcome {
     GracefulShutdown,
@@ -14,6 +11,9 @@ pub enum ReplaceOutcome {
 pub(crate) struct RunningDaemon(i32);
 
 impl RunningDaemon {
+    const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+    const SIGTERM_GRACE: Duration = Duration::from_millis(500);
+
     pub(crate) fn new(pid: i32) -> Self {
         Self(pid)
     }
@@ -53,14 +53,14 @@ impl RunningDaemon {
             return ReplaceOutcome::AlreadyDead;
         }
 
-        if send_shutdown().is_ok() && self.wait_for_exit(Instant::now() + SHUTDOWN_GRACE) {
+        if send_shutdown().is_ok() && self.wait_for_exit(Instant::now() + Self::SHUTDOWN_GRACE) {
             tracing::info!(pid = self.0, "old daemon exited via Shutdown handshake");
             return ReplaceOutcome::GracefulShutdown;
         }
 
         tracing::warn!(pid = self.0, "Shutdown timed out, escalating to SIGTERM");
         let _ = self.signal(libc::SIGTERM);
-        if self.wait_for_exit(Instant::now() + SIGTERM_GRACE) {
+        if self.wait_for_exit(Instant::now() + Self::SIGTERM_GRACE) {
             return ReplaceOutcome::SigtermExit;
         }
 
@@ -96,22 +96,24 @@ mod tests {
         assert_eq!(outcome, ReplaceOutcome::AlreadyDead);
     }
 
-    fn start_and_detach() -> i32 {
-        let child = std::process::Command::new("sleep")
-            .arg("60")
-            .spawn()
-            .expect("spawn sleep");
-        let pid = child.id() as i32;
-        std::thread::spawn(move || {
-            let mut c = child;
-            let _ = c.wait();
-        });
-        pid
+    impl RunningDaemon {
+        fn spawn_test_sleep() -> i32 {
+            let child = std::process::Command::new("sleep")
+                .arg("60")
+                .spawn()
+                .expect("spawn sleep");
+            let pid = child.id() as i32;
+            std::thread::spawn(move || {
+                let mut c = child;
+                let _ = c.wait();
+            });
+            pid
+        }
     }
 
     #[test]
     fn graceful_shutdown_when_send_succeeds_and_pid_exits() {
-        let pid = start_and_detach();
+        let pid = RunningDaemon::spawn_test_sleep();
 
         let outcome = RunningDaemon::new(pid).replace(|| {
             unsafe { libc::kill(pid, libc::SIGTERM) };
@@ -122,7 +124,7 @@ mod tests {
 
     #[test]
     fn escalates_to_sigterm_when_shutdown_send_fails() {
-        let pid = start_and_detach();
+        let pid = RunningDaemon::spawn_test_sleep();
 
         let outcome = RunningDaemon::new(pid).replace(|| {
             Err(std::io::Error::new(
