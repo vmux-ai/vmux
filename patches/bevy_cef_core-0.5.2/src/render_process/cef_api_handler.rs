@@ -2,7 +2,7 @@ use crate::prelude::{
     PROCESS_MESSAGE_BIN_JS_EMIT, PROCESS_MESSAGE_HISTORY_SWIPE, PROCESS_MESSAGE_JS_EMIT,
 };
 use crate::render_process::render_process_handler::{
-    BinDocumentIdentity, current_bin_ipc_epoch, register_render_listener,
+    BinDocumentIdentity, RenderBrowserRegistry, current_bin_ipc_epoch,
 };
 use crate::util::{IntoString, v8_value_to_json};
 use cef::rc::{Rc, RcImpl};
@@ -254,7 +254,7 @@ impl CefApiHandler {
             && let Some(browser) = context.browser()
             && let Some(token) = BinDocumentIdentity::current_token(&context)
         {
-            register_render_listener(
+            RenderBrowserRegistry::register_listener(
                 browser.identifier(),
                 token,
                 id.string_value().into_string(),

@@ -12,7 +12,7 @@ use cef::{
     register_extension, sys, v8_value_create_array_buffer_with_copy, v8_value_create_object,
     v8_value_create_string,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::os::raw::c_int;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -35,26 +35,46 @@ if (!cef) cef = {};
 "#;
 
 const MAX_LISTENERS_PER_CHANNEL: usize = 64;
+const MAX_CHANNELS_PER_BROWSER: usize = 256;
 
 struct InitScript {
     source: String,
     url: String,
 }
 
-#[derive(Default)]
-struct RenderBrowserState {
+struct RenderBrowserState<T = V8Value> {
     surface_generation: Option<u64>,
     ipc_epoch: Option<u64>,
     init_script: Option<InitScript>,
-    listeners: HashMap<(String, String), Vec<V8Value>>,
+    listeners: HashMap<(String, String), Vec<T>>,
+    channel_order: VecDeque<(String, String)>,
 }
 
-#[derive(Default)]
-struct RenderBrowserRegistry {
-    browsers: HashMap<c_int, RenderBrowserState>,
+impl<T> Default for RenderBrowserState<T> {
+    fn default() -> Self {
+        Self {
+            surface_generation: None,
+            ipc_epoch: None,
+            init_script: None,
+            listeners: HashMap::new(),
+            channel_order: VecDeque::new(),
+        }
+    }
 }
 
-impl RenderBrowserRegistry {
+pub(crate) struct RenderBrowserRegistry<T = V8Value> {
+    browsers: HashMap<c_int, RenderBrowserState<T>>,
+}
+
+impl<T> Default for RenderBrowserRegistry<T> {
+    fn default() -> Self {
+        Self {
+            browsers: HashMap::new(),
+        }
+    }
+}
+
+impl<T: Clone> RenderBrowserRegistry<T> {
     fn register_browser(
         &mut self,
         browser_id: c_int,
@@ -69,6 +89,7 @@ impl RenderBrowserRegistry {
                 ipc_epoch,
                 init_script,
                 listeners: HashMap::new(),
+                channel_order: VecDeque::new(),
             },
         );
     }
@@ -94,16 +115,26 @@ impl RenderBrowserRegistry {
         should_inject_init_script(&script.url, frame_url, is_main).then(|| script.source.clone())
     }
 
-    fn add_listener(&mut self, browser_id: c_int, token: String, id: String, callback: V8Value) {
+    fn add_listener(&mut self, browser_id: c_int, token: String, id: String, callback: T) {
         let state = self.browsers.entry(browser_id).or_default();
-        let entry = state.listeners.entry((token, id)).or_default();
+        let key = (token, id);
+        if !state.listeners.contains_key(&key) {
+            while state.listeners.len() >= MAX_CHANNELS_PER_BROWSER {
+                let Some(oldest) = state.channel_order.pop_front() else {
+                    break;
+                };
+                state.listeners.remove(&oldest);
+            }
+            state.channel_order.push_back(key.clone());
+        }
+        let entry = state.listeners.entry(key).or_default();
         if entry.len() >= MAX_LISTENERS_PER_CHANNEL {
             entry.remove(0);
         }
         entry.push(callback);
     }
 
-    fn listeners(&self, browser_id: c_int, token: &str, id: &str) -> Option<Vec<V8Value>> {
+    fn listeners(&self, browser_id: c_int, token: &str, id: &str) -> Option<Vec<T>> {
         self.browsers
             .get(&browser_id)?
             .listeners
@@ -116,6 +147,9 @@ impl RenderBrowserRegistry {
             state
                 .listeners
                 .retain(|(registered_token, _), _| registered_token != token);
+            state
+                .channel_order
+                .retain(|(registered_token, _)| registered_token != token);
         }
     }
 
@@ -124,21 +158,23 @@ impl RenderBrowserRegistry {
     }
 }
 
+impl RenderBrowserRegistry {
+    pub(crate) fn register_listener(
+        browser_id: c_int,
+        token: String,
+        id: String,
+        callback: V8Value,
+    ) {
+        if let Ok(mut registry) = RENDER_BROWSERS.lock() {
+            registry.add_listener(browser_id, token, id, callback);
+        }
+    }
+}
+
 static RENDER_BROWSERS: LazyLock<Mutex<RenderBrowserRegistry>> =
     LazyLock::new(|| Mutex::new(RenderBrowserRegistry::default()));
 
 static NEXT_BIN_DOCUMENT_REVISION: AtomicU64 = AtomicU64::new(0);
-
-pub(crate) fn register_render_listener(
-    browser_id: c_int,
-    token: String,
-    id: String,
-    callback: V8Value,
-) {
-    if let Ok(mut registry) = RENDER_BROWSERS.lock() {
-        registry.add_listener(browser_id, token, id, callback);
-    }
-}
 pub const INIT_SCRIPT_KEY: &str = "init_script";
 pub const INIT_SCRIPT_URL_KEY: &str = "init_script_url";
 pub const BIN_IPC_SURFACE_GENERATION_KEY: &str = "bin_ipc_surface_generation";
@@ -295,6 +331,20 @@ impl RenderProcessHandlerBuilder {
             object: core::ptr::null_mut(),
         }
     }
+
+    fn load_embedded_config_from_command_line() -> Option<crate::util::CefEmbeddedPageConfig> {
+        let cmd_line = command_line_get_global()?;
+        if cmd_line.has_switch(Some(&crate::util::EMBEDDED_CONFIG_SWITCH.into())) == 0 {
+            return None;
+        }
+        let json = cmd_line
+            .switch_value(Some(&crate::util::EMBEDDED_CONFIG_SWITCH.into()))
+            .into_string();
+        if json.is_empty() {
+            return None;
+        }
+        serde_json::from_str::<crate::util::CefEmbeddedPageConfig>(&json).ok()
+    }
 }
 
 impl WrapRenderProcessHandler for RenderProcessHandlerBuilder {
@@ -325,7 +375,7 @@ impl Clone for RenderProcessHandlerBuilder {
 
 impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
     fn on_web_kit_initialized(&self) {
-        if let Some(config) = load_embedded_config_from_command_line() {
+        if let Some(config) = Self::load_embedded_config_from_command_line() {
             let config: crate::util::CefEmbeddedPageConfig = config;
             crate::util::try_set_cef_embedded_page_config(config);
         }
@@ -503,7 +553,7 @@ fn should_inject_init_script(expected_url: &str, frame_url: &str, is_main: bool)
 
 #[cfg(test)]
 mod tests {
-    use super::should_inject_init_script;
+    use super::{MAX_CHANNELS_PER_BROWSER, RenderBrowserRegistry, should_inject_init_script};
 
     #[test]
     fn init_script_is_scoped_to_initial_main_frame() {
@@ -515,6 +565,27 @@ mod tests {
             "https://example.com/",
             true
         ));
+    }
+
+    #[test]
+    fn render_browser_registry_bounds_distinct_channels_and_releases_context_budget() {
+        let mut registry = RenderBrowserRegistry::<usize>::default();
+        for idx in 0..(MAX_CHANNELS_PER_BROWSER + 5) {
+            registry.add_listener(1, "tok-a".to_string(), format!("ch-{idx}"), idx);
+        }
+        assert!(registry.listeners(1, "tok-a", "ch-0").is_none());
+        assert_eq!(
+            registry.listeners(1, "tok-a", &format!("ch-{}", MAX_CHANNELS_PER_BROWSER + 4)),
+            Some(vec![MAX_CHANNELS_PER_BROWSER + 4])
+        );
+        assert_eq!(
+            registry.browsers.get(&1).unwrap().listeners.len(),
+            MAX_CHANNELS_PER_BROWSER
+        );
+
+        registry.release_context(1, "tok-a");
+        assert!(registry.browsers.get(&1).unwrap().listeners.is_empty());
+        assert!(registry.browsers.get(&1).unwrap().channel_order.is_empty());
     }
 }
 
@@ -625,20 +696,6 @@ fn authorized_host_message(arguments: &cef::ListValue, context: &V8Context) -> O
     }
     let epoch = arguments.string(3).into_string().parse::<u64>().ok()?;
     (current_bin_ipc_epoch(context) == Some(epoch)).then_some(token)
-}
-
-fn load_embedded_config_from_command_line() -> Option<crate::util::CefEmbeddedPageConfig> {
-    let cmd_line = command_line_get_global()?;
-    if cmd_line.has_switch(Some(&crate::util::EMBEDDED_CONFIG_SWITCH.into())) == 0 {
-        return None;
-    }
-    let json = cmd_line
-        .switch_value(Some(&crate::util::EMBEDDED_CONFIG_SWITCH.into()))
-        .into_string();
-    if json.is_empty() {
-        return None;
-    }
-    serde_json::from_str::<crate::util::CefEmbeddedPageConfig>(&json).ok()
 }
 
 fn register_extensions_from_command_line() {

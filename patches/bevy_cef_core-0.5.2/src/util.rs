@@ -597,6 +597,32 @@ mod raw_response_tests {
         set_media_allowlist(HashSet::new());
         let _ = std::fs::remove_file(&p);
     }
+
+    #[test]
+    fn media_allowlist_lease_rejects_stale_owners_and_revokes_on_drop() {
+        let _guard = ALLOWLIST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("vmux_lease_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("sample.bin");
+        std::fs::write(&file, b"ok").unwrap();
+        let canon = std::fs::canonicalize(&file).unwrap();
+
+        let owner_a = MediaAllowlistLease::acquire();
+        let owner_b = MediaAllowlistLease::acquire();
+        assert!(owner_b.generation() > owner_a.generation());
+        assert!(!owner_a.replace(HashSet::from([canon.clone()])));
+        assert!(!is_media_path_allowed(&canon));
+
+        assert!(owner_b.replace(HashSet::from([canon.clone()])));
+        assert!(is_media_path_allowed(&canon));
+
+        drop(owner_a);
+        assert!(is_media_path_allowed(&canon));
+
+        drop(owner_b);
+        assert!(!is_media_path_allowed(&canon));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 pub fn debug_chromium_libraries_path() -> PathBuf {
@@ -826,31 +852,6 @@ mod tests {
                 .map(|r| r.host.as_str()),
             Some("files")
         );
-    }
-
-    #[test]
-    fn media_allowlist_lease_rejects_stale_owners_and_revokes_on_drop() {
-        let dir = std::env::temp_dir().join(format!("vmux_lease_{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let file = dir.join("sample.bin");
-        std::fs::write(&file, b"ok").unwrap();
-        let canon = std::fs::canonicalize(&file).unwrap();
-
-        let owner_a = MediaAllowlistLease::acquire();
-        let owner_b = MediaAllowlistLease::acquire();
-        assert!(owner_b.generation() > owner_a.generation());
-        assert!(!owner_a.replace(HashSet::from([canon.clone()])));
-        assert!(!is_media_path_allowed(&canon));
-
-        assert!(owner_b.replace(HashSet::from([canon.clone()])));
-        assert!(is_media_path_allowed(&canon));
-
-        drop(owner_a);
-        assert!(is_media_path_allowed(&canon));
-
-        drop(owner_b);
-        assert!(!is_media_path_allowed(&canon));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

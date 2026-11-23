@@ -40,8 +40,8 @@ pub mod prelude {
         CefTransitionQualifiers, CommandLineConfig, MediaAllowlistLease, MediaPermissionRequest,
         PointerButton, WebviewCefStateEvent, WebviewCommittedNavigationEvent,
         WebviewLoadingStateEvent, WebviewPopupEvent, compile_time_cef_embedded_scheme,
-        resolve_media_permission, resolved_cef_embedded_page_config, revoke_all_permissions,
-        revoke_webview_permissions, set_media_allowlist,
+        expire_pending_permissions, resolve_media_permission, resolved_cef_embedded_page_config,
+        revoke_all_permissions, revoke_webview_permissions, set_media_allowlist,
     };
 }
 
@@ -151,11 +151,18 @@ impl Plugin for CefPlugin {
         app.init_resource::<bevy_cef_core::prelude::CefColorScheme>()
             .add_systems(
                 Update,
-                sync_color_scheme
-                    .before(CefSystems::CreateAndResize)
-                    .run_if(resource_changed::<bevy_cef_core::prelude::CefColorScheme>),
+                (
+                    sync_color_scheme
+                        .before(CefSystems::CreateAndResize)
+                        .run_if(resource_changed::<bevy_cef_core::prelude::CefColorScheme>),
+                    expire_media_permissions,
+                ),
             );
     }
+}
+
+fn expire_media_permissions() {
+    bevy_cef_core::prelude::expire_pending_permissions();
 }
 
 fn sync_color_scheme(

@@ -130,6 +130,11 @@ impl PendingPermissionRegistry {
     }
 
     fn resolve(&mut self, request_id: u64, allow: bool) -> bool {
+        self.resolve_at(request_id, allow, Instant::now())
+    }
+
+    fn resolve_at(&mut self, request_id: u64, allow: bool, now: Instant) -> bool {
+        self.expire(now);
         let Some(entry) = self.entries.remove(&request_id) else {
             return false;
         };
@@ -196,6 +201,12 @@ pub fn revoke_webview_permissions(webview: Entity) {
 pub fn revoke_all_permissions() {
     PendingPermissionRegistry::with_current(|registry| {
         registry.revoke_all();
+    });
+}
+
+pub fn expire_pending_permissions() {
+    PendingPermissionRegistry::with_current(|registry| {
+        registry.expire(Instant::now());
     });
 }
 
@@ -402,5 +413,20 @@ mod tests {
         }
         assert_eq!(registry.entries.len(), MAX_PENDING_PERMISSIONS);
         assert_eq!(probes[0].load(Ordering::Acquire), -1);
+    }
+
+    #[test]
+    fn resolve_denies_expired_permission_without_new_insertion() {
+        let mut registry = PendingPermissionRegistry::default();
+        let owner = Entity::from_bits(12);
+        let probe = Arc::new(AtomicI8::new(0));
+        let created = Instant::now();
+
+        registry.insert(1, owner, created, PendingCallback::Probe(probe.clone()));
+
+        let after_ttl = created + PENDING_PERMISSION_TTL + Duration::from_secs(1);
+        assert!(!registry.resolve_at(1, true, after_ttl));
+        assert_eq!(probe.load(Ordering::Acquire), -1);
+        assert!(registry.entries.is_empty());
     }
 }
