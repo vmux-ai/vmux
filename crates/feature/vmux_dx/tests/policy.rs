@@ -8685,7 +8685,7 @@ struct BodyShape {
     bootstrap_defaults: Option<BTreeSet<String>>,
     bootstrap_factories: Option<BTreeSet<String>>,
     bootstrap_app: Option<String>,
-    identity_constructor: Option<String>,
+    identity_constructor: Option<(String, usize)>,
     returns_self: bool,
     default_markers: Option<Vec<String>>,
 }
@@ -8928,13 +8928,17 @@ impl BodyShape {
         }
     }
 
-    fn identity_constructor(method: &syn::ImplItemFn) -> Option<String> {
-        if !method.sig.inputs.is_empty() || method.sig.generics.params.len() != 1 {
+    fn identity_constructor(method: &syn::ImplItemFn) -> Option<(String, usize)> {
+        if !method.sig.inputs.is_empty() || method.sig.generics.params.is_empty() {
             return None;
         }
-        let syn::GenericParam::Type(parameter) = &method.sig.generics.params[0] else {
-            return None;
-        };
+        let mut parameters = Vec::with_capacity(method.sig.generics.params.len());
+        for param in &method.sig.generics.params {
+            let syn::GenericParam::Type(parameter) = param else {
+                return None;
+            };
+            parameters.push(parameter.ident.to_string());
+        }
         if !matches!(&method.sig.output, syn::ReturnType::Type(_, output)
             if matches!(output.as_ref(), Type::Path(path) if path.qself.is_none() && path.path.is_ident("Self")))
             || method.block.stmts.len() != 1
@@ -8985,9 +8989,23 @@ impl BodyShape {
         if method.ident != "of" || arguments.args.len() != 1 {
             return None;
         }
-        if !matches!(&arguments.args[0], syn::GenericArgument::Type(Type::Path(value))
-            if value.qself.is_none() && value.path.is_ident(&parameter.ident.to_string()))
-        {
+        let matches_parameters = match (&arguments.args[0], parameters.as_slice()) {
+            (syn::GenericArgument::Type(Type::Path(value)), [parameter]) => {
+                value.qself.is_none() && value.path.is_ident(parameter)
+            }
+            (syn::GenericArgument::Type(Type::Tuple(tuple)), params)
+                if params.len() >= 2 && tuple.elems.len() == params.len() =>
+            {
+                tuple.elems.iter().zip(params).all(|(elem, parameter)| {
+                    matches!(
+                        elem,
+                        Type::Path(value) if value.qself.is_none() && value.path.is_ident(parameter)
+                    )
+                })
+            }
+            _ => false,
+        };
+        if !matches_parameters {
             return None;
         }
         let mut path = value.path.clone();
@@ -8999,7 +9017,7 @@ impl BodyShape {
         {
             return None;
         }
-        Some(References::path(&path))
+        Some((References::path(&path), parameters.len()))
     }
 
     fn default_markers(block: &syn::Block) -> Option<Vec<String>> {
@@ -12489,6 +12507,8 @@ impl Inventory {
                     | "crates/build_platform_cfg.rs"
                     | "crates/build_product.rs"
                     | "crates/build_cfg_product.rs"
+                    | "scripts/ui_build.rs"
+                    | "scripts/ui_stylesheet.rs"
             )
             || path.ends_with("/build.rs")
     }
@@ -12625,8 +12645,12 @@ impl Inventory {
         true
     }
 
+    fn test_scope(entry: &Declaration) -> bool {
+        !entry.production || entry.path.contains("/tests/")
+    }
+
     fn automatic_test_fixture(&self, entry: &Declaration) -> bool {
-        if entry.production {
+        if !Self::test_scope(entry) {
             return false;
         }
         self.ensure_test_fixtures();
@@ -12643,7 +12667,7 @@ impl Inventory {
         let mut fixtures = BTreeSet::new();
         let mut queue = Vec::new();
         for entry in self.entries.values() {
-            if !entry.production && entry.test {
+            if Self::test_scope(entry) && entry.test {
                 queue.push(entry.key.clone());
             }
         }
@@ -12653,7 +12677,7 @@ impl Inventory {
             let mut origins = vec![source];
             if matches!(source.kind, Kind::Struct | Kind::Enum) {
                 for implementation in self.implementations(source) {
-                    if !implementation.production && !implementation.plugin {
+                    if Self::test_scope(implementation) && !implementation.plugin {
                         origins.push(implementation);
                     }
                 }
@@ -12688,7 +12712,7 @@ impl Inventory {
             let entry = &self.entries[key];
             if matches!(entry.kind, Kind::Struct | Kind::Enum) {
                 for implementation in self.implementations(entry) {
-                    if !implementation.production && !implementation.plugin {
+                    if Self::test_scope(implementation) && !implementation.plugin {
                         finalized.insert(implementation.key.clone());
                     }
                 }
@@ -12733,7 +12757,7 @@ impl Inventory {
         let mut sources = vec![entry];
         if matches!(entry.kind, Kind::Struct | Kind::Enum) {
             for implementation in self.implementations(entry) {
-                if !implementation.production {
+                if Self::test_scope(implementation) {
                     sources.push(implementation);
                 }
             }
@@ -12759,7 +12783,7 @@ impl Inventory {
     }
 
     fn valid_test_fixture_target(&self, entry: &Declaration) -> bool {
-        if entry.production
+        if !Self::test_scope(entry)
             || entry.plugin
             || entry.path.starts_with("crates/feature/vmux_dx/lints/")
             || self.has_cargo_command(entry)
@@ -13096,6 +13120,9 @@ impl Inventory {
             return false;
         }
         if shape.payloads == 0 && !shape.component && !self.enum_job(entry) {
+            if self.automatic_pre_world_boundary(entry) {
+                return true;
+            }
             let system_set = entry.derive_paths.iter().any(|path| {
                 self.framework_handle(&entry.namespace, path, &mut BTreeSet::new())
                     .as_deref()
@@ -14066,7 +14093,17 @@ impl Inventory {
             if root.is_some_and(|root| {
                 matches!(
                     root.split("::").next(),
-                    Some("bevy" | "bevy_app" | "bevy_ecs" | "bevy_cef" | "bevy_cef_core")
+                    Some(
+                        "bevy"
+                            | "bevy_app"
+                            | "bevy_asset"
+                            | "bevy_ecs"
+                            | "bevy_tasks"
+                            | "bevy_time"
+                            | "bevy_window"
+                            | "bevy_cef"
+                            | "bevy_cef_core"
+                    )
                 )
             }) {
                 continue;
@@ -14099,6 +14136,9 @@ impl Inventory {
                 | "crates/util/vmux_ecs/src/store.rs||struct:SchemaPlugin"
                 | "crates/util/vmux_ecs/src/identity.rs||struct:IdentityIndexPlugin"
                 | "crates/util/vmux_ecs/src/jobs.rs||struct:JobPlugin"
+                | "crates/util/vmux_ecs/src/operation.rs||struct:OperationPlugin"
+                | "crates/util/vmux_ecs/src/wake.rs||struct:WakePlugin"
+                | "patches/bevy_cef-0.5.2/src/common/ipc/ui_event.rs||struct:UiEventPlugin"
         )
     }
 
@@ -14284,7 +14324,11 @@ impl Inventory {
         let syn::PathArguments::AngleBracketed(arguments) = &method.arguments else {
             return false;
         };
-        if arguments.args.len() != 1 || !matches!(&arguments.args[0], syn::GenericArgument::Type(_))
+        if arguments.args.is_empty()
+            || !arguments
+                .args
+                .iter()
+                .all(|arg| matches!(arg, syn::GenericArgument::Type(_)))
         {
             return false;
         }
@@ -14343,9 +14387,12 @@ impl Inventory {
                 if !body.production || method.ident != body.name {
                     continue;
                 }
-                let Some(identity) = &body.identity_constructor else {
+                let Some((identity, arity)) = &body.identity_constructor else {
                     return false;
                 };
+                if *arity != arguments.args.len() {
+                    return false;
+                }
                 if !matches!(
                     self.external_path(&implementation.namespace, identity, &mut BTreeSet::new())
                         .as_deref(),
@@ -21797,4 +21844,59 @@ fn registered_compiler_helpers_moonshine_observers_and_git_test_fixtures_prove_s
             "expected proved test fixture: {key}"
         );
     }
+}
+
+#[test]
+fn pre_world_unit_enums_build_scripts_and_integration_test_fixtures_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_macro/src/kind.rs",
+        "pub(crate) enum Direction { Host, Ui } pub(crate) enum Command { Run(String), Stop }",
+    );
+    inventory.source(
+        "scripts/ui_build.rs",
+        "fn main() { println!(\"cargo:rerun-if-changed=x\"); }",
+    );
+    inventory.source(
+        "examples/demo/src/lib.rs",
+        "pub struct ProdLeak { count: u32 }",
+    );
+    inventory.source(
+        "examples/demo/tests/flow.rs",
+        "struct Harness { count: u32 } impl Harness { fn new() -> Self { Self { count: 1 } } } struct UnusedFixture { x: u32 } #[test] fn runs() { let _ = (Harness::new(), demo::ProdLeak { count: 0 }); }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    assert!(inventory.automatic_enum_purpose(
+        &inventory.entries["crates/util/vmux_macro/src/kind.rs||enum:Direction"],
+        &policy
+    ));
+    assert!(!inventory.automatic_enum_purpose(
+        &inventory.entries["crates/util/vmux_macro/src/kind.rs||enum:Command"],
+        &policy
+    ));
+    assert!(inventory.automatic_boundary(&inventory.entries["scripts/ui_build.rs||fn:main"]));
+    for key in [
+        "examples/demo/tests/flow.rs||struct:Harness",
+        "examples/demo/tests/flow.rs||impl:Harness",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved integration test fixture: {key}"
+        );
+    }
+    for key in [
+        "examples/demo/tests/flow.rs||struct:UnusedFixture",
+        "examples/demo/src/lib.rs||struct:ProdLeak",
+    ] {
+        assert!(
+            !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected rejected declaration: {key}"
+        );
+    }
+    let multi = Inventory::fixture(
+        "use std::any::TypeId; use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)] struct PairSet(TypeId); impl PairSet { fn of<K: 'static, T: 'static>() -> Self { Self(TypeId::of::<(K, T)>()) } } fn tick() {} struct PairPlugin; impl Plugin for PairPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, tick.after(PairSet::of::<u32, u64>())); } }",
+    );
+    assert!(multi.automatic_boundary(&multi.entries[&multi.key("struct:PairPlugin")]));
+    assert!(multi.automatic_boundary(&multi.entries[&multi.key("impl:Plugin for PairPlugin")]));
 }
