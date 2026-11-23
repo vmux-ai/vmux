@@ -113,32 +113,9 @@ impl Server {
     ) -> std::io::Result<()> {
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
         stream.set_write_timeout(Some(Duration::from_secs(15)))?;
-        let mut request = BufReader::new((&stream).take(16 * 1024));
-        let mut line = String::new();
-        request.read_line(&mut line)?;
-        let mut parts = line.split_whitespace();
-        let method = parts.next().unwrap_or_default().to_string();
-        let target = parts.next().unwrap_or_default().to_string();
-        let mut range = None;
-        let mut host = String::new();
-        loop {
-            line.clear();
-            if request.read_line(&mut line)? == 0 {
-                return Self::error(&mut stream, 400, "Bad Request");
-            }
-            if line == "\r\n" {
-                break;
-            }
-            let Some((name, value)) = line.split_once(':') else {
-                return Self::error(&mut stream, 400, "Bad Request");
-            };
-            if name.eq_ignore_ascii_case("range") {
-                range = Some(value.trim().to_string());
-            }
-            if name.eq_ignore_ascii_case("host") {
-                host = value.trim().to_string();
-            }
-        }
+        let Some((method, target, range, host)) = Self::read_request(&mut stream)? else {
+            return Ok(());
+        };
         if host != format!("127.0.0.1:{port}") {
             return Self::error(&mut stream, 403, "Forbidden");
         }
@@ -153,6 +130,49 @@ impl Server {
         let Some(source) = source else {
             return Self::error(&mut stream, 404, "Not Found");
         };
+        Self::write_response(&mut stream, &method, range.as_deref(), &source)
+    }
+
+    fn read_request(
+        stream: &mut TcpStream,
+    ) -> std::io::Result<Option<(String, String, Option<String>, String)>> {
+        let mut request = BufReader::new((&*stream).take(16 * 1024));
+        let mut line = String::new();
+        request.read_line(&mut line)?;
+        let mut parts = line.split_whitespace();
+        let method = parts.next().unwrap_or_default().to_string();
+        let target = parts.next().unwrap_or_default().to_string();
+        let mut range = None;
+        let mut host = String::new();
+        loop {
+            line.clear();
+            if request.read_line(&mut line)? == 0 {
+                Self::error(stream, 400, "Bad Request")?;
+                return Ok(None);
+            }
+            if line == "\r\n" {
+                break;
+            }
+            let Some((name, value)) = line.split_once(':') else {
+                Self::error(stream, 400, "Bad Request")?;
+                return Ok(None);
+            };
+            if name.eq_ignore_ascii_case("range") {
+                range = Some(value.trim().to_string());
+            }
+            if name.eq_ignore_ascii_case("host") {
+                host = value.trim().to_string();
+            }
+        }
+        Ok(Some((method, target, range, host)))
+    }
+
+    fn write_response(
+        stream: &mut TcpStream,
+        method: &str,
+        range: Option<&str>,
+        source: &RegisteredFile,
+    ) -> std::io::Result<()> {
         let selected = if method == "HEAD" {
             Ok(ByteRange {
                 start: 0,
@@ -160,7 +180,7 @@ impl Server {
                 partial: false,
             })
         } else {
-            ByteRange::parse(range.as_deref(), source.size)
+            ByteRange::parse(range, source.size)
         };
         let Ok(selected) = selected else {
             return write!(

@@ -250,12 +250,42 @@ fn sync_manager_views(
         }
         let manager_route =
             target_manager && matches!(Route::parse(&page.url), Some(Route::Manager));
-        if manager_route && let Some(stack) = stack {
-            let captured = locations.targets.get(stack).ok().map(|target| {
-                SessionManagerFallback::capture(target, locations.work_dirs.get(stack).ok())
+        if let Some(stack) = stack {
+            locations.sync_stack_fallback(
+                stack,
+                manager_route,
+                transitioning,
+                route.as_ref(),
+                &mut commands,
+            );
+        }
+        match (manager_route, manager) {
+            (true, false) => {
+                commands.entity(entity).try_insert(SessionManagerView);
+            }
+            (false, true) => {
+                commands.entity(entity).remove::<SessionManagerView>();
+            }
+            _ => {}
+        }
+    }
+}
+
+impl ManagerLocations<'_, '_> {
+    fn sync_stack_fallback(
+        &self,
+        stack: Entity,
+        manager_route: bool,
+        transitioning: bool,
+        route: Option<&Route>,
+        commands: &mut Commands,
+    ) {
+        if manager_route {
+            let captured = self.targets.get(stack).ok().map(|target| {
+                SessionManagerFallback::capture(target, self.work_dirs.get(stack).ok())
             });
             let mut entity = commands.entity(stack);
-            if locations.fallbacks.get(stack).is_err()
+            if self.fallbacks.get(stack).is_err()
                 && let Some(captured) = captured.clone()
             {
                 entity.insert(captured);
@@ -266,11 +296,11 @@ fn sync_manager_views(
             if !transitioning && captured.is_none() {
                 entity.remove::<SessionManagerFallback>();
             }
-        } else if let (Some(stack), Some(Route::Session(id))) = (stack, route.as_ref()) {
+        } else if let Some(Route::Session(id)) = route {
             let mut restored = false;
-            if locations.targets.get(stack).is_err()
-                && let Ok(fallback) = locations.fallbacks.get(stack)
-                && locations
+            if self.targets.get(stack).is_err()
+                && let Ok(fallback) = self.fallbacks.get(stack)
+                && self
                     .sessions
                     .get(fallback.session)
                     .is_ok_and(|candidate| candidate == id)
@@ -288,18 +318,9 @@ fn sync_manager_views(
                 entity.remove::<SessionManagerFallback>();
                 restored = true;
             }
-            if !transitioning && !restored && locations.targets.get(stack).is_ok() {
+            if !transitioning && !restored && self.targets.get(stack).is_ok() {
                 commands.entity(stack).remove::<SessionManagerFallback>();
             }
-        }
-        match (manager_route, manager) {
-            (true, false) => {
-                commands.entity(entity).try_insert(SessionManagerView);
-            }
-            (false, true) => {
-                commands.entity(entity).remove::<SessionManagerView>();
-            }
-            _ => {}
         }
     }
 }
