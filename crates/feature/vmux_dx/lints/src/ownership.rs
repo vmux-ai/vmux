@@ -411,6 +411,9 @@ impl<'tcx> Ownership<'tcx> {
                 self.bundle_type(cx, bundle, &mut HashSet::new());
             }
         }
+        if cx.tcx.entry_fn(()).is_none() {
+            self.register_exported_ecs(cx);
+        }
         for local in cx.tcx.hir_crate_items(()).definitions() {
             let definition = local.to_def_id();
             if !matches!(
@@ -460,6 +463,39 @@ impl<'tcx> Ownership<'tcx> {
                 definition,
                 "declaration has no unique resolved registered ECS owner",
             );
+        }
+    }
+
+    fn register_exported_ecs(&mut self, cx: &LateContext<'tcx>) {
+        let exported: Vec<DefId> = cx
+            .tcx
+            .hir_crate_items(())
+            .definitions()
+            .map(|local| local.to_def_id())
+            .filter(|definition| {
+                matches!(
+                    cx.tcx.def_kind(*definition),
+                    DefKind::Struct | DefKind::Enum | DefKind::Union
+                ) && cx.tcx.visibility(*definition).is_public()
+            })
+            .collect();
+        for definition in exported {
+            if self.has_role(definition, "component")
+                || self.has_role(definition, "resource")
+                || self.has_role(definition, "message")
+            {
+                let ty = cx
+                    .tcx
+                    .type_of(definition)
+                    .instantiate_identity()
+                    .skip_norm_wip();
+                self.root(cx, ty);
+            } else if self.has_role(definition, "bundle")
+                || self.has_role(definition, "query")
+                || self.has_role(definition, "parameter")
+            {
+                self.used.insert(definition);
+            }
         }
     }
 
@@ -682,6 +718,16 @@ impl<'tcx> Ownership<'tcx> {
             "tree_sitter",
             "pulldown_cmark",
             "ureq",
+            "wry",
+            "sysinfo",
+            "zeroize",
+            "polling",
+            "web_sys",
+            "js_sys",
+            "wasm_bindgen",
+            "image",
+            "fontdue",
+            "agent_client_protocol",
         ]
         .contains(&krate)
     }

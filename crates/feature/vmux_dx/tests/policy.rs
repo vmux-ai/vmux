@@ -10004,6 +10004,8 @@ struct Inventory {
     parser_visitors: RefCell<Option<BTreeSet<String>>>,
     static_traits: RefCell<Option<BTreeSet<String>>>,
     native_io_adapters: RefCell<Option<BTreeSet<String>>>,
+    adapter_helpers: RefCell<Option<BTreeSet<String>>>,
+    ui_transport_projections: RefCell<Option<BTreeSet<String>>>,
     enum_owner_candidates: RefCell<Option<BTreeMap<String, Vec<String>>>>,
     owned_values: RefCell<Option<BTreeSet<String>>>,
     test_fixtures: RefCell<Option<BTreeSet<String>>>,
@@ -11187,6 +11189,8 @@ impl Inventory {
         *self.parser_visitors.get_mut() = None;
         *self.static_traits.get_mut() = None;
         *self.native_io_adapters.get_mut() = None;
+        *self.adapter_helpers.get_mut() = None;
+        *self.ui_transport_projections.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -11938,6 +11942,8 @@ impl Inventory {
         *self.parser_visitors.get_mut() = None;
         *self.static_traits.get_mut() = None;
         *self.native_io_adapters.get_mut() = None;
+        *self.adapter_helpers.get_mut() = None;
+        *self.ui_transport_projections.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -12017,6 +12023,8 @@ impl Inventory {
         *self.parser_visitors.get_mut() = None;
         *self.static_traits.get_mut() = None;
         *self.native_io_adapters.get_mut() = None;
+        *self.adapter_helpers.get_mut() = None;
+        *self.ui_transport_projections.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -12225,9 +12233,21 @@ impl Inventory {
             if declaration.projection {
                 return false;
             }
+            let impl_on_proved_boundary = entry.production
+                && !entry.plugin
+                && !self.has_bevy_runtime_access(entry)
+                && !declaration.contract
+                && !declaration.plugin
+                && !self.framework_bootstrap(declaration)
+                && !self.manifest_source(declaration)
+                && !self.typed_page(declaration)
+                && !self.host_page_marker(declaration)
+                && !self.store_schema(declaration)
+                && self.automatic_boundary(declaration);
             if !declaration.ecs
                 && declaration.bundle_derive.is_none()
                 && declaration.generated_query.is_none()
+                && !impl_on_proved_boundary
                 && !self.automatic_owned_value(declaration)
                 && !self.automatic_value_handle(declaration)
                 && !self.automatic_drop_guard(declaration)
@@ -12240,6 +12260,9 @@ impl Inventory {
                     .any(|value| value.key == declaration.key)
             {
                 return false;
+            }
+            if impl_on_proved_boundary {
+                return true;
             }
             return self.canonical(declaration, policy, visiting);
         }
@@ -12544,6 +12567,436 @@ impl Inventory {
             || self.automatic_parser_visitor(entry)
             || self.automatic_static_trait(entry)
             || self.automatic_native_io_adapter(entry)
+            || self.automatic_adapter_helper(entry)
+            || self.automatic_ui_transport_projection(entry)
+    }
+
+    fn automatic_adapter_helper(&self, entry: &Declaration) -> bool {
+        if !entry.production {
+            return false;
+        }
+        self.ensure_adapter_helpers();
+        self.adapter_helpers
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn adapter_helper_candidate(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || entry.ecs
+            || entry.plugin
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.projection
+            || entry.bundle_derive.is_some()
+            || entry.query_derive.is_some()
+            || self.has_bevy_runtime_access(entry)
+            || self.manifest_source(entry)
+            || self.typed_page(entry)
+            || self.host_page_marker(entry)
+            || self.store_schema(entry)
+        {
+            return false;
+        }
+        match entry.kind {
+            Kind::Const | Kind::Function | Kind::Alias | Kind::Static => true,
+            Kind::Trait => {
+                self.event_interface(entry).is_none()
+                    && !self.entries.values().any(|other| {
+                        other.production
+                            && other.ecs
+                            && other.dynamic
+                            && other.field_paths.iter().any(|path| {
+                                self.resolve(&other.namespace, path, &mut BTreeSet::new())
+                                    .is_some_and(|resolved| resolved.key == entry.key)
+                            })
+                    })
+            }
+            Kind::Enum => {
+                entry
+                    .enum_shape
+                    .as_ref()
+                    .is_some_and(|shape| !shape.component && !shape.signal)
+                    && !self.enum_job(entry)
+                    && self.adapter_helper_impls_clean(entry)
+            }
+            Kind::Struct => self.adapter_helper_impls_clean(entry),
+            _ => false,
+        }
+    }
+
+    fn adapter_helper_impls_clean(&self, entry: &Declaration) -> bool {
+        for implementation in self.implementations(entry) {
+            if !implementation.production {
+                continue;
+            }
+            if implementation.plugin
+                || implementation.local
+                || implementation.dynamic
+                || implementation.opaque
+                || self.has_bevy_runtime_access(implementation)
+            {
+                return false;
+            }
+            if let Some(tr) = implementation.implemented_trait.as_deref() {
+                let tail = tr.rsplit("::").next().unwrap_or(tr);
+                if matches!(
+                    tail,
+                    "Plugin" | "FeatureManifestSource" | "LateLintPass" | "Job" | "Command"
+                ) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    #[inline(never)]
+    fn ensure_adapter_helpers(&self) {
+        if self.adapter_helpers.borrow().is_some() {
+            return;
+        }
+        self.ensure_ecs_commands();
+        self.ensure_serde_dtos();
+        self.ensure_stateless_adapters();
+        self.ensure_value_handles();
+        self.ensure_drop_guards();
+        self.ensure_cef_ffi();
+        self.ensure_parser_visitors();
+        self.ensure_native_io_adapters();
+        self.ensure_error_types();
+        self.ensure_ui_transport_projections();
+        let mut roots = BTreeSet::new();
+        for cache in [
+            &self.ecs_commands,
+            &self.stateless_adapters,
+            &self.drop_guards,
+            &self.cef_ffi,
+            &self.parser_visitors,
+            &self.native_io_adapters,
+            &self.error_types,
+            &self.ui_transport_projections,
+        ] {
+            if let Some(keys) = cache.borrow().as_ref() {
+                roots.extend(keys.iter().cloned());
+            }
+        }
+        for entry in self.entries.values() {
+            if !entry.production || entry.local || entry.opaque || entry.projection {
+                continue;
+            }
+            if self.automatic_binary_entrypoint(entry) || self.automatic_pre_world_boundary(entry) {
+                roots.insert(entry.key.clone());
+                continue;
+            }
+            if entry.ecs && matches!(entry.kind, Kind::Struct) && self.used(entry) {
+                let has_io = entry.field_paths.iter().any(|path| {
+                    self.external_path(&entry.namespace, path, &mut BTreeSet::new())
+                        .is_some_and(|resolved| Self::is_external_io_handle_path(&resolved))
+                });
+                let has_drop = self.implementations(entry).into_iter().any(|imp| {
+                    imp.production
+                        && imp.implemented_trait.as_deref().is_some_and(|tr| {
+                            matches!(
+                                self.external_path(&imp.namespace, tr, &mut BTreeSet::new())
+                                    .as_deref(),
+                                Some("std::ops::Drop" | "core::ops::Drop")
+                            ) || tr == "Drop" && !self.local_binding(&imp.namespace, tr)
+                        })
+                });
+                if has_io || has_drop {
+                    roots.insert(entry.key.clone());
+                }
+            }
+        }
+        let mut proved = BTreeSet::new();
+        if !roots.is_empty() {
+            let root_crates: BTreeSet<&str> = roots
+                .iter()
+                .filter_map(|key| {
+                    self.entries
+                        .get(key)
+                        .and_then(|e| e.namespace.split("::").next())
+                })
+                .collect();
+            let mut candidates = BTreeSet::new();
+            let mut candidate_type_names = BTreeSet::new();
+            let mut candidate_fn_names = BTreeSet::new();
+            for entry in self.entries.values() {
+                if !entry
+                    .namespace
+                    .split("::")
+                    .next()
+                    .is_some_and(|krate| root_crates.contains(krate))
+                    || roots.contains(&entry.key)
+                    || !self.adapter_helper_candidate(entry)
+                {
+                    continue;
+                }
+                candidates.insert(entry.key.clone());
+                if matches!(entry.kind, Kind::Function) {
+                    candidate_fn_names.insert(entry.name.clone());
+                } else {
+                    candidate_type_names.insert(entry.name.clone());
+                }
+            }
+            let mut ecs_embedded = BTreeSet::new();
+            for entry in self.entries.values() {
+                if !entry.production
+                    || (!entry.ecs && entry.bundle_derive.is_none())
+                    || roots.contains(&entry.key)
+                {
+                    continue;
+                }
+                for path in &entry.field_paths {
+                    if !path
+                        .split("::")
+                        .any(|segment| candidate_type_names.contains(segment))
+                    {
+                        continue;
+                    }
+                    if let Some(target) = self.resolve_path_or_prefix(&entry.namespace, path)
+                        && candidates.contains(&target.key)
+                    {
+                        ecs_embedded.insert(target.key.clone());
+                    }
+                }
+            }
+            for blocked in &ecs_embedded {
+                candidates.remove(blocked);
+            }
+            if !candidates.is_empty() {
+                loop {
+                    let before = candidate_type_names.len() + candidate_fn_names.len();
+                    for imports in self.imports.values() {
+                        for (alias, target) in &imports.aliases {
+                            let tail = target.rsplit("::").next().unwrap_or(target);
+                            if candidate_type_names.contains(tail) {
+                                candidate_type_names.insert(alias.clone());
+                            }
+                            if candidate_fn_names.contains(tail) {
+                                candidate_fn_names.insert(alias.clone());
+                            }
+                        }
+                    }
+                    if candidate_type_names.len() + candidate_fn_names.len() == before {
+                        break;
+                    }
+                }
+                let mut queue: Vec<String> = roots.iter().cloned().collect();
+                while let Some(source_key) = queue.pop() {
+                    let Some(owner) = self.entries.get(&source_key) else {
+                        continue;
+                    };
+                    let owner_crate = owner.namespace.split("::").next();
+                    let mut sources = vec![owner];
+                    if matches!(owner.kind, Kind::Struct | Kind::Enum) {
+                        for implementation in self.implementations(owner) {
+                            if implementation.production {
+                                sources.push(implementation);
+                            }
+                        }
+                    }
+                    for source in sources {
+                        for path in source
+                            .field_paths
+                            .iter()
+                            .chain(source.reference_paths.iter())
+                        {
+                            let has_type = path
+                                .split("::")
+                                .any(|segment| candidate_type_names.contains(segment));
+                            let tail = path.rsplit("::").next().unwrap_or(path);
+                            let has_fn = candidate_fn_names.contains(tail);
+                            if !has_type && !has_fn {
+                                continue;
+                            }
+                            let target = if has_type {
+                                self.resolve_path_or_prefix(&source.namespace, path)
+                            } else {
+                                None
+                            }
+                            .or_else(|| {
+                                if has_fn {
+                                    self.function_reference(
+                                        &source.namespace,
+                                        path,
+                                        &mut BTreeSet::new(),
+                                    )
+                                } else {
+                                    None
+                                }
+                            });
+                            let Some(target) = target else {
+                                continue;
+                            };
+                            if target.namespace.split("::").next() == owner_crate
+                                && candidates.contains(&target.key)
+                                && proved.insert(target.key.clone())
+                            {
+                                queue.push(target.key.clone());
+                            }
+                        }
+                    }
+                }
+                let mut finalized = proved.clone();
+                for key in &proved {
+                    let entry = &self.entries[key];
+                    for implementation in self.implementations(entry) {
+                        if implementation.production
+                            && !implementation.plugin
+                            && !implementation.local
+                            && !implementation.dynamic
+                            && !implementation.opaque
+                            && !self.has_bevy_runtime_access(implementation)
+                        {
+                            finalized.insert(implementation.key.clone());
+                        }
+                    }
+                }
+                proved = finalized;
+            }
+        }
+        *self.adapter_helpers.borrow_mut() = Some(proved);
+    }
+
+    fn automatic_ui_transport_projection(&self, entry: &Declaration) -> bool {
+        if !entry.production {
+            return false;
+        }
+        self.ensure_ui_transport_projections();
+        self.ui_transport_projections
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn references_ui_transport(&self, entry: &Declaration) -> bool {
+        entry
+            .field_paths
+            .iter()
+            .chain(entry.reference_paths.iter())
+            .any(|path| {
+                self.resolve_path_or_prefix(&entry.namespace, path)
+                    .is_some_and(|resolved| {
+                        matches!(
+                            resolved.key.as_str(),
+                            "crates/util/vmux_ecs/src/ui_state.rs||struct:UiStateWrite"
+                                | "crates/util/vmux_ecs/src/ui_state.rs||struct:UiStateWriter"
+                                | "crates/util/vmux_api/src/page.rs||struct:UiStateEmit"
+                        )
+                    })
+            })
+    }
+
+    #[inline(never)]
+    fn ensure_ui_transport_projections(&self) {
+        if self.ui_transport_projections.borrow().is_some() {
+            return;
+        }
+        let mut proved = BTreeSet::new();
+        let mut transport_fns = BTreeSet::new();
+        for entry in self.entries.values() {
+            if !entry.production
+                || !matches!(entry.kind, Kind::Function)
+                || entry.local
+                || entry.dynamic
+                || entry.opaque
+                || !self.registered(entry)
+            {
+                continue;
+            }
+            if self.references_ui_transport(entry) {
+                transport_fns.insert(entry.key.clone());
+                proved.insert(entry.key.clone());
+            }
+        }
+        let mut wrapper_candidates = BTreeSet::new();
+        let mut wrapper_names = BTreeSet::new();
+        for entry in self.entries.values() {
+            if !entry.production
+                || !matches!(entry.kind, Kind::Struct)
+                || !entry.ecs
+                || !self.used(entry)
+                || entry.projection
+                || entry.local
+                || entry.dynamic
+                || entry.opaque
+            {
+                continue;
+            }
+            let wraps_ui_state = entry.field_paths.iter().any(|path| {
+                self.resolve(&entry.namespace, path, &mut BTreeSet::new())
+                    .is_some_and(|field| field.projection)
+            });
+            if wraps_ui_state {
+                wrapper_candidates.insert(entry.key.clone());
+                wrapper_names.insert(entry.name.clone());
+            }
+        }
+        if !wrapper_candidates.is_empty() {
+            let mut transport_wrappers = BTreeSet::new();
+            for fn_key in &transport_fns {
+                let func = &self.entries[fn_key];
+                for path in func.field_paths.iter().chain(func.reference_paths.iter()) {
+                    if !path
+                        .split("::")
+                        .any(|segment| wrapper_names.contains(segment))
+                    {
+                        continue;
+                    }
+                    if let Some(target) = self.resolve_path_or_prefix(&func.namespace, path)
+                        && wrapper_candidates.contains(&target.key)
+                    {
+                        transport_wrappers.insert(target.key.clone());
+                    }
+                }
+            }
+            for key in &transport_wrappers {
+                proved.insert(key.clone());
+                let entry = &self.entries[key];
+                for implementation in self.implementations(entry) {
+                    if implementation.production
+                        && !implementation.plugin
+                        && !implementation.local
+                        && !implementation.dynamic
+                        && !implementation.opaque
+                        && !self.has_bevy_runtime_access(implementation)
+                    {
+                        proved.insert(implementation.key.clone());
+                    }
+                }
+            }
+            for entry in self.entries.values() {
+                if !entry.production
+                    || !matches!(entry.kind, Kind::Function)
+                    || entry.local
+                    || entry.dynamic
+                    || entry.opaque
+                    || !self.registered(entry)
+                    || transport_fns.contains(&entry.key)
+                {
+                    continue;
+                }
+                let touches_wrapper = entry
+                    .field_paths
+                    .iter()
+                    .chain(entry.reference_paths.iter())
+                    .any(|path| {
+                        path.split("::")
+                            .any(|segment| wrapper_names.contains(segment))
+                            && self
+                                .resolve_path_or_prefix(&entry.namespace, path)
+                                .is_some_and(|target| transport_wrappers.contains(&target.key))
+                    });
+                if touches_wrapper {
+                    proved.insert(entry.key.clone());
+                }
+            }
+        }
+        *self.ui_transport_projections.borrow_mut() = Some(proved);
     }
 
     fn is_external_io_handle_path(resolved: &str) -> bool {
@@ -12676,6 +13129,16 @@ impl Inventory {
             "tree_sitter::",
             "pulldown_cmark::",
             "ureq::",
+            "wry::",
+            "sysinfo::",
+            "zeroize::",
+            "polling::",
+            "web_sys::",
+            "js_sys::",
+            "wasm_bindgen::",
+            "image::",
+            "fontdue::",
+            "agent_client_protocol::",
         ];
         PREFIXES.iter().any(|prefix| resolved.starts_with(prefix))
     }
@@ -12697,7 +13160,6 @@ impl Inventory {
             || entry.ecs
             || entry.plugin
             || entry.local
-            || entry.dynamic
             || entry.opaque
             || entry.projection
             || entry.bundle_derive.is_some()
@@ -12723,7 +13185,6 @@ impl Inventory {
             }
             if implementation.plugin
                 || implementation.local
-                || implementation.dynamic
                 || implementation.opaque
                 || self.has_bevy_runtime_access(implementation)
             {
@@ -12773,11 +13234,13 @@ impl Inventory {
             }
             self.ensure_job_adapters();
             self.ensure_ecs_commands();
+            self.ensure_renderer_graph();
             self.ensure_stateless_adapters();
             self.ensure_value_handles();
             self.ensure_drop_guards();
             let jobs = self.job_adapters.borrow();
             let cmds = self.ecs_commands.borrow();
+            let renderers = self.renderer_graph.borrow();
             let adapters = self.stateless_adapters.borrow();
             let handles = self.value_handles.borrow();
             let guards = self.drop_guards.borrow();
@@ -12789,8 +13252,13 @@ impl Inventory {
                     (owner.ecs || owner.bundle_derive.is_some() || owner.query_derive.is_some())
                         && self.used(owner)
                         || matches!(owner.kind, Kind::Function) && self.registered(owner)
+                        || self.automatic_binary_entrypoint(owner)
+                        || self.automatic_pre_world_boundary(owner)
                         || jobs.as_ref().is_some_and(|keys| keys.contains(&owner.key))
                         || cmds.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || renderers.as_ref().is_some_and(|(roots, helpers)| {
+                            roots.contains(&owner.key) || helpers.contains(&owner.key)
+                        })
                         || adapters
                             .as_ref()
                             .is_some_and(|keys| keys.contains(&owner.key))
@@ -12835,6 +13303,7 @@ impl Inventory {
             }
             drop(jobs);
             drop(cmds);
+            drop(renderers);
             drop(adapters);
             drop(handles);
             drop(guards);
@@ -13840,19 +14309,7 @@ impl Inventory {
         *self.value_handles.borrow_mut() = Some(proved);
     }
 
-    fn automatic_binary_entrypoint(&self, entry: &Declaration) -> bool {
-        if !entry.production
-            || !matches!(entry.kind, Kind::Function)
-            || entry.name != "main"
-            || entry.local
-            || entry.dynamic
-            || entry.opaque
-            || entry.ecs
-            || entry.projection
-        {
-            return false;
-        }
-        let path = entry.path.as_str();
+    fn is_binary_entrypoint_file(path: &str) -> bool {
         (path.starts_with("crates/app/") && path.ends_with("/src/main.rs"))
             || path.starts_with("crates/util/vmux_app/src/bin/")
             || matches!(
@@ -13861,6 +14318,97 @@ impl Inventory {
                     | "crates/feature/vmux_dx/src/ci_main.rs"
                     | "website/src/main.rs"
             )
+    }
+
+    fn automatic_binary_entrypoint(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.ecs
+            || entry.projection
+            || !Self::is_binary_entrypoint_file(&entry.path)
+        {
+            return false;
+        }
+        if matches!(entry.kind, Kind::Function) && entry.name == "main" {
+            return true;
+        }
+        let Some(main_fn) = self.entries.values().find(|candidate| {
+            candidate.production
+                && candidate.path == entry.path
+                && matches!(candidate.kind, Kind::Function)
+                && candidate.name == "main"
+                && !candidate.local
+                && !candidate.dynamic
+                && !candidate.opaque
+        }) else {
+            return false;
+        };
+        let mut proved = BTreeSet::from([main_fn.key.clone()]);
+        let mut queue = vec![main_fn.key.clone()];
+        while let Some(source_key) = queue.pop() {
+            let source = &self.entries[&source_key];
+            for path in source
+                .field_paths
+                .iter()
+                .chain(source.reference_paths.iter())
+            {
+                let mut targets: Vec<&Declaration> = Vec::new();
+                if let Some(target) = self
+                    .function_reference(&source.namespace, path, &mut BTreeSet::new())
+                    .or_else(|| self.resolve_path_or_prefix(&source.namespace, path))
+                {
+                    targets.push(target);
+                } else if !path.contains("::") {
+                    for candidate in self.entries.values() {
+                        if candidate.production
+                            && candidate.path == entry.path
+                            && candidate.namespace == source.namespace
+                            && matches!(candidate.kind, Kind::Function)
+                            && candidate.name == *path
+                        {
+                            targets.push(candidate);
+                        }
+                    }
+                }
+                for target in targets {
+                    if !target.production
+                        || target.path != entry.path
+                        || target.local
+                        || target.dynamic
+                        || target.opaque
+                        || target.ecs
+                        || target.projection
+                        || target.plugin
+                    {
+                        continue;
+                    }
+                    let allowed = match target.kind {
+                        Kind::Function => target.private,
+                        Kind::Struct => target.field_types.is_empty(),
+                        _ => false,
+                    };
+                    if allowed && proved.insert(target.key.clone()) {
+                        queue.push(target.key.clone());
+                        if matches!(target.kind, Kind::Struct) {
+                            for implementation in self.implementations(target) {
+                                if implementation.production
+                                    && implementation.implemented_trait.is_none()
+                                    && !implementation.local
+                                    && !implementation.dynamic
+                                    && !implementation.opaque
+                                    && proved.insert(implementation.key.clone())
+                                {
+                                    queue.push(implementation.key.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        proved.contains(&entry.key)
     }
 
     fn automatic_error_type(&self, entry: &Declaration) -> bool {
@@ -13939,6 +14487,26 @@ impl Inventory {
                 candidate_names.insert(entry.name.as_str());
             }
         }
+        let mut error_aliases: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        if !candidates.is_empty() {
+            for entry in self.entries.values() {
+                if !entry.production || !matches!(entry.kind, Kind::Alias) {
+                    continue;
+                }
+                let mut targets = Vec::new();
+                for path in &entry.field_paths {
+                    if let Some(target) = self.resolve(&entry.namespace, path, &mut BTreeSet::new())
+                        && candidates.contains(&target.key)
+                    {
+                        targets.push(target.key.clone());
+                    }
+                }
+                if !targets.is_empty() {
+                    candidate_names.insert(entry.name.as_str());
+                    error_aliases.insert(entry.key.clone(), targets);
+                }
+            }
+        }
         let mut proved = BTreeSet::new();
         let mut queue = Vec::new();
         if !candidates.is_empty() {
@@ -14008,6 +14576,13 @@ impl Inventory {
                         };
                         if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
                             queue.push(target.key.clone());
+                        }
+                        if let Some(aliased) = error_aliases.get(&target.key) {
+                            for error_key in aliased {
+                                if proved.insert(error_key.clone()) {
+                                    queue.push(error_key.clone());
+                                }
+                            }
                         }
                     }
                 }
@@ -15010,13 +15585,37 @@ impl Inventory {
                 }
             }
         }
-        let const_names: BTreeSet<&str> = self
+        let mut const_names: BTreeSet<String> = self
             .entries
             .values()
             .filter(|entry| self.owned_const_candidate(entry))
-            .map(|entry| entry.name.as_str())
+            .map(|entry| entry.name.clone())
             .collect();
-        if !const_names.is_empty() {
+        let mut alias_names: BTreeSet<String> = self
+            .entries
+            .values()
+            .filter(|entry| self.owned_alias_candidate(entry))
+            .map(|entry| entry.name.clone())
+            .collect();
+        if !const_names.is_empty() || !alias_names.is_empty() {
+            loop {
+                let before = const_names.len() + alias_names.len();
+                for imports in self.imports.values() {
+                    for (alias, target) in &imports.aliases {
+                        let tail = target.rsplit("::").next().unwrap_or(target);
+                        if const_names.contains(tail) {
+                            const_names.insert(alias.clone());
+                        }
+                        if alias_names.contains(tail) {
+                            alias_names.insert(alias.clone());
+                        }
+                    }
+                }
+                if const_names.len() + alias_names.len() == before {
+                    break;
+                }
+            }
+            let mut queue = Vec::new();
             for entry in self.entries.values() {
                 if !entry.production || entry.local || entry.dynamic || entry.opaque {
                     continue;
@@ -15048,7 +15647,9 @@ impl Inventory {
                         .chain(source.reference_paths.iter())
                     {
                         let tail = path.rsplit("::").next().unwrap_or(path);
-                        if !const_names.contains(tail) {
+                        let is_const = const_names.contains(tail);
+                        let is_alias = alias_names.contains(tail);
+                        if !is_const && !is_alias {
                             continue;
                         }
                         let Some(target) =
@@ -15056,14 +15657,97 @@ impl Inventory {
                         else {
                             continue;
                         };
-                        if target.key != entry.key && self.owned_const_candidate(target) {
-                            owned.insert(target.key.clone());
+                        if target.key != entry.key
+                            && (is_const && self.owned_const_candidate(target)
+                                || is_alias && self.owned_alias_candidate(target))
+                            && owned.insert(target.key.clone())
+                        {
+                            queue.push(target.key.clone());
                         }
+                    }
+                }
+            }
+            while let Some(source_key) = queue.pop() {
+                let source = &self.entries[&source_key];
+                for path in source
+                    .field_paths
+                    .iter()
+                    .chain(source.reference_paths.iter())
+                {
+                    let tail = path.rsplit("::").next().unwrap_or(path);
+                    let is_const = const_names.contains(tail);
+                    let is_alias = alias_names.contains(tail);
+                    if !is_const && !is_alias {
+                        continue;
+                    }
+                    let Some(target) = self.resolve(&source.namespace, path, &mut BTreeSet::new())
+                    else {
+                        continue;
+                    };
+                    if target.key != source.key
+                        && (is_const && self.owned_const_candidate(target)
+                            || is_alias && self.owned_alias_candidate(target))
+                        && owned.insert(target.key.clone())
+                    {
+                        queue.push(target.key.clone());
                     }
                 }
             }
         }
         *self.owned_values.borrow_mut() = Some(owned);
+    }
+
+    fn owned_alias_candidate(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || !matches!(entry.kind, Kind::Alias)
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.projection
+            || entry.field_paths.is_empty()
+            || self.has_bevy_runtime_access(entry)
+        {
+            return false;
+        }
+        let mut saw_valid_or_external = false;
+        for path in &entry.field_paths {
+            if let Some(target) = self.resolve(&entry.namespace, path, &mut BTreeSet::new()) {
+                if target.key == entry.key || matches!(target.kind, Kind::Alias) {
+                    return false;
+                }
+                let allowed = target.contract
+                    || self.automatic_boundary(target)
+                    || self.plain_value_candidate(target);
+                if target.local || target.dynamic || target.opaque || target.ecs || !allowed {
+                    return false;
+                }
+                saw_valid_or_external = true;
+            } else if self
+                .external_path(&entry.namespace, path, &mut BTreeSet::new())
+                .is_some()
+                || matches!(
+                    path.as_str(),
+                    "Result"
+                        | "Option"
+                        | "Box"
+                        | "Vec"
+                        | "String"
+                        | "Arc"
+                        | "Rc"
+                        | "Pin"
+                        | "Mutex"
+                        | "RwLock"
+                        | "HashMap"
+                        | "BTreeMap"
+                        | "HashSet"
+                        | "BTreeSet"
+                        | "VecDeque"
+                )
+            {
+                saw_valid_or_external = true;
+            }
+        }
+        saw_valid_or_external
     }
 
     fn owned_const_candidate(&self, entry: &Declaration) -> bool {
@@ -15086,6 +15770,7 @@ impl Inventory {
             }
             let allowed = target.contract
                 || (target.ecs && self.used(target))
+                || self.automatic_boundary(target)
                 || self.plain_value_candidate(target);
             if target.local || target.dynamic || target.opaque || !allowed {
                 return false;
@@ -15477,7 +16162,7 @@ impl Inventory {
             return false;
         }
         match entry.kind {
-            Kind::Const | Kind::Function | Kind::Alias => true,
+            Kind::Const | Kind::Function | Kind::Alias | Kind::Static => true,
             Kind::Enum => {
                 entry
                     .enum_shape
@@ -15765,6 +16450,9 @@ impl Inventory {
             return true;
         }
         if self.automatic_value_handle(entry) && !shape.component && !self.enum_job(entry) {
+            return true;
+        }
+        if self.automatic_adapter_helper(entry) && !shape.component && !self.enum_job(entry) {
             return true;
         }
         if self.automatic_error_type(entry) && !shape.component && !self.enum_job(entry) {
@@ -19800,6 +20488,8 @@ impl Inventory {
         *self.parser_visitors.get_mut() = None;
         *self.static_traits.get_mut() = None;
         *self.native_io_adapters.get_mut() = None;
+        *self.adapter_helpers.get_mut() = None;
+        *self.ui_transport_projections.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -25526,4 +26216,88 @@ fn wave11_rkyv_dtos_copy_scalar_enums_and_map_serde_fields_prove_safely() {
         &inventory.entries["crates/feature/demo/src/lib.rs||enum:UnitVal"],
         &policy
     ));
+}
+
+#[test]
+fn wave12_binary_helpers_owned_aliases_and_transitive_consts_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/app/demo_cli/src/main.rs",
+        "fn main() { Bootstrap::init(); run(); } fn run() {} fn orphan() {} struct Bootstrap; impl Bootstrap { fn init() {} }",
+    );
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use std::fmt; #[derive(Debug)] struct DemoError; impl fmt::Display for DemoError { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(\"e\") } } impl std::error::Error for DemoError {} type DemoResult<T> = std::result::Result<T, DemoError>; type DeadAlias<T> = std::result::Result<T, DemoError>; const BASE: u64 = 1024; const SCALED: u64 = BASE * 1024; #[derive(Component)] struct State(u64); fn tick(states: Query<&State>) { let _: DemoResult<u64> = Ok(SCALED); let _ = states; } struct DemoPlugin; impl Plugin for DemoPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, tick); } }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/app/demo_cli/src/main.rs||fn:main",
+        "crates/app/demo_cli/src/main.rs||fn:run",
+        "crates/app/demo_cli/src/main.rs||struct:Bootstrap",
+        "crates/app/demo_cli/src/main.rs||impl:Bootstrap",
+        "crates/feature/demo/src/lib.rs||alias:DemoResult",
+        "crates/feature/demo/src/lib.rs||const:SCALED",
+        "crates/feature/demo/src/lib.rs||const:BASE",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved Wave 12 entry: {key}"
+        );
+    }
+    for key in [
+        "crates/app/demo_cli/src/main.rs||fn:orphan",
+        "crates/feature/demo/src/lib.rs||alias:DeadAlias",
+    ] {
+        assert!(
+            !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected rejected Wave 12 entry: {key}"
+        );
+    }
+}
+
+#[test]
+fn wave12_adapter_helpers_impl_propagation_and_ui_transport_projections_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_macro/src/lib.rs",
+        "#[proc_macro_attribute] pub fn ui_state() {}",
+    );
+    inventory.source(
+        "crates/util/vmux_api/src/lib.rs",
+        "pub use vmux_macro::ui_state; pub mod page;",
+    );
+    inventory.source(
+        "crates/util/vmux_api/src/page.rs",
+        "#[derive(bevy_ecs::prelude::Message)] pub struct UiStateEmit;",
+    );
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use std::sync::mpsc::Receiver; use vmux_api::page::UiStateEmit; struct HelperRow { label: String } impl HelperRow { fn text(&self) -> &str { &self.label } } struct DeadHelper { label: String } struct IoPort { rx: Receiver<HelperRow> } impl IoPort { fn recv(&self) -> Option<HelperRow> { self.rx.try_recv().ok() } } #[vmux_api::ui_state] struct PanelUiState { title: String } #[derive(Component)] struct PanelProjection(PanelUiState); impl PanelProjection { fn title(&self) -> &str { &self.0.title } } #[derive(Component)] struct State(u32); fn project(states: Query<&State>, mut panels: Query<&mut PanelProjection>) { let _ = (states, panels.iter_mut().next(), std::mem::size_of::<IoPort>()); } fn emit(panels: Query<&PanelProjection>, mut writer: MessageWriter<UiStateEmit>) { let _ = (panels, writer.write(UiStateEmit)); } struct DemoPlugin; impl Plugin for DemoPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, (project, emit)); } }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/feature/demo/src/lib.rs||struct:IoPort",
+        "crates/feature/demo/src/lib.rs||impl:IoPort",
+        "crates/feature/demo/src/lib.rs||struct:HelperRow",
+        "crates/feature/demo/src/lib.rs||impl:HelperRow",
+        "crates/feature/demo/src/lib.rs||struct:PanelProjection",
+        "crates/feature/demo/src/lib.rs||impl:PanelProjection",
+        "crates/feature/demo/src/lib.rs||fn:project",
+        "crates/feature/demo/src/lib.rs||fn:emit",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved Wave 12 helper/projection: {key}"
+        );
+    }
+    assert!(
+        !inventory.canonical(
+            &inventory.entries["crates/feature/demo/src/lib.rs||struct:DeadHelper"],
+            &policy,
+            &mut BTreeSet::new()
+        ),
+        "expected unreferenced helper to stay rejected"
+    );
 }
