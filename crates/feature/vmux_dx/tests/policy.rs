@@ -9980,6 +9980,8 @@ struct Inventory {
     value_handles: RefCell<Option<BTreeSet<String>>>,
     drop_guards: RefCell<Option<BTreeSet<String>>>,
     cef_ffi: RefCell<Option<BTreeSet<String>>>,
+    parser_visitors: RefCell<Option<BTreeSet<String>>>,
+    static_traits: RefCell<Option<BTreeSet<String>>>,
     enum_owner_candidates: RefCell<Option<BTreeMap<String, Vec<String>>>>,
     owned_values: RefCell<Option<BTreeSet<String>>>,
     test_fixtures: RefCell<Option<BTreeSet<String>>>,
@@ -11160,6 +11162,8 @@ impl Inventory {
         *self.value_handles.get_mut() = None;
         *self.drop_guards.get_mut() = None;
         *self.cef_ffi.get_mut() = None;
+        *self.parser_visitors.get_mut() = None;
+        *self.static_traits.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -11908,6 +11912,8 @@ impl Inventory {
         *self.value_handles.get_mut() = None;
         *self.drop_guards.get_mut() = None;
         *self.cef_ffi.get_mut() = None;
+        *self.parser_visitors.get_mut() = None;
+        *self.static_traits.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -11984,6 +11990,8 @@ impl Inventory {
         *self.value_handles.get_mut() = None;
         *self.drop_guards.get_mut() = None;
         *self.cef_ffi.get_mut() = None;
+        *self.parser_visitors.get_mut() = None;
+        *self.static_traits.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -12474,6 +12482,247 @@ impl Inventory {
             || self.automatic_cef_ffi(entry)
             || self.automatic_ui_state_projection(entry)
             || self.automatic_tuple_event_list(entry)
+            || self.automatic_parser_visitor(entry)
+            || self.automatic_static_trait(entry)
+    }
+
+    fn automatic_parser_visitor(&self, entry: &Declaration) -> bool {
+        if !entry.production {
+            return false;
+        }
+        self.ensure_parser_visitors();
+        self.parser_visitors
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    fn parser_visitor_candidate(&self, entry: &Declaration) -> bool {
+        if !entry.production
+            || !matches!(entry.kind, Kind::Struct)
+            || entry.ecs
+            || entry.plugin
+            || entry.local
+            || entry.dynamic
+            || entry.opaque
+            || entry.projection
+            || self.has_bevy_runtime_access(entry)
+        {
+            return false;
+        }
+        let mut has_visitor_trait = false;
+        for implementation in self.implementations(entry) {
+            if !implementation.production {
+                continue;
+            }
+            if implementation.plugin
+                || implementation.local
+                || implementation.dynamic
+                || implementation.opaque
+                || self.has_bevy_runtime_access(implementation)
+            {
+                return false;
+            }
+            if let Some(tr) = implementation.implemented_trait.as_deref()
+                && self
+                    .external_path(&implementation.namespace, tr, &mut BTreeSet::new())
+                    .is_some_and(|resolved| {
+                        matches!(
+                            resolved.as_str(),
+                            "syn::visit::Visit"
+                                | "syn::visit_mut::VisitMut"
+                                | "yaml_rust::parser::MarkedEventReceiver"
+                                | "yaml_rust2::parser::MarkedEventReceiver"
+                                | "vte::Perform"
+                                | "serde::de::Visitor"
+                        )
+                    })
+            {
+                has_visitor_trait = true;
+            }
+        }
+        has_visitor_trait
+    }
+
+    #[inline(never)]
+    fn ensure_parser_visitors(&self) {
+        if self.parser_visitors.borrow().is_some() {
+            return;
+        }
+        let mut candidates = BTreeSet::new();
+        let mut candidate_names = BTreeSet::new();
+        for entry in self.entries.values() {
+            if self.parser_visitor_candidate(entry) {
+                candidates.insert(entry.key.clone());
+                candidate_names.insert(entry.name.clone());
+            }
+        }
+        let mut proved = BTreeSet::new();
+        if !candidates.is_empty() {
+            self.ensure_job_adapters();
+            self.ensure_stateless_adapters();
+            let jobs = self.job_adapters.borrow();
+            let adapters = self.stateless_adapters.borrow();
+            for owner in self.entries.values() {
+                if !owner.production || owner.local || owner.dynamic || owner.opaque {
+                    continue;
+                }
+                let valid_root =
+                    (owner.ecs || owner.bundle_derive.is_some() || owner.query_derive.is_some())
+                        && self.used(owner)
+                        || matches!(owner.kind, Kind::Function) && self.registered(owner)
+                        || jobs.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || adapters
+                            .as_ref()
+                            .is_some_and(|keys| keys.contains(&owner.key));
+                if !valid_root {
+                    continue;
+                }
+                let mut sources = vec![owner];
+                if matches!(owner.kind, Kind::Struct | Kind::Enum) {
+                    for implementation in self.implementations(owner) {
+                        if implementation.production {
+                            sources.push(implementation);
+                        }
+                    }
+                }
+                for source in sources {
+                    for path in source
+                        .field_paths
+                        .iter()
+                        .chain(source.reference_paths.iter())
+                    {
+                        if !path
+                            .split("::")
+                            .any(|segment| candidate_names.contains(segment))
+                        {
+                            continue;
+                        }
+                        let Some(target) = self.resolve_path_or_prefix(&source.namespace, path)
+                        else {
+                            continue;
+                        };
+                        if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
+                            for implementation in self.implementations(target) {
+                                if implementation.production {
+                                    proved.insert(implementation.key.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            drop(jobs);
+            drop(adapters);
+        }
+        *self.parser_visitors.borrow_mut() = Some(proved);
+    }
+
+    fn automatic_static_trait(&self, entry: &Declaration) -> bool {
+        if !entry.production || !matches!(entry.kind, Kind::Trait) {
+            return false;
+        }
+        self.ensure_static_traits();
+        self.static_traits
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| keys.contains(&entry.key))
+    }
+
+    #[inline(never)]
+    fn ensure_static_traits(&self) {
+        if self.static_traits.borrow().is_some() {
+            return;
+        }
+        let mut proved = BTreeSet::new();
+        self.ensure_job_adapters();
+        self.ensure_drop_guards();
+        let jobs = self.job_adapters.borrow();
+        let guards = self.drop_guards.borrow();
+        for entry in self.entries.values() {
+            if !entry.production
+                || !matches!(entry.kind, Kind::Trait)
+                || entry.local
+                || entry.dynamic
+                || entry.opaque
+                || entry.projection
+                || self.has_bevy_runtime_access(entry)
+                || self
+                    .event_trait_interface(entry, &mut BTreeSet::new())
+                    .is_some()
+                || matches!(entry.name.as_str(), "Plugin" | "Default" | "Component")
+            {
+                continue;
+            }
+            let mut has_dyn = false;
+            for other in self.entries.values() {
+                if other.dynamic
+                    && other
+                        .field_paths
+                        .iter()
+                        .chain(other.reference_paths.iter())
+                        .any(|path| {
+                            path.rsplit("::").next() == Some(entry.name.as_str())
+                                && self
+                                    .resolve(&other.namespace, path, &mut BTreeSet::new())
+                                    .is_some_and(|resolved| resolved.key == entry.key)
+                        })
+                {
+                    has_dyn = true;
+                    break;
+                }
+            }
+            if has_dyn {
+                continue;
+            }
+            let mut impl_count = 0usize;
+            let mut all_valid = true;
+            for implementation in self.entries.values() {
+                if !implementation.production || !matches!(implementation.kind, Kind::Impl) {
+                    continue;
+                }
+                let Some(tr) = implementation.implemented_trait.as_deref() else {
+                    continue;
+                };
+                if tr.rsplit("::").next() != Some(entry.name.as_str()) {
+                    continue;
+                }
+                if !self
+                    .resolve(&implementation.namespace, tr, &mut BTreeSet::new())
+                    .is_some_and(|resolved| resolved.key == entry.key)
+                {
+                    continue;
+                }
+                let Some(owner) = implementation.owner.as_deref().and_then(|path| {
+                    self.resolve(&implementation.namespace, path, &mut BTreeSet::new())
+                }) else {
+                    all_valid = false;
+                    break;
+                };
+                let owner_ok =
+                    owner.ecs && self.used(owner) && self.event_interface(owner).is_none()
+                        || jobs.as_ref().is_some_and(|keys| keys.contains(&owner.key))
+                        || guards
+                            .as_ref()
+                            .is_some_and(|keys| keys.contains(&owner.key));
+                if !owner_ok
+                    || implementation.local
+                    || implementation.dynamic
+                    || implementation.opaque
+                    || self.has_bevy_runtime_access(implementation)
+                {
+                    all_valid = false;
+                    break;
+                }
+                impl_count += 1;
+            }
+            if impl_count > 0 && all_valid {
+                proved.insert(entry.key.clone());
+            }
+        }
+        drop(jobs);
+        drop(guards);
+        *self.static_traits.borrow_mut() = Some(proved);
     }
 
     fn automatic_ui_state_projection(&self, entry: &Declaration) -> bool {
@@ -14799,6 +15048,46 @@ impl Inventory {
         for argument in &arguments.args {
             if let syn::GenericArgument::Type(inner) = argument {
                 self.collect_registered_jobs(namespace, inner, jobs);
+                self.collect_nested_job_inputs(namespace, inner, jobs);
+            }
+        }
+    }
+
+    fn collect_nested_job_inputs(&self, namespace: &str, ty: &Type, jobs: &mut BTreeSet<String>) {
+        let Type::Path(path) = ty else {
+            return;
+        };
+        if path.qself.is_some() {
+            return;
+        }
+        let Some(target) = self.resolve(
+            namespace,
+            &References::path(&path.path),
+            &mut BTreeSet::new(),
+        ) else {
+            return;
+        };
+        if target.production
+            && matches!(target.kind, Kind::Struct)
+            && !target.local
+            && !target.dynamic
+            && !target.opaque
+            && !target.ecs
+            && !target.projection
+            && !self.has_bevy_runtime_access(target)
+            && self.value_impls_clean(target)
+        {
+            jobs.insert(target.key.clone());
+        }
+        let Some(segment) = path.path.segments.last() else {
+            return;
+        };
+        let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+            return;
+        };
+        for argument in &arguments.args {
+            if let syn::GenericArgument::Type(inner) = argument {
+                self.collect_nested_job_inputs(namespace, inner, jobs);
             }
         }
     }
@@ -18889,6 +19178,8 @@ impl Inventory {
         *self.value_handles.get_mut() = None;
         *self.drop_guards.get_mut() = None;
         *self.cef_ffi.get_mut() = None;
+        *self.parser_visitors.get_mut() = None;
+        *self.static_traits.get_mut() = None;
         *self.enum_owner_candidates.get_mut() = None;
         *self.owned_values.get_mut() = None;
         *self.test_fixtures.get_mut() = None;
@@ -24451,4 +24742,34 @@ fn wave7_ui_state_projections_tuple_event_lists_and_test_impls_prove_safely() {
         ),
         "expected rejected plain patch projection"
     );
+}
+
+#[test]
+fn closure_parser_visitors_static_traits_and_nested_job_inputs_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use syn::visit::Visit; struct AstScan(u32); impl<'ast> Visit<'ast> for AstScan {} struct DeadScan(u32); impl<'ast> Visit<'ast> for DeadScan {} trait StepContract { fn kind(&self) -> u32; } trait DynEngine { fn run(&self); } struct Lease(u32); impl Drop for Lease { fn drop(&mut self) {} } impl StepContract for Lease { fn kind(&self) -> u32 { self.0 } } #[derive(Component)] struct Step(u32); #[derive(Resource)] struct BadBox { engine: Box<dyn DynEngine> } fn tick(steps: Query<&Step>) { let _ = (steps, AstScan(0), Lease(1)); } struct DemoPlugin; impl Plugin for DemoPlugin { fn build(&self, app: &mut App) { app.add_systems(Update, tick); } }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/feature/demo/src/lib.rs||struct:AstScan",
+        "crates/feature/demo/src/lib.rs||impl:Visit < 'ast > for AstScan",
+        "crates/feature/demo/src/lib.rs||trait:StepContract",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved closure entry: {key}"
+        );
+    }
+    for key in [
+        "crates/feature/demo/src/lib.rs||struct:DeadScan",
+        "crates/feature/demo/src/lib.rs||trait:DynEngine",
+    ] {
+        assert!(
+            !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected rejected closure entry: {key}"
+        );
+    }
 }

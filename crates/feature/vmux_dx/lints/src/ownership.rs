@@ -51,6 +51,9 @@ impl<'tcx> Ownership<'tcx> {
                 ("serde" | "serde_core", "Serialize" | "Deserialize") => "serde",
                 ("core" | "std", "Error") => "error",
                 ("core" | "std", "Drop") => "drop",
+                ("syn", "Visit" | "VisitMut")
+                | ("yaml_rust" | "yaml_rust2", "MarkedEventReceiver")
+                | ("vte", "Perform") => "parser",
                 _ => continue,
             };
             for implementation in implementations {
@@ -411,6 +414,8 @@ impl<'tcx> Ownership<'tcx> {
                     && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
                 || self.has_role(definition, "serde")
                 || self.has_role(definition, "error")
+                || self.has_role(definition, "parser")
+                    && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
                 || self.has_role(definition, "drop")
                     && !self.has_role(definition, "component")
                     && !self.has_role(definition, "resource")
