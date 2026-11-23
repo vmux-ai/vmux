@@ -73,7 +73,6 @@ values: [
 shape: (
 enums: [
     (key: "patches/bevy_cef_core-0.5.2/src/browser_process/permission_handler.rs||enum:PendingCallback", fingerprint: "71ad3312aceb221b", role: Boundary, owner: "patches/bevy_cef_core-0.5.2/src/browser_process/permission_handler.rs||enum:PendingCallback", reason: "Foreign !Send CEF PermissionPromptCallback or MediaAccessCallback handle stored in PendingPermissionRegistry until resolved or revoked."),
-    (key: "patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs||enum:PointerButton", fingerprint: "11bec1f27b9ee2d9", role: Boundary, owner: "patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs||impl:Browsers", reason: "CEF and AppKit mouse button boundary vocabulary mapping to cef_mouse_button_type_t and cef_event_flags_t"),
 ],
 ),
 )
