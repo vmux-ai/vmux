@@ -455,8 +455,17 @@ mod tests {
     fn install_delivery_requires_the_original_profile_and_catalog() {
         let mut current = InstallFixture::new();
         current.app.update();
-        assert!(
-            matches!(current.app.world().get::<RunState>(current.session),Some(RunState::Errored(message)) if message == "selected outcome")
+        assert_eq!(
+            current.app.world().get::<RunState>(current.session),
+            Some(&RunState::Errored)
+        );
+        assert_eq!(
+            current
+                .app
+                .world()
+                .get::<vmux_session::RunError>(current.session)
+                .map(|error| error.0.as_str()),
+            Some("selected outcome")
         );
         for profile_replaced in [true, false] {
             let mut fixture = InstallFixture::new();
@@ -579,10 +588,18 @@ mod tests {
                 login_env: Vec::new(),
             });
         failure.app.update();
-        assert!(matches!(
+        assert_eq!(
             failure.app.world().get::<RunState>(failure.session),
-            Some(RunState::Errored(error)) if error == "registry install refused"
-        ));
+            Some(&RunState::Errored)
+        );
+        assert_eq!(
+            failure
+                .app
+                .world()
+                .get::<vmux_session::RunError>(failure.session)
+                .map(|error| error.0.as_str()),
+            Some("registry install refused")
+        );
         for replace_profile in [true, false] {
             let mut fixture = InstallFixture::new();
             fixture

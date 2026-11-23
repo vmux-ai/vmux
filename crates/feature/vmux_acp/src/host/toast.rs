@@ -34,26 +34,38 @@ pub(super) struct ErrorSurfaced;
 fn surface_errors(
     mut commands: Commands,
     mut writer: MessageWriter<AgentToast>,
-    sessions: Query<(Entity, &RunState, &SessionId, Option<&ErrorSurfaced>), Changed<RunState>>,
+    sessions: Query<
+        (
+            Entity,
+            &RunState,
+            Option<&vmux_session::RunError>,
+            &SessionId,
+            Option<&ErrorSurfaced>,
+        ),
+        Or<(Changed<RunState>, Changed<vmux_session::RunError>)>,
+    >,
 ) {
-    for (entity, state, session, surfaced) in &sessions {
-        let RunState::Errored(message) = state else {
+    for (entity, state, error, session, surfaced) in &sessions {
+        if !matches!(state, RunState::Errored) {
             if surfaced.is_some() {
                 commands.entity(entity).remove::<ErrorSurfaced>();
             }
+            continue;
+        }
+        let Some(error) = error else {
             continue;
         };
         if surfaced.is_some() {
             continue;
         }
         commands.entity(entity).insert(ErrorSurfaced);
-        if vmux_session::Failure(message).in_use() {
+        if error.in_use() {
             continue;
         }
         writer.write(AgentToast {
             session_sid: session.0.clone(),
             level: ToastLevel::Error,
-            message: message.clone(),
+            message: error.0.clone(),
         });
     }
 }
@@ -69,7 +81,8 @@ mod tests {
         app.world_mut().spawn((
             Session,
             SessionId("busy".into()),
-            RunState::Errored("thread_active_writer".into()),
+            RunState::Errored,
+            vmux_session::RunError("thread_active_writer".into()),
         ));
         app.update();
         assert!(
@@ -103,7 +116,8 @@ mod tests {
         app.world_mut().spawn((
             Session,
             SessionId("abc".into()),
-            RunState::Errored("boom".into()),
+            RunState::Errored,
+            vmux_session::RunError("boom".into()),
         ));
         app.update();
         let events = app
@@ -124,7 +138,8 @@ mod tests {
         app.world_mut().spawn((
             Session,
             SessionId("acp1".into()),
-            RunState::Errored("kaboom".into()),
+            RunState::Errored,
+            vmux_session::RunError("kaboom".into()),
         ));
         app.update();
         let events = app
@@ -145,7 +160,8 @@ mod tests {
             Session,
             SessionId("abc".into()),
             ErrorSurfaced,
-            RunState::Errored("old".into()),
+            RunState::Errored,
+            vmux_session::RunError("old".into()),
         ));
         app.update();
         assert!(

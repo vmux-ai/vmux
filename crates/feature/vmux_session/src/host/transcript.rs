@@ -231,6 +231,8 @@ struct PushWorld<'w, 's> {
     changed_handoffs: ChangedHandoffEvents<'w, 's>,
     loading_started: Query<'w, 's, Entity, Added<vmux_session::TranscriptLoading>>,
     loading_finished: RemovedComponents<'w, 's, vmux_session::TranscriptLoading>,
+    approvals: Query<'w, 's, Ref<'static, crate::RunApproval>>,
+    errors: Query<'w, 's, Ref<'static, crate::RunError>>,
     queued: QueuedPromptReads<'w, 's>,
 }
 
@@ -330,12 +332,16 @@ impl PushWorld<'_, '_> {
             .then(|| self.viewports.get(session).ok())
             .flatten();
         let imported_messages = self.handoffs.messages(session);
+        let approval = self.approvals.get(session).ok();
+        let error = self.errors.get(session).ok();
         self.transcripts.read(session, |conversation| {
             ChatProjection::new(
                 agent_id,
                 &conversation.messages,
                 &conversation.created_at,
                 state,
+                approval.as_deref(),
+                error.as_deref(),
                 turn_meta,
                 profile,
                 user_profile,
@@ -458,6 +464,18 @@ impl PushWorld<'_, '_> {
         }
     }
 
+    fn run_details_changed(&self, session: Entity) -> bool {
+        self.approvals
+            .get(session)
+            .ok()
+            .is_some_and(|approval| approval.is_changed())
+            || self
+                .errors
+                .get(session)
+                .ok()
+                .is_some_and(|error| error.is_changed())
+    }
+
     #[allow(clippy::type_complexity)]
     fn prepare_session_update(
         &self,
@@ -507,7 +525,7 @@ impl PushWorld<'_, '_> {
         let conversation_changed = children.is_changed() || changed_transcripts.contains(&session);
         let context_changed = Self::context_changed(
             user_moved,
-            loading_changes.contains(&session),
+            loading_changes.contains(&session) || self.run_details_changed(session),
             &agent_id,
             &name,
             &state,
@@ -735,6 +753,8 @@ struct ReadyWorld<'w, 's> {
     user_profiles: Query<'w, 's, &'static Profile, With<User>>,
     viewports: Query<'w, 's, &'static ChatViewport, With<Session>>,
     session_ids: Query<'w, 's, &'static SessionId, With<Session>>,
+    approvals: Query<'w, 's, &'static crate::RunApproval>,
+    errors: Query<'w, 's, &'static crate::RunError>,
     queued: QueuedPromptReads<'w, 's>,
 }
 
@@ -755,6 +775,8 @@ impl ReadyWorld<'_, '_> {
         let meta = self.metadata.get(stack).ok();
         let choice = self.choices.get(webview).ok();
         let viewport = self.viewports.get(session_entity).ok().copied();
+        let approval = self.approvals.get(session_entity).ok();
+        let error = self.errors.get(session_entity).ok();
         let imported_messages = self.handoffs.messages(session_entity);
         let projection = self.transcripts.read(session_entity, |conversation| {
             ChatProjection::new(
@@ -762,6 +784,8 @@ impl ReadyWorld<'_, '_> {
                 &conversation.messages,
                 &conversation.created_at,
                 state,
+                approval,
+                error,
                 turn_meta,
                 profile,
                 user_profile,
@@ -805,13 +829,13 @@ fn track_turn_duration(
                     meta.turn_start = Some(time.elapsed());
                 }
             }
-            RunState::Idle | RunState::Errored(_) => {
+            RunState::Idle | RunState::Errored => {
                 if let Some(start) = meta.turn_start.take() {
                     meta.durations
                         .push(time.elapsed().saturating_sub(start).as_secs() as u32);
                 }
             }
-            RunState::AwaitingApproval { .. } => {}
+            RunState::AwaitingApproval => {}
         }
     }
 }
@@ -856,6 +880,8 @@ impl ChatProjection {
         messages: &[vmux_api::session::Message],
         message_times: &[u64],
         state: &RunState,
+        run_approval: Option<&crate::RunApproval>,
+        run_error: Option<&crate::RunError>,
         turn_meta: Option<&AgentTurnMeta>,
         profile: Option<&Profile>,
         user_profile: Option<&Profile>,
@@ -885,20 +911,18 @@ impl ChatProjection {
             viewport.item_limit(messages.item_count())
         });
         let page = messages.tail_with_prompt(limit);
-        let error = match state {
-            RunState::Errored(message) => message.clone(),
-            _ => String::new(),
+        let error = if matches!(state, RunState::Errored) {
+            run_error.map(|error| error.0.clone()).unwrap_or_default()
+        } else {
+            String::new()
         };
-        let approval = match state {
-            RunState::AwaitingApproval {
-                call_id,
-                name,
-                args,
-            } => {
-                let args = vmux_api::json::JsonValue::from(args.clone());
-                Some(PendingApproval::new(call_id.clone(), name.clone(), &args))
-            }
-            _ => None,
+        let approval = if matches!(state, RunState::AwaitingApproval) {
+            run_approval.map(|pending| {
+                let args = vmux_api::json::JsonValue::from(pending.args.clone());
+                PendingApproval::new(pending.call_id.clone(), pending.name.clone(), &args)
+            })
+        } else {
+            None
         };
         let (agent_name, accent_color) = profile
             .map(|p| (p.name.clone(), p.avatar.color.clone()))
@@ -1856,6 +1880,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
             &PromptQueue::default(),
             Vec::new(),
             Some(&imported),
@@ -1875,15 +1901,18 @@ mod tests {
     #[test]
     fn snapshot_includes_approval_tool_and_input() {
         let agent = AgentId("codex".into());
+        let approval = crate::RunApproval {
+            call_id: "call-1".into(),
+            name: "vmux.run".into(),
+            args: serde_json::json!({"command": "echo hi", "focus": true}),
+        };
         let snapshot = ChatProjection::new(
             &agent,
             &[],
             &[],
-            &RunState::AwaitingApproval {
-                call_id: "call-1".into(),
-                name: "vmux.run".into(),
-                args: serde_json::json!({"command": "echo hi", "focus": true}),
-            },
+            &RunState::AwaitingApproval,
+            Some(&approval),
+            None,
             None,
             None,
             None,
@@ -1922,6 +1951,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
             &PromptQueue::default(),
             Vec::new(),
             None,
@@ -1953,6 +1984,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
             &PromptQueue::default(),
             Vec::new(),
             None,
@@ -1978,6 +2011,8 @@ mod tests {
             &[],
             &[],
             &RunState::Idle,
+            None,
+            None,
             None,
             None,
             Some(&profile),
@@ -2162,11 +2197,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, TranscriptPlugin));
         let e = app.world_mut().spawn(RunState::Streaming).id();
         app.update();
-        *app.world_mut().get_mut::<RunState>(e).unwrap() = RunState::AwaitingApproval {
-            call_id: "c".into(),
-            name: "n".into(),
-            args: serde_json::Value::Null,
-        };
+        *app.world_mut().get_mut::<RunState>(e).unwrap() = RunState::AwaitingApproval;
         app.update();
         let meta = app.world().get::<AgentTurnMeta>(e).unwrap();
         assert!(meta.durations.is_empty());

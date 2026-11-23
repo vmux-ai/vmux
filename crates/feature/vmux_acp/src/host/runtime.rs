@@ -151,7 +151,7 @@ fn workspace(
             }
             commands.queue(vmux_session::mutation::Request::local(
                 session_id.clone(),
-                vmux_session::mutation::Mutation::ChangeWorkspace(cwd.clone()),
+                vmux_session::mutation::Mutation::change_workspace(cwd.clone()),
             ));
             let Some(stack) = session_views
                 .iter()
@@ -354,6 +354,7 @@ fn input(
         &SessionId,
         &AgentId,
         &mut RunState,
+        Option<&vmux_session::RunError>,
         Has<AcpSpawnQueued>,
         Has<TitlePending>,
         Option<&mut PendingHandoff>,
@@ -372,6 +373,7 @@ fn input(
         session_id,
         agent_id,
         mut state,
+        run_error,
         spawn_queued,
         title_pending,
         mut pending,
@@ -385,8 +387,11 @@ fn input(
                 continue;
             }
             if modes.ready(kind) {
-                if matches!(&*state, RunState::Errored(error) if *error == blocked.error) {
+                if matches!(*state, RunState::Errored)
+                    && run_error.is_some_and(|error| error.0 == blocked.error)
+                {
                     *state = RunState::Idle;
+                    commands.entity(entity).remove::<vmux_session::RunError>();
                 }
                 commands.entity(entity).remove::<PreferencesBlocked>();
             }
@@ -396,11 +401,14 @@ fn input(
                 && queues.ready(entity, matches!(*state, RunState::Idle))
                 && let Some((file, error)) = modes.load_error(kind)
             {
-                *state = RunState::Errored(error.to_string());
-                commands.entity(entity).insert(PreferencesBlocked {
-                    file,
-                    error: error.to_string(),
-                });
+                *state = RunState::Errored;
+                commands.entity(entity).insert((
+                    vmux_session::RunError(error.to_string()),
+                    PreferencesBlocked {
+                        file,
+                        error: error.to_string(),
+                    },
+                ));
             }
             continue;
         }
@@ -593,9 +601,14 @@ mod tests {
 
     #[test]
     fn refused_dispatch_retains_the_prompt_until_the_session_is_rearmed() {
-        let mut fixture = DispatchFixture::new(RunState::Errored(
-            "thread already has an active writer".into(),
-        ));
+        let mut fixture = DispatchFixture::new(RunState::Errored);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .insert(vmux_session::RunError(
+                "thread already has an active writer".into(),
+            ));
         fixture.enqueue(fixture.session, "retained", Vec::new());
         fixture
             .app
@@ -1341,7 +1354,7 @@ mod tests {
             app.update();
             if matches!(
                 app.world().get::<RunState>(session),
-                Some(RunState::Errored(_))
+                Some(RunState::Errored)
             ) {
                 break;
             }

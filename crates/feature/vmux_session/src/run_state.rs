@@ -1,18 +1,14 @@
 use bevy_ecs::prelude::Component;
 use std::time::Duration;
 
-#[derive(Component, Default)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[require(AgentTurnMeta)]
 pub enum RunState {
     #[default]
     Idle,
     Streaming,
-    AwaitingApproval {
-        call_id: String,
-        name: String,
-        args: serde_json::Value,
-    },
-    Errored(String),
+    AwaitingApproval,
+    Errored,
 }
 
 impl RunState {
@@ -20,24 +16,37 @@ impl RunState {
         match self {
             Self::Idle => "idle",
             Self::Streaming => "streaming",
-            Self::AwaitingApproval { .. } => "awaiting",
-            Self::Errored(_) => "errored",
+            Self::AwaitingApproval => "awaiting",
+            Self::Errored => "errored",
         }
     }
+}
 
-    pub fn failure(&self) -> Option<Failure<'_>> {
-        match self {
-            Self::Errored(message) => Some(Failure(message)),
-            _ => None,
-        }
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct RunApproval {
+    pub call_id: String,
+    pub name: String,
+    pub args: serde_json::Value,
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct RunError(pub String);
+
+impl RunError {
+    pub fn failure(&self) -> Failure<'_> {
+        Failure(&self.0)
     }
 
-    pub fn failure_kind(&self) -> Option<FailureKind> {
-        self.failure().map(|failure| failure.kind())
+    pub fn failure_kind(&self) -> FailureKind {
+        self.failure().kind()
     }
 
     pub fn in_use(&self) -> bool {
-        self.failure().is_some_and(|failure| failure.in_use())
+        self.failure().in_use()
+    }
+
+    pub fn state() -> RunState {
+        RunState::Errored
     }
 }
 
@@ -138,10 +147,8 @@ mod tests {
 
     #[test]
     fn errored_holds_message() {
-        let s = RunState::Errored("oops".into());
-        match s {
-            RunState::Errored(m) => assert_eq!(m, "oops"),
-            _ => panic!("wrong variant"),
-        }
+        let error = RunError("oops".into());
+        assert_eq!(error.0, "oops");
+        assert_eq!(RunError::state(), RunState::Errored);
     }
 }

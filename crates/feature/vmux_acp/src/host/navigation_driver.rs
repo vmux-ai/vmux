@@ -368,7 +368,7 @@ impl PageOpener<'_, '_> {
         if cwd_missing {
             self.commands.queue(vmux_session::mutation::Request::local(
                 id.clone(),
-                vmux_session::mutation::Mutation::ChangeWorkspace(cwd.to_path_buf()),
+                vmux_session::mutation::Mutation::change_workspace(cwd.to_path_buf()),
             ));
         }
         self.bind_workspace(task.stack, cwd);

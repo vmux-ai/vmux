@@ -1863,7 +1863,7 @@ fn activate(
         }
         if viewed.contains(&entity)
             && ConversationSource::new(kind, sid, 0).is_some()
-            && let (Some(file), Some(RunState::Errored(_))) = (file, state)
+            && let (Some(file), Some(RunState::Errored)) = (file, state)
         {
             let paths = watched
                 .map(|watched| watched.0.clone())
@@ -2392,7 +2392,7 @@ fn reset_source(
                 ConversationRevision,
                 vmux_session::history::Window,
             )>();
-        if matches!(state, Some(RunState::Errored(_))) {
+        if matches!(state, Some(RunState::Errored)) {
             commands
                 .entity(session)
                 .insert(FailedConversationReadRequested);
@@ -2651,7 +2651,7 @@ fn queue_failed_conversations(
         }
     };
     for (session, _sid, kind, provider_sid, created_at, state, cursor) in &sessions {
-        if !matches!(state, RunState::Errored(_)) {
+        if !matches!(state, RunState::Errored) {
             commands
                 .entity(session)
                 .remove::<FailedConversationReadRequested>();
@@ -4121,7 +4121,8 @@ mod tests {
                     ProviderSessionId("01a14fcc-f46a-7c12-b000-779be98d72ae".into()),
                     AcpSessionId("01a14fcc-f46a-7c12-b000-779be98d72ae".into()),
                     CreatedAt(Timestamp::parse("2026-10-18T16:16:34.454Z")),
-                    RunState::Errored("thread_active_writer".into()),
+                    RunState::Errored,
+                    vmux_session::RunError("thread_active_writer".into()),
                 ))
                 .id();
             for (sequence, message) in cached.into_iter().enumerate() {
@@ -4301,8 +4302,17 @@ mod tests {
             fixture.finish(),
             [vmux_api::session::Message::user("original conversation")]
         );
-        assert!(
-            matches!(fixture.app.world().get::<RunState>(fixture.session), Some(RunState::Errored(message)) if message == "thread_active_writer")
+        assert_eq!(
+            fixture.app.world().get::<RunState>(fixture.session),
+            Some(&RunState::Errored)
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_session::RunError>(fixture.session)
+                .map(|error| error.0.as_str()),
+            Some("thread_active_writer")
         );
         assert_eq!(
             fixture.app.world().get::<AcpSessionId>(fixture.session),

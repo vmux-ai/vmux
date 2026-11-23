@@ -62,19 +62,32 @@ fn receive(
 
 fn reply(
     trigger: On<AgentApprovalReply>,
-    mut sessions: Query<(&mut RunState, &SessionId, &AgentId, &Cwd), With<Session>>,
+    mut sessions: Query<
+        (
+            &mut RunState,
+            Option<&vmux_session::RunApproval>,
+            &SessionId,
+            &AgentId,
+            &Cwd,
+        ),
+        With<Session>,
+    >,
     grants: Grants,
     mut remembered: MessageWriter<Remember>,
     mut service: MessageWriter<ServiceRequest>,
+    mut commands: Commands,
 ) {
     let reply = trigger.event();
-    let Ok((mut state, id, agent, cwd)) = sessions.get_mut(reply.session) else {
+    let Ok((mut state, approval, id, agent, cwd)) = sessions.get_mut(reply.session) else {
         return;
     };
-    let RunState::AwaitingApproval { call_id, name, .. } = &*state else {
+    if !matches!(*state, RunState::AwaitingApproval) {
+        return;
+    }
+    let Some(approval) = approval else {
         return;
     };
-    if call_id != &reply.call_id {
+    if approval.call_id != reply.call_id {
         return;
     }
     if reply.decision == ApprovalDecision::AllowAlways
@@ -85,7 +98,7 @@ fn reply(
             session: reply.session,
             agent: agent.clone(),
             cwd: cwd.clone(),
-            tool: name.clone(),
+            tool: approval.name.clone(),
         });
     }
     service.write(ServiceRequest(ClientMessage::Shared(
@@ -96,28 +109,46 @@ fn reply(
         },
     )));
     *state = RunState::Streaming;
+    commands
+        .entity(reply.session)
+        .remove::<vmux_session::RunApproval>();
 }
 
 fn auto_allow(
-    mut sessions: Query<(Entity, &SessionId, &mut RunState), With<Session>>,
+    mut sessions: Query<
+        (
+            Entity,
+            &SessionId,
+            &mut RunState,
+            Option<&vmux_session::RunApproval>,
+        ),
+        With<Session>,
+    >,
     grants: Grants,
     mut service: MessageWriter<ServiceRequest>,
+    mut commands: Commands,
 ) {
-    for (session, id, mut state) in &mut sessions {
-        let RunState::AwaitingApproval { call_id, name, .. } = &*state else {
+    for (session, id, mut state, approval) in &mut sessions {
+        if !matches!(*state, RunState::AwaitingApproval) {
+            continue;
+        }
+        let Some(approval) = approval else {
             continue;
         };
-        if !grants.allows(session, name) {
+        if !grants.allows(session, &approval.name) {
             continue;
         }
         service.write(ServiceRequest(ClientMessage::Shared(
             SharedMessage::AgentApprove {
                 sid: id.0.clone(),
-                call_id: call_id.clone(),
+                call_id: approval.call_id.clone(),
                 decision: ApprovalDecision::AllowAlways,
             },
         )));
         *state = RunState::Streaming;
+        commands
+            .entity(session)
+            .remove::<vmux_session::RunApproval>();
     }
 }
 
@@ -201,7 +232,8 @@ mod tests {
                     SessionId(format!("s{}", self.next)),
                     AgentId(agent.into()),
                     Cwd(cwd.into()),
-                    RunState::AwaitingApproval {
+                    RunState::AwaitingApproval,
+                    vmux_session::RunApproval {
                         call_id: call.into(),
                         name: tool.into(),
                         args: json!({}),
@@ -256,8 +288,17 @@ mod tests {
         let session = fixture.session("one", &directory, "current", "edit");
         fixture.reply(session, "stale", ApprovalDecision::AllowAlways);
         assert!(fixture.requests().is_empty());
-        assert!(
-            matches!(fixture.app.world().get::<RunState>(session), Some(RunState::AwaitingApproval { call_id, .. }) if call_id == "current")
+        assert_eq!(
+            fixture.app.world().get::<RunState>(session),
+            Some(&RunState::AwaitingApproval)
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_session::RunApproval>(session)
+                .map(|approval| approval.call_id.as_str()),
+            Some("current")
         );
         assert!(!fixture.path.exists());
     }
@@ -314,7 +355,7 @@ mod tests {
         assert!(fixture.requests().is_empty());
         assert!(matches!(
             fixture.app.world().get::<RunState>(alias),
-            Some(RunState::AwaitingApproval { .. })
+            Some(RunState::AwaitingApproval)
         ));
     }
 
@@ -339,15 +380,14 @@ mod tests {
             .into_owned();
         let repaired = json!({"by_agent": {"other": {namespace: ["other_tool"]}}});
         std::fs::write(&fixture.path, serde_json::to_vec(&repaired).unwrap()).unwrap();
-        fixture
-            .app
-            .world_mut()
-            .entity_mut(session)
-            .insert(RunState::AwaitingApproval {
+        fixture.app.world_mut().entity_mut(session).insert((
+            RunState::AwaitingApproval,
+            vmux_session::RunApproval {
                 call_id: "retry".into(),
                 name: "edit".into(),
                 args: json!({}),
-            });
+            },
+        ));
         fixture.reply(session, "retry", ApprovalDecision::AllowAlways);
         fixture.wait(|fixture| fixture.saved("one", "edit"));
         let stored: serde_json::Value =
@@ -387,15 +427,14 @@ mod tests {
                 .is_some()
                 || fixture.saved("one", "edit")
         });
-        fixture
-            .app
-            .world_mut()
-            .entity_mut(session)
-            .insert(RunState::AwaitingApproval {
+        fixture.app.world_mut().entity_mut(session).insert((
+            RunState::AwaitingApproval,
+            vmux_session::RunApproval {
                 call_id: "second".into(),
                 name: "run".into(),
                 args: json!({}),
-            });
+            },
+        ));
         fixture.app.world_mut().trigger(AgentApprovalReply {
             session,
             call_id: "second".into(),
@@ -431,7 +470,7 @@ mod tests {
         assert!(fixture.requests().is_empty());
         assert!(matches!(
             fixture.app.world().get::<RunState>(session),
-            Some(RunState::AwaitingApproval { .. })
+            Some(RunState::AwaitingApproval)
         ));
     }
 }

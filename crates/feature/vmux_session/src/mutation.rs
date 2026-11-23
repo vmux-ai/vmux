@@ -18,6 +18,7 @@ impl Plugin for MutationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::ProviderSessionTombstones>()
             .add_plugins(SchemaPlugin::<MutationStore>::default())
+            .register_type::<MutationKind>()
             .register_type::<Creation>()
             .add_message::<Request>()
             .add_message::<Committed>()
@@ -59,24 +60,104 @@ pub(crate) struct ReceiveSet;
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct CommitSet;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[type_path = "vmux_session"]
+pub enum MutationKind {
+    Create,
+    Rename,
+    Describe,
+    Summarize,
+    ChangeWorkspace,
+    BindAgent,
+    ChangeStage,
+    Archive,
+}
+
 #[derive(Component, Clone, Debug, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
 #[type_path = "vmux_session"]
-pub enum Mutation {
-    Create(Creation),
-    Rename(String),
-    Describe(String),
-    Summarize {
-        title: String,
-        description: String,
-    },
-    ChangeWorkspace(std::path::PathBuf),
-    BindAgent {
-        agent: AgentId,
-        cwd: std::path::PathBuf,
-    },
-    ChangeStage(StageId),
-    Archive(Option<i64>),
+pub struct Mutation {
+    pub kind: MutationKind,
+    pub creation: Option<Creation>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub cwd: Option<std::path::PathBuf>,
+    pub agent: Option<AgentId>,
+    pub stage: Option<StageId>,
+    pub archived_at: Option<i64>,
+}
+
+impl Mutation {
+    fn empty(kind: MutationKind) -> Self {
+        Self {
+            kind,
+            creation: None,
+            name: None,
+            description: None,
+            cwd: None,
+            agent: None,
+            stage: None,
+            archived_at: None,
+        }
+    }
+
+    pub fn create(creation: Creation) -> Self {
+        Self {
+            creation: Some(creation),
+            ..Self::empty(MutationKind::Create)
+        }
+    }
+
+    pub fn rename(name: String) -> Self {
+        Self {
+            name: Some(name),
+            ..Self::empty(MutationKind::Rename)
+        }
+    }
+
+    pub fn describe(description: String) -> Self {
+        Self {
+            description: Some(description),
+            ..Self::empty(MutationKind::Describe)
+        }
+    }
+
+    pub fn summarize(title: String, description: String) -> Self {
+        Self {
+            name: Some(title),
+            description: Some(description),
+            ..Self::empty(MutationKind::Summarize)
+        }
+    }
+
+    pub fn change_workspace(cwd: std::path::PathBuf) -> Self {
+        Self {
+            cwd: Some(cwd),
+            ..Self::empty(MutationKind::ChangeWorkspace)
+        }
+    }
+
+    pub fn bind_agent(agent: AgentId, cwd: std::path::PathBuf) -> Self {
+        Self {
+            agent: Some(agent),
+            cwd: Some(cwd),
+            ..Self::empty(MutationKind::BindAgent)
+        }
+    }
+
+    pub fn change_stage(stage: StageId) -> Self {
+        Self {
+            stage: Some(stage),
+            ..Self::empty(MutationKind::ChangeStage)
+        }
+    }
+
+    pub fn archive(archived_at: Option<i64>) -> Self {
+        Self {
+            archived_at,
+            ..Self::empty(MutationKind::Archive)
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Reflect)]
@@ -119,9 +200,10 @@ impl Request {
     }
 
     fn creation(&self) -> Option<&Creation> {
-        match &self.mutation {
-            Mutation::Create(created) => Some(created),
-            _ => None,
+        if self.mutation.kind == MutationKind::Create {
+            self.mutation.creation.as_ref()
+        } else {
+            None
         }
     }
 }
@@ -192,11 +274,11 @@ impl Journal<'_, '_> {
         &self,
         request: &Request,
         entity: Option<Entity>,
-    ) -> Result<(Revision, Revision), Rejection> {
+    ) -> Result<(Revision, Revision), (Rejection, Option<(Revision, Revision)>)> {
         if let Some(operation) = request.lease
             && (self.ids.get(operation) != Ok(&request.session) || !self.imports.active(operation))
         {
-            return Err(Rejection::Canceled);
+            return Err((Rejection::Canceled, None));
         }
         let current = entity
             .and_then(|entity| {
@@ -210,23 +292,20 @@ impl Journal<'_, '_> {
         if let Some(expected) = request.expected
             && expected != current
         {
-            return Err(Rejection::Stale {
-                expected,
-                actual: current,
-            });
+            return Err((Rejection::Stale, Some((expected, current))));
         }
-        let next = current.next().ok_or(Rejection::RevisionExhausted)?;
+        let next = current.next().ok_or((Rejection::RevisionExhausted, None))?;
         let stage = match request.creation() {
             Some(created) => Some(&created.stage),
-            None => match &request.mutation {
-                Mutation::ChangeStage(stage) => Some(stage),
-                _ => None,
-            },
+            None if request.mutation.kind == MutationKind::ChangeStage => {
+                request.mutation.stage.as_ref()
+            }
+            None => None,
         };
         if let Some(stage) = stage
             && !self.stages.iter().any(|id| id == stage)
         {
-            return Err(Rejection::MissingStage);
+            return Err((Rejection::MissingStage, None));
         }
         Ok((current, next))
     }
@@ -240,10 +319,21 @@ struct Replies<'w> {
 
 impl Replies<'_> {
     fn reject(&mut self, request: &Request, reason: Rejection) {
+        self.reject_with_revisions(request, reason, None);
+    }
+
+    fn reject_with_revisions(
+        &mut self,
+        request: &Request,
+        reason: Rejection,
+        stale: Option<(Revision, Revision)>,
+    ) {
         self.rejected.write(Rejected {
             operation: request.operation.clone(),
             session: request.session.clone(),
             reason,
+            expected: stale.map(|(expected, _)| expected),
+            actual: stale.map(|(_, actual)| actual),
         });
     }
 
@@ -304,8 +394,8 @@ fn commit(
     }
     let (current, next) = match journal.validate(request, entity) {
         Ok(revisions) => revisions,
-        Err(reason) => {
-            replies.reject(request, reason);
+        Err((reason, stale)) => {
+            replies.reject_with_revisions(request, reason, stale);
             return;
         }
     };
@@ -356,41 +446,56 @@ fn change(
     stages: &Query<(Option<&Stage>, Option<&StageChangedAt>)>,
     commands: &mut Commands,
 ) {
-    match &request.mutation {
-        Mutation::Create(_) => {}
-        Mutation::Rename(name) => {
-            commands
-                .entity(entity)
-                .insert((
-                    Name::new(name.clone()),
-                    AgentConversationTitle(name.clone()),
-                ))
-                .remove::<TitlePending>();
+    match request.mutation.kind {
+        MutationKind::Create => {}
+        MutationKind::Rename => {
+            if let Some(name) = &request.mutation.name {
+                commands
+                    .entity(entity)
+                    .insert((
+                        Name::new(name.clone()),
+                        AgentConversationTitle(name.clone()),
+                    ))
+                    .remove::<TitlePending>();
+            }
         }
-        Mutation::Describe(description) => {
-            commands
-                .entity(entity)
-                .insert(Description(description.clone()));
+        MutationKind::Describe => {
+            if let Some(description) = &request.mutation.description {
+                commands
+                    .entity(entity)
+                    .insert(Description(description.clone()));
+            }
         }
-        Mutation::Summarize { title, description } => {
-            commands
-                .entity(entity)
-                .insert((
-                    Name::new(title.clone()),
-                    AgentConversationTitle(title.clone()),
-                    Description(description.clone()),
-                ))
-                .remove::<TitlePending>();
+        MutationKind::Summarize => {
+            if let (Some(title), Some(description)) =
+                (&request.mutation.name, &request.mutation.description)
+            {
+                commands
+                    .entity(entity)
+                    .insert((
+                        Name::new(title.clone()),
+                        AgentConversationTitle(title.clone()),
+                        Description(description.clone()),
+                    ))
+                    .remove::<TitlePending>();
+            }
         }
-        Mutation::ChangeWorkspace(cwd) => {
-            commands.entity(entity).insert(Cwd(cwd.clone()));
+        MutationKind::ChangeWorkspace => {
+            if let Some(cwd) = &request.mutation.cwd {
+                commands.entity(entity).insert(Cwd(cwd.clone()));
+            }
         }
-        Mutation::BindAgent { agent, cwd } => {
-            commands
-                .entity(entity)
-                .insert((agent.clone(), Cwd(cwd.clone())));
+        MutationKind::BindAgent => {
+            if let (Some(agent), Some(cwd)) = (&request.mutation.agent, &request.mutation.cwd) {
+                commands
+                    .entity(entity)
+                    .insert((agent.clone(), Cwd(cwd.clone())));
+            }
         }
-        Mutation::ChangeStage(stage) => {
+        MutationKind::ChangeStage => {
+            let Some(stage) = &request.mutation.stage else {
+                return;
+            };
             let current = stages.get(entity).ok();
             if current
                 .is_some_and(|(current, _)| current.is_some_and(|current| current.0 == *stage))
@@ -406,12 +511,14 @@ fn change(
                 StageChangedAt(UnixMillis::now().0.max(previous.saturating_add(1))),
             ));
         }
-        Mutation::Archive(Some(at)) => {
-            commands.entity(entity).insert(ArchivedAt((*at).max(1)));
-        }
-        Mutation::Archive(None) => {
-            commands.entity(entity).remove::<ArchivedAt>();
-        }
+        MutationKind::Archive => match request.mutation.archived_at {
+            Some(at) => {
+                commands.entity(entity).insert(ArchivedAt(at.max(1)));
+            }
+            None => {
+                commands.entity(entity).remove::<ArchivedAt>();
+            }
+        },
     }
 }
 
@@ -427,9 +534,11 @@ pub struct Rejected {
     pub operation: String,
     pub session: SessionId,
     pub reason: Rejection,
+    pub expected: Option<Revision>,
+    pub actual: Option<Revision>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rejection {
     Canceled,
     InvalidOperation,
@@ -438,10 +547,7 @@ pub enum Rejection {
     DuplicateSession,
     SessionExists,
     MissingStage,
-    Stale {
-        expected: Revision,
-        actual: Revision,
-    },
+    Stale,
     RevisionExhausted,
 }
 
@@ -470,7 +576,7 @@ mod tests {
             ))
             .id();
         app.world_mut()
-            .write_message(Request::local(id, Mutation::Rename("Changed".into())));
+            .write_message(Request::local(id, Mutation::rename("Changed".into())));
         app.update();
         assert_eq!(
             app.world().get::<Name>(entity).unwrap().as_str(),
@@ -505,7 +611,7 @@ mod tests {
             .spawn((StageDefinition, StageId("active".into())));
         let id = SessionId("replayed".into());
         let changes = [
-            Mutation::Create(Creation {
+            Mutation::create(Creation {
                 name: "Initial".into(),
                 description: String::new(),
                 cwd: std::path::PathBuf::from("/tmp/project"),
@@ -515,9 +621,9 @@ mod tests {
                 activated_at: 100,
                 local: true,
             }),
-            Mutation::Rename("Final".into()),
-            Mutation::Describe("Committed summary".into()),
-            Mutation::Archive(Some(200)),
+            Mutation::rename("Final".into()),
+            Mutation::describe("Committed summary".into()),
+            Mutation::archive(Some(200)),
         ];
         for (base, mutation) in changes.into_iter().enumerate() {
             source.world_mut().write_message(Request {
@@ -580,7 +686,7 @@ mod tests {
             operation: "committed-before-expiry".into(),
             session: id.clone(),
             expected: Some(Revision(0)),
-            mutation: Mutation::Rename("Committed".into()),
+            mutation: Mutation::rename("Committed".into()),
         };
         app.world_mut().write_message(request.clone());
         app.update();
@@ -601,7 +707,7 @@ mod tests {
             operation: "refused-after-expiry".into(),
             session: id,
             expected: Some(Revision(1)),
-            mutation: Mutation::Describe("Must not commit".into()),
+            mutation: Mutation::describe("Must not commit".into()),
         });
         app.update();
         assert_eq!(
@@ -647,7 +753,7 @@ mod tests {
             operation: "rename".into(),
             session: id.clone(),
             expected: Some(Revision(0)),
-            mutation: Mutation::Rename("First".into()),
+            mutation: Mutation::rename("First".into()),
         };
         app.world_mut().write_message(request.clone());
         app.update();
@@ -656,7 +762,7 @@ mod tests {
             operation: "describe".into(),
             session: id.clone(),
             expected: Some(Revision(1)),
-            mutation: Mutation::Describe("New".into()),
+            mutation: Mutation::describe("New".into()),
         });
         app.update();
         app.world_mut().write_message(request);
@@ -665,7 +771,7 @@ mod tests {
             operation: "stale".into(),
             session: id,
             expected: Some(Revision(0)),
-            mutation: Mutation::Rename("Stale".into()),
+            mutation: Mutation::rename("Stale".into()),
         });
         app.update();
         assert_eq!(app.world().get::<Name>(entity).unwrap().as_str(), "First");
@@ -683,13 +789,9 @@ mod tests {
             .resource_mut::<Messages<Rejected>>()
             .drain()
             .collect::<Vec<_>>();
-        assert_eq!(
-            rejected[0].reason,
-            Rejection::Stale {
-                expected: Revision(0),
-                actual: Revision(2)
-            }
-        );
+        assert_eq!(rejected[0].reason, Rejection::Stale);
+        assert_eq!(rejected[0].expected, Some(Revision(0)));
+        assert_eq!(rejected[0].actual, Some(Revision(2)));
     }
 
     #[test]
@@ -706,14 +808,14 @@ mod tests {
             .spawn((Session, id.clone(), Name::new("Second")))
             .id();
         app.world_mut()
-            .write_message(Request::local(id.clone(), Mutation::Rename("Wrong".into())));
+            .write_message(Request::local(id.clone(), Mutation::rename("Wrong".into())));
         app.update();
         assert_eq!(app.world().get::<Name>(first).unwrap().as_str(), "First");
         assert_eq!(app.world().get::<Name>(second).unwrap().as_str(), "Second");
         app.world_mut().entity_mut(second).despawn();
         app.world_mut().write_message(Request::local(
             id,
-            Mutation::ChangeStage(StageId("missing".into())),
+            Mutation::change_stage(StageId("missing".into())),
         ));
         app.update();
         assert!(app.world().get::<Revision>(first).is_none());

@@ -568,12 +568,15 @@ fn deliver(
                         .remove::<(AcpInstallWaiter, vmux_tool::McpResolveResult)>();
                 }
                 Err(message) => {
-                    *state = RunState::Errored(message.clone());
-                    commands.entity(entity).remove::<(
-                        AcpInstallWaiter,
-                        vmux_tool::McpResolveRequest,
-                        vmux_tool::McpResolveResult,
-                    )>();
+                    *state = RunState::Errored;
+                    commands
+                        .entity(entity)
+                        .insert(vmux_session::RunError(message.clone()))
+                        .remove::<(
+                            AcpInstallWaiter,
+                            vmux_tool::McpResolveRequest,
+                            vmux_tool::McpResolveResult,
+                        )>();
                 }
             }
         }

@@ -142,7 +142,7 @@ impl ActivityIcon {
     }
 
     fn svg_data_url(svg: &str) -> String {
-        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        let hex = b"0123456789ABCDEF";
         let mut encoded = String::with_capacity(svg.len() * 2);
         encoded.push_str("data:image/svg+xml,");
         for byte in svg.bytes() {
@@ -150,8 +150,8 @@ impl ActivityIcon {
                 encoded.push(byte as char);
             } else {
                 encoded.push('%');
-                encoded.push(HEX[(byte >> 4) as usize] as char);
-                encoded.push(HEX[(byte & 0x0f) as usize] as char);
+                encoded.push(hex[(byte >> 4) as usize] as char);
+                encoded.push(hex[(byte & 0x0f) as usize] as char);
             }
         }
         encoded
