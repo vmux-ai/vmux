@@ -1951,13 +1951,13 @@ fn desktop_and_run_auto_build_missing_artifacts_and_reuse_existing_ones() {
 #[test]
 #[cfg(unix)]
 fn no_build_fails_fast_with_resolved_branch_and_profile_or_launches_existing_artifact() {
+    let fixture = Fixture::new();
     for (command, branch_arg, profile) in [
         ("desktop", Some("main"), "local"),
         ("desktop", None, "local"),
         ("run", Some("main"), "dev"),
         ("desktop", None, "release"),
     ] {
-        let fixture = Fixture::new();
         let mut args = vec![command];
         if let Some(branch) = branch_arg {
             args.push(branch);
@@ -1974,7 +1974,6 @@ fn no_build_fails_fast_with_resolved_branch_and_profile_or_launches_existing_art
         assert!(!fixture.root.join("open.log").exists());
     }
 
-    let fixture = Fixture::new();
     let worktree = fixture.directory.path().join("alias-dir");
     for args in [
         vec!["add", "Cargo.toml", "packaging", "crates"],
@@ -2015,21 +2014,41 @@ fn no_build_fails_fast_with_resolved_branch_and_profile_or_launches_existing_art
     assert!(!fixture.root.join("build.log").exists());
     assert!(!fixture.root.join("open.log").exists());
 
-    let ready = Fixture::new();
-    let app = ready
+    std::fs::write(fixture.target.join("release"), "not a directory").unwrap();
+    fixture
+        .command()
+        .args(["desktop", "main", "-p", "local"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a directory"));
+    assert!(!fixture.root.join("build.log").exists());
+    std::fs::remove_file(fixture.target.join("release")).unwrap();
+
+    std::fs::create_dir_all(fixture.target.join("release")).unwrap();
+    std::fs::write(fixture.target.join("release/Vmux.app"), "not a directory").unwrap();
+    fixture
+        .command()
+        .args(["desktop", "main", "-p", "release"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a directory"));
+    assert!(!fixture.root.join("build.log").exists());
+    std::fs::remove_file(fixture.target.join("release/Vmux.app")).unwrap();
+
+    let app = fixture
         .target
         .join("release/Vmux (existing).app/Contents/MacOS");
     std::fs::create_dir_all(&app).unwrap();
     std::fs::write(app.join("vmux_desktop"), "fixture").unwrap();
-    ready
+    fixture
         .command()
         .args(["desktop", "main", "-p", "local", "--no-build"])
         .assert()
         .success();
-    assert!(!ready.root.join("build.log").exists());
-    assert!(ready.root.join("open.log").is_file());
+    assert!(!fixture.root.join("build.log").exists());
+    assert!(fixture.root.join("open.log").is_file());
 
-    ready
+    fixture
         .command()
         .args(["run", "-P", "web", "--no-build"])
         .assert()

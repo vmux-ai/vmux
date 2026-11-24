@@ -3215,11 +3215,20 @@ fn inspect_local(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mu
             continue;
         }
 
-        if !matches!(facts.get::<_, DirectorySlot>(entity), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
-        {
-            *phase = RunPhase::Missing;
-            wake.0.wake_by_ref();
-            continue;
+        match facts.get::<_, DirectorySlot>(entity) {
+            Some(PathMetadata(None)) => {
+                *phase = RunPhase::Missing;
+                wake.0.wake_by_ref();
+                continue;
+            }
+            Some(PathMetadata(Some(metadata))) if metadata.is_dir() => {}
+            Some(PathMetadata(Some(_))) => {
+                io.commands.entity(entity).insert(Failed(Failure::message(
+                    "Local release target is not a directory",
+                )));
+                continue;
+            }
+            None => continue,
         }
         io.request(
             &mut sequence,
@@ -3399,11 +3408,20 @@ fn inspect_package(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, 
             continue;
         }
 
-        if !matches!(facts.get::<_, PathSlot>(entity), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
-        {
-            *phase = RunPhase::Missing;
-            wake.0.wake_by_ref();
-            continue;
+        match facts.get::<_, PathSlot>(entity) {
+            Some(PathMetadata(None)) => {
+                *phase = RunPhase::Missing;
+                wake.0.wake_by_ref();
+                continue;
+            }
+            Some(PathMetadata(Some(metadata))) if metadata.is_dir() => {}
+            Some(PathMetadata(Some(_))) => {
+                io.commands.entity(entity).insert(Failed(Failure::message(
+                    "App bundle target is not a directory",
+                )));
+                continue;
+            }
+            None => continue,
         }
         *phase = RunPhase::Verify;
 
