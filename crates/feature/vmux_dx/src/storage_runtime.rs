@@ -159,6 +159,15 @@ impl Default for ScanBudget {
     }
 }
 
+impl ScanBudget {
+    fn next_batch(&self, total: usize) -> Option<usize> {
+        self.limit
+            .checked_sub(total)
+            .filter(|remaining| *remaining > 0)
+            .map(|remaining| remaining.min(self.batch))
+    }
+}
+
 #[derive(Component, Default)]
 struct ScannedEntries(usize);
 
@@ -1133,11 +1142,11 @@ fn scan_roots(
             }
             let total = directories.record(entity, batch.entries.len());
             if let Some(next) = &batch.next {
-                if total < budget.limit {
+                if let Some(limit) = budget.next_batch(total) {
                     io.request_batch(
                         batch.path.clone(),
                         Some(next.clone()),
-                        budget.batch,
+                        limit,
                         entity,
                         Purpose::new(PurposeKind::Roots),
                     );
@@ -1165,13 +1174,17 @@ fn scan_roots(
                 ChildOf(entity),
             ));
             io.commands.entity(entity).insert(ScannedEntries::default());
-            io.request_batch(
-                checkout.target.clone(),
-                None,
-                budget.batch,
-                entity,
-                Purpose::new(PurposeKind::Roots),
-            );
+            if let Some(limit) = budget.next_batch(0) {
+                io.request_batch(
+                    checkout.target.clone(),
+                    None,
+                    limit,
+                    entity,
+                    Purpose::new(PurposeKind::Roots),
+                );
+            } else {
+                *phase = Phase::Profiles;
+            }
         }
     }
 }
@@ -1286,13 +1299,15 @@ fn scan_caches(
                 io.commands
                     .entity(profile)
                     .insert(ScannedEntries::default());
-                io.request_batch(
-                    path.0.clone(),
-                    None,
-                    budget.batch,
-                    entity,
-                    Purpose::targeted(PurposeKind::CacheEntries, profile),
-                );
+                if let Some(limit) = budget.next_batch(0) {
+                    io.request_batch(
+                        path.0.clone(),
+                        None,
+                        limit,
+                        entity,
+                        Purpose::targeted(PurposeKind::CacheEntries, profile),
+                    );
+                }
             }
             io.commands.entity(profile).insert(Expanded);
         }
@@ -1315,13 +1330,15 @@ fn scan_caches(
                             io.commands
                                 .entity(*candidate)
                                 .insert((Incremental, ScannedEntries::default()));
-                            io.request_batch(
-                                path.0.clone(),
-                                None,
-                                budget.batch,
-                                entity,
-                                Purpose::targeted(PurposeKind::Increments, *candidate),
-                            );
+                            if let Some(limit) = budget.next_batch(0) {
+                                io.request_batch(
+                                    path.0.clone(),
+                                    None,
+                                    limit,
+                                    entity,
+                                    Purpose::targeted(PurposeKind::Increments, *candidate),
+                                );
+                            }
                         } else if path.0.file_name() == Some(OsStr::new("deps")) {
                             io.commands.entity(*candidate).insert(Deps);
                         }
@@ -1414,12 +1431,12 @@ fn collect_caches(
             };
             let total = directories.record(target, batch.entries.len());
             if let Some(next) = &batch.next {
-                if total < budget.limit {
+                if let Some(limit) = budget.next_batch(total) {
                     continued = true;
                     io.request_batch(
                         batch.path.clone(),
                         Some(next.clone()),
-                        budget.batch,
+                        limit,
                         entity,
                         *purpose,
                     );
@@ -1910,11 +1927,11 @@ fn collect_deps(
                     ));
                 }
                 if let Some(next) = &batch.next {
-                    if total < budget.limit {
+                    if let Some(limit) = budget.next_batch(total) {
                         io.request_batch(
                             batch.path.clone(),
                             Some(next.clone()),
-                            budget.batch,
+                            limit,
                             entity,
                             *purpose,
                         );
@@ -1933,11 +1950,11 @@ fn collect_deps(
                     }
                 }
                 if let Some(next) = &batch.next {
-                    if total < budget.limit {
+                    if let Some(limit) = budget.next_batch(total) {
                         io.request_batch(
                             batch.path.clone(),
                             Some(next.clone()),
-                            budget.batch,
+                            limit,
                             entity,
                             *purpose,
                         );
@@ -2003,13 +2020,15 @@ fn select_caches(
                 }
                 if path.0.file_name() == Some(OsStr::new("deps")) {
                     io.commands.entity(cache).insert(ScannedEntries::default());
-                    io.request_batch(
-                        path.0.clone(),
-                        None,
-                        budget.batch,
-                        entity,
-                        Purpose::targeted(PurposeKind::CacheEntries, cache),
-                    );
+                    if let Some(limit) = budget.next_batch(0) {
+                        io.request_batch(
+                            path.0.clone(),
+                            None,
+                            limit,
+                            entity,
+                            Purpose::targeted(PurposeKind::CacheEntries, cache),
+                        );
+                    }
                 } else {
                     io.commands.entity(cache).insert(Selected);
                 }
@@ -2030,13 +2049,15 @@ fn select_caches(
                 io.commands
                     .entity(cache)
                     .insert((ScannedEntries::default(), DepsBuffer::default()));
-                io.request_batch(
-                    path.0.clone(),
-                    None,
-                    budget.batch,
-                    entity,
-                    Purpose::targeted(PurposeKind::CacheEntries, cache),
-                );
+                if let Some(limit) = budget.next_batch(0) {
+                    io.request_batch(
+                        path.0.clone(),
+                        None,
+                        limit,
+                        entity,
+                        Purpose::targeted(PurposeKind::CacheEntries, cache),
+                    );
+                }
             }
         }
     }
@@ -3237,14 +3258,14 @@ mod tests {
         );
 
         assert_eq!(
-            fixture.run_with_budget(Request::clean(true), ScanBudget { batch: 2, limit: 4 }),
+            fixture.run_with_budget(Request::clean(true), ScanBudget { batch: 2, limit: 3 }),
             0
         );
         let remaining = paths.iter().filter(|path| path.is_file()).count();
         assert_eq!(
             remaining,
-            paths.len() - 4,
-            "bounded clean pass should prune up to its scan budget and defer the rest"
+            paths.len() - 3,
+            "bounded clean pass should cap continuation batches at the remaining scan budget"
         );
     }
 }
