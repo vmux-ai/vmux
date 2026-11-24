@@ -779,6 +779,7 @@ mod tests {
             .add_message::<vmux_browser::OpenRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
+        app.world_mut().run_schedule(PreStartup);
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
@@ -797,6 +798,7 @@ mod tests {
             .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
+        app.world_mut().run_schedule(PreStartup);
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
@@ -818,6 +820,7 @@ mod tests {
             .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
+        app.world_mut().run_schedule(PreStartup);
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut().trigger(vmux_layout::tab::TabClosed);
@@ -837,6 +840,7 @@ mod tests {
             .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
+        app.world_mut().run_schedule(PreStartup);
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
@@ -860,6 +864,7 @@ mod tests {
             .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
+        app.world_mut().run_schedule(PreStartup);
 
         let window = app.world_mut().spawn(Window::default()).id();
         {
@@ -884,6 +889,7 @@ mod tests {
             .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
+        app.world_mut().run_schedule(PreStartup);
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut().run_schedule(Update);
