@@ -117,6 +117,7 @@ fn spawn_state(mut commands: Commands) {
     commands.spawn((Name::new("OS menu runtime"), OsMenuState::default()));
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct OsMenuResource {
     menu: Option<Menu>,
     #[cfg(target_os = "macos")]
