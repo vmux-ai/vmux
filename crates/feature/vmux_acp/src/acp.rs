@@ -1,6 +1,6 @@
 use bevy::prelude::{
-    App, ApplyDeferred, Commands, Component, Entity, IntoScheduleConfigs, Name, On, Query, Single,
-    Update,
+    App, ApplyDeferred, Commands, Component, Entity, IntoScheduleConfigs, Name, On, PreUpdate,
+    Query, Single, Update,
 };
 pub(crate) use catalog_driver::{CatalogDriver, CatalogRequest};
 use driver::{
@@ -25,7 +25,9 @@ use vmux_api::protocol::{
 use vmux_api::session::Message;
 use vmux_api::session::{RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_ecs::service::{AbortTask, Shutdown, ShutdownComplete, ShutdownPending};
-use vmux_ecs::{AsyncChannel, ChannelReceived, CreatedAt, ProcessId, SpawnReceiver, SpawnSender};
+use vmux_ecs::{
+    AsyncChannel, ChannelDrain, ChannelReceived, CreatedAt, ProcessId, SpawnReceiver, SpawnSender,
+};
 use vmux_process::ProcessRuntime;
 use vmux_session::SessionId;
 
@@ -44,10 +46,20 @@ impl bevy::prelude::Plugin for AcpRuntimePlugin {
         AcpSessions::add_channels(app);
         AcpProjectionSenders::add_channels(app);
         app.add_plugins(AcpProjectionPlugin)
+            .configure_sets(
+                PreUpdate,
+                (
+                    ChannelDrain::of::<RemoteApproval>(),
+                    ChannelDrain::of::<AcpApprovalResolved>(),
+                )
+                    .chain(),
+            )
             .add_observer(project_info)
             .add_observer(project_config_state)
             .add_observer(project_status)
             .add_observer(project_startup)
+            .add_observer(project_approval_requested)
+            .add_observer(project_approval_resolved)
             .add_systems(
                 Update,
                 (spawn, ApplyDeferred).chain().before(AcpProjectionSet),
@@ -56,13 +68,7 @@ impl bevy::prelude::Plugin for AcpRuntimePlugin {
                 Update,
                 (
                     ApplyDeferred,
-                    (
-                        project_selected_config,
-                        project_approval_requested,
-                        project_approval_resolved,
-                        snapshot_selection,
-                    )
-                        .chain(),
+                    (project_selected_config, snapshot_selection).chain(),
                     (route_prompts, route_approvals, route_configs, route_cancels).chain(),
                     ApplyDeferred,
                     (subscribe, read, list, rebind, close, reap).chain(),
@@ -534,55 +540,53 @@ fn project_status(
 }
 
 fn project_approval_requested(
-    mut sessions: Query<(
-        &SessionId,
-        &AcpSessionShared,
-        &AsyncChannel<RemoteApproval>,
-        &mut AcpApprovalState,
-    )>,
+    mut trigger: On<ChannelReceived<RemoteApproval>>,
+    mut sessions: Query<(&SessionId, &AcpSessionShared, &mut AcpApprovalState)>,
 ) {
-    for (sid, shared, channel, mut approval) in &mut sessions {
-        for next in channel.drain() {
-            approval.0 = Some(next.clone());
-            shared
-                .0
-                .emit(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
-                    sid: sid.0.clone(),
-                    call_id: next.call_id,
-                    name: next.name,
-                    args: next.args,
-                }));
-        }
-    }
+    let entity = trigger.event().entity;
+    let Some(next) = trigger.event_mut().take() else {
+        return;
+    };
+    let Ok((sid, shared, mut approval)) = sessions.get_mut(entity) else {
+        return;
+    };
+    approval.0 = Some(next.clone());
+    shared
+        .0
+        .emit(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
+            sid: sid.0.clone(),
+            call_id: next.call_id,
+            name: next.name,
+            args: next.args,
+        }));
 }
 
 fn project_approval_resolved(
-    mut sessions: Query<(
-        &SessionId,
-        &AcpSessionShared,
-        &AsyncChannel<AcpApprovalResolved>,
-        &mut AcpApprovalState,
-    )>,
+    mut trigger: On<ChannelReceived<AcpApprovalResolved>>,
+    mut sessions: Query<(&SessionId, &AcpSessionShared, &mut AcpApprovalState)>,
 ) {
-    for (sid, shared, channel, mut approval) in &mut sessions {
-        for resolved in channel.drain() {
-            let call_id = resolved.0;
-            if approval
-                .0
-                .as_ref()
-                .is_none_or(|pending| pending.call_id != call_id)
-            {
-                continue;
-            }
-            approval.0 = None;
-            shared
-                .0
-                .emit(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
-                    sid: sid.0.clone(),
-                    call_id,
-                }));
-        }
+    let entity = trigger.event().entity;
+    let Some(resolved) = trigger.event_mut().take() else {
+        return;
+    };
+    let Ok((sid, shared, mut approval)) = sessions.get_mut(entity) else {
+        return;
+    };
+    let call_id = resolved.0;
+    if approval
+        .0
+        .as_ref()
+        .is_none_or(|pending| pending.call_id != call_id)
+    {
+        return;
     }
+    approval.0 = None;
+    shared
+        .0
+        .emit(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
+            sid: sid.0.clone(),
+            call_id,
+        }));
 }
 
 fn snapshot_selection(

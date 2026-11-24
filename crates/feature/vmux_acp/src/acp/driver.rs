@@ -218,9 +218,7 @@ pub(super) struct AcpProjectionSenders {
     #[channel(manual)]
     selected_config: ChannelSender<AcpSelectedConfigInput>,
     status: ChannelSender<AgentRunStatus>,
-    #[channel(manual)]
     approval_requested: ChannelSender<RemoteApproval>,
-    #[channel(manual)]
     approval_resolved: ChannelSender<AcpApprovalResolved>,
     #[channel(manual)]
     selection_snapshot: ChannelSender<AcpSelectionSnapshotRequest>,

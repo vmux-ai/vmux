@@ -5,7 +5,7 @@ pub use vmux_macro::types;
 
 pub use vmux_channel as channel;
 pub use vmux_channel::{
-    AsyncChannel, AsyncChannelPlugin, ChannelClosed, ChannelMode, ChannelReceived,
+    AsyncChannel, AsyncChannelPlugin, ChannelClosed, ChannelDrain, ChannelMode, ChannelReceived,
     ChannelSendError, ChannelSendErrorKind, ChannelSender, ChannelSet, ChannelWake, MessageChannel,
     MessageMode, MessageSender, SpawnChannel, SpawnMode, SpawnReceiver, SpawnSender,
 };

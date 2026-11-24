@@ -6,7 +6,7 @@ pub use vmux_acp::AcpPlugin;
 pub use vmux_browser::BrowserPlugin;
 #[cfg(feature = "ecs")]
 pub use vmux_ecs::{
-    AsyncChannel, AsyncChannelPlugin, ChannelClosed, ChannelMode, ChannelReceived,
+    AsyncChannel, AsyncChannelPlugin, ChannelClosed, ChannelDrain, ChannelMode, ChannelReceived,
     ChannelSendError, ChannelSendErrorKind, ChannelSender, ChannelSet, ChannelWake, MessageChannel,
     MessageMode, MessageSender, SpawnChannel, SpawnMode, SpawnReceiver, SpawnSender,
 };

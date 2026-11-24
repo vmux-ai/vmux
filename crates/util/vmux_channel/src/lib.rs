@@ -1,5 +1,6 @@
 extern crate self as vmux_channel;
 
+use std::any::TypeId;
 use std::collections::VecDeque;
 use std::fmt;
 use std::marker::PhantomData;
@@ -90,7 +91,9 @@ impl<M: Message> Plugin for AsyncChannelPlugin<M, MessageMode> {
             PreUpdate,
             (
                 bind_message_wake::<M>.in_set(ChannelSet::BindWake),
-                drain_messages::<M>.in_set(ChannelSet::Drain),
+                drain_messages::<M>
+                    .in_set(ChannelSet::Drain)
+                    .in_set(ChannelDrain::of::<M>()),
             ),
         );
     }
@@ -125,7 +128,9 @@ impl<B: Bundle> Plugin for AsyncChannelPlugin<B, SpawnMode> {
             PreUpdate,
             (
                 bind_spawn_wake::<B>.in_set(ChannelSet::BindWake),
-                drain_spawns::<B>.in_set(ChannelSet::Drain),
+                drain_spawns::<B>
+                    .in_set(ChannelSet::Drain)
+                    .in_set(ChannelDrain::of::<B>()),
             ),
         );
     }
@@ -138,7 +143,9 @@ impl<T: Send + Sync + 'static> Plugin for AsyncChannelPlugin<T, ChannelMode> {
                 PreUpdate,
                 (
                     bind_entity_wake::<T>.in_set(ChannelSet::BindWake),
-                    drain_entities::<T>.in_set(ChannelSet::Drain),
+                    drain_entities::<T>
+                        .in_set(ChannelSet::Drain)
+                        .in_set(ChannelDrain::of::<T>()),
                 ),
             );
     }
@@ -148,6 +155,15 @@ impl<T: Send + Sync + 'static> Plugin for AsyncChannelPlugin<T, ChannelMode> {
 pub enum ChannelSet {
     BindWake,
     Drain,
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ChannelDrain(TypeId);
+
+impl ChannelDrain {
+    pub fn of<T: Send + Sync + 'static>() -> Self {
+        Self(TypeId::of::<T>())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1234,5 +1250,50 @@ mod tests {
                 .as_deref(),
             Some("held")
         );
+    }
+
+    #[derive(Resource, Default)]
+    struct OrderedLog(Vec<&'static str>);
+
+    struct FirstEvent;
+
+    struct SecondEvent;
+
+    fn record_first(_: On<ChannelReceived<FirstEvent>>, mut log: ResMut<OrderedLog>) {
+        log.0.push("first");
+    }
+
+    fn record_second(_: On<ChannelReceived<SecondEvent>>, mut log: ResMut<OrderedLog>) {
+        log.0.push("second");
+    }
+
+    #[test]
+    fn channel_drain_sets_enforce_explicit_cross_channel_ordering() {
+        let mut app = App::new();
+        app.init_resource::<OrderedLog>()
+            .add_plugins((
+                AsyncChannelPlugin::<SecondEvent>::default(),
+                AsyncChannelPlugin::<FirstEvent>::default(),
+            ))
+            .configure_sets(
+                PreUpdate,
+                (
+                    ChannelDrain::of::<FirstEvent>(),
+                    ChannelDrain::of::<SecondEvent>(),
+                )
+                    .chain(),
+            )
+            .add_observer(record_second)
+            .add_observer(record_first);
+
+        let (first_tx, first_rx) = AsyncChannel::<FirstEvent>::unbounded();
+        let (second_tx, second_rx) = AsyncChannel::<SecondEvent>::unbounded();
+        app.world_mut().spawn((first_rx, second_rx));
+
+        second_tx.send(SecondEvent).unwrap();
+        first_tx.send(FirstEvent).unwrap();
+        app.update();
+
+        assert_eq!(app.world().resource::<OrderedLog>().0, ["first", "second"]);
     }
 }
