@@ -12592,6 +12592,145 @@ impl Inventory {
             || self.automatic_native_io_adapter(entry)
             || self.automatic_adapter_helper(entry)
             || self.automatic_ui_transport_projection(entry)
+            || self.automatic_schedule_label(entry)
+            || self.automatic_reflect_type_data(entry)
+            || self.automatic_app_extension(entry)
+    }
+
+    fn automatic_schedule_label(&self, entry: &Declaration) -> bool {
+        entry.production
+            && matches!(entry.kind, Kind::Struct | Kind::Enum)
+            && !entry.local
+            && !entry.dynamic
+            && !entry.opaque
+            && entry.field_types.is_empty()
+            && entry.derive_paths.iter().any(|path| {
+                self.external_path(&entry.namespace, path, &mut BTreeSet::new())
+                    .is_some_and(|resolved| {
+                        matches!(
+                            resolved.as_str(),
+                            "bevy_ecs::schedule::ScheduleLabel"
+                                | "bevy_ecs::prelude::ScheduleLabel"
+                                | "bevy::ecs::schedule::ScheduleLabel"
+                                | "bevy::ecs::prelude::ScheduleLabel"
+                                | "bevy::prelude::ScheduleLabel"
+                        )
+                    })
+            })
+    }
+
+    fn automatic_reflect_type_data(&self, entry: &Declaration) -> bool {
+        if !entry.production || entry.local || entry.dynamic || entry.opaque || entry.projection {
+            return false;
+        }
+        let is_from_type_impl = |imp: &Declaration| {
+            imp.production
+                && matches!(imp.kind, Kind::Impl)
+                && imp.implemented_trait.as_deref().is_some_and(|tr| {
+                    self.external_path(&imp.namespace, tr, &mut BTreeSet::new())
+                        .is_some_and(|resolved| {
+                            matches!(
+                                resolved.as_str(),
+                                "bevy_reflect::FromType"
+                                    | "bevy::reflect::FromType"
+                                    | "bevy::prelude::FromType"
+                            )
+                        })
+                })
+        };
+        match entry.kind {
+            Kind::Struct => self
+                .implementations(entry)
+                .into_iter()
+                .any(is_from_type_impl),
+            Kind::Impl => {
+                if is_from_type_impl(entry) {
+                    return true;
+                }
+                entry
+                    .owner
+                    .as_deref()
+                    .and_then(|owner| self.resolve(&entry.namespace, owner, &mut BTreeSet::new()))
+                    .is_some_and(|owner| {
+                        owner.production
+                            && matches!(owner.kind, Kind::Struct)
+                            && self
+                                .implementations(owner)
+                                .into_iter()
+                                .any(is_from_type_impl)
+                    })
+            }
+            _ => false,
+        }
+    }
+
+    fn automatic_app_extension(&self, entry: &Declaration) -> bool {
+        if !entry.production || entry.local || entry.dynamic || entry.opaque || entry.projection {
+            return false;
+        }
+        let is_app_ext_impl = |imp: &Declaration| {
+            imp.production
+                && matches!(imp.kind, Kind::Impl)
+                && !imp.local
+                && !imp.dynamic
+                && !imp.opaque
+                && imp.owner.as_deref().is_some_and(|owner| {
+                    self.framework_handle(&imp.namespace, owner, &mut BTreeSet::new())
+                        .as_deref()
+                        == Some("App")
+                })
+                && imp.implemented_trait.as_deref().is_some_and(|tr| {
+                    self.resolve(&imp.namespace, tr, &mut BTreeSet::new())
+                        .is_some_and(|trait_decl| {
+                            trait_decl.production
+                                && matches!(trait_decl.kind, Kind::Trait)
+                                && trait_decl.namespace.split("::").next()
+                                    == imp.namespace.split("::").next()
+                        })
+                })
+        };
+        let trait_used_by_plugin = |trait_decl: &Declaration| {
+            self.entries.values().any(|other| {
+                other.production
+                    && other.plugin
+                    && (other
+                        .reference_paths
+                        .iter()
+                        .chain(other.field_paths.iter())
+                        .any(|p| p.rsplit("::").next() == Some(trait_decl.name.as_str()))
+                        || self.imports.get(&other.namespace).is_some_and(|imp| {
+                            imp.aliases.values().any(|target| {
+                                target.rsplit("::").next() == Some(trait_decl.name.as_str())
+                            })
+                        }))
+            })
+        };
+        match entry.kind {
+            Kind::Impl => {
+                if !is_app_ext_impl(entry) {
+                    return false;
+                }
+                entry
+                    .implemented_trait
+                    .as_deref()
+                    .and_then(|tr| self.resolve(&entry.namespace, tr, &mut BTreeSet::new()))
+                    .is_some_and(trait_used_by_plugin)
+            }
+            Kind::Trait => {
+                trait_used_by_plugin(entry)
+                    && self.entries.values().any(|imp| {
+                        is_app_ext_impl(imp)
+                            && imp
+                                .implemented_trait
+                                .as_deref()
+                                .and_then(|tr| {
+                                    self.resolve(&imp.namespace, tr, &mut BTreeSet::new())
+                                })
+                                .is_some_and(|resolved| resolved.key == entry.key)
+                    })
+            }
+            _ => false,
+        }
     }
 
     fn automatic_adapter_helper(&self, entry: &Declaration) -> bool {
@@ -12710,7 +12849,11 @@ impl Inventory {
             if !entry.production || entry.local || entry.opaque || entry.projection {
                 continue;
             }
-            if self.automatic_binary_entrypoint(entry) || self.automatic_pre_world_boundary(entry) {
+            if self.automatic_binary_entrypoint(entry)
+                || self.automatic_pre_world_boundary(entry)
+                || self.automatic_reflect_type_data(entry)
+                || self.automatic_app_extension(entry)
+            {
                 roots.insert(entry.key.clone());
                 continue;
             }
@@ -13175,8 +13318,12 @@ impl Inventory {
             "objc2_av_foundation::",
             "objc2_screen_capture_kit::",
             "objc2_user_notifications::",
+            "objc2_ui_kit::",
+            "objc2_core_media::",
+            "objc2_core_video::",
             "core_foundation::",
             "core_graphics::",
+            "core_video::",
             "security_framework::",
             "block2::",
             "dispatch2::",
@@ -13361,6 +13508,47 @@ impl Inventory {
         let mut candidate_names = BTreeSet::new();
         let mut wrapper_pool = Vec::new();
         for entry in self.entries.values() {
+            if entry.production
+                && matches!(entry.kind, Kind::Function)
+                && !entry.ecs
+                && !entry.plugin
+                && !entry.local
+                && !entry.opaque
+                && !entry.projection
+                && !entry.renderer
+                && !self.registered_keys.contains(&entry.key)
+                && !self.has_bevy_runtime_access(entry)
+                && entry.reference_paths.iter().any(|path| {
+                    let first = path.split("::").next().unwrap_or("");
+                    let plausible = first == "std"
+                        || first == "tokio"
+                        || first == "tokio_util"
+                        || Self::is_external_io_handle_path(&format!("{first}::"))
+                        || io_aliases
+                            .get(entry.namespace.as_str())
+                            .is_some_and(|set| set.contains(first));
+                    plausible
+                        && self
+                            .external_path(&entry.namespace, path, &mut BTreeSet::new())
+                            .is_some_and(|resolved| Self::is_external_io_call_path(&resolved))
+                })
+            {
+                candidates.insert(entry.key.clone());
+                candidate_names.insert(entry.name.clone());
+                continue;
+            }
+            if entry.production
+                && matches!(entry.kind, Kind::Macro)
+                && let Some((macro_path, _)) = &entry.native_class
+                && self
+                    .external_path(&entry.namespace, macro_path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("objc2::define_class")
+            {
+                candidates.insert(entry.key.clone());
+                candidate_names.insert(entry.name.clone());
+                continue;
+            }
             if !self.native_io_adapter_shape(entry) {
                 continue;
             }
@@ -13504,13 +13692,48 @@ impl Inventory {
                         {
                             continue;
                         }
-                        let Some(target) = self.resolve_path_or_prefix(&source.namespace, path)
+                        let Some(target) = self
+                            .resolve_path_or_prefix(&source.namespace, path)
+                            .or_else(|| {
+                                self.function_reference(
+                                    &source.namespace,
+                                    path,
+                                    &mut BTreeSet::new(),
+                                )
+                            })
+                            .or_else(|| {
+                                self.resolve_direct_import_function(&source.namespace, path)
+                            })
+                            .or_else(|| self.resolve_direct_import_symbol(&source.namespace, path))
                         else {
                             continue;
                         };
                         if candidates.contains(&target.key) && proved.insert(target.key.clone()) {
                             queue.push(target.key.clone());
                         }
+                    }
+                }
+            }
+            for entry in self.entries.values() {
+                if candidates.contains(&entry.key)
+                    && matches!(entry.kind, Kind::Macro)
+                    && let Some((_, ivars)) = &entry.native_class
+                {
+                    let mut ivar_paths = BTreeSet::new();
+                    Self::collect_non_collection_types(ivars, &mut ivar_paths);
+                    let valid = ivar_paths.is_empty()
+                        || ivar_paths.iter().any(|ivar| {
+                            self.resolve(&entry.namespace, ivar, &mut BTreeSet::new())
+                                .is_some_and(|t| {
+                                    proved.contains(&t.key)
+                                        || guards.as_ref().is_some_and(|g| g.contains(&t.key))
+                                        || handles.as_ref().is_some_and(|h| h.contains(&t.key))
+                                        || adapters.as_ref().is_some_and(|a| a.contains(&t.key))
+                                        || self.used(t)
+                                })
+                        });
+                    if valid && proved.insert(entry.key.clone()) {
+                        queue.push(entry.key.clone());
                     }
                 }
             }
@@ -14163,9 +14386,27 @@ impl Inventory {
         let mut proved = BTreeSet::new();
         let mut queue = Vec::new();
         for entry in self.entries.values() {
-            if (entry.path.starts_with("patches/bevy_cef_core-0.5.2/")
-                || entry.path.starts_with("patches/bevy_cef-0.5.2/"))
-                && self.is_cef_handler_struct(entry)
+            let is_cef_patch = entry.path.starts_with("patches/bevy_cef_core-0.5.2/")
+                || entry.path.starts_with("patches/bevy_cef-0.5.2/");
+            if !is_cef_patch || !entry.production {
+                continue;
+            }
+            let is_cef_plugin = entry.path.starts_with("patches/bevy_cef-0.5.2/")
+                && matches!(entry.kind, Kind::Struct)
+                && self
+                    .implementations(entry)
+                    .into_iter()
+                    .any(|implementation| implementation.production && implementation.plugin);
+            let is_cef_handler_impl = matches!(entry.kind, Kind::Impl)
+                && entry.implemented_trait.as_deref().is_some_and(|tr| {
+                    let tail = tr.rsplit("::").next().unwrap_or(tr);
+                    tail.starts_with("Impl") && tail.ends_with("Handler")
+                });
+            let is_cef_ecs = entry.ecs && matches!(entry.kind, Kind::Struct | Kind::Enum);
+            if (self.is_cef_handler_struct(entry)
+                || is_cef_plugin
+                || is_cef_handler_impl
+                || is_cef_ecs)
                 && proved.insert(entry.key.clone())
             {
                 queue.push(entry.key.clone());
@@ -14183,52 +14424,75 @@ impl Inventory {
                 .iter()
                 .chain(source.reference_paths.iter())
             {
-                let target = self
+                let mut targets: Vec<&Declaration> = Vec::new();
+                if let Some(target) = self
                     .resolve_path_or_prefix(&source.namespace, path)
                     .or_else(|| {
                         self.function_reference(&source.namespace, path, &mut BTreeSet::new())
-                    });
-                let Some(target) = target else {
-                    continue;
-                };
-                if !target.production
-                    || !target.path.starts_with("patches/bevy_cef_core-0.5.2/")
-                    || target.ecs
-                    || target.plugin
-                    || target.local
-                    || target.dynamic
-                    || target.opaque
-                    || target.projection
-                    || self.has_bevy_runtime_access(target)
-                {
-                    continue;
-                }
-                if !matches!(
-                    target.kind,
-                    Kind::Function | Kind::Const | Kind::Alias | Kind::Struct
-                ) {
-                    continue;
-                }
-                if matches!(target.kind, Kind::Struct)
-                    && self.implementations(target).into_iter().any(|i| {
-                        i.production
-                            && (i.plugin
-                                || i.local
-                                || i.dynamic
-                                || i.opaque
-                                || self.has_bevy_runtime_access(i))
                     })
+                    .or_else(|| self.resolve_direct_import_function(&source.namespace, path))
+                    .or_else(|| self.resolve_direct_import_symbol(&source.namespace, path))
                 {
-                    continue;
+                    targets.push(target);
+                } else if !path.contains("::") {
+                    for candidate in self.entries.values() {
+                        if candidate.production
+                            && candidate.path == source.path
+                            && candidate.namespace == source.namespace
+                            && candidate.name == *path
+                        {
+                            targets.push(candidate);
+                        }
+                    }
                 }
-                if proved.insert(target.key.clone()) {
-                    queue.push(target.key.clone());
-                    if matches!(target.kind, Kind::Struct) {
-                        for implementation in self.implementations(target) {
-                            if implementation.production
-                                && proved.insert(implementation.key.clone())
-                            {
-                                queue.push(implementation.key.clone());
+                for target in targets {
+                    let is_cef_core = target.path.starts_with("patches/bevy_cef_core-0.5.2/");
+                    let is_cef_bevy = target.path.starts_with("patches/bevy_cef-0.5.2/");
+                    if !target.production
+                        || (!is_cef_core && !is_cef_bevy)
+                        || target.local
+                        || target.opaque
+                        || target.projection
+                        || (is_cef_core
+                            && (target.ecs
+                                || target.plugin
+                                || self.has_bevy_runtime_access(target)))
+                    {
+                        continue;
+                    }
+                    if !matches!(
+                        target.kind,
+                        Kind::Function
+                            | Kind::Const
+                            | Kind::Static
+                            | Kind::Alias
+                            | Kind::Struct
+                            | Kind::Enum
+                            | Kind::Trait
+                    ) {
+                        continue;
+                    }
+                    if is_cef_core
+                        && matches!(target.kind, Kind::Struct)
+                        && self.implementations(target).into_iter().any(|i| {
+                            i.production
+                                && (i.plugin
+                                    || i.local
+                                    || i.opaque
+                                    || self.has_bevy_runtime_access(i))
+                        })
+                    {
+                        continue;
+                    }
+                    if proved.insert(target.key.clone()) {
+                        queue.push(target.key.clone());
+                        if matches!(target.kind, Kind::Struct | Kind::Enum) {
+                            for implementation in self.implementations(target) {
+                                if implementation.production
+                                    && proved.insert(implementation.key.clone())
+                                {
+                                    queue.push(implementation.key.clone());
+                                }
                             }
                         }
                     }
@@ -14334,6 +14598,15 @@ impl Inventory {
                 _ => false,
             }
         });
+        let has_static_borrow = matches!(&entry.syntax, Some(Item::Struct(_)))
+            && !entry.field_types.is_empty()
+            && entry.field_types.iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::Reference(r)
+                        if matches!(r.elem.as_ref(), Type::Path(p) if p.path.is_ident("str"))
+                )
+            });
         if matches!(entry.kind, Kind::Enum) {
             let valid_enum = derives_copy
                 && entry
@@ -14350,7 +14623,7 @@ impl Inventory {
                 &entry.syntax,
                 Some(Item::Struct(structure)) if structure.generics.lifetimes().next().is_some()
             ) && entry.field_types.iter().any(Self::type_has_direct_borrow);
-            if !has_lifetime && !derives_copy {
+            if !has_lifetime && !derives_copy && !has_static_borrow {
                 return false;
             }
         }
@@ -16103,6 +16376,7 @@ impl Inventory {
             || entry.path.contains("/tests/")
             || entry.path.ends_with("/tests.rs")
             || entry.path.ends_with("_tests.rs")
+            || entry.path.ends_with("_test.js")
     }
 
     fn automatic_test_fixture(&self, entry: &Declaration) -> bool {
@@ -16212,9 +16486,15 @@ impl Inventory {
                 }
             }
         }
+        let mut test_crates = BTreeSet::new();
         for entry in self.entries.values() {
             if !Self::test_scope(entry) {
                 continue;
+            }
+            if entry.test
+                && let Some(krate) = entry.namespace.split("::").next()
+            {
+                test_crates.insert(krate.to_string());
             }
             if entry.test || finalized.contains(&entry.key) {
                 for included in &entry.included_sources {
@@ -16222,6 +16502,18 @@ impl Inventory {
                         finalized.insert(script_key);
                     }
                 }
+            }
+        }
+        for entry in self.entries.values() {
+            if matches!(entry.kind, Kind::Script)
+                && entry.path.ends_with("_test.js")
+                && entry
+                    .namespace
+                    .split("::")
+                    .next()
+                    .is_some_and(|krate| test_crates.contains(krate))
+            {
+                finalized.insert(entry.key.clone());
             }
         }
         *self.test_fixtures.borrow_mut() = Some(finalized);
@@ -16814,7 +17106,57 @@ impl Inventory {
         if self.renderer_graph.borrow().is_some() {
             return;
         }
-        let renderers = self.collect_renderer_roots();
+        let mut props_structs = BTreeSet::new();
+        for entry in self.entries.values() {
+            if !entry.production || entry.ecs || entry.local || entry.dynamic || entry.opaque {
+                continue;
+            }
+            if matches!(entry.kind, Kind::Function)
+                && entry.contract_paths.iter().any(|path| {
+                    let tail = path.rsplit("::").next().unwrap_or(path);
+                    tail == "server"
+                        && (self
+                            .external_path(&entry.namespace, path, &mut BTreeSet::new())
+                            .is_some_and(|resolved| resolved.starts_with("dioxus"))
+                            || self.imports.get(&entry.namespace).is_some_and(|imp| {
+                                imp.globs.iter().any(|g| g.starts_with("dioxus::"))
+                            }))
+                })
+                && !self.renderer_has_forbidden_access(entry)
+            {
+                props_structs.insert(entry.key.clone());
+                continue;
+            }
+            if matches!(entry.kind, Kind::Macro)
+                && entry.name == "include"
+                && entry.path.starts_with("website/")
+            {
+                props_structs.insert(entry.key.clone());
+                continue;
+            }
+            if matches!(entry.kind, Kind::Struct)
+                && entry.derive_paths.iter().any(|path| {
+                    let tail = path.rsplit("::").next().unwrap_or(path);
+                    tail == "Props"
+                        && (self
+                            .external_path(&entry.namespace, path, &mut BTreeSet::new())
+                            .is_some_and(|resolved| {
+                                resolved.starts_with("dioxus::")
+                                    || resolved.starts_with("dioxus_core")
+                            })
+                            || self.imports.get(&entry.namespace).is_some_and(|imp| {
+                                imp.globs.iter().any(|g| g.starts_with("dioxus::"))
+                            }))
+                })
+                && !self.renderer_has_forbidden_access(entry)
+                && !self.renderer_helper_forbidden_field(entry)
+                && self.renderer_impls_clean(entry)
+            {
+                props_structs.insert(entry.key.clone());
+            }
+        }
+        let mut renderers = self.collect_renderer_roots();
+        renderers.extend(props_structs);
         let mut helpers = self.collect_renderer_helpers(&renderers);
         let mut contract_names = BTreeSet::new();
         for entry in self.entries.values() {
@@ -16969,36 +17311,82 @@ impl Inventory {
         false
     }
 
-    fn renderer_helper_forbidden_field(&self, entry: &Declaration) -> bool {
-        for path in &entry.field_paths {
-            let tail = path.rsplit("::").next().unwrap_or(path);
-            let forbidden_name = matches!(
-                tail,
-                "HashMap"
-                    | "BTreeMap"
-                    | "HashSet"
-                    | "BTreeSet"
-                    | "Mutex"
-                    | "RwLock"
-                    | "OnceLock"
-                    | "LazyLock"
-                    | "RefCell"
-                    | "AtomicBool"
-                    | "AtomicU8"
-                    | "AtomicU16"
-                    | "AtomicU32"
-                    | "AtomicU64"
-                    | "AtomicUsize"
-                    | "AtomicI8"
-                    | "AtomicI16"
-                    | "AtomicI32"
-                    | "AtomicI64"
-                    | "AtomicIsize"
-                    | "AtomicPtr"
-            );
-            if forbidden_name {
-                return true;
+    fn type_has_forbidden_renderer_container(ty: &Type, inside_signal: bool) -> bool {
+        match ty {
+            Type::Path(path) if path.qself.is_none() => {
+                let Some(segment) = path.path.segments.last() else {
+                    return false;
+                };
+                let name = segment.ident.to_string();
+                let is_signal = matches!(name.as_str(), "Signal" | "Memo" | "ReadSignal");
+                if !inside_signal
+                    && matches!(
+                        name.as_str(),
+                        "HashMap" | "BTreeMap" | "HashSet" | "BTreeSet"
+                    )
+                {
+                    return true;
+                }
+                if matches!(
+                    name.as_str(),
+                    "Mutex"
+                        | "RwLock"
+                        | "OnceLock"
+                        | "LazyLock"
+                        | "RefCell"
+                        | "AtomicBool"
+                        | "AtomicU8"
+                        | "AtomicU16"
+                        | "AtomicU32"
+                        | "AtomicU64"
+                        | "AtomicUsize"
+                        | "AtomicI8"
+                        | "AtomicI16"
+                        | "AtomicI32"
+                        | "AtomicI64"
+                        | "AtomicIsize"
+                        | "AtomicPtr"
+                ) {
+                    return true;
+                }
+                if let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments {
+                    for arg in &arguments.args {
+                        if let syn::GenericArgument::Type(inner) = arg
+                            && Self::type_has_forbidden_renderer_container(
+                                inner,
+                                inside_signal || is_signal,
+                            )
+                        {
+                            return true;
+                        }
+                    }
+                }
+                false
             }
+            Type::Reference(r) => {
+                Self::type_has_forbidden_renderer_container(&r.elem, inside_signal)
+            }
+            Type::Paren(p) => Self::type_has_forbidden_renderer_container(&p.elem, inside_signal),
+            Type::Group(g) => Self::type_has_forbidden_renderer_container(&g.elem, inside_signal),
+            Type::Tuple(t) => t
+                .elems
+                .iter()
+                .any(|e| Self::type_has_forbidden_renderer_container(e, inside_signal)),
+            Type::Slice(s) => Self::type_has_forbidden_renderer_container(&s.elem, inside_signal),
+            Type::Array(a) => Self::type_has_forbidden_renderer_container(&a.elem, inside_signal),
+            _ => false,
+        }
+    }
+
+    fn renderer_helper_forbidden_field(&self, entry: &Declaration) -> bool {
+        if entry
+            .field_types
+            .iter()
+            .any(|ty| Self::type_has_forbidden_renderer_container(ty, false))
+        {
+            return true;
+        }
+        for path in &entry.field_paths {
             if let Some(field) = self.resolve(&entry.namespace, path, &mut BTreeSet::new()) {
                 if field.key == entry.key {
                     continue;
@@ -17092,6 +17480,58 @@ impl Inventory {
             })
     }
 
+    fn resolve_direct_import_function(&self, namespace: &str, name: &str) -> Option<&Declaration> {
+        let imports = self.imports.get(namespace)?;
+        if let Some(target) = imports.aliases.get(name)
+            && let Some(keys) = self.functions.get(target)
+            && keys.len() == 1
+        {
+            return self.entries.get(&keys[0]);
+        }
+        let mut found: Option<&Declaration> = None;
+        for glob in &imports.globs {
+            let candidate = format!("{glob}::{name}");
+            if let Some(keys) = self.functions.get(&candidate)
+                && keys.len() == 1
+                && let Some(entry) = self.entries.get(&keys[0])
+            {
+                if found.is_some_and(|prev| prev.key != entry.key) {
+                    return None;
+                }
+                found = Some(entry);
+            }
+        }
+        found
+    }
+
+    fn resolve_direct_import_symbol(&self, namespace: &str, path: &str) -> Option<&Declaration> {
+        let imports = self.imports.get(namespace)?;
+        let first = path.split("::").next()?;
+        if let Some(target) = imports.aliases.get(first)
+            && let Some(keys) = self.symbols.get(target)
+            && keys.len() == 1
+        {
+            return self.entries.get(&keys[0]);
+        }
+        if !path.contains("::") {
+            let mut found: Option<&Declaration> = None;
+            for glob in &imports.globs {
+                let candidate = format!("{glob}::{first}");
+                if let Some(keys) = self.symbols.get(&candidate)
+                    && keys.len() == 1
+                    && let Some(entry) = self.entries.get(&keys[0])
+                {
+                    if found.is_some_and(|prev| prev.key != entry.key) {
+                        return None;
+                    }
+                    found = Some(entry);
+                }
+            }
+            return found;
+        }
+        None
+    }
+
     fn collect_renderer_roots(&self) -> BTreeSet<String> {
         let mut renderers = BTreeSet::new();
         let mut queue = Vec::new();
@@ -17127,8 +17567,9 @@ impl Inventory {
         while let Some(parent_key) = queue.pop() {
             let parent = &self.entries[&parent_key];
             for child_path in &parent.rendered {
-                let Some(child) =
-                    self.function_reference(&parent.namespace, child_path, &mut BTreeSet::new())
+                let Some(child) = self
+                    .function_reference(&parent.namespace, child_path, &mut BTreeSet::new())
+                    .or_else(|| self.resolve_direct_import_function(&parent.namespace, child_path))
                 else {
                     continue;
                 };
@@ -17279,12 +17720,16 @@ impl Inventory {
                     }
                     let target = if has_type {
                         self.resolve_path_or_prefix(&source.namespace, path)
+                            .or_else(|| self.resolve_direct_import_symbol(&source.namespace, path))
                     } else {
                         None
                     }
                     .or_else(|| {
                         if has_fn {
                             self.function_reference(&source.namespace, path, &mut BTreeSet::new())
+                                .or_else(|| {
+                                    self.resolve_direct_import_function(&source.namespace, path)
+                                })
                         } else {
                             None
                         }
@@ -17476,12 +17921,16 @@ impl Inventory {
                     }
                     let target = if has_type {
                         self.resolve_path_or_prefix(&source.namespace, path)
+                            .or_else(|| self.resolve_direct_import_symbol(&source.namespace, path))
                     } else {
                         None
                     }
                     .or_else(|| {
                         if has_fn {
                             self.function_reference(&source.namespace, path, &mut BTreeSet::new())
+                                .or_else(|| {
+                                    self.resolve_direct_import_function(&source.namespace, path)
+                                })
                         } else {
                             None
                         }
@@ -26647,4 +27096,56 @@ fn wave13_io_calls_included_scripts_contract_traits_and_test_macro_fixtures_prov
         ),
         "expected plain store without IO calls to stay rejected"
     );
+}
+
+#[test]
+fn wave14_cef_plugins_props_signal_maps_schedule_labels_and_app_exts_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_macro/src/lib.rs",
+        "#[proc_macro_attribute] pub fn ui_state() {} #[proc_macro_attribute] pub fn page() {}",
+    );
+    inventory.source(
+        "crates/util/vmux_page/src/lib.rs",
+        "pub use vmux_macro::page;",
+    );
+    inventory.source(
+        "crates/util/vmux_api/src/lib.rs",
+        "pub use vmux_macro::ui_state;",
+    );
+    inventory.source(
+        "crates/util/vmux_ecs/src/lib.rs",
+        "use bevy_app::App; use bevy_ecs::schedule::ScheduleLabel; use bevy_reflect::FromType; #[derive(ScheduleLabel, Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct BootStep; pub trait DemoAppExt { fn demo(&mut self) -> &mut Self; } impl DemoAppExt for App { fn demo(&mut self) -> &mut Self { self } } pub struct ReflectMarker; impl<T> FromType<T> for ReflectMarker {}",
+    );
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use bevy_app::{App, Plugin}; use dioxus::prelude::*; use std::collections::BTreeMap; use vmux_ecs::DemoAppExt; struct UseExtPlugin; impl Plugin for UseExtPlugin { fn build(&self, app: &mut App) { app.demo(); } } #[vmux_api::ui_state] struct State { n: u32 } #[derive(Clone, PartialEq, Props)] struct CardProps { title: String } #[derive(Clone, Copy)] struct Cursor { mounted: Signal<BTreeMap<usize, u32>> } #[vmux_page::page(component = DemoView, states = [State])] struct DemoPage; #[component] fn DemoView(props: CardProps) -> Element { let _ = (props.title, std::mem::size_of::<Cursor>()); rsx! { div {} } }",
+    );
+    inventory.source(
+        "website/src/docs.rs",
+        "pub struct Doc { pub slug: &'static str, pub title: &'static str } impl Doc { pub fn label(&self) -> &'static str { self.title } }",
+    );
+    inventory.source(
+        "website/src/app.rs",
+        "use dioxus::prelude::*; use crate::docs::Doc; #[server] pub async fn static_routes() -> Result<Vec<String>, ServerFnError> { let _ = std::mem::size_of::<Doc>(); Ok(Vec::new()) }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/util/vmux_ecs/src/lib.rs||struct:BootStep",
+        "crates/util/vmux_ecs/src/lib.rs||trait:DemoAppExt",
+        "crates/util/vmux_ecs/src/lib.rs||impl:DemoAppExt for App",
+        "crates/util/vmux_ecs/src/lib.rs||struct:ReflectMarker",
+        "crates/util/vmux_ecs/src/lib.rs||impl:FromType < T > for ReflectMarker",
+        "crates/feature/demo/src/lib.rs||struct:CardProps",
+        "crates/feature/demo/src/lib.rs||struct:Cursor",
+        "website/src/app.rs||fn:static_routes",
+        "website/src/docs.rs||struct:Doc",
+        "website/src/docs.rs||impl:Doc",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved Wave 14 entry: {key}"
+        );
+    }
 }
