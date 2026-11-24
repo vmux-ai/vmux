@@ -1,4 +1,4 @@
-use bevy_app::{App, Plugin as BevyPlugin, Update};
+use bevy_app::{App, Plugin as BevyPlugin, PreStartup, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::ScheduleLabel;
 use bevy_ecs::system::SystemParam;
@@ -17,13 +17,13 @@ impl BevyPlugin for ApprovalPlugin {
         if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
             app.add_plugins(vmux_ecs::OperationPlugin);
         }
-        app.world_mut().spawn(File::bundle(None));
         app.add_message::<StoreRequested>()
             .add_message::<Remember>()
             .add_message::<Scoped>()
             .add_message::<Loaded>()
             .add_message::<Saved>()
             .add_message::<PreparedGrant>()
+            .add_systems(PreStartup, spawn_default_file)
             .add_systems(
                 Reconcile,
                 (initialize, remember, receive, materialize, receive_saves).chain(),
@@ -62,6 +62,10 @@ pub(crate) struct Prepare;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Resolve;
+
+fn spawn_default_file(mut commands: Commands) {
+    commands.spawn(File::bundle(None));
+}
 
 #[derive(Component)]
 pub(crate) struct File {

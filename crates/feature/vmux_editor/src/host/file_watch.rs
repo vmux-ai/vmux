@@ -13,14 +13,9 @@ pub(super) struct FileWatchPlugin;
 
 impl Plugin for FileWatchPlugin {
     fn build(&self, app: &mut App) {
-        match Transport::new() {
-            Ok(transport) => {
-                app.insert_non_send(transport);
-            }
-            Err(error) => tracing::warn!("file watcher init failed: {error}"),
-        }
         app.add_message::<Observed>()
             .add_message::<Reconciled>()
+            .add_systems(PreStartup, start_transport)
             .add_systems(
                 Update,
                 (wake, receive, invalidate, select, retire, register)
@@ -30,8 +25,54 @@ impl Plugin for FileWatchPlugin {
     }
 }
 
+fn start_transport(world: &mut World) {
+    if world.contains_non_send::<Transport>() {
+        return;
+    }
+    match Transport::new() {
+        Ok(transport) => {
+            world.insert_non_send(transport);
+        }
+        Err(error) => tracing::warn!("file watcher init failed: {error}"),
+    }
+}
+
 #[derive(Message)]
-pub(super) struct Observed(pub notify::Result<notify::Event>);
+pub(super) struct Observed {
+    pub(super) paths: Vec<PathBuf>,
+    pub(super) directory_removed: bool,
+    pub(super) error: Option<String>,
+}
+
+impl Observed {
+    pub(super) fn from_notify(result: notify::Result<notify::Event>) -> Self {
+        match result {
+            Ok(event) if matches!(event.kind, notify::EventKind::Access(_)) => Self {
+                paths: Vec::new(),
+                directory_removed: false,
+                error: None,
+            },
+            Ok(event) => Self {
+                directory_removed: matches!(
+                    event.kind,
+                    notify::EventKind::Remove(_)
+                        | notify::EventKind::Modify(notify::event::ModifyKind::Name(
+                            notify::event::RenameMode::From
+                                | notify::event::RenameMode::Both
+                                | notify::event::RenameMode::Any
+                        ))
+                ),
+                paths: event.paths,
+                error: None,
+            },
+            Err(error) => Self {
+                paths: Vec::new(),
+                directory_removed: false,
+                error: Some(error.to_string()),
+            },
+        }
+    }
+}
 
 #[derive(Message)]
 pub(super) struct Reconciled(pub PathBuf);
@@ -189,22 +230,11 @@ fn invalidate(
     mut commands: Commands,
 ) {
     for observation in observations.read() {
-        let Ok(event) = &observation.0 else {
-            continue;
-        };
-        if !matches!(
-            event.kind,
-            notify::EventKind::Remove(_)
-                | notify::EventKind::Modify(notify::event::ModifyKind::Name(
-                    notify::event::RenameMode::From
-                        | notify::event::RenameMode::Both
-                        | notify::event::RenameMode::Any
-                ))
-        ) {
+        if !observation.directory_removed {
             continue;
         }
         for (entity, directory) in &registrations {
-            if event.paths.contains(&directory.0) {
+            if observation.paths.contains(&directory.0) {
                 commands.entity(entity).insert(Reset);
             }
         }
@@ -216,7 +246,7 @@ fn receive(transport: Option<NonSend<Transport>>, mut observations: MessageWrite
         return;
     };
     while let Some(observation) = transport.receive() {
-        observations.write(Observed(observation));
+        observations.write(Observed::from_notify(observation));
     }
 }
 
@@ -321,9 +351,9 @@ mod tests {
         fixture
             .app
             .world_mut()
-            .write_message(Observed(Ok(notify::Event::new(notify::EventKind::Remove(
-                notify::event::RemoveKind::Folder,
-            ))
+            .write_message(Observed::from_notify(Ok(notify::Event::new(
+                notify::EventKind::Remove(notify::event::RemoveKind::Folder),
+            )
             .add_path(directory.clone()))));
         fixture.app.update();
         let roots: Vec<_> = cursor
@@ -410,9 +440,9 @@ mod tests {
         fixture
             .app
             .world_mut()
-            .write_message(Observed(Ok(notify::Event::new(notify::EventKind::Access(
-                notify::event::AccessKind::Read,
-            ))
+            .write_message(Observed::from_notify(Ok(notify::Event::new(
+                notify::EventKind::Access(notify::event::AccessKind::Read),
+            )
             .add_path(fixture.directory.path().join("file.txt")))));
         fixture.app.update();
         assert_eq!(

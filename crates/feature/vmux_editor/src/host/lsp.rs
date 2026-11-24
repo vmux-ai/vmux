@@ -45,7 +45,6 @@ pub struct LspPlugin;
 
 impl Plugin for LspPlugin {
     fn build(&self, app: &mut App) {
-        let (diagnostics, inbox) = LspDiagnosticsSender::channel();
         app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         app.add_plugins((
             registry::RegistryPlugin,
@@ -53,7 +52,7 @@ impl Plugin for LspPlugin {
             inventory::LspInventoryPlugin,
             tool_runtime::LspToolPlugin,
             server_request::ServerRequestPlugin,
-            manager::ManagerPlugin::new(diagnostics, inbox),
+            manager::ManagerPlugin,
         ))
         .add_systems(Startup, spawn_tool_provider);
         app.add_plugins(manager_page::ManagerPlugin);

@@ -152,7 +152,7 @@ impl Plugin for StagePlugin {
                 ExternalIdentityIndexSet::of::<ProviderKind, ProviderSessionId, ProviderStage>()
                     .before(crate::mutation::ReceiveSet),
             )
-            .insert_resource(Configuration::load())
+            .init_resource::<Configuration>()
             .register_stored::<Stage>()
             .register_stored::<StageChangedAt>()
             .register_type::<StageId>()
@@ -691,6 +691,13 @@ pub struct Cleanup {
 struct Configuration {
     default_stage: StageId,
     stages: Vec<StageSeed>,
+}
+
+#[cfg(host)]
+impl Default for Configuration {
+    fn default() -> Self {
+        Self::load()
+    }
 }
 
 #[cfg(host)]

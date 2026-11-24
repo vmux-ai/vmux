@@ -17,10 +17,8 @@ pub struct WorkspacePlugin;
 
 impl bevy_app::Plugin for WorkspacePlugin {
     fn build(&self, app: &mut App) {
-        if !app.world().contains_resource::<Input>() {
-            app.insert_resource(Input(std::env::args_os().skip(1).collect()));
-        }
-        app.init_resource::<Admission>()
+        app.init_resource::<Input>()
+            .init_resource::<Admission>()
             .init_resource::<Failure>()
             .add_systems(
                 PreStartup,
@@ -60,6 +58,12 @@ impl Host {
 
 #[derive(Resource)]
 struct Input(Vec<OsString>);
+
+impl Default for Input {
+    fn default() -> Self {
+        Self(std::env::args_os().skip(1).collect())
+    }
+}
 
 #[derive(Resource)]
 struct Probe;

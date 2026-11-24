@@ -17,6 +17,7 @@ use super::{
 impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Notification>()
+            .add_systems(PreStartup, start_watch)
             .add_systems(Startup, spawn)
             .add_systems(
                 Update,
@@ -31,10 +32,18 @@ impl Plugin for RuntimePlugin {
                     .chain()
                     .in_set(RuntimeSet),
             );
+    }
+}
 
-        if let Some(watch) = VaultWatch::new(app) {
-            app.insert_non_send(watch);
-        }
+fn start_watch(world: &mut World) {
+    if world.contains_non_send::<VaultWatch>() {
+        return;
+    }
+    let wake = world
+        .get_resource::<bevy::winit::EventLoopProxyWrapper>()
+        .map(|wrapper| (**wrapper).clone());
+    if let Some(watch) = VaultWatch::new(wake) {
+        world.insert_non_send(watch);
     }
 }
 
@@ -53,14 +62,12 @@ impl VaultWatch {
     const AUTO_SYNC_DELAY: Duration = Duration::from_secs(2);
     const REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(30);
 
-    fn new(app: &App) -> Option<Self> {
+    fn new(
+        watch_wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
+    ) -> Option<Self> {
         let vault_root = VaultStorage::current().root().to_path_buf();
         let _ = std::fs::create_dir_all(&vault_root);
         let (watch_tx, watch_rx) = mpsc::channel();
-        let watch_wake = app
-            .world()
-            .get_resource::<bevy::winit::EventLoopProxyWrapper>()
-            .map(|wrapper| (**wrapper).clone());
         let debounce_wake = watch_wake.clone();
         let remote_wake = watch_wake.clone();
         let mut watcher = match notify::recommended_watcher(Self::callback(watch_tx, watch_wake)) {

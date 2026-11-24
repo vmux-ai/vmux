@@ -15,40 +15,42 @@ pub struct ServerRequestPlugin;
 
 impl Plugin for ServerRequestPlugin {
     fn build(&self, app: &mut App) {
-        let (apply_edit_sender, apply_edit_receiver) = crossbeam_channel::unbounded();
-        let (log_sender, log_receiver) = crossbeam_channel::unbounded();
-        app.add_systems(PreStartup, move |mut commands: Commands| {
-            commands.spawn((
-                Name::new("LSP server input"),
-                ServerInputSender {
-                    apply_edits: apply_edit_sender.clone(),
-                    logs: log_sender.clone(),
-                    server: None,
-                    transport: None,
-                },
-                ApplyEditInbox(apply_edit_receiver.clone()),
-                ServerLogInbox(log_receiver.clone()),
-            ));
-        })
-        .add_message::<ServerReply>()
-        .configure_sets(
-            Update,
-            (
-                ServerRequestSet::Receive,
-                ServerRequestSet::Answer,
-                ServerRequestSet::Reply,
+        app.add_systems(PreStartup, spawn_input)
+            .add_message::<ServerReply>()
+            .configure_sets(
+                Update,
+                (
+                    ServerRequestSet::Receive,
+                    ServerRequestSet::Answer,
+                    ServerRequestSet::Reply,
+                )
+                    .chain(),
             )
-                .chain(),
-        )
-        .add_systems(
-            Update,
-            (
-                spawn_apply_edit_requests.in_set(ServerRequestSet::Receive),
-                write_server_logs.in_set(ServerRequestSet::Receive),
-                answer_server_requests.in_set(ServerRequestSet::Reply),
-            ),
-        );
+            .add_systems(
+                Update,
+                (
+                    spawn_apply_edit_requests.in_set(ServerRequestSet::Receive),
+                    write_server_logs.in_set(ServerRequestSet::Receive),
+                    answer_server_requests.in_set(ServerRequestSet::Reply),
+                ),
+            );
     }
+}
+
+fn spawn_input(mut commands: Commands) {
+    let (apply_edit_sender, apply_edit_receiver) = crossbeam_channel::unbounded();
+    let (log_sender, log_receiver) = crossbeam_channel::unbounded();
+    commands.spawn((
+        Name::new("LSP server input"),
+        ServerInputSender {
+            apply_edits: apply_edit_sender,
+            logs: log_sender,
+            server: None,
+            transport: None,
+        },
+        ApplyEditInbox(apply_edit_receiver),
+        ServerLogInbox(log_receiver),
+    ));
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

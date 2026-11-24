@@ -17,6 +17,7 @@ pub struct CommandRuntimePlugin;
 impl Plugin for CommandRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CommandInvocation>()
+            .add_systems(PreStartup, validate_bindings)
             .configure_sets(
                 Startup,
                 (RegisterManifests, FlushManifests, BindCommands).chain(),
@@ -46,12 +47,15 @@ impl Plugin for CommandRuntimePlugin {
                     .chain()
                     .in_set(DispatchCommandInvocations),
             );
-        for binding in inventory::iter::<CommandBindingRegistration> {
-            binding
-                .declaration
-                .validate()
-                .expect("valid command declaration binding");
-        }
+    }
+}
+
+fn validate_bindings() {
+    for binding in inventory::iter::<CommandBindingRegistration> {
+        binding
+            .declaration
+            .validate()
+            .expect("valid command declaration binding");
     }
 }
 

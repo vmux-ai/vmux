@@ -180,14 +180,12 @@ fn drain_file_changes(
 ) {
     let mut changed = HashSet::new();
     for observation in observations.read() {
-        match &observation.0 {
-            Ok(event) if matches!(event.kind, notify::EventKind::Access(_)) => {}
-            Ok(event) => {
-                for path in &event.paths {
-                    changed.insert(vmux_path::PathIdentity::resolve(path).into_path_buf());
-                }
-            }
-            Err(error) => tracing::warn!("file watcher observation failed: {error}"),
+        if let Some(error) = &observation.error {
+            tracing::warn!("file watcher observation failed: {error}");
+            continue;
+        }
+        for path in &observation.paths {
+            changed.insert(vmux_path::PathIdentity::resolve(path).into_path_buf());
         }
     }
     let mut reconciled_dirs = HashSet::new();
@@ -334,9 +332,11 @@ mod tests {
 
         std::fs::create_dir(&parent).unwrap();
         std::fs::write(&path, "created\n").unwrap();
-        app.world_mut().write_message(Observed(Ok(
-            notify::Event::new(notify::EventKind::Any).add_path(parent)
-        )));
+        app.world_mut()
+            .write_message(Observed::from_notify(Ok(notify::Event::new(
+                notify::EventKind::Any,
+            )
+            .add_path(parent))));
         FileLoadTask::settle(&mut app, entity);
 
         assert_eq!(

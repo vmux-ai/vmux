@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use bevy_app::{App, Update};
+use bevy_app::{App, PreStartup, Update};
 use bevy_ecs::prelude::*;
 use vmux_ecs::cli::{CliInvocation, CliResult, CliWake};
 use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake};
@@ -18,10 +18,8 @@ pub struct RepositorySelectionPlugin;
 
 impl bevy_app::Plugin for RepositorySelectionPlugin {
     fn build(&self, app: &mut App) {
-        if !app.world().contains_resource::<JobWake>() {
-            app.insert_resource(JobWake(std::sync::Arc::new(CliWake::current()).into()));
-        }
         app.add_plugins(JobPlugin::<Task<Read>>::default())
+            .add_systems(PreStartup, ensure_job_wake)
             .configure_sets(Update, Stage::Resolve.in_set(JobSet::Apply))
             .add_systems(
                 Update,
@@ -51,6 +49,12 @@ impl bevy_app::Plugin for RepositorySelectionPlugin {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Stage {
     Resolve,
+}
+
+fn ensure_job_wake(wake: Option<Res<JobWake>>, mut commands: Commands) {
+    if wake.is_none() {
+        commands.insert_resource(JobWake(std::sync::Arc::new(CliWake::current()).into()));
+    }
 }
 
 #[derive(Component)]
