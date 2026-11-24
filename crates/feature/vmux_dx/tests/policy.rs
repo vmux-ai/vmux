@@ -1922,7 +1922,20 @@ fn fetched_policy_refuses_the_same_misplaced_fragments_as_the_filesystem() {
 #[test]
 fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
     let root = Workspace::current();
-    let policy = Policy::load(&root.0).expect("valid ownership policy");
+    assert!(
+        !root.0.join("ecs-policy.ron").exists(),
+        "root ecs-policy.ron has been retired"
+    );
+    let policy = Policy::load(&root.0).expect("valid zero-policy workspace");
+    assert!(
+        policy.legacy.is_empty()
+            && policy.boundaries.is_empty()
+            && policy.values.is_empty()
+            && policy.shape.debt.is_empty()
+            && policy.shape.enums.is_empty()
+            && policy.shape.bodies.is_empty(),
+        "ecs-policy.ron files have been retired"
+    );
     let architecture = std::fs::read_to_string(root.0.join("docs/dx/architecture.md"))
         .expect("architecture boundary contract");
     assert!(
@@ -1932,10 +1945,50 @@ fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
         "document the policy's adapter boundary"
     );
     let inventory = Inventory::workspace(&root.0);
-    let errors = policy.audit(&inventory);
+    let mut errors = Vec::new();
+    for entry in inventory.entries.values() {
+        if entry.path.starts_with("patches/") || !entry.shape_source() {
+            continue;
+        }
+        if entry.renderer
+            && !inventory.registered_keys.contains(&entry.key)
+            && entry.contract_paths.iter().any(|path| {
+                inventory
+                    .framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                    .as_deref()
+                    == Some("component")
+            })
+        {
+            continue;
+        }
+        for body in &entry.bodies {
+            if !body.production
+                || body.lines <= 100
+                || body.composition
+                    && body.name == "build"
+                    && entry.plugin_path.as_deref().is_some_and(|path| {
+                        inventory
+                            .framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                            .as_deref()
+                            == Some("Plugin")
+                    })
+            {
+                continue;
+            }
+            errors.push(format!(
+                "{}: body has {} production token lines; maximum is 100 [fingerprint: {}]",
+                body.key, body.lines, body.fingerprint
+            ));
+        }
+    }
+    for symbol in &inventory.generated_collisions {
+        errors.push(format!(
+            "generated QueryData identity collides with a source declaration: {symbol}"
+        ));
+    }
     assert!(
         errors.is_empty(),
-        "ECS ownership violations:\n{}",
+        "ECS workspace invariants failed:\n{}",
         errors.join("\n")
     );
     policy.prove_legacy(&root.0);
@@ -7682,7 +7735,10 @@ impl Policy {
             paths.insert(path.to_path_buf());
         }
         if !paths.remove(Path::new("ecs-policy.ron")) {
-            return Err("Missing root policy in Git tree".into());
+            if !paths.is_empty() {
+                return Err("Missing root policy while policy fragments remain".into());
+            }
+            return Ok(Self::default());
         }
         let mut policy = Self::read_git(root, revision, Path::new("ecs-policy.ron"))?;
         policy.check_root()?;
@@ -27146,17 +27202,22 @@ fn extended_plugin_bootstrap_proves_ui_state_and_page_factories() {
 
 #[test]
 fn zero_policy_files_requires_zero_fragments_and_passes_with_automatic_proofs() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join("crates/feature/demo/src")).unwrap();
-    let loaded = Policy::load(dir.path()).expect("empty workspace without policy files");
+    let repository = Repository::new();
+    let _ = std::fs::remove_file(repository.0.path().join("ecs-policy.ron"));
+    std::fs::create_dir_all(repository.0.path().join("crates/feature/demo/src")).unwrap();
+    let loaded = Policy::load(repository.0.path()).expect("empty workspace without policy files");
     assert!(loaded.legacy.is_empty());
     assert!(loaded.boundaries.is_empty());
-    std::fs::write(
-        dir.path().join("crates/feature/demo/ecs-policy.ron"),
-        "(legacy: [])",
-    )
-    .unwrap();
-    assert!(Policy::load(dir.path()).is_err());
+    repository.write("crates/feature/demo/src/lib.rs", "");
+    repository.snapshot();
+    let fetched = Policy::from_git(repository.0.path(), "origin/main")
+        .expect("empty git tree without policy files");
+    assert!(fetched.legacy.is_empty());
+    assert!(fetched.boundaries.is_empty());
+    repository.write("crates/feature/demo/ecs-policy.ron", "(legacy: [])");
+    assert!(Policy::load(repository.0.path()).is_err());
+    repository.snapshot();
+    assert!(Policy::from_git(repository.0.path(), "origin/main").is_err());
 }
 
 #[test]

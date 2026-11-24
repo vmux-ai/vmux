@@ -639,6 +639,7 @@ fn request_default(
     });
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct TabScaffold {
     tab: Entity,
     pane: Entity,

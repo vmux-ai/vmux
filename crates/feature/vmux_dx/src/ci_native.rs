@@ -718,7 +718,7 @@ impl<'ast> Visit<'ast> for Collector {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 struct Predicates {
     platform: bool,
 }

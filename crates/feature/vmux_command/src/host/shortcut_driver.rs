@@ -60,7 +60,7 @@ impl Keymap {
     pub fn set_leader(&mut self, leader: &KeyCombo) {
         for (_, binding) in &mut self.bindings {
             if let Shortcut::Chord(prefix, _) = &mut binding.shortcut {
-                *prefix = leader.clone();
+                *prefix = *leader;
             }
         }
     }
@@ -293,7 +293,7 @@ impl From<Modifiers> for KeyModifiers {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KeyCombo {
     pub key: KeyCode,
     pub modifiers: Modifiers,
@@ -436,7 +436,7 @@ impl KeyCombo {
     }
 
     fn chord_second_after(&self, prefix: &KeyCombo) -> KeyCombo {
-        let mut second = self.clone();
+        let mut second = *self;
         second.modifiers.ctrl &= !prefix.modifiers.ctrl;
         second.modifiers.alt &= !prefix.modifiers.alt;
         second.modifiers.super_key &= !prefix.modifiers.super_key;

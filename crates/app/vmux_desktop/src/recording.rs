@@ -26,7 +26,7 @@ pub(crate) enum RecordingStatus {
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-#[allow(unknown_lints, vmux_ecs_ownership)]
+#[derive(Clone, Copy)]
 pub(crate) struct GifSampling {
     elapsed_ms: u64,
     last_sampled_ms: Option<u64>,

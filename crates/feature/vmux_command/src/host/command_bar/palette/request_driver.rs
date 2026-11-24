@@ -3,8 +3,7 @@ use std::time::{Duration, Instant};
 use bevy::prelude::Entity;
 use vmux_api::command_bar::OpenId;
 
-#[derive(Default)]
-#[allow(unknown_lints, vmux_ecs_ownership)]
+#[derive(Clone, Copy, Default)]
 pub(super) struct OpenVersion {
     initialized: bool,
     open_id: OpenId,
@@ -34,7 +33,7 @@ impl OpenVersion {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub(super) struct RequestGeneration(u64);
 
 impl RequestGeneration {

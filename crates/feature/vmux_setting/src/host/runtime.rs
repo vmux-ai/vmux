@@ -1040,7 +1040,7 @@ impl ShortcutDef {
                 second.to_key_combo()?,
             )),
             ShortcutDef::Leader(second) => Some(vmux_command::Shortcut::Chord(
-                leader.clone(),
+                *leader,
                 second.to_key_combo()?,
             )),
         }

@@ -359,7 +359,7 @@ fn discard_superseded_opens(
     }
 }
 
-#[allow(unknown_lints, vmux_ecs_ownership)]
+#[derive(Clone, Copy)]
 struct ResolvedOpenTarget {
     existing: Option<Entity>,
     create_in: Option<Entity>,
