@@ -164,7 +164,12 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(DefaultPlugins.build().disable::<bevy::winit::WinitPlugin>())
             .add_plugins(bevy_cef::prelude::IpcPlugin)
-            .add_plugins(vmux_app::VmuxPlugin::builder().desktop().build());
+            .add_plugins(
+                vmux_app::VmuxPlugin::builder()
+                    .desktop()
+                    .browser(false)
+                    .build(),
+            );
         assert!(app.is_plugin_added::<vmux_acp::AcpPlugin>());
         assert!(app.is_plugin_added::<vmux_tool::ToolPlugin>());
         assert!(app.is_plugin_added::<vmux_tool::McpRegistryPlugin>());
