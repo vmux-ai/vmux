@@ -14,8 +14,6 @@ boundaries: [
 ],
 values: [
     (key: "crates/util/vmux_process/src/run_marker.rs||struct:RunMarker", owner: "crates/util/vmux_process/src/plugin.rs||struct:ProcessRunCompletion", lifetime: "Latest parsed OSC 6973 run completion token and exit code stored on ProcessRunCompletion."),
-    (key: "crates/util/vmux_process/src/selection.rs||struct:CopyModeState", owner: "crates/util/vmux_process/src/selection.rs||struct:ProcessCopyMode", lifetime: "Active vi copy-mode cursor, anchor, visual mode and last find owned by ProcessCopyMode."),
-    (key: "crates/util/vmux_process/src/viewport.rs||struct:ViewportPace", owner: "crates/util/vmux_process/src/viewport.rs||struct:ProcessViewport", lifetime: "Heavy-output frame pacing timestamps owned by ProcessViewport."),
 ],
 shape: (
   debt: [
