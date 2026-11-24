@@ -51,9 +51,14 @@ pub enum Stage {
     Resolve,
 }
 
-fn ensure_job_wake(wake: Option<Res<JobWake>>, mut commands: Commands) {
+fn ensure_job_wake(
+    wake: Option<Res<JobWake>>,
+    cli_wake: Option<Res<CliWake>>,
+    mut commands: Commands,
+) {
     if wake.is_none() {
-        commands.insert_resource(JobWake(std::sync::Arc::new(CliWake::current()).into()));
+        let target = cli_wake.map_or_else(CliWake::current, |wake| wake.clone());
+        commands.insert_resource(JobWake(std::sync::Arc::new(target).into()));
     }
 }
 
