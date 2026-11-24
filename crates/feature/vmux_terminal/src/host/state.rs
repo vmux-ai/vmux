@@ -24,7 +24,7 @@ impl TerminalCopyMode {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub(crate) struct CopyModeInputState {
     pub(crate) pending_key: Option<CopyModePendingKey>,
     pub(crate) count: Option<u16>,

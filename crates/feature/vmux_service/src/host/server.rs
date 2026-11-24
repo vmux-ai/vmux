@@ -221,7 +221,7 @@ fn dispatch_clients(
                 .map(|source| source.subscribe()),
         );
         for protocol in &protocols.0 {
-            client.add_local(entity.to_bits(), protocol.clone(), peer.0.clone(), admitted);
+            client.add_local(entity.to_bits(), protocol.clone(), peer.0, admitted);
         }
         let connection = Connection::new(stream, client);
         let wake = wake.0.clone();

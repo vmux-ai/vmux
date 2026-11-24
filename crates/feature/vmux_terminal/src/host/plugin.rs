@@ -1769,7 +1769,7 @@ impl TerminalShortcutState {
             self.pending_prefix = None;
         }
 
-        if let Some((prefix, _)) = self.pending_prefix.clone() {
+        if let Some((prefix, _)) = self.pending_prefix {
             if let Some(cmd) = map.chord(&prefix, &combo) {
                 self.pending_prefix = None;
                 return (true, Some(cmd));

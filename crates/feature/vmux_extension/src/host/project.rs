@@ -96,7 +96,7 @@ struct ProjectionData<'w, 's> {
     >,
 }
 
-#[allow(unknown_lints, vmux_ecs_ownership)]
+#[derive(Clone, Copy)]
 struct WindowCandidate {
     entity: Entity,
     id: i32,

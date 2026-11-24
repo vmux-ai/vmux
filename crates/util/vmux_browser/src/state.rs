@@ -358,7 +358,7 @@ struct ProjectionTarget {
     page_ready_changed: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ProjectProjectionSelection {
     tab: Entity,
     revision: u64,
@@ -665,7 +665,7 @@ impl PageStateRemovals<'_, '_> {
     }
 }
 
-#[allow(unknown_lints, vmux_ecs_ownership)]
+#[derive(Clone, Copy)]
 struct PageStateRemovalChanges {
     state: bool,
     geometry: bool,

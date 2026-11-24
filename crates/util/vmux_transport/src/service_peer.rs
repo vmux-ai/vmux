@@ -17,7 +17,7 @@ impl CodeRequirement {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct LocalPeer {
     uid: u32,
     pid: Option<u32>,

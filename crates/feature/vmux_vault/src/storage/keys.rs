@@ -69,6 +69,7 @@ impl NativeKeyAccess {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct KeyWriteReceipt {
     pub(crate) created: bool,
 }

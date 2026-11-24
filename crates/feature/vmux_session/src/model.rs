@@ -1237,7 +1237,7 @@ fn cleanup(
 }
 
 #[cfg(host)]
-#[allow(unknown_lints, vmux_ecs_ownership)]
+#[derive(Clone, Copy)]
 struct ProviderSessionCandidate {
     entity: Entity,
     duplicate: Option<Entity>,
