@@ -28,6 +28,7 @@ fn development() {
         ("app", "vmux_cli"),
         ("util", "vmux_ecs"),
         ("util", "vmux_api"),
+        ("util", "vmux_channel"),
         ("util", "vmux_task"),
         ("util", "vmux_macro"),
     ] {

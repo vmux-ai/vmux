@@ -2,6 +2,12 @@ extern crate self as vmux_ecs;
 
 pub use vmux_macro::types;
 
+pub use vmux_channel as channel;
+pub use vmux_channel::{
+    AsyncChannelPlugin, ChannelClosed, ChannelReceived, ChannelSendError, ChannelSendErrorKind,
+    ChannelSet, ChannelWake, EntityChannel, EntityMode, EntitySender, EntitySpawnChannel,
+    MessageChannel, MessageMode, MessageSender, SpawnChannel, SpawnMode, SpawnSender,
+};
 #[cfg(feature = "store")]
 pub use vmux_macro::store;
 pub use vmux_task::{
@@ -14,11 +20,6 @@ pub use archive::{
 };
 #[cfg(feature = "jobs")]
 pub use blocking::{BlockingCancellation, BlockingPool, BlockingRuntime, BlockingTask};
-pub use channel::{
-    AsyncChannelPlugin, ChannelClosed, ChannelReceived, ChannelSendError, ChannelSendErrorKind,
-    ChannelSet, EntityChannel, EntityMode, EntitySender, EntitySpawnChannel, MessageChannel,
-    MessageMode, MessageSender, SpawnChannel, SpawnMode, SpawnSender,
-};
 pub use component::{
     ActivateRequest, Active, ArchivedAt, Bookmark, BookmarkOrder, Collapsed, CollectionView,
     CreatedAt, Cwd, Description, EffectiveStartupUrl, EntityTarget, Folder, HostShell,
@@ -85,7 +86,6 @@ mod archive;
 pub mod blocking;
 #[cfg(all(host, feature = "host"))]
 pub mod browser;
-pub mod channel;
 #[cfg(feature = "cli")]
 pub mod cli;
 mod component;

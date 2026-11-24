@@ -10484,6 +10484,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_channel"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+]
+
+[[package]]
 name = "vmux_cli"
 version = "0.0.35"
 dependencies = [
@@ -10694,6 +10702,7 @@ dependencies = [
  "url",
  "uuid",
  "vmux_api",
+ "vmux_channel",
  "vmux_flex",
  "vmux_macro",
  "vmux_path",

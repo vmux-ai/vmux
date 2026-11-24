@@ -52,7 +52,7 @@ runs:
       uses: actions/cache/restore@v5
       with:
         path: .vmux/bootstrap
-        key: ci-runtime-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tool-versions.env', '.cargo/**', '.env*', 'crates/build_*.rs', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_api/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_macro/**', 'crates/util/vmux_task/**', 'patches/**', '.github/actions/setup-ci/action.yml') }}
+        key: ci-runtime-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-${{ env.VMUX_CI_VALIDATION }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tool-versions.env', '.cargo/**', '.env*', 'crates/build_*.rs', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_api/**', 'crates/util/vmux_channel/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_macro/**', 'crates/util/vmux_task/**', 'patches/**', '.github/actions/setup-ci/action.yml') }}
     - name: Verify CI runtime checksum
       id: reuse
       if: env.VMUX_CI_RUNTIME_READY != '1'

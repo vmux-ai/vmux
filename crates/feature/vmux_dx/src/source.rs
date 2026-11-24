@@ -22,6 +22,7 @@ impl Source {
             "vmux_cli",
             "vmux_ecs",
             "vmux_api",
+            "vmux_channel",
             "vmux_task",
             "vmux_macro",
         ] {

@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::task::Waker;
 
 use bevy_app::{App, Plugin, PreUpdate};
@@ -10,8 +10,8 @@ use bevy_ecs::lifecycle::HookContext;
 use bevy_ecs::prelude::*;
 use bevy_ecs::world::DeferredWorld;
 
-#[cfg(feature = "jobs")]
-use crate::JobWake;
+#[derive(Resource, Clone)]
+pub struct ChannelWake(pub Waker);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MessageMode;
@@ -74,12 +74,13 @@ impl<M: Message> Plugin for AsyncChannelPlugin<M, MessageMode> {
             };
             app.insert_resource(sender).insert_resource(channel);
         }
-        #[cfg(feature = "jobs")]
         app.add_systems(
             PreUpdate,
-            bind_message_wake::<M>.in_set(ChannelSet::BindWake),
+            (
+                bind_message_wake::<M>.in_set(ChannelSet::BindWake),
+                drain_messages::<M>.in_set(ChannelSet::Drain),
+            ),
         );
-        app.add_systems(PreUpdate, drain_messages::<M>.in_set(ChannelSet::Drain));
     }
 }
 
@@ -108,21 +109,26 @@ impl<B: Bundle> Plugin for AsyncChannelPlugin<B, SpawnMode> {
             };
             app.insert_resource(sender).insert_resource(channel);
         }
-        #[cfg(feature = "jobs")]
-        app.add_systems(PreUpdate, bind_spawn_wake::<B>.in_set(ChannelSet::BindWake));
-        app.add_systems(PreUpdate, drain_spawns::<B>.in_set(ChannelSet::Drain));
+        app.add_systems(
+            PreUpdate,
+            (
+                bind_spawn_wake::<B>.in_set(ChannelSet::BindWake),
+                drain_spawns::<B>.in_set(ChannelSet::Drain),
+            ),
+        );
     }
 }
 
 impl<T: Send + Sync + 'static> Plugin for AsyncChannelPlugin<T, EntityMode> {
     fn build(&self, app: &mut App) {
-        app.configure_sets(PreUpdate, (ChannelSet::BindWake, ChannelSet::Drain).chain());
-        #[cfg(feature = "jobs")]
-        app.add_systems(
-            PreUpdate,
-            bind_entity_wake::<T>.in_set(ChannelSet::BindWake),
-        );
-        app.add_systems(PreUpdate, drain_entities::<T>.in_set(ChannelSet::Drain));
+        app.configure_sets(PreUpdate, (ChannelSet::BindWake, ChannelSet::Drain).chain())
+            .add_systems(
+                PreUpdate,
+                (
+                    bind_entity_wake::<T>.in_set(ChannelSet::BindWake),
+                    drain_entities::<T>.in_set(ChannelSet::Drain),
+                ),
+            );
     }
 }
 
@@ -526,25 +532,36 @@ impl<T> Channel<T> {
         let Ok(queue) = self.state.lock() else {
             return false;
         };
-        !queue.items.is_empty() || (!queue.closed && queue.senders == 0)
+        !queue.items.is_empty() || queue.senders == 0
     }
 
-    fn bind_custom_waker(&self, waker: Waker) {
-        {
+    fn clear_waker(&self) {
+        let previous = {
             let Ok(mut wake) = self.wake.lock() else {
                 return;
             };
-            wake.waker = Some(waker);
+            wake.waker.take()
+        };
+        drop(previous);
+    }
+
+    fn bind_custom_waker(&self, waker: Waker) {
+        let previous = {
+            let Ok(mut wake) = self.wake.lock() else {
+                return;
+            };
+            let previous = wake.waker.replace(waker);
             wake.custom = true;
-        }
+            previous
+        };
+        drop(previous);
         if self.has_pending_work() {
             self.wake();
         }
     }
 
-    #[cfg(feature = "jobs")]
     fn bind_auto_waker(&self, waker: &Waker) {
-        let updated = {
+        let (updated, previous) = {
             let Ok(mut wake) = self.wake.lock() else {
                 return;
             };
@@ -556,12 +573,12 @@ impl<T> Channel<T> {
                 .as_ref()
                 .is_some_and(|current| current.will_wake(waker))
             {
-                false
+                (false, None)
             } else {
-                wake.waker = Some(waker.clone());
-                true
+                (true, wake.waker.replace(waker.clone()))
             }
         };
+        drop(previous);
         if updated && self.has_pending_work() {
             self.wake();
         }
@@ -586,7 +603,7 @@ impl<T> Drop for ChannelSender<T> {
                 return;
             };
             queue.senders = queue.senders.saturating_sub(1);
-            queue.senders == 0 && !queue.closed
+            queue.senders == 0
         };
         if disconnected {
             self.0.wake();
@@ -643,6 +660,7 @@ struct ChannelReceiver<T>(Arc<Channel<T>>);
 
 impl<T> Drop for ChannelReceiver<T> {
     fn drop(&mut self) {
+        self.0.clear_waker();
         self.close_and_clear();
     }
 }
@@ -671,10 +689,14 @@ impl<T> ChannelReceiver<T> {
     }
 
     fn close_and_clear(&self) {
-        if let Ok(mut queue) = self.0.state.lock() {
+        let cleared = {
+            let Ok(mut queue) = self.0.state.lock() else {
+                return;
+            };
             queue.closed = true;
-            queue.items.clear();
-        }
+            std::mem::take(&mut queue.items)
+        };
+        drop(cleared);
     }
 
     fn is_disconnected(&self) -> bool {
@@ -684,7 +706,6 @@ impl<T> ChannelReceiver<T> {
         queue.senders == 0 && queue.items.is_empty()
     }
 
-    #[cfg(feature = "jobs")]
     fn bind_auto_waker(&self, waker: &Waker) {
         self.0.bind_auto_waker(waker);
     }
@@ -692,6 +713,7 @@ impl<T> ChannelReceiver<T> {
 
 struct DeliverEntityItem<T: Send + Sync + 'static> {
     entity: Entity,
+    channel: Weak<Channel<T>>,
     item: T,
 }
 
@@ -699,13 +721,44 @@ impl<T: Send + Sync + 'static> Command for DeliverEntityItem<T> {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        if world.get_entity(self.entity).is_err() {
+        let Some(expected) = self.channel.upgrade() else {
+            return;
+        };
+        let Some(current) = world.get::<EntityChannel<T>>(self.entity) else {
+            return;
+        };
+        if !Arc::ptr_eq(&current.receiver.0, &expected) {
             return;
         }
         world.trigger(ChannelReceived {
             entity: self.entity,
             item: Some(self.item),
         });
+        world.flush();
+    }
+}
+
+struct MarkChannelClosed<T: Send + Sync + 'static> {
+    entity: Entity,
+    channel: Weak<Channel<T>>,
+}
+
+impl<T: Send + Sync + 'static> Command for MarkChannelClosed<T> {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        let Some(expected) = self.channel.upgrade() else {
+            return;
+        };
+        let Some(current) = world.get::<EntityChannel<T>>(self.entity) else {
+            return;
+        };
+        if !Arc::ptr_eq(&current.receiver.0, &expected) {
+            return;
+        }
+        world
+            .entity_mut(self.entity)
+            .insert(ChannelClosed::<T>::default());
     }
 }
 
@@ -716,9 +769,8 @@ fn clear_closed<T: Send + Sync + 'static>(mut world: DeferredWorld, context: Hoo
         .try_remove::<ChannelClosed<T>>();
 }
 
-#[cfg(feature = "jobs")]
 fn bind_message_wake<M: Message>(
-    wake: Option<Res<JobWake>>,
+    wake: Option<Res<ChannelWake>>,
     channel: Option<Res<MessageChannel<M>>>,
 ) {
     let (Some(wake), Some(channel)) = (wake, channel) else {
@@ -740,9 +792,8 @@ fn drain_messages<M: Message>(
     }
 }
 
-#[cfg(feature = "jobs")]
 fn bind_spawn_wake<B: Bundle>(
-    wake: Option<Res<JobWake>>,
+    wake: Option<Res<ChannelWake>>,
     resource: Option<Res<SpawnChannel<B>>>,
     components: Query<&EntitySpawnChannel<B>>,
 ) {
@@ -776,9 +827,8 @@ fn drain_spawns<B: Bundle>(
     }
 }
 
-#[cfg(feature = "jobs")]
 fn bind_entity_wake<T: Send + Sync + 'static>(
-    wake: Option<Res<JobWake>>,
+    wake: Option<Res<ChannelWake>>,
     channels: Query<&EntityChannel<T>>,
 ) {
     let Some(wake) = wake else {
@@ -795,13 +845,19 @@ type EntityChannels<'w, 's, T> =
 fn drain_entities<T: Send + Sync + 'static>(channels: EntityChannels<T>, mut commands: Commands) {
     for (entity, channel, closed) in &channels {
         let (items, disconnected) = channel.receiver.drain_all();
+        let identity = Arc::downgrade(&channel.receiver.0);
         for item in items {
-            commands.queue(DeliverEntityItem { entity, item });
+            commands.queue(DeliverEntityItem {
+                entity,
+                channel: Weak::clone(&identity),
+                item,
+            });
         }
         if disconnected && !closed {
-            commands
-                .entity(entity)
-                .try_insert(ChannelClosed::<T>::default());
+            commands.queue(MarkChannelClosed {
+                entity,
+                channel: identity,
+            });
         }
     }
 }
@@ -863,6 +919,7 @@ mod tests {
     fn record_entity_item(
         mut trigger: On<ChannelReceived<u32>>,
         despawn_on: Query<&DespawnOnItem>,
+        replace_on: Query<&ReplaceOnItem>,
         mut delivered: ResMut<DeliveredItems>,
         mut commands: Commands,
     ) {
@@ -873,6 +930,12 @@ mod tests {
         delivered.0.push((entity, value));
         if despawn_on.get(entity).is_ok_and(|rule| rule.0 == value) {
             commands.entity(entity).despawn();
+        }
+        if let Ok(rule) = replace_on.get(entity)
+            && rule.trigger == value
+            && let Some(next) = rule.replacement.lock().unwrap().take()
+        {
+            commands.entity(entity).insert(next);
         }
     }
 
@@ -922,9 +985,8 @@ mod tests {
         assert_eq!(app.world().resource::<ReceivedMessages>().0, [1, 2, 3]);
     }
 
-    #[cfg(feature = "jobs")]
     #[test]
-    fn message_sender_auto_binds_job_wake_and_wakes_for_queued_items() {
+    fn message_sender_auto_binds_channel_wake_and_wakes_for_queued_items() {
         let mut app = App::new();
         app.init_resource::<ReceivedMessages>()
             .add_plugins(AsyncChannelPlugin::message::<TestMessage>())
@@ -932,7 +994,7 @@ mod tests {
 
         let sender = app.world().resource::<MessageSender<TestMessage>>().clone();
         let wake = CountWake::new();
-        app.insert_resource(JobWake(Waker::from(Arc::clone(&wake))));
+        app.insert_resource(ChannelWake(Waker::from(Arc::clone(&wake))));
 
         sender.send(TestMessage(1)).unwrap();
         assert_eq!(wake.count(), 0);
@@ -1054,5 +1116,70 @@ mod tests {
         assert!(app.world().get_entity(entity).is_err());
         assert!(tx.is_closed());
         assert_eq!(tx.send(3).unwrap_err().kind(), ChannelSendErrorKind::Closed);
+    }
+
+    #[test]
+    fn closing_channel_with_self_referential_sender_payload_does_not_deadlock() {
+        let (self_tx, self_rx) = EntityChannel::<SelfPayload>::unbounded();
+        self_tx
+            .send(SelfPayload {
+                _sender: Some(self_tx.clone()),
+            })
+            .unwrap();
+        self_rx.close_and_clear();
+        assert_eq!(
+            self_tx
+                .send(SelfPayload { _sender: None })
+                .unwrap_err()
+                .kind(),
+            ChannelSendErrorKind::Closed
+        );
+    }
+
+    struct SelfPayload {
+        _sender: Option<EntitySender<SelfPayload>>,
+    }
+
+    #[derive(Component)]
+    struct ReplaceOnItem {
+        trigger: u32,
+        replacement: Mutex<Option<EntityChannel<u32>>>,
+    }
+
+    #[test]
+    fn replacing_entity_channel_during_final_delivery_does_not_mark_replacement_closed() {
+        let mut app = App::new();
+        app.init_resource::<DeliveredItems>()
+            .add_plugins(AsyncChannelPlugin::entity::<u32>())
+            .add_observer(record_entity_item);
+
+        let (old_tx, old_rx) = EntityChannel::<u32>::unbounded();
+        let (new_tx, new_rx) = EntityChannel::<u32>::unbounded();
+        let entity = app
+            .world_mut()
+            .spawn((
+                old_rx,
+                ReplaceOnItem {
+                    trigger: 1,
+                    replacement: Mutex::new(Some(new_rx)),
+                },
+            ))
+            .id();
+
+        old_tx.send(1).unwrap();
+        old_tx.send(2).unwrap();
+        drop(old_tx);
+
+        app.update();
+
+        assert_eq!(app.world().resource::<DeliveredItems>().0, [(entity, 1)]);
+        assert!(app.world().get::<ChannelClosed<u32>>(entity).is_none());
+        new_tx.send(3).unwrap();
+        app.update();
+        assert_eq!(
+            app.world().resource::<DeliveredItems>().0,
+            [(entity, 1), (entity, 3)]
+        );
+        assert!(app.world().get::<ChannelClosed<u32>>(entity).is_none());
     }
 }

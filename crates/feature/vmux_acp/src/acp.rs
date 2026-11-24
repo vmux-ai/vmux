@@ -67,20 +67,14 @@ impl bevy::prelude::Plugin for AcpRuntimePlugin {
             (
                 AsyncChannelPlugin::entity::<AcpAgentInfoUpdate>(),
                 AsyncChannelPlugin::entity::<AcpConfigStateInput>(),
-                AsyncChannelPlugin::entity::<AcpSelectedConfigInput>(),
                 AsyncChannelPlugin::entity::<AgentRunStatus>(),
                 AsyncChannelPlugin::entity::<AcpStartup>(),
-                AsyncChannelPlugin::entity::<RemoteApproval>(),
-                AsyncChannelPlugin::entity::<AcpApprovalResolved>(),
             ),
         ))
         .add_observer(project_info)
         .add_observer(project_config_state)
-        .add_observer(project_selected_config)
         .add_observer(project_status)
         .add_observer(project_startup)
-        .add_observer(project_approval_requested)
-        .add_observer(project_approval_resolved)
         .add_systems(
             Update,
             (spawn, ApplyDeferred).chain().before(AcpProjectionSet),
@@ -89,7 +83,13 @@ impl bevy::prelude::Plugin for AcpRuntimePlugin {
             Update,
             (
                 ApplyDeferred,
-                snapshot_selection,
+                (
+                    project_selected_config,
+                    project_approval_requested,
+                    project_approval_resolved,
+                    snapshot_selection,
+                )
+                    .chain(),
                 (route_prompts, route_approvals, route_configs, route_cancels).chain(),
                 ApplyDeferred,
                 (subscribe, read, list, rebind, close, reap).chain(),
@@ -477,53 +477,54 @@ fn project_config_state(
 }
 
 fn project_selected_config(
-    mut trigger: On<ChannelReceived<AcpSelectedConfigInput>>,
-    mut sessions: Query<(&SessionId, &AcpSessionShared, &mut AcpSessionConfigs)>,
+    mut sessions: Query<(
+        &SessionId,
+        &AcpSessionShared,
+        &EntityChannel<AcpSelectedConfigInput>,
+        &mut AcpSessionConfigs,
+    )>,
 ) {
-    let entity = trigger.event().entity;
-    let Some(input) = trigger.event_mut().take() else {
-        return;
-    };
-    let Ok((sid, shared, mut configs)) = sessions.get_mut(entity) else {
-        return;
-    };
-    if !input.config_options.is_empty() {
-        let legacy = configs
-            .0
-            .iter()
-            .find(|config| config.config_id.is_none())
-            .cloned();
-        let mut next = AcpSessionConfigs::from_acp(&input.config_options, None);
-        if !next
-            .0
-            .iter()
-            .any(|config| config.category.as_deref() == Some("mode"))
-            && let Some(legacy) = legacy
-        {
-            next.0.push(legacy);
+    for (sid, shared, channel, mut configs) in &mut sessions {
+        for input in channel.drain() {
+            if !input.config_options.is_empty() {
+                let legacy = configs
+                    .0
+                    .iter()
+                    .find(|config| config.config_id.is_none())
+                    .cloned();
+                let mut next = AcpSessionConfigs::from_acp(&input.config_options, None);
+                if !next
+                    .0
+                    .iter()
+                    .any(|config| config.category.as_deref() == Some("mode"))
+                    && let Some(legacy) = legacy
+                {
+                    next.0.push(legacy);
+                }
+                *configs = next;
+            }
+            let Some(config) = configs
+                .0
+                .iter_mut()
+                .find(|config| config.config_id.as_deref() == input.config_id.as_deref())
+            else {
+                continue;
+            };
+            if config.current_value == input.value
+                || !config
+                    .values
+                    .iter()
+                    .any(|option| option.value == input.value)
+            {
+                continue;
+            }
+            config.current_value = input.value;
+            shared.0.emit(ServiceMessage::AcpSessionConfigState {
+                sid: sid.0.clone(),
+                configs: configs.0.clone(),
+            });
         }
-        *configs = next;
     }
-    let Some(config) = configs
-        .0
-        .iter_mut()
-        .find(|config| config.config_id.as_deref() == input.config_id.as_deref())
-    else {
-        return;
-    };
-    if config.current_value == input.value
-        || !config
-            .values
-            .iter()
-            .any(|option| option.value == input.value)
-    {
-        return;
-    }
-    config.current_value = input.value;
-    shared.0.emit(ServiceMessage::AcpSessionConfigState {
-        sid: sid.0.clone(),
-        configs: configs.0.clone(),
-    });
 }
 
 fn project_status(
@@ -558,53 +559,55 @@ fn project_status(
 }
 
 fn project_approval_requested(
-    mut trigger: On<ChannelReceived<RemoteApproval>>,
-    mut sessions: Query<(&SessionId, &AcpSessionShared, &mut AcpApprovalState)>,
+    mut sessions: Query<(
+        &SessionId,
+        &AcpSessionShared,
+        &EntityChannel<RemoteApproval>,
+        &mut AcpApprovalState,
+    )>,
 ) {
-    let entity = trigger.event().entity;
-    let Some(next) = trigger.event_mut().take() else {
-        return;
-    };
-    let Ok((sid, shared, mut approval)) = sessions.get_mut(entity) else {
-        return;
-    };
-    approval.0 = Some(next.clone());
-    shared
-        .0
-        .emit(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
-            sid: sid.0.clone(),
-            call_id: next.call_id,
-            name: next.name,
-            args: next.args,
-        }));
+    for (sid, shared, channel, mut approval) in &mut sessions {
+        for next in channel.drain() {
+            approval.0 = Some(next.clone());
+            shared
+                .0
+                .emit(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
+                    sid: sid.0.clone(),
+                    call_id: next.call_id,
+                    name: next.name,
+                    args: next.args,
+                }));
+        }
+    }
 }
 
 fn project_approval_resolved(
-    mut trigger: On<ChannelReceived<AcpApprovalResolved>>,
-    mut sessions: Query<(&SessionId, &AcpSessionShared, &mut AcpApprovalState)>,
+    mut sessions: Query<(
+        &SessionId,
+        &AcpSessionShared,
+        &EntityChannel<AcpApprovalResolved>,
+        &mut AcpApprovalState,
+    )>,
 ) {
-    let entity = trigger.event().entity;
-    let Some(resolved) = trigger.event_mut().take() else {
-        return;
-    };
-    let Ok((sid, shared, mut approval)) = sessions.get_mut(entity) else {
-        return;
-    };
-    let call_id = resolved.0;
-    if approval
-        .0
-        .as_ref()
-        .is_none_or(|pending| pending.call_id != call_id)
-    {
-        return;
+    for (sid, shared, channel, mut approval) in &mut sessions {
+        for resolved in channel.drain() {
+            let call_id = resolved.0;
+            if approval
+                .0
+                .as_ref()
+                .is_none_or(|pending| pending.call_id != call_id)
+            {
+                continue;
+            }
+            approval.0 = None;
+            shared
+                .0
+                .emit(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
+                    sid: sid.0.clone(),
+                    call_id,
+                }));
+        }
     }
-    approval.0 = None;
-    shared
-        .0
-        .emit(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
-            sid: sid.0.clone(),
-            call_id,
-        }));
 }
 
 fn snapshot_selection(
