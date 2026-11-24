@@ -26,6 +26,7 @@ pub(crate) enum RecordingStatus {
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(crate) struct GifSampling {
     elapsed_ms: u64,
     last_sampled_ms: Option<u64>,
@@ -52,6 +53,7 @@ impl GifSampling {
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(crate) struct BgraFrame(Vec<u8>);
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

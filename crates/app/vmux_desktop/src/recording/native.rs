@@ -99,6 +99,7 @@ pub(super) struct Completion {
     opened: Sender<Opened>,
     #[cfg(any(target_os = "macos", test))]
     encoded: Sender<Encoded>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     wake: Option<super::WakeFn>,
 }
 
