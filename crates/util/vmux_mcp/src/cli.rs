@@ -29,8 +29,8 @@ impl Plugin for McpCliPlugin {
     }
 }
 
-fn spawn_runtime(mut commands: Commands) {
-    commands.spawn((
+fn spawn_runtime(world: &mut World) {
+    world.spawn((
         Name::new("MCP async runtime"),
         McpRuntime(tokio::runtime::Handle::current()),
     ));
