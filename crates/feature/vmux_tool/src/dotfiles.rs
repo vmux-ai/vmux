@@ -485,6 +485,7 @@ pub struct DotfileLink {
 #[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
 pub struct DotfilePlan {
     pub package: String,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub links: Vec<DotfileLink>,
 }
 

@@ -102,6 +102,7 @@ struct WorkspaceReady(Option<McpWorkspaceRoot>);
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct McpResolveResult {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub servers: Vec<McpResolvedServer>,
     pub managed: Vec<ManagedMcpServer>,
     pub diagnostics: Vec<String>,

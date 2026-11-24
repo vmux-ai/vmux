@@ -55,12 +55,16 @@ pub struct VimKeymap {
     replace_pending: bool,
     g_pending: bool,
     z_pending: bool,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pending_change: Vec<Recorded>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     last_change: Vec<Recorded>,
     in_change: bool,
     replaying: bool,
     macro_pending: Option<bool>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     macro_record: Option<(char, Vec<Recorded>)>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     macros: std::collections::HashMap<char, Vec<Recorded>>,
     last_macro: Option<char>,
     insert_after_next: bool,
@@ -68,6 +72,7 @@ pub struct VimKeymap {
     block_insert: Option<bool>,
     block_text: String,
     mappings: crate::keymap::mapping::Mappings,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     map_pending: Vec<KeyInput>,
 }
 

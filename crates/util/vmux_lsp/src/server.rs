@@ -43,6 +43,7 @@ struct LaunchTicket {
     operation: Entity,
     server: Entity,
     root: Entity,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     key: ServerKey,
 }
 
@@ -64,6 +65,7 @@ impl LaunchServer {
 
 #[derive(Component)]
 pub struct ServerCompleted {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     ticket: LaunchTicket,
     result: Option<Result<Transport, String>>,
 }

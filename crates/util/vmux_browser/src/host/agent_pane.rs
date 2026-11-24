@@ -16,6 +16,7 @@ pub struct AgentBrowserResolve<'w, 's> {
     tabs: vmux_layout::tab::TabHierarchy<'w, 's>,
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct AgentBrowserPaneClaim {
     pub(super) pane: Entity,
     pub(super) stack: Option<Entity>,

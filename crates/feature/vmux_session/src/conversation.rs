@@ -1503,10 +1503,12 @@ struct EventIndex {
     snapshot_events: HashMap<Entity, HashMap<EventId, (Entity, Option<ClientOpId>)>>,
     latest_sequences: HashMap<Entity, u64>,
     latest_users: HashMap<Entity, ((bool, u64), EventId)>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     native_aliases: HashMap<
         (Entity, ProviderSessionKey, NativeAlias, String),
         Vec<(Entity, Option<usize>, Option<usize>)>,
     >,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     native_entities: HashMap<(Entity, ProviderSessionKey, NativeAlias, String), Vec<Entity>>,
     native_bound: HashSet<Entity>,
     identities: HashMap<Entity, EventIdentity>,
@@ -1515,12 +1517,15 @@ struct EventIndex {
     event_owners: HashMap<Entity, Entity>,
     units: HashMap<Entity, Vec<(Entity, Option<usize>)>>,
     claimed_units: HashSet<(Entity, Option<usize>)>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     replay_aliases: HashMap<
         (Entity, Option<ProviderSessionKey>, EventId),
         Vec<(Entity, Option<usize>, Option<usize>)>,
     >,
     replay_positions: HashMap<Entity, usize>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     sources: HashMap<Entity, ProviderSessionKey>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     origins: HashMap<Entity, ProviderSessionKey>,
     unit_positions: HashMap<(Entity, Option<usize>), usize>,
 }

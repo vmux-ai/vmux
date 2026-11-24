@@ -67,6 +67,7 @@ impl Plugin for ToolRegistryPlugin {
 #[derive(Component, Clone, Copy)]
 pub struct ToolInputRegistration {
     name: &'static str,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     parse: fn(Entity, &Name, &JsonArguments, &mut Commands),
 }
 

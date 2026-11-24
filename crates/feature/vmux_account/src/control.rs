@@ -48,9 +48,11 @@ struct Context {
     local: Uuid,
     remote: Uuid,
     generation: u64,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     server: Server,
     data: std::path::PathBuf,
     environment: String,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     certificate: Option<LocalCertificate>,
 }
 

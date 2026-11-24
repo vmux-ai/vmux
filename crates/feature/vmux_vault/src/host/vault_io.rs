@@ -56,6 +56,7 @@ pub(super) struct ActiveVaultOperation;
 pub(super) struct VaultOperationOutcome(pub(super) Result<VaultOperationOutput, String>);
 
 #[derive(Component, Clone, Debug)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct ProcessOutcome {
     pub(super) success: bool,
     pub(super) stdout: String,

@@ -21,6 +21,7 @@ pub struct Package {
     pub languages: Vec<String>,
     pub categories: Vec<String>,
     pub source_id: String,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub assets: Vec<Asset>,
     pub bin: BTreeMap<PackageName, String>,
 }

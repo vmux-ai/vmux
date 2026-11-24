@@ -234,6 +234,7 @@ struct CatalogQueued(vmux_api::protocol::ClientMessage);
 #[derive(Component)]
 struct CatalogBinding {
     agent: Entity,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     source: Checked,
 }
 

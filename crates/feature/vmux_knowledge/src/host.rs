@@ -25,4 +25,5 @@ impl Plugin for KnowledgePlugin {
 #[reflect(Component)]
 #[type_path = "vmux_desktop::knowledge"]
 #[require(moonshine_save::prelude::Save)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(crate) struct ExpandedKnowledgeDirs(Vec<String>);

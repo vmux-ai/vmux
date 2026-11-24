@@ -66,6 +66,7 @@ impl Document {
 pub struct Carets {
     pub selections: Vec<Selection>,
     pub(crate) active: usize,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(super) memory: Vec<CaretMemory>,
     pub(super) block_insert: Option<(Vec<usize>, usize)>,
 }

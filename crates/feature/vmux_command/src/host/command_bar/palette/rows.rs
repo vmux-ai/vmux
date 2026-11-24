@@ -31,6 +31,7 @@ pub(super) enum PaletteRowKind {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct PaletteRow {
     pub(super) kind: PaletteRowKind,
     pub(super) display: CommandBarResultItem,
@@ -50,7 +51,9 @@ pub(super) struct PaletteRow {
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub(super) struct PaletteRowsSnapshot {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(super) items: Vec<PaletteRow>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(super) prompt_targets: Vec<PaletteRow>,
     pub(super) default_target: Option<PaletteRow>,
     pub(super) ghost: String,

@@ -335,6 +335,7 @@ impl Install {
 }
 
 #[derive(Component, Debug)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub struct PreparedEvidence(pub Vec<Evidence>);
 
 #[derive(Debug, Default)]

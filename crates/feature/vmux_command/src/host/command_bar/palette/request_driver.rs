@@ -4,6 +4,7 @@ use bevy::prelude::Entity;
 use vmux_api::command_bar::OpenId;
 
 #[derive(Default)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct OpenVersion {
     initialized: bool,
     open_id: OpenId,

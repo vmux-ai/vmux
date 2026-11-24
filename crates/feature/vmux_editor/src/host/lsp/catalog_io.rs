@@ -59,4 +59,5 @@ impl Job for DecodeArchive {
 }
 
 #[derive(Component)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct RegistryBytes(pub(super) Vec<u8>);

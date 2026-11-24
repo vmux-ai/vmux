@@ -122,6 +122,7 @@ impl ChatListSelection {
     }
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct ActiveChatList {
     kind: ChatListKind,
     composer_menu: Option<ChatComposerMenuKind>,

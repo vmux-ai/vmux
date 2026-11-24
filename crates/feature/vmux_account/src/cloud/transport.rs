@@ -135,6 +135,7 @@ impl Drop for Transport {
 #[derive(Clone, Component)]
 #[component(immutable)]
 struct Open {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     server: Server,
     wake: Option<Waker>,
     trust: Trust,

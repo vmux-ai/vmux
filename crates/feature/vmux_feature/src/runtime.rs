@@ -169,6 +169,7 @@ impl OverridePolicy {
 pub struct EvaluationFailure(pub String);
 
 #[derive(Component)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(crate) struct Evaluated(pub(crate) Result<Decision<Value>, EvaluationFailure>);
 
 #[derive(Component, Default)]

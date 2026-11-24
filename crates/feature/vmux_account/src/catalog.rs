@@ -75,6 +75,7 @@ pub struct ReadCompleted {
 pub struct Loaded {
     pub generation: u64,
     pub records: Vec<Record>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub directories: Vec<DirectoryObservation>,
 }
 

@@ -51,7 +51,10 @@ impl Fixture {
         )
         .unwrap();
         let output = Command::new("cargo")
-            .env("DYLINT_RUSTFLAGS", "-A vmux_ecs_runtime")
+            .env(
+                "DYLINT_RUSTFLAGS",
+                "-A vmux_ecs_runtime -A vmux_ecs_ownership",
+            )
             .current_dir(self.directory.path())
             .args([
                 "dylint",
@@ -68,7 +71,34 @@ impl Fixture {
         self.verify(name, output, expected, code);
     }
 
-    fn check_default(&self, name: &str, source: &str, expected: &[&str], code: &str) {
+    fn check_ownership(&self, name: &str, source: &str, expected: &[&str]) {
+        std::fs::write(
+            self.directory
+                .path()
+                .join("examples")
+                .join(format!("{name}.rs")),
+            source,
+        )
+        .unwrap();
+        let output = Command::new("cargo")
+            .env("DYLINT_RUSTFLAGS", "-A vmux_ecs_runtime")
+            .current_dir(self.directory.path())
+            .args([
+                "dylint",
+                "--path",
+                self.library.to_str().unwrap(),
+                "--",
+                "--locked",
+                "--example",
+                name,
+                "--message-format=json",
+            ])
+            .output()
+            .expect("run the prepared Dylint compiler");
+        self.verify(name, output, expected, "vmux_ecs_ownership");
+    }
+
+    fn check_ownership_default(&self, name: &str, source: &str, expected: &[&str]) {
         std::fs::write(
             self.directory
                 .path()
@@ -79,6 +109,33 @@ impl Fixture {
         .unwrap();
         let output = Command::new("cargo")
             .env("DYLINT_RUSTFLAGS", "")
+            .current_dir(self.directory.path())
+            .args([
+                "dylint",
+                "--path",
+                self.library.to_str().unwrap(),
+                "--",
+                "--locked",
+                "--example",
+                name,
+                "--message-format=json",
+            ])
+            .output()
+            .expect("run the prepared Dylint compiler");
+        self.verify(name, output, expected, "vmux_ecs_ownership");
+    }
+
+    fn check_default(&self, name: &str, source: &str, expected: &[&str], code: &str) {
+        std::fs::write(
+            self.directory
+                .path()
+                .join("examples")
+                .join(format!("{name}.rs")),
+            source,
+        )
+        .unwrap();
+        let output = Command::new("cargo")
+            .env("DYLINT_RUSTFLAGS", "-A vmux_ecs_ownership")
             .current_dir(self.directory.path())
             .args([
                 "dylint",
@@ -404,13 +461,12 @@ fn compiler_resolves_registered_systems_and_ignores_other_contracts() {
 }
 
 #[test]
-fn ownership_diagnostics_require_an_explicit_audit_request() {
+fn ownership_diagnostics_are_denied_by_default() {
     let fixture = Fixture::new();
-    fixture.check(
+    fixture.check_ownership_default(
         "ownership_default",
         "struct Detached(u32); fn main() {}\n",
-        &[],
-        "vmux_ecs_ownership",
+        &["declaration has no unique resolved registered ECS owner @ 1:1-1:16"],
     );
 }
 
@@ -482,6 +538,6 @@ fn compiler_proves_registered_ownership_and_rejects_hidden_or_unused_models() {
             ][..],
         ),
     ] {
-        fixture.check(name, source, expected, "vmux_ecs_ownership");
+        fixture.check_ownership(name, source, expected);
     }
 }

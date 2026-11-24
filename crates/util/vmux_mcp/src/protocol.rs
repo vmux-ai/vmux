@@ -301,6 +301,7 @@ struct McpTask(tokio::sync::oneshot::Receiver<Result<Value, String>>);
 type McpFuture = Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>;
 
 #[derive(Component)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub struct McpExecution(Mutex<Option<McpFuture>>);
 
 impl McpExecution {

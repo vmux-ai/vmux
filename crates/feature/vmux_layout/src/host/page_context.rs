@@ -321,6 +321,7 @@ impl ProjectActivations {
     }
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct ProjectActivationOutcome {
     path: String,
     branch: String,

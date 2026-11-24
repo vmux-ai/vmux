@@ -32,6 +32,7 @@ pub(in crate::host) struct PreparationSet;
 #[derive(Component)]
 pub(in crate::host) struct Request {
     pub(in crate::host) agent: Entity,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(in crate::host) source: Checked,
     pub(in crate::host) shell: String,
 }
@@ -40,6 +41,7 @@ pub(in crate::host) struct Request {
 pub(in crate::host) struct Completed(pub(in crate::host) Result<AcpLaunch, String>);
 
 #[derive(Component)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct Prepared(InstalledLaunch);
 #[derive(Component)]
 struct Writing;
@@ -71,6 +73,7 @@ impl Job for LoginEnvironment {
 }
 
 #[derive(Component)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct EnvironmentValues(Vec<(String, String)>);
 
 fn invalidate(

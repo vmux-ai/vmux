@@ -79,6 +79,7 @@ pub struct CommandDefinition {
     pub hidden: bool,
     pub native_menu: bool,
     pub shortcut_label: Option<String>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub shortcuts: Vec<CommandShortcut>,
     pub toolbar: Option<CommandToolbar>,
     pub mcp: Option<CommandMcp>,
@@ -98,6 +99,7 @@ pub struct CommandInvocation {
 }
 
 #[derive(Component, Clone, Copy)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct CommandMessage(pub(super) fn(&CommandInvocation, &mut Commands));
 
 pub trait CommandBinding: Bundle + Sized {
@@ -107,6 +109,7 @@ pub trait CommandBinding: Bundle + Sized {
 #[derive(Component, Clone, Copy)]
 pub struct CommandBindingRegistration {
     declaration: vmux_feature::CommandBindingRegistration,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     attach: fn(Entity, &CommandDefinition, &mut Commands),
 }
 
@@ -135,7 +138,9 @@ inventory::collect!(CommandBindingRegistration);
 
 #[derive(Component, Clone, Copy)]
 pub struct CommandMessageRegistration {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     owner: fn() -> FeatureId,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     message: fn(&CommandDefinition) -> Option<CommandMessage>,
 }
 

@@ -115,11 +115,14 @@ struct QueuedServerMessage {
 #[derive(Component)]
 pub struct ExtensionBridgeServer {
     endpoint: String,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     identities: HashMap<String, BridgeIdentity>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     authorizations: HashMap<String, BridgeAuthorization>,
     conformance: HashSet<String>,
     inbound_queue: BridgeInboundQueue,
     inbound_rx: crossbeam_channel::Receiver<BridgeInbound>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     sessions: Arc<Mutex<HashMap<String, BridgeSession>>>,
     shutdown: Arc<AtomicBool>,
     accept_poller: Arc<Poller>,
@@ -156,6 +159,7 @@ impl bevy::prelude::Plugin for ExtensionBridgePlugin {
 #[derive(Component)]
 struct ExtensionBridgeStartup {
     profile: String,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     registrations: Vec<BridgeRegistration>,
 }
 

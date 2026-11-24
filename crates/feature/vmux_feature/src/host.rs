@@ -1497,22 +1497,24 @@ struct PageValues<'w, 's> {
     history: Query<'w, 's, (&'static ChildOf, &'static History)>,
 }
 
+#[derive(Component)]
+struct LastEmittedUiState(FeaturesUiState);
+
 fn emit(
     contexts: Query<(
         Entity,
         &Context,
         &Selection,
         Option<&crate::inspection::OverrideOutcome>,
+        Option<&LastEmittedUiState>,
     )>,
     values: PageValues,
     declarations: Declarations,
     inspection: crate::inspection::Inspection,
-    mut previous: Local<BTreeMap<Entity, FeaturesUiState>>,
     mut commands: Commands,
     access: crate::access::Access,
 ) {
-    previous.retain(|entity, _| contexts.contains(*entity));
-    for (page, context, selection, outcome) in &contexts {
+    for (page, context, selection, outcome, previous) in &contexts {
         let environment = context.environment.clone();
         let valid = context
             .endpoint
@@ -1603,9 +1605,9 @@ fn emit(
             });
             prior = entry.flags.clone();
         }
-        if previous.get(&page) != Some(&state) {
+        if previous.map(|last| &last.0) != Some(&state) {
             commands.trigger(UiStateWrite::<FeaturesUiState>::from_event(page, &state));
-            previous.insert(page, state);
+            commands.entity(page).insert(LastEmittedUiState(state));
         }
     }
 }

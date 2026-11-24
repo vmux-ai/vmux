@@ -236,6 +236,7 @@ impl TabStripProjection {
     }
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct BookmarkUiBuilder {
     folders: Vec<BookmarkFolderRow>,
     choices: Vec<BookmarkFolderChoice>,

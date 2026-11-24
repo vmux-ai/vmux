@@ -163,6 +163,7 @@ impl Diagnostics {
 
 #[derive(Component)]
 struct Pending {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     ticket: Ticket,
     version: Option<i32>,
     diagnostics: Vec<lsp_types::Diagnostic>,

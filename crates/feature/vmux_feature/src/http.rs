@@ -161,6 +161,7 @@ struct Pending {
     generation: u64,
     conditional: bool,
     credential: Option<(Entity, u64)>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     contexts: Vec<EvaluationContext>,
 }
 
@@ -176,6 +177,7 @@ pub(crate) struct Authentication {
     pub(crate) source_revision: u64,
     pub(crate) generation: u64,
     pub(crate) revision: u64,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     contexts: Vec<EvaluationContext>,
 }
 
@@ -199,6 +201,7 @@ struct Candidate {
     etag: Option<String>,
     entropy: u64,
     credential: Option<(Entity, u64)>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     contexts: Vec<EvaluationContext>,
 }
 

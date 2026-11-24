@@ -4,6 +4,7 @@ pub struct Page {
     pub title: &'static str,
     pub reports_title: bool,
     pub favicon: bool,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub component: crate::PageComponent,
     pub dom_group: Option<&'static str>,
     pub root_id: &'static str,

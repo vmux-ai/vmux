@@ -271,6 +271,7 @@ struct ClearApproval {
     index: usize,
     scope: Entity,
     context: Context,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     binding: Binding,
     document: crate::snapshot::Document,
     flag: String,

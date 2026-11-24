@@ -67,6 +67,7 @@ impl Plugin for DotfileImportPlugin {
 struct Work {
     requester: Entity,
     source: Option<Entity>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     request: ImportDotfiles,
     retained: bool,
 }

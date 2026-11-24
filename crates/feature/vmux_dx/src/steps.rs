@@ -158,6 +158,7 @@ pub(crate) struct ResolvedIdentity(pub String);
 pub(crate) struct ProducedArtifacts(pub Vec<PathBuf>);
 
 #[derive(Component, Clone)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(crate) struct ResolvedExecutable(pub crate::workspace::Executable);
 
 #[derive(Component, Clone)]

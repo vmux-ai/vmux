@@ -36,7 +36,7 @@ rustc_session::declare_lint! {
 
 rustc_session::declare_lint! {
     pub VMUX_ECS_OWNERSHIP,
-    Allow,
+    Deny,
     "Vmux state must have a resolved registered ECS owner"
 }
 
@@ -222,9 +222,7 @@ impl<'tcx> VmuxExportedSystem<'tcx> {
         {
             return Some(usize::from(qualified));
         }
-        let Some(implementation) = cx.tcx.impl_of_assoc(method) else {
-            return None;
-        };
+        let implementation = cx.tcx.impl_of_assoc(method)?;
         let TyKind::Adt(owner, _) = cx
             .tcx
             .type_of(implementation)

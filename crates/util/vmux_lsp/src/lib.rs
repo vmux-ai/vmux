@@ -209,6 +209,7 @@ pub trait TransportIo: Send + Sync + 'static {
 #[derive(Component, Clone)]
 pub struct Transport {
     identity: uuid::Uuid,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     io: Arc<dyn TransportIo>,
 }
 

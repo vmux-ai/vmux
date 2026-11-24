@@ -799,6 +799,7 @@ impl CatalogSources<'_, '_> {
 }
 
 #[cfg(host)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct ConversationPreview {
     title: String,
     last_prompt: String,

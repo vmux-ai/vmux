@@ -55,6 +55,7 @@ impl ServiceConnectRetry {
 }
 
 #[derive(Component)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct ServiceWakeCallback(Option<ServiceWake>);
 
 #[derive(Component)]

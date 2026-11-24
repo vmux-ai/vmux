@@ -126,6 +126,7 @@ pub(crate) enum MatchResult {
 
 #[derive(Clone, Default)]
 pub(crate) struct Mappings {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     entries: Vec<Mapping>,
 }
 
