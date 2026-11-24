@@ -12470,6 +12470,11 @@ impl Inventory {
                                             | "RemovedComponents"
                                     )
                                 })
+                                || self
+                                    .resolve(&entry.namespace, path, &mut BTreeSet::new())
+                                    .is_some_and(|target| {
+                                        target.parameter && !target.local && !target.opaque
+                                    })
                         })
                         || entry.fields.iter().any(|field| {
                             matches!(
@@ -12961,7 +12966,7 @@ impl Inventory {
         {
             return false;
         }
-        if entry.dynamic && !matches!(entry.kind, Kind::Struct) {
+        if entry.dynamic && !matches!(entry.kind, Kind::Struct | Kind::Alias) {
             return false;
         }
         match entry.kind {
@@ -13234,6 +13239,45 @@ impl Inventory {
                     }
                 }
                 let mut finalized = proved.clone();
+                for key in &roots {
+                    let Some(owner) = self.entries.get(key) else {
+                        continue;
+                    };
+                    if !self.automatic_app_extension(owner) {
+                        continue;
+                    }
+                    let owner_crate = owner.namespace.split("::").next();
+                    for path in owner.field_paths.iter().chain(owner.reference_paths.iter()) {
+                        let target = self
+                            .resolve_path_or_prefix(&owner.namespace, path)
+                            .or_else(|| self.resolve_direct_import_symbol(&owner.namespace, path))
+                            .or_else(|| {
+                                self.function_reference(
+                                    &owner.namespace,
+                                    path,
+                                    &mut BTreeSet::new(),
+                                )
+                                .or_else(|| {
+                                    self.resolve_direct_import_function(&owner.namespace, path)
+                                })
+                            });
+                        let Some(target) = target else {
+                            continue;
+                        };
+                        if target.production
+                            && !target.local
+                            && !target.dynamic
+                            && !target.opaque
+                            && target.namespace.split("::").next() == owner_crate
+                            && (matches!(target.kind, Kind::Function) && target.private
+                                || matches!(target.kind, Kind::Struct)
+                                    && target.namespace == owner.namespace
+                                    && !target.plugin)
+                        {
+                            finalized.insert(target.key.clone());
+                        }
+                    }
+                }
                 for key in &proved {
                     let entry = &self.entries[key];
                     for implementation in self.implementations(entry) {
@@ -13581,6 +13625,7 @@ impl Inventory {
             "image::",
             "fontdue::",
             "agent_client_protocol::",
+            "async_lock::",
         ];
         PREFIXES.iter().any(|prefix| resolved.starts_with(prefix))
     }
@@ -14002,6 +14047,31 @@ impl Inventory {
             let mut finalized = proved.clone();
             for key in &proved {
                 let entry = &self.entries[key];
+                for path in &entry.field_paths {
+                    if let Some(target) = self.resolve(&entry.namespace, path, &mut BTreeSet::new())
+                        && target.key != entry.key
+                        && target.production
+                        && target.path == entry.path
+                        && matches!(target.kind, Kind::Struct)
+                        && matches!(&target.syntax, Some(Item::Struct(s)) if matches!(s.vis, syn::Visibility::Inherited))
+                        && !target.ecs
+                        && !target.plugin
+                        && !target.local
+                        && !target.dynamic
+                        && !target.opaque
+                        && !target.projection
+                        && !self.has_bevy_runtime_access(target)
+                        && !self.renderer_helper_forbidden_field(target)
+                        && self.value_impls_clean(target)
+                    {
+                        finalized.insert(target.key.clone());
+                        for imp in self.implementations(target) {
+                            if imp.production {
+                                finalized.insert(imp.key.clone());
+                            }
+                        }
+                    }
+                }
                 for implementation in self.implementations(entry) {
                     if implementation.production {
                         finalized.insert(implementation.key.clone());
@@ -14527,6 +14597,31 @@ impl Inventory {
             let mut finalized = proved.clone();
             for key in &proved {
                 let entry = &self.entries[key];
+                for path in &entry.field_paths {
+                    if let Some(target) = self.resolve(&entry.namespace, path, &mut BTreeSet::new())
+                        && target.key != entry.key
+                        && target.production
+                        && target.path == entry.path
+                        && matches!(target.kind, Kind::Struct)
+                        && matches!(&target.syntax, Some(Item::Struct(s)) if matches!(s.vis, syn::Visibility::Inherited))
+                        && !target.ecs
+                        && !target.plugin
+                        && !target.local
+                        && !target.dynamic
+                        && !target.opaque
+                        && !target.projection
+                        && !self.has_bevy_runtime_access(target)
+                        && !self.renderer_helper_forbidden_field(target)
+                        && self.value_impls_clean(target)
+                    {
+                        finalized.insert(target.key.clone());
+                        for imp in self.implementations(target) {
+                            if imp.production {
+                                finalized.insert(imp.key.clone());
+                            }
+                        }
+                    }
+                }
                 for implementation in self.implementations(entry) {
                     if implementation.production {
                         finalized.insert(implementation.key.clone());
@@ -14629,10 +14724,25 @@ impl Inventory {
                     tail.starts_with("Impl") && tail.ends_with("Handler")
                 });
             let is_cef_ecs = entry.ecs && matches!(entry.kind, Kind::Struct | Kind::Enum);
+            let is_cef_core_config_fn = entry.path.starts_with("patches/bevy_cef_core-0.5.2/")
+                && matches!(entry.kind, Kind::Function)
+                && !entry.local
+                && !entry.opaque
+                && !self.has_bevy_runtime_access(entry)
+                && entry.reference_paths.iter().any(|path| {
+                    let tail = path.rsplit("::").next().unwrap_or(path);
+                    matches!(
+                        tail,
+                        "CefEmbeddedPageConfig"
+                            | "resolved_cef_embedded_page_config"
+                            | "CEF_EMBEDDED_PAGE_CONFIG"
+                    )
+                });
             if (self.is_cef_handler_struct(entry)
                 || is_cef_plugin
                 || is_cef_handler_impl
-                || is_cef_ecs)
+                || is_cef_ecs
+                || is_cef_core_config_fn)
                 && proved.insert(entry.key.clone())
             {
                 queue.push(entry.key.clone());
@@ -14823,6 +14933,15 @@ impl Inventory {
                 None => path == "Copy" && !self.local_binding(&entry.namespace, path),
                 _ => false,
             }
+        }) || self.implementations(entry).into_iter().any(|imp| {
+            imp.production
+                && imp.implemented_trait.as_deref().is_some_and(|tr| {
+                    matches!(
+                        self.external_path(&imp.namespace, tr, &mut BTreeSet::new())
+                            .as_deref(),
+                        Some("std::marker::Copy" | "core::marker::Copy")
+                    ) || tr == "Copy" && !self.local_binding(&imp.namespace, tr)
+                })
         });
         let has_static_borrow = matches!(&entry.syntax, Some(Item::Struct(_)))
             && !entry.field_types.is_empty()
@@ -15010,6 +15129,31 @@ impl Inventory {
             let mut finalized = proved.clone();
             for key in &proved {
                 let entry = &self.entries[key];
+                for path in &entry.field_paths {
+                    if let Some(target) = self.resolve(&entry.namespace, path, &mut BTreeSet::new())
+                        && target.key != entry.key
+                        && target.production
+                        && target.path == entry.path
+                        && matches!(target.kind, Kind::Struct)
+                        && matches!(&target.syntax, Some(Item::Struct(s)) if matches!(s.vis, syn::Visibility::Inherited))
+                        && !target.ecs
+                        && !target.plugin
+                        && !target.local
+                        && !target.dynamic
+                        && !target.opaque
+                        && !target.projection
+                        && !self.has_bevy_runtime_access(target)
+                        && !self.renderer_helper_forbidden_field(target)
+                        && self.value_impls_clean(target)
+                    {
+                        finalized.insert(target.key.clone());
+                        for imp in self.implementations(target) {
+                            if imp.production {
+                                finalized.insert(imp.key.clone());
+                            }
+                        }
+                    }
+                }
                 for implementation in self.implementations(entry) {
                     if implementation.production {
                         finalized.insert(implementation.key.clone());
@@ -15522,6 +15666,31 @@ impl Inventory {
             let mut finalized = proved.clone();
             for key in &proved {
                 let entry = &self.entries[key];
+                for path in &entry.field_paths {
+                    if let Some(target) = self.resolve(&entry.namespace, path, &mut BTreeSet::new())
+                        && target.key != entry.key
+                        && target.production
+                        && target.path == entry.path
+                        && matches!(target.kind, Kind::Struct)
+                        && matches!(&target.syntax, Some(Item::Struct(s)) if matches!(s.vis, syn::Visibility::Inherited))
+                        && !target.ecs
+                        && !target.plugin
+                        && !target.local
+                        && !target.dynamic
+                        && !target.opaque
+                        && !target.projection
+                        && !self.has_bevy_runtime_access(target)
+                        && !self.renderer_helper_forbidden_field(target)
+                        && self.value_impls_clean(target)
+                    {
+                        finalized.insert(target.key.clone());
+                        for imp in self.implementations(target) {
+                            if imp.production {
+                                finalized.insert(imp.key.clone());
+                            }
+                        }
+                    }
+                }
                 for implementation in self.implementations(entry) {
                     if implementation.production {
                         finalized.insert(implementation.key.clone());
@@ -16138,12 +16307,14 @@ impl Inventory {
                     .field_paths
                     .iter()
                     .chain(origin.reference_paths.iter())
+                    .chain(origin.rendered.iter())
                 {
                     let target = self
                         .resolve_path_or_prefix(&origin.namespace, path)
                         .or_else(|| {
                             self.function_reference(&origin.namespace, path, &mut BTreeSet::new())
-                        });
+                        })
+                        .or_else(|| self.resolve_direct_import_function(&origin.namespace, path));
                     let Some(target) = target else {
                         continue;
                     };
@@ -16577,6 +16748,16 @@ impl Inventory {
                     && !self.enum_job(entry)
                     && self.value_impls_clean(entry)
             }
+            Kind::Struct => {
+                let derives_reflect = entry.derive_paths.iter().any(|path| {
+                    self.framework_handle(&entry.namespace, path, &mut BTreeSet::new())
+                        .as_deref()
+                        == Some("Reflect")
+                });
+                derives_reflect
+                    && !self.renderer_helper_forbidden_field(entry)
+                    && self.value_impls_clean(entry)
+            }
             _ => false,
         }
     }
@@ -16644,12 +16825,14 @@ impl Inventory {
                     .field_paths
                     .iter()
                     .chain(origin.reference_paths.iter())
+                    .chain(origin.rendered.iter())
                 {
                     let target = self
                         .resolve_path_or_prefix(&origin.namespace, path)
                         .or_else(|| {
                             self.function_reference(&origin.namespace, path, &mut BTreeSet::new())
-                        });
+                        })
+                        .or_else(|| self.resolve_direct_import_function(&origin.namespace, path));
                     let Some(target) = target else {
                         continue;
                     };
@@ -17064,7 +17247,7 @@ impl Inventory {
             && !entry.local
             && !entry.dynamic
             && !entry.opaque
-            && !entry.ecs
+            && (!entry.ecs || entry.component_path.is_some())
             && !entry.projection
             && !self.has_bevy_runtime_access(entry)
             && self
@@ -18389,11 +18572,14 @@ impl Inventory {
                 let bad_field = matches!(entry.kind, Kind::Struct)
                     && entry.field_paths.iter().any(|path| {
                         self.resolve(&entry.namespace, path, &mut BTreeSet::new())
+                            .or_else(|| self.resolve_direct_import_symbol(&entry.namespace, path))
                             .is_some_and(|field| {
                                 field.key != entry.key
                                     && !(field.contract
                                         || field.projection
                                         || field.ecs && self.used(field)
+                                        || self.serde_dto_candidate(field)
+                                        || self.value_handle_candidate(field)
                                         || candidates.contains(&field.key))
                             })
                     });
@@ -20875,6 +21061,14 @@ impl Inventory {
                         | "bevy::transform::prelude"
                         | "bevy::prelude"
                 ),
+                "Reflect" => matches!(
+                    prefix,
+                    "bevy_reflect"
+                        | "bevy_reflect::prelude"
+                        | "bevy::reflect"
+                        | "bevy::reflect::prelude"
+                        | "bevy::prelude"
+                ),
                 "Ref" | "Mut" => matches!(
                     prefix,
                     "bevy_ecs::change_detection"
@@ -21005,6 +21199,7 @@ impl Inventory {
                 | "Children"
                 | "Name"
                 | "Transform"
+                | "Reflect"
                 | "Ref"
                 | "Mut"
                 | "Option"
@@ -27931,6 +28126,43 @@ fn wave15_plugin_globs_is_unique_hook_state_and_shadowing_guards_prove_safely() 
         assert!(
             !inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
             "expected rejected shadowed/unused Wave 15 entry: {key}"
+        );
+    }
+}
+
+#[test]
+fn wave16_async_lock_copy_impl_reflect_values_app_ext_helpers_and_component_jobs_prove_safely() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/vmux_ecs/src/jobs.rs",
+        "use std::marker::PhantomData; use bevy_app::{App, Plugin}; pub trait Job { type Output; fn run(self) -> Self::Output; } pub struct JobPlugin<J: Job>(PhantomData<fn() -> J>); impl<J: Job> Default for JobPlugin<J> { fn default() -> Self { Self(PhantomData) } } impl<J: Job> Plugin for JobPlugin<J> { fn build(&self, app: &mut App) { let _ = app; } }",
+    );
+    inventory.source(
+        "crates/util/vmux_ecs/src/lib.rs",
+        "use bevy_app::{App, Update}; use bevy_ecs::prelude::*; pub trait RouteAppExt { fn add_route<T: Message>(&mut self) -> &mut Self; } fn route_one<T: Message>(mut reader: MessageReader<T>) { let _ = reader.read().count(); } #[derive(Resource, Default)] struct RouteRegistry; impl RouteAppExt for App { fn add_route<T: Message>(&mut self) -> &mut Self { self.init_resource::<RouteRegistry>().add_systems(Update, route_one::<T>) } }",
+    );
+    inventory.source(
+        "crates/feature/demo/src/lib.rs",
+        "use std::rc::Rc; use bevy_app::{App, Plugin, Update}; use bevy_ecs::prelude::*; use bevy_reflect::Reflect; use vmux_ecs::RouteAppExt; use vmux_ecs::jobs::{Job, JobPlugin}; struct SemGuard { sem: async_lock::Semaphore } impl SemGuard { fn acquire(&self) -> usize { let _ = &self.sem; 1 } } #[derive(Clone, Reflect)] struct StoredStep { label: String } #[derive(Component)] struct Holder { step: StoredStep } #[derive(Component, Clone)] struct CompJob { n: u32 } impl Job for CompJob { type Output = u32; fn run(self) -> u32 { self.n } } struct ManualCopy<T>(std::marker::PhantomData<T>); impl<T> Clone for ManualCopy<T> { fn clone(&self) -> Self { *self } } impl<T> Copy for ManualCopy<T> {} struct SpanPart { start: usize } struct BorrowedText<'a> { raw: &'a str, parts: Vec<SpanPart> } type DynCb = Rc<dyn Fn()>; trait Port { fn on_event(&self, cb: DynCb); } struct IoBridge { rx: std::sync::mpsc::Receiver<u32> } impl Port for IoBridge { fn on_event(&self, cb: DynCb) { let _ = (&self.rx, cb); } } #[derive(Message)] struct Ping; fn tick(holders: Query<&Holder>, jobs: Query<&CompJob>) { let _ = (holders, jobs, std::mem::size_of::<SemGuard>(), std::mem::size_of::<ManualCopy<u32>>(), std::mem::size_of::<BorrowedText<'_>>(), std::mem::size_of::<IoBridge>()); } struct DemoPlugin; impl Plugin for DemoPlugin { fn build(&self, app: &mut App) { app.add_route::<Ping>().add_plugins(JobPlugin::<CompJob>::default()).add_systems(Update, tick); } }",
+    );
+    inventory.resolve_usage();
+    let policy = Policy::default();
+    for key in [
+        "crates/util/vmux_ecs/src/lib.rs||fn:route_one",
+        "crates/util/vmux_ecs/src/lib.rs||struct:RouteRegistry",
+        "crates/feature/demo/src/lib.rs||struct:SemGuard",
+        "crates/feature/demo/src/lib.rs||struct:StoredStep",
+        "crates/feature/demo/src/lib.rs||struct:CompJob",
+        "crates/feature/demo/src/lib.rs||impl:Job for CompJob",
+        "crates/feature/demo/src/lib.rs||struct:ManualCopy",
+        "crates/feature/demo/src/lib.rs||impl:Copy for ManualCopy < T >",
+        "crates/feature/demo/src/lib.rs||struct:BorrowedText",
+        "crates/feature/demo/src/lib.rs||struct:SpanPart",
+        "crates/feature/demo/src/lib.rs||alias:DynCb",
+    ] {
+        assert!(
+            inventory.canonical(&inventory.entries[key], &policy, &mut BTreeSet::new()),
+            "expected proved Wave 16 entry: {key}"
         );
     }
 }

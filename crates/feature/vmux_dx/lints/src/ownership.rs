@@ -732,6 +732,7 @@ impl<'tcx> Ownership<'tcx> {
             "image",
             "fontdue",
             "agent_client_protocol",
+            "async_lock",
         ]
         .contains(&krate)
     }
