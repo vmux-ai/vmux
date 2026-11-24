@@ -5,7 +5,6 @@ boundaries: [
 ],
 values: [
     (key: "crates/feature/vmux_setting/src/host/runtime.rs||struct:StartupDir", owner: "crates/feature/vmux_setting/src/host/runtime.rs||struct:AppSettings", lifetime: "Resolved working directory value returned by AppSettings startup_dir and workspace_dir queries"),
-    (key: "crates/feature/vmux_setting/src/schema.rs||struct:SettingsPath", owner: "crates/feature/vmux_setting/src/schema.rs||struct:SettingsSchema", lifetime: "Normalized pattern-matching wrapper used by SettingsSchema::field lookups."),
 ],
 shape: (
   debt: [

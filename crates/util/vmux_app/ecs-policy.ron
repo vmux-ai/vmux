@@ -2,7 +2,6 @@
 legacy: [
 ],
 boundaries: [
-    (key: "crates/util/vmux_app/src/plugin.rs||enum:VmuxPlugin", fingerprint: "efa317401e927374", interface: "Vmux application plugin composition", input: "external: selected application plugin options", output: "ECS: crates/feature/vmux_feature/src/runtime.rs||struct:Provider", lifetime: "one application host composition", bounds: "Static root/child plugin metadata and native writer-role selection only; registered domain systems own behavior", teardown: "Application teardown releases configured host/feature entities and native lifecycle owners", architecture: "ECS ownership boundaries"),
     (key: "crates/util/vmux_app/src/host_runtime.rs||struct:SessionHostRuntimePlugin", fingerprint: "53d5715c1edc8f77", interface: "Bevy composition of shared Session Host and existing native service/ACP runtime", input: "ECS: crates/feature/vmux_session/src/history.rs||struct:Received", output: "external: installed public Session Host, service daemon and ACP runtime plugins", lifetime: "one selected App plugin installation", bounds: "static composition only; bounded IO and canonical Session/provider/transcript state remain owned by their existing child systems", teardown: "registered schedules and canonical state end with the owning App", architecture: "ECS ownership boundaries"),
     (key: "crates/util/vmux_app/src/host_runtime.rs||impl:Plugin for SessionHostRuntimePlugin", fingerprint: "06c95847ded24e5d", interface: "Vmux application plugin composition", input: "external: selected application plugin options", output: "ECS: crates/feature/vmux_session/src/model.rs||struct:Session", lifetime: "one application host composition", bounds: "Static root/child plugin metadata and native writer-role selection only; registered domain systems own behavior", teardown: "Application teardown releases configured host/feature entities and native lifecycle owners", architecture: "ECS ownership boundaries"),
 ],
@@ -12,8 +11,7 @@ shape: (
   debt: [
   ],
   enums: [
-    (key: "crates/util/vmux_app/src/plugin.rs||enum:VmuxPlugin", fingerprint: "efa317401e927374", role: Boundary, owner: "crates/util/vmux_app/src/plugin.rs||enum:VmuxPlugin", reason: "app_plugin compile-time feature composition metadata expands to Bevy plugin installation; it does not retain runtime commands or workflows."),
-  ],
+],
   bodies: [
   ],
 ),

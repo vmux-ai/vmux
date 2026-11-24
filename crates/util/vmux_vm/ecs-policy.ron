@@ -1,7 +1,5 @@
 (legacy: [
 ], boundaries: [
-    (key: "crates/util/vmux_vm/src/connection.rs||struct:ConnectionPlugin", fingerprint: "4c703626651819af", interface: "Rust/Bevy plugin and page registration", input: "external: Bevy App plugin composition", output: "ECS: crates/util/vmux_vm/src/engine.rs||enum:EngineSet", lifetime: "one plugin installation; runtime state lives on its ECS entities", bounds: "only its declared child plugins, contracts and ordered systems", teardown: "configuration drops after registration; entity and task lifecycles own runtime cleanup", architecture: "ECS ownership boundaries"),
-    (key: "crates/util/vmux_vm/src/connection.rs||impl:Plugin for ConnectionPlugin", fingerprint: "d341a9a1138955c7", interface: "Rust/Bevy plugin and page registration", input: "external: Bevy App plugin composition", output: "ECS: crates/util/vmux_vm/src/engine.rs||enum:EngineSet", lifetime: "one plugin installation; runtime state lives on its ECS entities", bounds: "only its declared child plugins, contracts and ordered systems", teardown: "configuration drops after registration; entity and task lifecycles own runtime cleanup", architecture: "ECS ownership boundaries"),
 ], values: [
     (key: "crates/util/vmux_vm/src/client.rs||struct:Status", owner: "crates/feature/vmux_container/src/host.rs||struct:Observed", lifetime: "last external engine observation of the EngineView entity"),
 ],
