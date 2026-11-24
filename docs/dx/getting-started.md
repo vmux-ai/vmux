@@ -31,7 +31,7 @@ vmux build my-vmux
 vmux desktop my-vmux
 ```
 
-`build` prepares the app; `run` opens the finished build. After an edit, repeat those two commands. If the build reports an error, fix it before running the app.
+`build` prepares the app; `desktop` (or `run`) opens the finished build without compiling, or builds it first if no completed artifact exists. After an edit, rebuild with `vmux build my-vmux` and open again. If the build reports an error, fix it before running the app.
 
 ## Make your first change
 
@@ -55,10 +55,12 @@ investigating a failure; it is not required before every push.
 
 You can use Vmux itself as the editor: open this checkout as a Project, select the worktree in its Space, and keep Code, Terminal, and a Session together. The same build and test commands work whether you edit manually or ask an agent to make the change.
 
-`vmux desktop <branch>` opens the prepared desktop app for that branch. `vmux desktop`
-uses the current checkout; select `vmux desktop main` when you intend main. Build an
-unprepared checkout first with `vmux build <branch>`. `vmux run` remains available for
-explicit platform selection, including mobile and web.
+`vmux desktop <branch>` opens the desktop app for that branch without compiling when a
+completed artifact already exists, and builds it first when missing. Pass `--no-build` to
+fail instead of compiling. `vmux desktop` uses the current checkout; select
+`vmux desktop main` when you intend main. Use `vmux build <branch>` to build without
+launching. `vmux run` remains available for explicit platform selection, including mobile
+and web.
 
 ## CLI updates
 

@@ -729,7 +729,14 @@ fn desktop_help_exposes_the_branch_without_launching() {
         .assert()
         .success()
         .stdout(predicate::str::contains("[BRANCH]"))
-        .stdout(predicate::str::contains("current checkout"));
+        .stdout(predicate::str::contains("current checkout"))
+        .stdout(predicate::str::contains("--no-build"));
+    Command::cargo_bin("vmux")
+        .unwrap()
+        .args(["run", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--no-build"));
 }
 
 #[test]
@@ -1883,6 +1890,187 @@ fn packaged_artifacts_are_verified_before_publication_and_failed_builds_preserve
         std::fs::read(fixture.root.join("build.log")).unwrap(),
         build_log
     );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn desktop_and_run_auto_build_missing_artifacts_and_reuse_existing_ones() {
+    for (command, profile, expected_suffix) in [
+        ("desktop", "local", "release/Vmux (9999999).app"),
+        ("run", "local", "release/Vmux (9999999).app"),
+        ("desktop", "dev", "debug/Vmux Dev.app"),
+        ("run", "dev", "debug/Vmux Dev.app"),
+        ("desktop", "release", "release/Vmux.app"),
+    ] {
+        let fixture = Fixture::new();
+        let mut first = fixture.command();
+        first.args([command, "main", "-p", profile]);
+        if profile == "release" {
+            first
+                .env("VMUX_CI_FAST_PACKAGE", "1")
+                .env("GITHUB_EVENT_NAME", "pull_request")
+                .env("GITHUB_REF", "refs/pull/1/merge")
+                .env("IS_RELEASE_PR", "0");
+        }
+        first.assert().success();
+        let build_log = std::fs::read(fixture.root.join("build.log")).unwrap();
+        assert!(
+            !build_log.is_empty(),
+            "{command} -p {profile} did not build"
+        );
+        let opened = std::fs::read_to_string(fixture.root.join("open.log")).unwrap();
+        assert!(
+            opened.trim().ends_with(expected_suffix),
+            "{command} -p {profile} opened unexpected target: {opened}"
+        );
+
+        std::fs::remove_file(fixture.root.join("open.log")).unwrap();
+        let mut second = fixture.command();
+        second.args([command, "main", "-p", profile]);
+        if profile == "release" {
+            second
+                .env("VMUX_CI_FAST_PACKAGE", "1")
+                .env("GITHUB_EVENT_NAME", "pull_request")
+                .env("GITHUB_REF", "refs/pull/1/merge")
+                .env("IS_RELEASE_PR", "0");
+        }
+        second.assert().success();
+        assert_eq!(
+            std::fs::read(fixture.root.join("build.log")).unwrap(),
+            build_log,
+            "{command} -p {profile} rebuilt an existing artifact"
+        );
+        let reopened = std::fs::read_to_string(fixture.root.join("open.log")).unwrap();
+        assert!(
+            reopened.trim().ends_with(expected_suffix),
+            "{command} -p {profile} reopened unexpected target: {reopened}"
+        );
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn no_build_fails_fast_with_resolved_branch_and_profile_or_launches_existing_artifact() {
+    let fixture = Fixture::new();
+    for (command, branch_arg, profile) in [
+        ("desktop", Some("main"), "local"),
+        ("desktop", None, "local"),
+        ("run", Some("main"), "dev"),
+        ("desktop", None, "release"),
+    ] {
+        let mut args = vec![command];
+        if let Some(branch) = branch_arg {
+            args.push(branch);
+        }
+        args.extend(["-p", profile, "--no-build"]);
+        fixture
+            .command()
+            .args(args)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("main"))
+            .stderr(predicate::str::contains(profile));
+        assert!(!fixture.root.join("build.log").exists());
+        assert!(!fixture.root.join("open.log").exists());
+    }
+
+    let worktree = fixture.directory.path().join("alias-dir");
+    for args in [
+        vec!["add", "Cargo.toml", "packaging", "crates"],
+        vec![
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "Fixture",
+        ],
+        vec![
+            "worktree",
+            "add",
+            "-b",
+            "feature/launch-check",
+            worktree.to_str().unwrap(),
+        ],
+    ] {
+        let output = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&fixture.root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output);
+    }
+    fixture
+        .command()
+        .args(["desktop", "alias-dir", "-p", "local", "--no-build"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("feature/launch-check"))
+        .stderr(predicate::str::contains("local"));
+    assert!(!fixture.root.join("build.log").exists());
+    assert!(!fixture.root.join("open.log").exists());
+
+    std::fs::write(fixture.target.join("release"), "not a directory").unwrap();
+    fixture
+        .command()
+        .args(["desktop", "main", "-p", "local"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a directory"));
+    assert!(!fixture.root.join("build.log").exists());
+    std::fs::remove_file(fixture.target.join("release")).unwrap();
+
+    std::fs::create_dir_all(fixture.target.join("release")).unwrap();
+    std::fs::write(fixture.target.join("release/Vmux.app"), "not a directory").unwrap();
+    fixture
+        .command()
+        .args(["desktop", "main", "-p", "release"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a directory"));
+    assert!(!fixture.root.join("build.log").exists());
+    std::fs::remove_file(fixture.target.join("release/Vmux.app")).unwrap();
+
+    let app = fixture
+        .target
+        .join("release/Vmux (existing).app/Contents/MacOS");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(app.join("vmux_desktop"), "fixture").unwrap();
+    fixture
+        .command()
+        .args(["desktop", "main", "-p", "local", "--no-build"])
+        .assert()
+        .success();
+    assert!(!fixture.root.join("build.log").exists());
+    assert!(fixture.root.join("open.log").is_file());
+
+    fixture
+        .command()
+        .args(["run", "-P", "web", "--no-build"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--no-build"));
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn auto_build_failure_preserves_exit_code_and_skips_launch() {
+    for (profile, env_key, expected_code) in
+        [("dev", "FAIL_BUILD", 42), ("local", "FAIL_PACKAGE", 43)]
+    {
+        let fixture = Fixture::new();
+        fixture
+            .command()
+            .args(["desktop", "main", "-p", profile])
+            .env(env_key, "1")
+            .assert()
+            .code(expected_code);
+        assert!(!fixture.root.join("open.log").exists());
+    }
 }
 
 #[test]

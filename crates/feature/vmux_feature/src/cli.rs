@@ -61,6 +61,8 @@ pub struct CliArgumentManifest {
     pub trailing: bool,
     #[serde(default)]
     pub global: bool,
+    #[serde(default)]
+    pub help: Option<String>,
 }
 
 #[cfg(test)]

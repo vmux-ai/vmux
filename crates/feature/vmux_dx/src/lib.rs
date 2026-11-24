@@ -28,10 +28,10 @@ use repository::Checkout;
 use steps::{
     BinaryenStep, CliCompileStep, CliPackageStep, ConfiguredToolPath, ConsumerStep, CssStep,
     DesktopPackageStep, DioxusStep, DoctorStep, FlattenWebStep, HelperStep, InternalStep,
-    NativeInputsStep, NativeToolsStep, PackageToolsStep, ProducedArtifacts, ReleaseIosStep,
-    ResetLayoutStep, ResolvedExecutable, ResolvedIdentity, ResourcesIosStep, ScopeStep, SeedStep,
-    SimulatorStep, StorageCheckStep, StorageCleanStep, StorageFinishStep, StoragePreflightStep,
-    StorageStatusStep, TailwindStep, VerifyIosStep,
+    MissingArtifact, NativeInputsStep, NativeToolsStep, PackageToolsStep, ProducedArtifacts,
+    ReleaseIosStep, ResetLayoutStep, ResolvedExecutable, ResolvedIdentity, ResourcesIosStep,
+    ScopeStep, SeedStep, SimulatorStep, StorageCheckStep, StorageCleanStep, StorageFinishStep,
+    StoragePreflightStep, StorageStatusStep, TailwindStep, VerifyIosStep,
 };
 #[cfg(feature = "development")]
 use storage::Storage;
@@ -501,7 +501,7 @@ type Finishing<'w, 's> = Query<
     'w,
     's,
     (Entity, &'static Children, &'static OperationState),
-    (With<Accepted>, Without<CliResult>),
+    (With<Accepted>, Without<AutoBuild>, Without<CliResult>),
 >;
 
 #[cfg(feature = "development")]
@@ -949,6 +949,10 @@ impl Plans<'_, '_> {
 #[cfg(feature = "development")]
 struct Planned;
 
+#[derive(Component)]
+#[cfg(feature = "development")]
+struct AutoBuild;
+
 #[cfg(feature = "development")]
 type Planning<'w, 's> = Query<
     'w,
@@ -958,6 +962,7 @@ type Planning<'w, 's> = Query<
         &'static CliInvocation,
         Option<&'static workspace::Dispatch>,
         &'static Storage,
+        Has<AutoBuild>,
         &'static mut Tail,
     ),
     (With<Accepted>, Without<Planned>, Without<CliResult>),
@@ -969,7 +974,7 @@ fn plan_provider(
     providers: Query<&workspace::Provider>,
     mut plans: Plans,
 ) {
-    for (entity, _invocation, dispatch, storage, mut tail) in &mut operations {
+    for (entity, _invocation, dispatch, storage, _auto_build, mut tail) in &mut operations {
         if dispatch.is_none() {
             continue;
         }
@@ -1032,17 +1037,20 @@ fn plan_provider(
 
 #[cfg(feature = "development")]
 fn prepare_build(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
-        if !(dispatch.is_none() && invocation.is("dx.build") && tail.0.is_none()) {
+    for (entity, invocation, dispatch, _storage, auto_build, mut tail) in &mut operations {
+        let fresh_build = invocation.is("dx.build") && tail.0.is_none();
+        if !(dispatch.is_none() && (fresh_build || auto_build)) {
             continue;
         }
         plans.step(entity, &mut tail, "Check build storage", StorageCheckStep);
-        plans.request(
-            entity,
-            &mut tail,
-            "Acquire target lock",
-            debug::Acquire { inherit: true },
-        );
+        if !auto_build {
+            plans.request(
+                entity,
+                &mut tail,
+                "Acquire target lock",
+                debug::Acquire { inherit: true },
+            );
+        }
         plans.step(entity, &mut tail, "Seed target cache", SeedStep);
         plans.step(
             entity,
@@ -1055,7 +1063,7 @@ fn prepare_build(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, auto_build, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
         let platform = invocation.value("platform").unwrap_or("desktop");
         let mut forwarded = invocation
@@ -1064,7 +1072,7 @@ fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
             .cloned()
             .unwrap_or_default();
         if !(dispatch.is_none()
-            && invocation.is("dx.build")
+            && (invocation.is("dx.build") || auto_build)
             && (platform == "desktop" && profile == "dev"))
         {
             continue;
@@ -1145,11 +1153,11 @@ fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_desktop_package(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, auto_build, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
         let platform = invocation.value("platform").unwrap_or("desktop");
         if !(dispatch.is_none()
-            && invocation.is("dx.build")
+            && (invocation.is("dx.build") || auto_build)
             && (platform == "desktop" && profile != "dev"))
         {
             continue;
@@ -1185,11 +1193,11 @@ fn plan_desktop_package(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_mobile_release(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, auto_build, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
         let platform = invocation.value("platform").unwrap_or("desktop");
         if !(dispatch.is_none()
-            && invocation.is("dx.build")
+            && (invocation.is("dx.build") || auto_build)
             && (platform == "ios" && profile == "release"))
         {
             continue;
@@ -1207,7 +1215,7 @@ fn plan_mobile_release(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_mobile(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, auto_build, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
         let platform = invocation.value("platform").unwrap_or("desktop");
         let mut forwarded = invocation
@@ -1216,7 +1224,7 @@ fn plan_mobile(mut operations: Planning, mut plans: Plans) {
             .cloned()
             .unwrap_or_default();
         if !(dispatch.is_none()
-            && invocation.is("dx.build")
+            && (invocation.is("dx.build") || auto_build)
             && ((platform == "ios" && profile != "release") || platform == "android"))
         {
             continue;
@@ -1256,7 +1264,7 @@ fn plan_mobile(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_web(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, auto_build, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
         let platform = invocation.value("platform").unwrap_or("desktop");
         let mut forwarded = invocation
@@ -1264,7 +1272,8 @@ fn plan_web(mut operations: Planning, mut plans: Plans) {
             .get("forward")
             .cloned()
             .unwrap_or_default();
-        if !(dispatch.is_none() && invocation.is("dx.build") && (platform == "web")) {
+        if !(dispatch.is_none() && (invocation.is("dx.build") || auto_build) && (platform == "web"))
+        {
             continue;
         }
 
@@ -1304,10 +1313,10 @@ fn plan_web(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn refuse_build(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, _tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, auto_build, _tail) in &mut operations {
         let platform = invocation.value("platform").unwrap_or("desktop");
         if !(dispatch.is_none()
-            && invocation.is("dx.build")
+            && (invocation.is("dx.build") || auto_build)
             && (!matches!(platform, "desktop" | "ios" | "android" | "web")))
         {
             continue;
@@ -1323,9 +1332,10 @@ fn refuse_build(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn finish_build_plan(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, auto_build, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
-        if !(dispatch.is_none() && invocation.is("dx.build")) {
+        let platform = invocation.value("platform").unwrap_or("desktop");
+        if !(dispatch.is_none() && (invocation.is("dx.build") || auto_build)) {
             continue;
         }
         plans.step(
@@ -1334,13 +1344,26 @@ fn finish_build_plan(mut operations: Planning, mut plans: Plans) {
             "Finish build storage",
             StorageFinishStep(profile.into()),
         );
+        if auto_build {
+            plans.request(
+                entity,
+                &mut tail,
+                "Run artifact",
+                debug::Run {
+                    profile: profile.into(),
+                    platform: platform.into(),
+                    allow_build: false,
+                },
+            );
+            plans.commands.entity(entity).remove::<AutoBuild>();
+        }
         plans.commands.entity(entity).insert(Planned);
     }
 }
 
 #[cfg(feature = "development")]
 fn plan_run(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, auto_build, mut tail) in &mut operations {
         let profile = if invocation.is("dx.serve") {
             "dev"
         } else {
@@ -1351,7 +1374,20 @@ fn plan_run(mut operations: Planning, mut plans: Plans) {
         } else {
             invocation.value("platform").unwrap_or("desktop")
         };
-        if !(dispatch.is_none() && (invocation.is("dx.run") || invocation.is("dx.serve"))) {
+        if !(dispatch.is_none()
+            && !auto_build
+            && (invocation.is("dx.run") || invocation.is("dx.serve")))
+        {
+            continue;
+        }
+        let no_build = invocation.flag("no-build");
+        if platform != "desktop" && no_build {
+            plans.commands.entity(entity).insert((
+                OperationState::Failed,
+                CliResult(Err(format!(
+                    "--no-build is only supported for desktop runs, not {platform}"
+                ))),
+            ));
             continue;
         }
 
@@ -1389,6 +1425,7 @@ fn plan_run(mut operations: Planning, mut plans: Plans) {
             debug::Run {
                 profile: profile.into(),
                 platform: platform.into(),
+                allow_build: platform == "desktop" && !no_build,
             },
         );
 
@@ -1398,7 +1435,7 @@ fn plan_run(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_stop(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.stop")) {
             continue;
         }
@@ -1409,7 +1446,7 @@ fn plan_stop(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_reset_layout(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.reset-layout")) {
             continue;
         }
@@ -1420,7 +1457,7 @@ fn plan_reset_layout(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_test(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
         let mut forwarded = invocation
             .arguments
@@ -1464,7 +1501,7 @@ fn plan_test(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_lint(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         let profile = invocation.value("profile").unwrap_or("dev");
         let mut forwarded = invocation
             .arguments
@@ -1525,7 +1562,7 @@ fn plan_lint(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_doctor(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.doctor")) {
             continue;
         }
@@ -1536,7 +1573,7 @@ fn plan_doctor(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_setup(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         let platform = invocation.value("platform").unwrap_or("desktop");
         if !(dispatch.is_none() && invocation.is("dx.setup")) {
             continue;
@@ -1594,7 +1631,7 @@ fn plan_setup(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_cache_status(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.cache.status")) {
             continue;
         }
@@ -1605,7 +1642,7 @@ fn plan_cache_status(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_cache_clean(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.cache.clean")) {
             continue;
         }
@@ -1629,7 +1666,7 @@ fn plan_cache_clean(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_ci_scope(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         let forwarded = invocation
             .arguments
             .get("forward")
@@ -1645,7 +1682,7 @@ fn plan_ci_scope(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_ci_native(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         let forwarded = invocation
             .arguments
             .get("forward")
@@ -1666,7 +1703,7 @@ fn plan_ci_native(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_checks(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.checks.test")) {
             continue;
         }
@@ -1694,7 +1731,7 @@ fn plan_checks(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_sdk(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         if !(dispatch.is_none() && invocation.is("dx.checks.sdk")) {
             continue;
         }
@@ -1723,7 +1760,7 @@ fn plan_sdk(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_cli_release(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         if !(dispatch.is_none()
             && invocation.is("dx.internal")
             && invocation.value("task") == Some("cli-release"))
@@ -1785,7 +1822,7 @@ fn plan_cli_release(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn plan_internal(mut operations: Planning, mut plans: Plans) {
-    for (entity, invocation, dispatch, _storage, mut tail) in &mut operations {
+    for (entity, invocation, dispatch, _storage, _auto_build, mut tail) in &mut operations {
         let forwarded = invocation
             .arguments
             .get("forward")
@@ -1868,7 +1905,7 @@ fn plan_internal(mut operations: Planning, mut plans: Plans) {
 
 #[cfg(feature = "development")]
 fn refuse_plan(operations: Planning, mut commands: Commands) {
-    for (entity, _, dispatch, _, _) in &operations {
+    for (entity, _, dispatch, _, _, _) in &operations {
         let error = if dispatch.is_some() {
             "Workspace provider is unavailable"
         } else {
@@ -2812,6 +2849,7 @@ type StepOutputs<'w, 's> = Query<
         Option<&'static ResolvedIdentity>,
         Option<&'static ProducedArtifacts>,
         Option<&'static ConfiguredToolPath>,
+        Has<MissingArtifact>,
     ),
 >;
 
@@ -2821,6 +2859,7 @@ fn apply(
     outputs: StepOutputs,
     mut operations: Query<(&mut Settings, &mut OperationState), With<Accepted>>,
     leases: Query<&Lease>,
+    mailbox: Res<Mailbox>,
     mut replies: Replies,
 ) {
     for (entity, started, parent, attempt, receipt) in &receipts {
@@ -2856,7 +2895,9 @@ fn apply(
                         .insert(Lease(lease.0.clone()));
                     replies.commands.entity(entity).remove::<Lease>();
                 }
-                if let Ok((executable, identity, artifacts, tool_path)) = outputs.get(entity) {
+                if let Ok((executable, identity, artifacts, tool_path, missing)) =
+                    outputs.get(entity)
+                {
                     if let Some(executable) = executable {
                         replies
                             .commands
@@ -2881,6 +2922,14 @@ fn apply(
                     }
                     if let Some(tool_path) = tool_path {
                         settings.0.set(tool_path.key, &tool_path.path);
+                    }
+                    if missing {
+                        replies
+                            .commands
+                            .entity(parent.parent())
+                            .insert(AutoBuild)
+                            .remove::<Planned>();
+                        mailbox.wake.unpark();
                     }
                 }
                 replies
