@@ -209,4 +209,14 @@ mod tests {
         let existing = Parsed::new(&["vmux", "run", "--platform", "ios"]);
         assert_eq!(existing.invocation().value("platform"), Some("ios"));
     }
+
+    #[test]
+    fn desktop_and_run_accept_the_no_build_flag() {
+        for command in ["desktop", "run"] {
+            let default = Parsed::new(&["vmux", command, "main", "-p", "local"]);
+            assert!(!default.invocation().flag("no-build"));
+            let strict = Parsed::new(&["vmux", command, "main", "-p", "local", "--no-build"]);
+            assert!(strict.invocation().flag("no-build"));
+        }
+    }
 }

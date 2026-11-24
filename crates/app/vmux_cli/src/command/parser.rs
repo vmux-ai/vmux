@@ -99,6 +99,9 @@ impl<'a> CliParser<'a> {
         if manifest.flag {
             argument = argument.action(ArgAction::SetTrue);
         }
+        if let Some(help) = &manifest.help {
+            argument = argument.help(help.clone());
+        }
         argument
     }
 

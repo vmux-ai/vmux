@@ -21,7 +21,7 @@ use crate::execution::Failure;
 use crate::product::ProductMetadata;
 use crate::repository::Checkout;
 use crate::signals::Signals;
-use crate::steps::{ProducedArtifacts, ResolvedExecutable, ResolvedIdentity};
+use crate::steps::{MissingArtifact, ProducedArtifacts, ResolvedExecutable, ResolvedIdentity};
 use crate::{Completion, Settings};
 
 pub struct DebugPlugin;
@@ -127,10 +127,14 @@ impl bevy_app::Plugin for DebugPlugin {
                         run_start,
                         inspect_local,
                         inspect_development,
+                        read_development,
                         inspect_package,
                         collect_local_entries,
                         verify_development,
                         run_select,
+                        resolve_missing,
+                        inspect_missing_branch,
+                        report_missing,
                         run_verify,
                         run_execute,
                         finish_run,
@@ -382,6 +386,20 @@ enum PublishPhase {
 pub struct Run {
     pub profile: String,
     pub platform: String,
+    pub allow_build: bool,
+}
+
+impl Run {
+    fn missing_message(&self, branch: &str) -> String {
+        if self.profile == "dev" {
+            format!("No completed dev app for branch {branch}; run vmux build {branch} first")
+        } else {
+            format!(
+                "No completed {} app for branch {branch}; run vmux build {branch} -p {} first",
+                self.profile, self.profile
+            )
+        }
+    }
 }
 
 #[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
@@ -389,8 +407,12 @@ enum RunPhase {
     #[default]
     Start,
     Inspect,
+    ReadStamp,
     Inputs,
     Select,
+    Missing,
+    MissingBranch,
+    MissingReport,
     Verify,
     Execute,
     Done,
@@ -3108,7 +3130,9 @@ fn run_start(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mut io
             continue;
         }
 
-        let Run { profile, platform } = request;
+        let Run {
+            profile, platform, ..
+        } = request;
         if platform != "desktop" {
             continue;
         }
@@ -3140,8 +3164,8 @@ fn run_start(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mut io
                 &mut sequence,
                 entity,
                 &mut previous,
-                ReadFile(checkout.directory("debug").join(".vmux-dev-ready")),
-                StampSlot,
+                InspectPath(checkout.directory("debug").join(".vmux-dev-ready")),
+                PathSlot,
                 false,
             ),
             _ => {
@@ -3173,8 +3197,10 @@ fn inspect_local(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mu
             continue;
         }
 
-        let Run { profile, platform } = request;
-        if platform != "desktop" {
+        let Run {
+            profile, platform, ..
+        } = request;
+        if platform != "desktop" || profile != "local" {
             continue;
         }
         if facts.pending(entity) {
@@ -3182,25 +3208,17 @@ fn inspect_local(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mu
         }
         let previous_phase = *phase;
         let mut previous = None;
-        let _product = match settings.0.product(&checkout.root) {
-            Ok(product) => product,
-            Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::message(error.to_string())));
-                continue;
-            }
-        };
-
-        if profile != "local" {
+        if let Err(error) = settings.0.product(&checkout.root) {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::message(error.to_string())));
             continue;
         }
 
         if !matches!(facts.get::<_, DirectorySlot>(entity), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
         {
-            io.commands.entity(entity).insert(Failed(Failure::message(
-                "No completed local app; run vmux build -p local first",
-            )));
+            *phase = RunPhase::Missing;
+            wake.0.wake_by_ref();
             continue;
         }
         io.request(
@@ -3230,8 +3248,10 @@ fn inspect_development(
             continue;
         }
 
-        let Run { profile, platform } = request;
-        if platform != "desktop" {
+        let Run {
+            profile, platform, ..
+        } = request;
+        if platform != "desktop" || profile != "dev" {
             continue;
         }
         if facts.pending(entity) {
@@ -3239,17 +3259,56 @@ fn inspect_development(
         }
         let previous_phase = *phase;
         let mut previous = None;
-        let _product = match settings.0.product(&checkout.root) {
-            Ok(product) => product,
-            Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::message(error.to_string())));
-                continue;
-            }
-        };
+        if let Err(error) = settings.0.product(&checkout.root) {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::message(error.to_string())));
+            continue;
+        }
 
-        if profile != "dev" {
+        match facts.get::<_, PathSlot>(entity) {
+            Some(PathMetadata(None)) => *phase = RunPhase::Missing,
+            Some(PathMetadata(Some(_))) => {
+                io.request(
+                    &mut sequence,
+                    entity,
+                    &mut previous,
+                    ReadFile(checkout.directory("debug").join(".vmux-dev-ready")),
+                    StampSlot,
+                    false,
+                );
+                *phase = RunPhase::ReadStamp;
+            }
+            None => continue,
+        }
+
+        if *phase != previous_phase {
+            wake.0.wake_by_ref();
+        }
+    }
+}
+
+fn read_development(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, RunPhase::ReadStamp) {
+            continue;
+        }
+
+        let Run {
+            profile, platform, ..
+        } = request;
+        if platform != "desktop" || profile != "dev" {
+            continue;
+        }
+        if facts.pending(entity) {
+            continue;
+        }
+        let previous_phase = *phase;
+        let mut previous = None;
+        if let Err(error) = settings.0.product(&checkout.root) {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::message(error.to_string())));
             continue;
         }
 
@@ -3323,33 +3382,27 @@ fn inspect_package(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, 
             continue;
         }
 
-        let Run { profile, platform } = request;
-        if platform != "desktop" {
+        let Run {
+            profile, platform, ..
+        } = request;
+        if platform != "desktop" || !(profile != "local" && profile != "dev") {
             continue;
         }
         if facts.pending(entity) {
             continue;
         }
         let previous_phase = *phase;
-        let _product = match settings.0.product(&checkout.root) {
-            Ok(product) => product,
-            Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::message(error.to_string())));
-                continue;
-            }
-        };
-
-        if !(profile != "local" && profile != "dev") {
+        if let Err(error) = settings.0.product(&checkout.root) {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::message(error.to_string())));
             continue;
         }
 
         if !matches!(facts.get::<_, PathSlot>(entity), Some(PathMetadata(Some(metadata))) if metadata.is_dir())
         {
-            io.commands.entity(entity).insert(Failed(Failure::message(
-                "No completed app; run vmux build first",
-            )));
+            *phase = RunPhase::Missing;
+            wake.0.wake_by_ref();
             continue;
         }
         *phase = RunPhase::Verify;
@@ -3371,25 +3424,20 @@ fn collect_local_entries(
             continue;
         }
 
-        let Run { profile, platform } = request;
-        if platform != "desktop" {
+        let Run {
+            profile, platform, ..
+        } = request;
+        if platform != "desktop" || profile != "local" {
             continue;
         }
         if facts.pending(entity) {
             continue;
         }
         let previous_phase = *phase;
-        let _product = match settings.0.product(&checkout.root) {
-            Ok(product) => product,
-            Err(error) => {
-                io.commands
-                    .entity(entity)
-                    .insert(Failed(Failure::message(error.to_string())));
-                continue;
-            }
-        };
-
-        if profile != "local" {
+        if let Err(error) = settings.0.product(&checkout.root) {
+            io.commands
+                .entity(entity)
+                .insert(Failed(Failure::message(error.to_string())));
             continue;
         }
 
@@ -3441,8 +3489,10 @@ fn verify_development(
             continue;
         }
 
-        let Run { profile, platform } = request;
-        if platform != "desktop" {
+        let Run {
+            profile, platform, ..
+        } = request;
+        if platform != "desktop" || profile == "local" {
             continue;
         }
         if facts.pending(entity) {
@@ -3458,10 +3508,6 @@ fn verify_development(
                 continue;
             }
         };
-
-        if profile == "local" {
-            continue;
-        }
 
         let mut valid = true;
         for (source, _, expected, _, parent) in &checks {
@@ -3548,9 +3594,8 @@ fn run_select(
             }
         }
         let Some(latest) = latest else {
-            io.commands.entity(entity).insert(Failed(Failure::message(
-                "No completed local app; run vmux build -p local first",
-            )));
+            *phase = RunPhase::Missing;
+            wake.0.wake_by_ref();
             continue;
         };
         io.commands
@@ -3561,6 +3606,117 @@ fn run_select(
         if *phase != previous_phase {
             wake.0.wake_by_ref();
         }
+    }
+}
+
+fn resolve_missing(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, RunPhase::Missing) || request.platform != "desktop" {
+            continue;
+        }
+        if facts.pending(entity) {
+            continue;
+        }
+        if request.allow_build {
+            io.commands
+                .entity(entity)
+                .insert((Complete, MissingArtifact));
+            continue;
+        }
+        let mut previous = None;
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(
+                &settings.0,
+                &checkout.root,
+                "git".into(),
+                ["symbolic-ref", "--quiet", "--short", "HEAD"]
+                    .map(OsString::from)
+                    .into(),
+            ),
+            BranchSlot,
+            true,
+        );
+        *phase = RunPhase::MissingBranch;
+        wake.0.wake_by_ref();
+    }
+}
+
+fn inspect_missing_branch(
+    mut requests: RunRequests,
+    facts: Facts,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
+    for (entity, request, checkout, settings, mut phase, mut sequence) in &mut requests {
+        if !matches!(*phase, RunPhase::MissingBranch) || request.platform != "desktop" {
+            continue;
+        }
+        if facts.pending(entity) {
+            continue;
+        }
+        let Some(ToolOutput(output)) = facts.get::<_, BranchSlot>(entity) else {
+            continue;
+        };
+        let branch = facts.text::<BranchSlot>(entity).unwrap_or_default();
+        if !output.status.success() || branch.trim().is_empty() {
+            let mut previous = None;
+            io.request(
+                &mut sequence,
+                entity,
+                &mut previous,
+                CaptureOutput::new(
+                    &settings.0,
+                    &checkout.root,
+                    "git".into(),
+                    ["rev-parse", "--short=7", "HEAD"]
+                        .map(OsString::from)
+                        .into(),
+                ),
+                CommitSlot,
+                true,
+            );
+        }
+        *phase = RunPhase::MissingReport;
+        wake.0.wake_by_ref();
+    }
+}
+
+fn report_missing(mut requests: RunRequests, facts: Facts, mut io: IoWriter) {
+    for (entity, request, checkout, _, phase, _) in &mut requests {
+        if !matches!(*phase, RunPhase::MissingReport) || request.platform != "desktop" {
+            continue;
+        }
+        if facts.pending(entity) {
+            continue;
+        }
+        let branch = facts
+            .get::<ToolOutput, BranchSlot>(entity)
+            .filter(|ToolOutput(output)| output.status.success())
+            .and_then(|_| facts.text::<BranchSlot>(entity))
+            .unwrap_or_default();
+        let commit = facts
+            .get::<ToolOutput, CommitSlot>(entity)
+            .filter(|ToolOutput(output)| output.status.success())
+            .and_then(|_| facts.text::<CommitSlot>(entity))
+            .unwrap_or_default();
+        let resolved = if !branch.trim().is_empty() {
+            branch.trim().to_owned()
+        } else if !commit.trim().is_empty() {
+            commit.trim().to_owned()
+        } else {
+            checkout
+                .root
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("unknown")
+                .to_owned()
+        };
+        io.commands
+            .entity(entity)
+            .insert(Failed(Failure::message(request.missing_message(&resolved))));
     }
 }
 
@@ -3633,7 +3789,9 @@ fn run_execute(
             continue;
         }
 
-        let Run { profile, platform } = request;
+        let Run {
+            profile, platform, ..
+        } = request;
         if platform != "desktop" {
             continue;
         }
@@ -5731,7 +5889,8 @@ exit 0
         assert_eq!(
             fixture.run(Run {
                 profile: "dev".into(),
-                platform: "web".into()
+                platform: "web".into(),
+                allow_build: false,
             }),
             0
         );
@@ -6148,7 +6307,8 @@ exit 0
         assert_ne!(
             fixture.run(Run {
                 profile: "dev".into(),
-                platform: "desktop".into()
+                platform: "desktop".into(),
+                allow_build: true,
             }),
             0
         );

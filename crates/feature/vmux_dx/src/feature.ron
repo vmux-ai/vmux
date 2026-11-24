@@ -30,21 +30,23 @@
                 (id: "user-profile", long: Some("user-profile"), value_name: Some("NAME")),
                 (id: "forward", index: Some(2), trailing: true)
             ]),
-        (id: "dx.run", name: "run", about: Some("Run a completed artifact"), arguments: [
+        (id: "dx.run", name: "run", about: Some("Run the app, building first if no completed artifact exists"), arguments: [
                 (id: "profile", long: Some("profile"), short: Some('p'), default: Some("dev"), values: ["dev", "local", "release"]),
                 (id: "platform", long: Some("platform"), short: Some('P'), default: Some("desktop"), values: ["desktop", "ios", "android", "web"]),
                 (id: "branch", index: Some(1), value_name: Some("BRANCH")),
                 (id: "root", long: Some("root"), value_name: Some("PATH")),
                 (id: "features", long: Some("features"), value_name: Some("FEATURES")),
                 (id: "user-profile", long: Some("user-profile"), value_name: Some("NAME")),
+                (id: "no-build", long: Some("no-build"), flag: true, help: Some("Fail if no completed artifact exists instead of building")),
                 (id: "forward", index: Some(2), trailing: true)
             ]),
-        (id: "dx.desktop", name: "desktop", about: Some("Run a prepared desktop app; defaults to the current checkout"), arguments: [
+        (id: "dx.desktop", name: "desktop", about: Some("Run the desktop app, building first if missing; defaults to the current checkout"), arguments: [
                 (id: "profile", long: Some("profile"), short: Some('p'), default: Some("dev"), values: ["dev", "local", "release"]),
                 (id: "branch", index: Some(1), value_name: Some("BRANCH")),
                 (id: "root", long: Some("root"), value_name: Some("PATH")),
                 (id: "features", long: Some("features"), value_name: Some("FEATURES")),
                 (id: "user-profile", long: Some("user-profile"), value_name: Some("NAME")),
+                (id: "no-build", long: Some("no-build"), flag: true, help: Some("Fail if no completed artifact exists instead of building")),
                 (id: "forward", index: Some(2), trailing: true)
             ]),
         (id: "dx.serve", name: "serve", about: Some("Serve the website with live reload"), arguments: [

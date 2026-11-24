@@ -166,3 +166,6 @@ pub(crate) struct ConfiguredToolPath {
     pub key: &'static str,
     pub path: OsString,
 }
+
+#[derive(Component, Clone)]
+pub(crate) struct MissingArtifact;
