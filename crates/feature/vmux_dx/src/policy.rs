@@ -140,6 +140,13 @@ impl Policy {
             .is_some_and(|extension| extension == "dylib" || extension == "so")
     }
 
+    pub(crate) fn is_hashed_artifact(path: &std::path::Path) -> bool {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .and_then(Self::hashed_artifact)
+            .is_some()
+    }
+
     fn hashed_artifact(name: &str) -> Option<(&str, &str)> {
         let base = name.split('.').next()?;
         let (stem, hash) = base.rsplit_once('-')?;
