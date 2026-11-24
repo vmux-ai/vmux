@@ -96,6 +96,7 @@ struct ProjectionData<'w, 's> {
     >,
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct WindowCandidate {
     entity: Entity,
     id: i32,
@@ -124,6 +125,7 @@ impl WindowCandidate {
     }
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct PageCandidate {
     entity: Entity,
     id: i32,
@@ -134,6 +136,7 @@ struct PageCandidate {
     status: String,
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct ProjectedTab {
     entity: Entity,
     activated_at: i64,

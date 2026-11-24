@@ -124,10 +124,12 @@ impl DotfileDrain<'_, '_> {
 #[derive(Component, Clone)]
 pub(crate) struct SharedReadLease {
     pub(crate) store: ToolStore,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(crate) lease: StoreLease,
 }
 
 #[derive(Component)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct Captured<R: Component>(R);
 
 #[derive(Component)]
@@ -220,6 +222,7 @@ struct AdoptHome;
 #[derive(Component)]
 struct AdoptRoot;
 #[derive(Component)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct AdoptInput(crate::io::PathFacts);
 #[derive(Component)]
 struct AdoptHomePath(PathBuf);

@@ -42,10 +42,12 @@ struct Binding {
     ticket: Ticket,
     path: PathBuf,
     revision: Option<Revision>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     projected: Collapsed,
     initialized: bool,
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct EventLoopWake(vmux_ecs::wake::Wake);
 
 impl Wake for EventLoopWake {

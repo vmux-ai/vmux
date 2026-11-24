@@ -57,6 +57,7 @@ pub(super) struct SnapshotContext {
     pub(super) sequence: u64,
     pub(super) owner: Entity,
     source_tick: Tick,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(super) result: Option<McpCompletion>,
 }
 
@@ -118,6 +119,7 @@ struct CredentialReadResult(Result<Option<SecretHandle>, String>);
 #[derive(Component)]
 struct SnapshotServerFacts {
     source_tick: Tick,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     facts: McpServerFacts,
 }
 

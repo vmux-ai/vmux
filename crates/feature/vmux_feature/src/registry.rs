@@ -48,12 +48,14 @@ fn freeze(
     );
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct Entry {
     owner: String,
     manifest: FeatureManifest,
 }
 
 #[derive(Resource)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub struct Registry(HashMap<FeatureId, Entry>);
 
 impl Registry {
@@ -81,6 +83,7 @@ impl Registry {
 }
 
 #[derive(Default)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct Claims(HashMap<(&'static str, String), String>);
 
 impl Claims {

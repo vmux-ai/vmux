@@ -244,12 +244,14 @@ pub struct WorkspaceCommitCompleted {
 #[derive(Component)]
 pub struct WorkspaceStoreValidator {
     pub name: &'static str,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub rejects: fn(&str) -> bool,
 }
 
 #[derive(Component)]
 pub struct WorkspaceRestoreValidator {
     pub name: &'static str,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub validate: fn(&DynamicWorld) -> Result<(), String>,
 }
 

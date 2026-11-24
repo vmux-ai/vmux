@@ -182,6 +182,7 @@ pub struct CleanupRoute {
     entity: Entity,
     root: Entity,
     sender: mpsc::Sender<(Entity, CleanupData)>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     flight: CleanupFlight,
     wake: Waker,
 }
@@ -190,6 +191,7 @@ pub struct CleanupRoute {
 struct Retained {
     target: Option<Arc<TargetLock>>,
     temporary: Vec<Arc<Temporary>>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     io: Flight,
     route: CleanupRoute,
 }
@@ -229,6 +231,7 @@ impl Drop for CleanupData {
 #[derive(Component)]
 pub struct ReapRequest {
     data: Arc<Mutex<Option<CleanupData>>>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     flight: CleanupFlight,
 }
 

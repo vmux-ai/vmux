@@ -551,10 +551,14 @@ impl SourceFacts {
 
 #[derive(Component, Clone)]
 pub(crate) struct CapturedSources {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(crate) files: Vec<SourceFile>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(crate) directories: BTreeMap<String, SourceDirectory>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(crate) entries: Vec<SourceEntry>,
     pub(crate) links: Vec<String>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(crate) git_references: Vec<SourceFile>,
 }
 

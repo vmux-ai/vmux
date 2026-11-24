@@ -32,6 +32,7 @@ impl RegisterValue {
 
 #[derive(bevy::prelude::Component, Default)]
 pub struct Registers {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     slots: BTreeMap<char, RegisterValue>,
     pub clipboard_shadow: String,
 }

@@ -474,6 +474,7 @@ pub struct ProviderArchiveCompleted {
 
 #[derive(Message, Clone, Debug)]
 pub struct ProviderSessionRestoreRequest {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub keys: Vec<ProviderSessionKey>,
 }
 
@@ -488,6 +489,7 @@ pub struct ProviderStageChangeRequest {
 #[derive(Message, Clone, Debug, Default)]
 pub struct CleanupRequest {
     pub sessions: Vec<SessionId>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub providers: Vec<ProviderSessionKey>,
 }
 
@@ -1228,6 +1230,7 @@ fn cleanup(
 }
 
 #[cfg(host)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct ProviderSessionCandidate {
     entity: Entity,
     duplicate: Option<Entity>,

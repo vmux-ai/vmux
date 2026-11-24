@@ -125,6 +125,7 @@ pub(super) struct Materialized;
 pub(super) struct InvalidTopology(pub(super) String);
 
 #[derive(SystemParam)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct Materializer<'w, 's> {
     pages: Query<
         'w,

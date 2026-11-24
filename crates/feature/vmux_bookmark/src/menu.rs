@@ -532,6 +532,7 @@ mod macos {
         }
     }
 
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     struct FolderChoice {
         entity: Entity,
         uuid: String,

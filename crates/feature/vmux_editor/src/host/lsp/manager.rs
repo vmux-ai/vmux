@@ -226,6 +226,7 @@ pub struct LspOrigin {
 }
 
 #[derive(Component, Default)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct BufferSnapshot(Vec<BufferStamp>);
 
 struct BufferStamp {

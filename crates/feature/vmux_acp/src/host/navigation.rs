@@ -152,6 +152,7 @@ impl WorkspaceCheckRequest {
 
 #[derive(Component)]
 struct WorkspaceCheckTask {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     request: WorkspaceCheckRequest,
     task: vmux_git::GitTask<bool>,
 }

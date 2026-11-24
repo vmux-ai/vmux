@@ -314,6 +314,7 @@ pub struct Imported {
 pub struct Received {
     pub operation: Entity,
     pub supported: bool,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub result: Result<Vec<ProviderSession>, String>,
 }
 

@@ -109,6 +109,7 @@ impl Checked {
 
 #[derive(Component)]
 struct Probe {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     source: Checked,
     scopes: Vec<PathBuf>,
 }

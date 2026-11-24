@@ -46,6 +46,7 @@ impl Plugin for RemotePlugin {
 struct RemoteLiveness(watch::Sender<bool>);
 
 #[derive(Component, Clone)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct RemoteHandler(Arc<dyn RemoteDriver>);
 
 #[derive(Component, Clone)]

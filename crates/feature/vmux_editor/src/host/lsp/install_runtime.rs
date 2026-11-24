@@ -106,6 +106,7 @@ struct Source {
     name: PackageName,
     id: String,
     purl: Purl,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     assets: Vec<Asset>,
     bin: BTreeMap<PackageName, String>,
 }

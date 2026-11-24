@@ -12,6 +12,7 @@ pub(crate) struct Store;
 #[derive(bevy_ecs::prelude::Component)]
 pub(crate) struct Loaded {
     pub pending: Vec<(u32, Pending)>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub checkpoints: Vec<Checkpoint>,
     pub next: Option<u32>,
     pub through: u32,

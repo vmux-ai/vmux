@@ -4,6 +4,7 @@ use vmux_api::input::{ClaimedKey, KeyClaimsUiState, KeyModifiers};
 
 #[derive(Component, Debug, Clone, Default)]
 pub struct Keymap {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     bindings: Vec<(Source, Binding)>,
     registered: std::collections::BTreeSet<String>,
     pub chord_timeout_ms: u64,

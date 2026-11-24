@@ -811,6 +811,7 @@ fn handle_close_tab_requests(
 }
 
 #[derive(SystemParam)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct ReopenLayout<'w, 's> {
     active_tab: ActiveTabParam<'w, 's>,
     focus: crate::stack::LayoutFocus<'w, 's>,
@@ -859,6 +860,7 @@ impl ReopenLayout<'_, '_> {
 }
 
 #[derive(SystemParam)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct ReopenRequest<'w, 's> {
     reader: MessageReader<'w, 's, ReopenClosedPage>,
     archived: Query<

@@ -87,6 +87,7 @@ impl Replacement {
 #[derive(Component, Clone)]
 struct NotePatch {
     source: PathBuf,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     replacements: Vec<Replacement>,
 }
 

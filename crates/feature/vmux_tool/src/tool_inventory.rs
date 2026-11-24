@@ -224,6 +224,7 @@ impl ScanSnapshot {
 
 #[derive(Component)]
 struct ScanProvider {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     id: ToolProviderId,
 }
 
@@ -928,6 +929,7 @@ struct ImportSink {
     requester: Entity,
     store: Entity,
     provider: Entity,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     id: ToolProviderId,
 }
 

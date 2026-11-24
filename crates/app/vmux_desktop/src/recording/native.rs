@@ -10,6 +10,7 @@ use crate::capture_output::CropRect;
 
 #[derive(Component)]
 pub(super) struct CapturePorts {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     backend: Arc<dyn OpenCapture>,
     opened: Receiver<Opened>,
     encoded: Receiver<Encoded>,
@@ -136,6 +137,7 @@ pub(super) trait CaptureControl: Send + Sync {
 }
 
 #[derive(Component, Clone)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct CaptureHandle(Arc<dyn CaptureControl>);
 
 impl CaptureHandle {

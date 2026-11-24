@@ -156,6 +156,7 @@ pub struct CommandBarContextSnapshot {
 
 #[derive(Component, Default, Clone, Debug)]
 pub struct CommandBarPagesSnapshot {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub pages: Vec<RegisteredPage>,
 }
 

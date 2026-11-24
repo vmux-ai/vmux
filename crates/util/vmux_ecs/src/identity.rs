@@ -80,7 +80,9 @@ impl<I: Component + Clone + Eq + Hash, M: Component> IdentityIndex<I, M> {
 }
 
 pub(crate) struct IdentityMap<I> {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     entities: HashMap<I, Entity>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     duplicates: HashSet<I>,
 }
 

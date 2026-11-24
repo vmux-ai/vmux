@@ -539,6 +539,7 @@ pub struct HostHistoryEntry {
 
 #[derive(Component, Clone, Debug, Default)]
 pub struct HostHistory {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     entries: Vec<HostHistoryEntry>,
     cursor: usize,
 }

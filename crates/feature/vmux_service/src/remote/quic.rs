@@ -22,6 +22,7 @@ pub(crate) struct RemoteState {
     pub(crate) device_id: DeviceId,
     pub(crate) relay_token: Arc<str>,
     pub(crate) authorizations: RemoteAuthorizations,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(crate) remote: Arc<dyn RemoteDriver>,
     pub(crate) sessions: SessionPublisher,
 }

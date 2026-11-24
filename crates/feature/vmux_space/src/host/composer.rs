@@ -53,6 +53,7 @@ impl Plugin for SpaceComposerPlugin {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct ComposerContextInput {
     cwd: std::path::PathBuf,
     workspace_selected: bool,

@@ -19,9 +19,13 @@ pub enum PagePlacement {
 pub struct PageRegistration {
     page: &'static Page,
     placement: PagePlacement,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     instance: Option<ReadInstance>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     instance_changed: Option<InstanceChanged>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     instance_present: Option<ClaimsPage>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     claim: Option<ClaimsPage>,
 }
 

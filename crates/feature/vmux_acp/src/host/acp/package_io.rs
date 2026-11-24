@@ -34,6 +34,7 @@ impl Job for Exists {
 }
 
 #[derive(Component)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct FileExists(pub(super) bool);
 
 #[derive(Clone)]

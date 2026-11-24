@@ -107,6 +107,7 @@ struct JobRunning<J: Job> {
 #[component(immutable)]
 struct CapturedJob<J: Job> {
     input: J,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     owner: JobOwner<J>,
 }
 

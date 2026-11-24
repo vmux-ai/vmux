@@ -145,6 +145,7 @@ impl ProcessUptime {
     }
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct Sparkline {
     line: String,
     area: String,

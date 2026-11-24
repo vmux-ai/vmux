@@ -130,6 +130,7 @@ impl Job for ReadDirectory {
 pub struct DirectoryEntries {
     pub exists: bool,
     pub is_directory: bool,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub entries: Vec<DirectoryEntry>,
 }
 

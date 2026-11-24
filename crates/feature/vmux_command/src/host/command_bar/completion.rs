@@ -200,6 +200,7 @@ struct WalkedPath {
 
 #[derive(Component, Default)]
 struct RootWalkResult {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     paths: Vec<WalkedPath>,
     partial: bool,
 }

@@ -83,6 +83,7 @@ pub struct GitDiffSource {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct GitDiffTarget {
     repo_root: PathBuf,
     path: PathBuf,

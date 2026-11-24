@@ -80,6 +80,7 @@ enum Phase {
 pub(crate) struct Slot;
 
 #[derive(Component)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct ProbeSlot;
 
 #[derive(Component)]
@@ -95,6 +96,7 @@ struct HashesSlot;
 struct KeySlot;
 
 #[derive(Component)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct MarkerSlot;
 
 #[derive(Component)]

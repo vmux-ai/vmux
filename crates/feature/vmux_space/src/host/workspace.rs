@@ -374,12 +374,14 @@ impl AgentWorkspaceState<'_, '_> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct ExistingWorktreeCandidate {
     pub(super) checkout_dir: PathBuf,
     pub(super) execution_dir: PathBuf,
     pub(super) branch: String,
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct ExistingWorktreeCandidates(Vec<ExistingWorktreeCandidate>);
 
 impl ExistingWorktreeCandidates {

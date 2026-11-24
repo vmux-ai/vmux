@@ -273,6 +273,7 @@ struct ProjectionReceipt<T: Send + Sync + 'static> {
     payload: std::marker::PhantomData<fn() -> T>,
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct BookmarkFolders(Vec<BookmarkFolderChoice>);
 
 impl BookmarkFolders {
@@ -664,6 +665,7 @@ impl PageStateRemovals<'_, '_> {
     }
 }
 
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct PageStateRemovalChanges {
     state: bool,
     geometry: bool,

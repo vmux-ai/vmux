@@ -16,9 +16,12 @@ pub(super) struct Ownership<'tcx> {
     callers: HashMap<DefId, HashSet<DefId>>,
     systems: Vec<(DefId, GenericArgsRef<'tcx>, DefId)>,
     bundles: Vec<(Ty<'tcx>, DefId)>,
+    world_uses: Vec<(Ty<'tcx>, DefId, bool)>,
     roles: HashMap<DefId, HashSet<&'static str>>,
     used: HashSet<DefId>,
     type_refs: HashMap<DefId, HashSet<DefId>>,
+    io_adapters: HashSet<DefId>,
+    ui_callers: HashSet<DefId>,
     owners: HashMap<DefId, HashSet<DefId>>,
     reported: HashSet<(DefId, String)>,
 }
@@ -40,18 +43,25 @@ impl<'tcx> Ownership<'tcx> {
                 ("bevy_ecs", "SystemSet" | "ScheduleLabel") => "system_set",
                 ("bevy_ecs", "Bundle") => "bundle",
                 ("bevy_ecs", "Command") => "command",
+                ("bevy_ecs", "Relationship" | "RelationshipTarget") => "relationship",
                 ("bevy_app", "Plugin") => "plugin",
+                ("bevy_app", "PluginGroup") => "plugin_group",
+                ("bevy_reflect", "FromType") => "from_type",
+                ("bevy_reflect", "Reflect") => "reflect",
                 ("vmux_ecs", "Job") => "job",
                 ("vmux_ecs", "Schema") => "schema",
                 ("vmux_page", "Page" | "PageComponent") => "page",
                 ("vmux_feature", "FeatureManifestSource") => "manifest",
-                ("vmux_api", "UiState" | "UiEvent" | "Contract") => "contract",
+                ("vmux_api", "UiState" | "UiEvent" | "Contract" | "UiStateProjection") => {
+                    "contract"
+                }
                 ("inventory", "Collect") => "inventory",
                 ("dioxus_core", "Properties") => "props",
                 ("dioxus_router" | "dioxus_router_core", "Routable") => "routable",
                 ("serde" | "serde_core", "Serialize" | "Deserialize")
                 | ("rkyv", "Archive" | "Serialize" | "Deserialize") => "serde",
                 ("core" | "std", "Error") => "error",
+                ("core" | "std", "Display") => "display",
                 ("core" | "std", "Drop") => "drop",
                 ("syn", "Visit" | "VisitMut")
                 | ("yaml_rust" | "yaml_rust2", "MarkedEventReceiver")
@@ -59,13 +69,14 @@ impl<'tcx> Ownership<'tcx> {
                 _ => continue,
             };
             for implementation in implementations {
-                if matches!(role, "plugin" | "component") {
+                if matches!(role, "plugin" | "component" | "command") {
                     for method in cx
                         .tcx
                         .associated_items(implementation.to_def_id())
                         .in_definition_order()
                     {
                         if role == "plugin" && method.name().as_str() == "build"
+                            || role == "command" && method.name().as_str() == "apply"
                             || role == "component"
                                 && matches!(
                                     method.name().as_str(),
@@ -81,8 +92,32 @@ impl<'tcx> Ownership<'tcx> {
                     }
                 }
                 let ty = cx.tcx.type_of(*implementation).instantiate_identity();
-                if let TyKind::Adt(owner, _) = ty.skip_norm_wip().kind() {
+                if let TyKind::Adt(owner, _) = ty.skip_norm_wip().kind()
+                    && owner.did().is_local()
+                {
                     self.roles.entry(owner.did()).or_default().insert(role);
+                }
+            }
+        }
+        for implementations in cx.tcx.all_local_trait_impls(()).values() {
+            for implementation in implementations {
+                let ty = cx
+                    .tcx
+                    .type_of(*implementation)
+                    .instantiate_identity()
+                    .skip_norm_wip();
+                if let TyKind::Adt(owner, _) = ty.kind()
+                    && !owner.did().is_local()
+                    && cx.tcx.crate_name(owner.did().krate).as_str() == "bevy_app"
+                    && cx.tcx.item_name(owner.did()).as_str() == "App"
+                {
+                    for method in cx
+                        .tcx
+                        .associated_items(implementation.to_def_id())
+                        .in_definition_order()
+                    {
+                        self.entrypoints.insert(method.def_id);
+                    }
                 }
             }
         }
@@ -118,21 +153,139 @@ impl<'tcx> Ownership<'tcx> {
             }
             _ => return,
         };
-        if let ExprKind::MethodCall(_, _, arguments, _) = expression.kind
-            && !function.is_local()
-            && cx.tcx.crate_name(function.krate).as_str() == "bevy_ecs"
-            && matches!(
-                cx.tcx.item_name(function).as_str(),
-                "spawn" | "insert" | "try_insert"
-            )
-            && let Some(bundle) = arguments.first()
-        {
-            self.bundles
-                .push((cx.typeck_results().expr_ty(bundle), caller));
-        }
+        self.record_bevy_call(cx, expression, function, caller);
         if function.is_local() {
             self.callers.entry(function).or_default().insert(caller);
+        } else {
+            let krate = cx.tcx.crate_name(function.krate);
+            let krate_str = krate.as_str();
+            if Self::is_external_io_crate(krate_str)
+                || Self::is_external_io_call(cx, function, krate_str)
+            {
+                self.record_io_caller(cx, caller);
+            } else if krate_str == "dioxus" || krate_str.starts_with("dioxus_") {
+                self.ui_callers.insert(caller);
+            }
         }
+    }
+
+    fn record_bevy_call(
+        &mut self,
+        cx: &LateContext<'tcx>,
+        expression: &'tcx Expr<'tcx>,
+        function: DefId,
+        caller: DefId,
+    ) {
+        if function.is_local() {
+            return;
+        }
+        if let ExprKind::MethodCall(_, _, arguments, _) = expression.kind {
+            let krate = cx.tcx.crate_name(function.krate);
+            let name = cx.tcx.item_name(function);
+            match (krate.as_str(), name.as_str()) {
+                ("bevy_ecs", "spawn" | "insert" | "try_insert") => {
+                    if let Some(bundle) = arguments.first() {
+                        self.bundles
+                            .push((cx.typeck_results().expr_ty(bundle), caller));
+                    }
+                }
+                (
+                    "bevy_app" | "bevy_ecs",
+                    "init_resource"
+                    | "init_non_send"
+                    | "add_message"
+                    | "add_event"
+                    | "resource"
+                    | "resource_mut"
+                    | "get_resource"
+                    | "get_resource_mut"
+                    | "get_resource_or_init"
+                    | "get_resource_or_insert_with"
+                    | "contains_resource"
+                    | "remove_resource"
+                    | "non_send_resource"
+                    | "non_send_resource_mut",
+                ) => {
+                    for ty in cx.typeck_results().node_args(expression.hir_id).types() {
+                        self.world_uses.push((ty, caller, false));
+                    }
+                }
+                (
+                    "bevy_app" | "bevy_ecs",
+                    "insert_resource" | "insert_non_send" | "trigger" | "write_message",
+                ) => {
+                    if let Some(arg) = arguments.first() {
+                        self.world_uses
+                            .push((cx.typeck_results().expr_ty(arg), caller, false));
+                    }
+                }
+                _ => {}
+            }
+        } else if let ExprKind::Call(..) = expression.kind
+            && cx.tcx.crate_name(function.krate).as_str() == "bevy_ecs"
+            && cx.tcx.item_name(function).as_str() == "new"
+            && cx
+                .tcx
+                .def_path(function)
+                .to_string_no_crate_verbose()
+                .contains("SystemState")
+            && let TyKind::Adt(_, args) = cx.typeck_results().expr_ty(expression).kind()
+        {
+            for ty in args.types() {
+                self.world_uses.push((ty, caller, true));
+            }
+        }
+    }
+
+    fn record_io_caller(&mut self, cx: &LateContext<'tcx>, caller: DefId) {
+        self.io_adapters.insert(caller);
+        if let Some(implementation) = cx.tcx.impl_of_assoc(caller) {
+            let ty = cx
+                .tcx
+                .type_of(implementation)
+                .instantiate_identity()
+                .skip_norm_wip();
+            if let TyKind::Adt(owner, _) = ty.kind()
+                && owner.did().is_local()
+            {
+                self.io_adapters.insert(owner.did());
+            }
+        }
+    }
+
+    fn is_external_io_call(cx: &LateContext<'tcx>, function: DefId, krate: &str) -> bool {
+        if matches!(krate, "tokio_util" | "async_lock") {
+            return true;
+        }
+        if !matches!(krate, "std" | "tokio") {
+            return false;
+        }
+        let path = cx.tcx.def_path(function).to_string_no_crate_verbose();
+        [
+            "::fs::",
+            "::process::",
+            "::net::",
+            "::io::",
+            "::env::",
+            "::os::",
+            "::thread::",
+            "::sync::mpsc::",
+            "::sync::",
+            "::runtime::",
+            "::task::",
+            "::time::",
+            "::signal::",
+            "::path::Path::canonicalize",
+            "::path::Path::metadata",
+            "::path::Path::symlink_metadata",
+            "::path::Path::exists",
+            "::path::Path::is_file",
+            "::path::Path::is_dir",
+            "::path::Path::read_dir",
+            "::path::Path::read_link",
+        ]
+        .iter()
+        .any(|seg| path.contains(seg))
     }
 
     pub fn system(
@@ -206,7 +359,8 @@ impl<'tcx> Ownership<'tcx> {
                                 self.filter(cx, filter, &mut HashSet::new());
                             }
                         }
-                        "Res" | "ResMut" | "MessageReader" | "MessageWriter" | "On" => {
+                        "Res" | "ResMut" | "NonSend" | "NonSendMut" | "MessageReader"
+                        | "MessageWriter" | "MessageMutator" | "RemovedComponents" | "On" => {
                             if let Some(data) = arguments.types().next() {
                                 self.root(cx, data);
                             }
@@ -217,6 +371,12 @@ impl<'tcx> Ownership<'tcx> {
                             }
                         }
                         _ => {}
+                    }
+                    return;
+                }
+                if package.as_str() == "core" && name.as_str() == "Option" {
+                    for data in arguments.types() {
+                        self.parameter(cx, data, function, visiting);
                     }
                     return;
                 }
@@ -341,7 +501,7 @@ impl<'tcx> Ownership<'tcx> {
                     .any(|role| {
                         matches!(
                             *role,
-                            "component" | "resource" | "message" | "bundle" | "query" | "parameter"
+                            "component" | "resource" | "bundle" | "query" | "parameter"
                         )
                     })
                     .then_some(*id)
@@ -351,22 +511,20 @@ impl<'tcx> Ownership<'tcx> {
             .roles
             .iter()
             .filter_map(|(id, roles)| {
-                let is_ecs = roles.iter().any(|role| {
-                    matches!(
-                        *role,
-                        "component" | "resource" | "message" | "bundle" | "query" | "parameter"
-                    )
-                });
                 let is_dto = roles
                     .iter()
-                    .any(|role| matches!(*role, "contract" | "serde" | "error"));
-                (!is_ecs && is_dto).then_some(*id)
+                    .any(|role| matches!(*role, "contract" | "serde" | "error" | "reflect"));
+                is_dto.then_some(*id)
             })
             .collect();
         let mut graph = ValueGraph {
             root: owner.did(),
+            root_is_message: self.has_role(owner.did(), "message")
+                && !self.has_role(owner.did(), "component")
+                && !self.has_role(owner.did(), "resource"),
             canonical,
             dtos: dto_roles,
+            io_adapters: self.io_adapters.clone(),
             values: HashSet::new(),
             visiting: HashSet::new(),
             issues: Vec::new(),
@@ -392,9 +550,21 @@ impl<'tcx> Ownership<'tcx> {
         if cx.tcx.sess.opts.test
             || !package.starts_with("vmux_")
             || package == "vmux_macro"
+            || cx.tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).as_str() == "build_script_build"
             || std::env::var("CARGO_CRATE_NAME").as_deref() == Ok("build_script_build")
         {
             return;
+        }
+        self.propagate_io_adapters(cx);
+        if cx.tcx.entry_fn(()).is_none() {
+            for local in cx.tcx.hir_crate_items(()).definitions() {
+                let def = local.to_def_id();
+                if matches!(cx.tcx.def_kind(def), DefKind::Fn | DefKind::AssocFn)
+                    && cx.tcx.visibility(def).is_public()
+                {
+                    self.entrypoints.insert(def);
+                }
+            }
         }
         for (function, arguments, site) in std::mem::take(&mut self.systems) {
             if !self.reachable(site, &mut HashSet::new()) {
@@ -411,50 +581,26 @@ impl<'tcx> Ownership<'tcx> {
                 self.bundle_type(cx, bundle, &mut HashSet::new());
             }
         }
+        for (ty, caller, is_param) in std::mem::take(&mut self.world_uses) {
+            if self.reachable(caller, &mut HashSet::new()) {
+                if is_param {
+                    self.parameter(cx, ty, caller, &mut HashSet::new());
+                } else {
+                    self.root(cx, ty);
+                }
+            }
+        }
         if cx.tcx.entry_fn(()).is_none() {
             self.register_exported_ecs(cx);
         }
+        let helper_owned = self.collect_helper_owned(cx);
         for local in cx.tcx.hir_crate_items(()).definitions() {
             let definition = local.to_def_id();
             if !matches!(
                 cx.tcx.def_kind(definition),
                 DefKind::Struct | DefKind::Enum | DefKind::Union
             ) || cx.tcx.def_span(definition).from_expansion()
-                || self.stateless_plugin(cx, definition)
-                || self.stateless_system_set(cx, definition)
-                || self.stateless_unit_role(cx, definition, "manifest")
-                || self.stateless_unit_role(cx, definition, "schema")
-                || self.stateless_unit_role(cx, definition, "page")
-                || self.concrete_job_struct(cx, definition)
-                || self.has_role(definition, "command")
-                    && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
-                || self.has_role(definition, "serde")
-                || self.has_role(definition, "error")
-                || self.has_role(definition, "parser")
-                    && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
-                || self.has_role(definition, "drop")
-                    && !self.has_role(definition, "component")
-                    && !self.has_role(definition, "resource")
-                    && !self.has_role(definition, "message")
-                    && !self.has_role(definition, "bundle")
-                    && !self.has_role(definition, "query")
-                    && !self.has_role(definition, "parameter")
-                    && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
-                || self.has_role(definition, "contract")
-                || self.stateless_unit_adapter(cx, definition)
-                || self.stack_local_or_copy_value(cx, definition)
-                || self.native_io_adapter(cx, definition)
-                || self.has_role(definition, "inventory")
-                    && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
-                || self.has_role(definition, "props")
-                    && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
-                || self.has_role(definition, "routable")
-                    && matches!(cx.tcx.def_kind(definition), DefKind::Enum)
-                || self.used.contains(&definition)
-                || self
-                    .owners
-                    .get(&definition)
-                    .is_some_and(|owners| owners.len() == 1)
+                || self.is_exempt_declaration(cx, definition, &helper_owned)
             {
                 continue;
             }
@@ -464,6 +610,194 @@ impl<'tcx> Ownership<'tcx> {
                 "declaration has no unique resolved registered ECS owner",
             );
         }
+    }
+
+    fn is_exempt_declaration(
+        &self,
+        cx: &LateContext<'tcx>,
+        definition: DefId,
+        helper_owned: &HashSet<DefId>,
+    ) -> bool {
+        self.has_role(definition, "plugin")
+            || self.has_role(definition, "relationship")
+            || self.stateless_unit_role(cx, definition, "plugin_group")
+            || self.has_role(definition, "from_type")
+            || self.has_role(definition, "reflect") && !self.is_ecs_role(definition)
+            || cx.tcx.entry_fn(()).is_none()
+                && cx.tcx.visibility(definition).is_public()
+                && !self.is_ecs_role(definition)
+                && !self.has_role(definition, "system_set")
+            || self.stateless_system_set(cx, definition)
+            || self.stateless_unit_role(cx, definition, "manifest")
+            || self.stateless_unit_role(cx, definition, "schema")
+            || self.stateless_unit_role(cx, definition, "page")
+            || self.concrete_job_struct(cx, definition)
+            || self.has_role(definition, "command")
+                && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
+            || self.has_role(definition, "serde")
+            || self.has_role(definition, "error")
+            || self.has_role(definition, "display")
+                && cx.tcx.item_name(definition).as_str().ends_with("Error")
+            || self.has_role(definition, "parser")
+                && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
+            || self.has_role(definition, "drop")
+                && !self.is_ecs_role(definition)
+                && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
+            || self.has_role(definition, "contract")
+            || self.stateless_unit_adapter(cx, definition)
+            || self.unit_enum(cx, definition)
+            || self.stack_local_or_copy_value(cx, definition)
+            || self.native_io_adapter(cx, definition)
+            || self.io_adapters.contains(&definition) && !self.is_ecs_role(definition)
+            || helper_owned.contains(&definition)
+            || self.has_role(definition, "inventory")
+                && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
+            || self.has_role(definition, "props")
+                && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
+            || self.has_role(definition, "routable")
+                && matches!(cx.tcx.def_kind(definition), DefKind::Enum)
+            || self.used.contains(&definition)
+            || self
+                .owners
+                .get(&definition)
+                .is_some_and(|owners| owners.len() == 1)
+    }
+
+    fn propagate_io_adapters(&mut self, cx: &LateContext<'tcx>) {
+        let mut queue: Vec<DefId> = self.io_adapters.iter().copied().collect();
+        while let Some(callee) = queue.pop() {
+            let Some(callers) = self.callers.get(&callee).cloned() else {
+                continue;
+            };
+            for caller in callers {
+                if self.io_adapters.insert(caller) {
+                    queue.push(caller);
+                }
+                if let Some(implementation) = cx.tcx.impl_of_assoc(caller) {
+                    let ty = cx
+                        .tcx
+                        .type_of(implementation)
+                        .instantiate_identity()
+                        .skip_norm_wip();
+                    if let TyKind::Adt(owner, _) = ty.kind()
+                        && owner.did().is_local()
+                        && self.io_adapters.insert(owner.did())
+                    {
+                        queue.push(owner.did());
+                    }
+                }
+            }
+        }
+    }
+
+    fn unit_enum(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
+        if self.is_ecs_role(definition) || self.has_role(definition, "system_set") {
+            return false;
+        }
+        let ty = cx
+            .tcx
+            .type_of(definition)
+            .instantiate_identity()
+            .skip_norm_wip();
+        matches!(ty.kind(), TyKind::Adt(owner, _) if owner.is_enum() && owner.variants().iter().all(|v| v.fields.is_empty()))
+    }
+
+    fn is_ecs_role(&self, definition: DefId) -> bool {
+        self.has_role(definition, "component")
+            || self.has_role(definition, "resource")
+            || self.has_role(definition, "message")
+            || self.has_role(definition, "bundle")
+            || self.has_role(definition, "query")
+            || self.has_role(definition, "parameter")
+    }
+
+    fn collect_helper_owned(&self, cx: &LateContext<'tcx>) -> HashSet<DefId> {
+        let mut roots = HashSet::new();
+        for local in cx.tcx.hir_crate_items(()).definitions() {
+            let def = local.to_def_id();
+            if matches!(cx.tcx.def_kind(def), DefKind::Struct | DefKind::Enum) {
+                let is_adapter = self.io_adapters.contains(&def)
+                    || self.native_io_adapter(cx, def)
+                    || self.stack_local_or_copy_value(cx, def)
+                    || self.has_role(def, "drop") && !self.is_ecs_role(def)
+                    || self.has_role(def, "error")
+                    || self.has_role(def, "command")
+                    || self.has_role(def, "job")
+                    || self.has_role(def, "parser")
+                    || self.has_role(def, "serde")
+                    || self.has_role(def, "contract")
+                    || self.has_role(def, "props")
+                    || self.has_role(def, "routable")
+                    || self.has_role(def, "from_type");
+                if is_adapter {
+                    roots.insert(def);
+                }
+            }
+        }
+        let mut owned = HashSet::new();
+        let mut queue: Vec<DefId> = roots.iter().copied().collect();
+        let mut callers_to_types: HashMap<DefId, Vec<DefId>> = HashMap::new();
+        for (adt, callers) in &self.type_refs {
+            for caller in callers {
+                callers_to_types.entry(*caller).or_default().push(*adt);
+                if let Some(implementation) = cx.tcx.impl_of_assoc(*caller) {
+                    let ty = cx
+                        .tcx
+                        .type_of(implementation)
+                        .instantiate_identity()
+                        .skip_norm_wip();
+                    if let TyKind::Adt(owner, _) = ty.kind()
+                        && owner.did().is_local()
+                    {
+                        callers_to_types.entry(owner.did()).or_default().push(*adt);
+                    }
+                }
+            }
+        }
+        for ui_fn in &self.ui_callers {
+            queue.push(*ui_fn);
+        }
+        for io_fn in &self.io_adapters {
+            queue.push(*io_fn);
+        }
+        while let Some(source) = queue.pop() {
+            if let Some(targets) = callers_to_types.get(&source) {
+                for target in targets {
+                    if !self.is_ecs_role(*target)
+                        && !self.has_role(*target, "plugin")
+                        && !self.has_role(*target, "system_set")
+                        && matches!(cx.tcx.def_kind(*target), DefKind::Struct | DefKind::Enum)
+                        && owned.insert(*target)
+                    {
+                        queue.push(*target);
+                    }
+                }
+            }
+            if matches!(cx.tcx.def_kind(source), DefKind::Struct | DefKind::Enum) {
+                let ty = cx
+                    .tcx
+                    .type_of(source)
+                    .instantiate_identity()
+                    .skip_norm_wip();
+                if let TyKind::Adt(adt, args) = ty.kind() {
+                    for field in adt.all_fields() {
+                        for arg in field.ty(cx.tcx, args).skip_norm_wip().walk() {
+                            if let Some(inner) = arg.as_type()
+                                && let TyKind::Adt(target, _) = inner.kind()
+                                && target.did().is_local()
+                                && !self.is_ecs_role(target.did())
+                                && !self.has_role(target.did(), "plugin")
+                                && !self.has_role(target.did(), "system_set")
+                                && owned.insert(target.did())
+                            {
+                                queue.push(target.did());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        owned
     }
 
     fn register_exported_ecs(&mut self, cx: &LateContext<'tcx>) {
@@ -567,7 +901,7 @@ impl<'tcx> Ownership<'tcx> {
 
     fn stack_local_or_copy_value(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
         if self.roles.contains_key(&definition)
-            || !matches!(cx.tcx.def_kind(definition), DefKind::Struct)
+            || !matches!(cx.tcx.def_kind(definition), DefKind::Struct | DefKind::Enum)
         {
             return false;
         }
@@ -644,6 +978,11 @@ impl<'tcx> Ownership<'tcx> {
             let Some(ty) = argument.as_type() else {
                 continue;
             };
+            if let TyKind::Dynamic(predicates, _) = ty.kind()
+                && ValueGraph::is_external_io_dynamic(cx, predicates)
+            {
+                return true;
+            }
             let TyKind::Adt(owner, _) = ty.kind() else {
                 continue;
             };
@@ -664,10 +1003,15 @@ impl<'tcx> Ownership<'tcx> {
     }
 
     fn is_external_io_crate(krate: &str) -> bool {
+        Self::is_native_runtime_crate(krate) || Self::is_codec_or_utility_crate(krate)
+    }
+
+    fn is_native_runtime_crate(krate: &str) -> bool {
         [
             "crossbeam_channel",
             "async_channel",
             "async_io",
+            "async_lock",
             "socket2",
             "libc",
             "nix",
@@ -706,6 +1050,20 @@ impl<'tcx> Ownership<'tcx> {
             "tempfile",
             "notify",
             "arboard",
+            "cef",
+            "winit",
+            "wry",
+            "sysinfo",
+            "polling",
+            "web_sys",
+            "js_sys",
+            "wasm_bindgen",
+        ]
+        .contains(&krate)
+    }
+
+    fn is_codec_or_utility_crate(krate: &str) -> bool {
+        [
             "ring",
             "ed25519_dalek",
             "aes_gcm",
@@ -714,25 +1072,40 @@ impl<'tcx> Ownership<'tcx> {
             "zip",
             "tar",
             "flate2",
-            "cef",
-            "winit",
             "lsp_types",
             "ropey",
             "git2",
             "tree_sitter",
             "pulldown_cmark",
             "ureq",
-            "wry",
-            "sysinfo",
             "zeroize",
-            "polling",
-            "web_sys",
-            "js_sys",
-            "wasm_bindgen",
             "image",
             "fontdue",
             "agent_client_protocol",
-            "async_lock",
+            "url",
+            "ron",
+            "serde_json",
+            "toml",
+            "clap",
+            "regex",
+            "globset",
+            "ignore",
+            "walkdir",
+            "dirs",
+            "sha2",
+            "hex",
+            "base64",
+            "uuid",
+            "time",
+            "chrono",
+            "fluent",
+            "fluent_bundle",
+            "unic_langid",
+            "semver",
+            "percent_encoding",
+            "http",
+            "axum",
+            "tower",
         ]
         .contains(&krate)
     }
@@ -837,32 +1210,6 @@ impl<'tcx> Ownership<'tcx> {
         self.has_role(definition, "job") && matches!(cx.tcx.def_kind(definition), DefKind::Struct)
     }
 
-    fn stateless_plugin(&self, cx: &LateContext<'tcx>, definition: DefId) -> bool {
-        if !self.has_role(definition, "plugin") {
-            return false;
-        }
-        let ty = cx
-            .tcx
-            .type_of(definition)
-            .instantiate_identity()
-            .skip_norm_wip();
-        let TyKind::Adt(owner, arguments) = ty.kind() else {
-            return false;
-        };
-        for field in owner.all_fields() {
-            let ty = field.ty(cx.tcx, arguments).skip_norm_wip();
-            let TyKind::Adt(marker, _) = ty.kind() else {
-                return false;
-            };
-            if cx.tcx.crate_name(marker.did().krate).as_str() != "core"
-                || cx.tcx.item_name(marker.did()).as_str() != "PhantomData"
-            {
-                return false;
-            }
-        }
-        true
-    }
-
     fn report(&mut self, cx: &LateContext<'_>, definition: DefId, message: &'static str) {
         if !definition.is_local() || !self.reported.insert((definition, message.into())) {
             return;
@@ -881,8 +1228,10 @@ impl<'tcx> Ownership<'tcx> {
 
 struct ValueGraph<'tcx> {
     root: DefId,
+    root_is_message: bool,
     canonical: HashSet<DefId>,
     dtos: HashSet<DefId>,
+    io_adapters: HashSet<DefId>,
     values: HashSet<DefId>,
     visiting: HashSet<Ty<'tcx>>,
     issues: Vec<(DefId, &'static str)>,
@@ -897,6 +1246,11 @@ impl<'tcx> ValueGraph<'tcx> {
         location: DefId,
     ) -> bool {
         if !self.visiting.insert(ty) {
+            if let TyKind::Adt(owner, _) = ty.kind()
+                && self.dtos.contains(&owner.did())
+            {
+                return true;
+            }
             self.issues
                 .push((location, "canonical ECS state retains a recursive model"));
             return false;
@@ -904,6 +1258,25 @@ impl<'tcx> ValueGraph<'tcx> {
         let valid = self.inspect(cx, ty, retained, location);
         self.visiting.remove(&ty);
         valid
+    }
+
+    fn is_external_io_dynamic(
+        cx: &LateContext<'tcx>,
+        predicates: &rustc_middle::ty::List<
+            rustc_middle::ty::Binder<'tcx, rustc_middle::ty::ExistentialPredicate<'tcx>>,
+        >,
+    ) -> bool {
+        predicates.principal_def_id().is_none_or(|trait_id| {
+            if trait_id.is_local() {
+                return false;
+            }
+            let krate = cx.tcx.crate_name(trait_id.krate);
+            let path = cx.tcx.def_path_str(trait_id);
+            Ownership::is_external_io_crate(krate.as_str())
+                || path.starts_with("std::io::")
+                || path.starts_with("tokio::io::")
+                || path.starts_with("core::any::")
+        })
     }
 
     fn inspect(
@@ -914,7 +1287,15 @@ impl<'tcx> ValueGraph<'tcx> {
         location: DefId,
     ) -> bool {
         match ty.kind() {
-            TyKind::Dynamic(..) | TyKind::FnPtr(..) | TyKind::FnDef(..) => {
+            TyKind::Dynamic(predicates, _) => {
+                if Self::is_external_io_dynamic(cx, predicates) {
+                    return true;
+                }
+                self.issues
+                    .push((location, "canonical ECS state hides a dynamic engine"));
+                return false;
+            }
+            TyKind::FnPtr(..) | TyKind::FnDef(..) => {
                 self.issues
                     .push((location, "canonical ECS state hides a dynamic engine"));
                 return false;
@@ -933,31 +1314,7 @@ impl<'tcx> ValueGraph<'tcx> {
                 return valid;
             }
             TyKind::Adt(owner, arguments) => {
-                if owner.did().is_local() {
-                    let is_copy = cx.tcx.type_is_copy_modulo_regions(cx.typing_env(), ty);
-                    let allowed_retained = self.dtos.contains(&owner.did()) || is_copy;
-                    if location != self.root
-                        && (self.canonical.contains(&owner.did()) || retained && !allowed_retained)
-                    {
-                        self.issues.push((
-                            location,
-                            "canonical ECS state embeds an independently owned model",
-                        ));
-                        return false;
-                    }
-                    self.values.insert(owner.did());
-                    let mut valid = true;
-                    for field in owner.all_fields() {
-                        valid &= self.check(
-                            cx,
-                            field.ty(cx.tcx, arguments).skip_norm_wip(),
-                            retained && !allowed_retained,
-                            field.did,
-                        );
-                    }
-                    return valid;
-                }
-                return self.external(cx, ty, retained, location);
+                return self.inspect_adt(cx, ty, *owner, arguments, retained, location);
             }
             TyKind::Alias(..) => {
                 let result = cx.tcx.try_normalize_erasing_regions(
@@ -968,6 +1325,12 @@ impl<'tcx> ValueGraph<'tcx> {
                     && resolved != ty
                 {
                     return self.check(cx, resolved, retained, location);
+                }
+                if ty.walk().any(|arg| {
+                    arg.as_type()
+                        .is_some_and(|t| matches!(t.kind(), TyKind::Param(..)))
+                }) {
+                    return true;
                 }
             }
             TyKind::Param(..) => return true,
@@ -985,6 +1348,47 @@ impl<'tcx> ValueGraph<'tcx> {
             "canonical ECS state has an unresolved ownership type",
         ));
         false
+    }
+
+    fn inspect_adt(
+        &mut self,
+        cx: &LateContext<'tcx>,
+        ty: Ty<'tcx>,
+        owner: rustc_middle::ty::AdtDef<'tcx>,
+        arguments: GenericArgsRef<'tcx>,
+        retained: bool,
+        location: DefId,
+    ) -> bool {
+        if !owner.did().is_local() {
+            return self.external(cx, ty, retained, location);
+        }
+        if location != self.root && self.io_adapters.contains(&owner.did()) {
+            self.values.insert(owner.did());
+            return true;
+        }
+        let is_copy = cx.tcx.type_is_copy_modulo_regions(cx.typing_env(), ty);
+        let is_unit_enum = owner.is_enum() && owner.variants().iter().all(|v| v.fields.is_empty());
+        let allowed_retained = self.dtos.contains(&owner.did()) || is_copy || is_unit_enum;
+        let canonical_blocked =
+            self.canonical.contains(&owner.did()) && !allowed_retained && !self.root_is_message;
+        if location != self.root && (canonical_blocked || retained && !allowed_retained) {
+            self.issues.push((
+                location,
+                "canonical ECS state embeds an independently owned model",
+            ));
+            return false;
+        }
+        self.values.insert(owner.did());
+        let mut valid = true;
+        for field in owner.all_fields() {
+            valid &= self.check(
+                cx,
+                field.ty(cx.tcx, arguments).skip_norm_wip(),
+                retained && !allowed_retained,
+                field.did,
+            );
+        }
+        valid
     }
 
     fn external(
@@ -1005,6 +1409,16 @@ impl<'tcx> ValueGraph<'tcx> {
         let package = cx.tcx.crate_name(owner.did().krate);
         let name = cx.tcx.item_name(owner.did());
         if package.as_str() == "core" && name.as_str() == "PhantomData" {
+            return true;
+        }
+        if Ownership::is_external_io_crate(package.as_str())
+            || package.as_str() == "tokio" && Ownership::is_tokio_io_handle(name.as_str())
+            || package.as_str() == "tokio_util" && name.as_str() == "CancellationToken"
+            || package.as_str() == "std" && Ownership::is_std_io_handle(name.as_str())
+            || package.as_str() == "bevy_tasks" && name.as_str() == "Task"
+            || package.as_str() == "vmux_ecs" && name.as_str() == "BlockingTask"
+            || package.as_str() == "vmux_git" && name.as_str() == "GitTask"
+        {
             return true;
         }
         if !Self::local(ty) {

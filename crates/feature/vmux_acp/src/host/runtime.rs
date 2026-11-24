@@ -73,11 +73,14 @@ impl bevy::prelude::Plugin for RuntimePlugin {
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct AcpSessionConfigState {
     pub configs: Vec<AcpSessionConfig>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(super) pending: Vec<PendingAcpSessionConfig>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     pub(super) initial: Vec<InitialAcpSessionConfig>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct PendingAcpSessionConfig {
     pub request_id: u64,
     pub config_id: Option<String>,
@@ -85,6 +88,7 @@ pub(super) struct PendingAcpSessionConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct InitialAcpSessionConfig {
     pub(super) config_id: Option<String>,
     pub(super) value: String,

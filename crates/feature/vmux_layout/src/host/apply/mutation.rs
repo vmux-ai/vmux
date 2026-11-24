@@ -17,6 +17,7 @@ use crate::window::WindowHierarchy;
 use super::Reconcile;
 
 #[derive(SystemParam)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub(super) struct Topology<'w, 's> {
     pub(super) commands: Commands<'w, 's>,
     tabs: Query<'w, 's, &'static Tab>,

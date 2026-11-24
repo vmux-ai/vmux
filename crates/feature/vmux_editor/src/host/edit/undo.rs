@@ -14,6 +14,7 @@ struct Node {
 
 #[derive(bevy::prelude::Component)]
 pub struct History {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     nodes: Vec<Node>,
     current: usize,
     next_seq: u64,

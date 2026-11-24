@@ -455,6 +455,7 @@ struct PendingMcpOperation {
 #[derive(Component, Clone)]
 struct PendingMcpSnapshot {
     generation: u64,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     result: Option<McpCompletion>,
 }
 

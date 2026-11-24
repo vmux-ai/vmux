@@ -433,6 +433,7 @@ pub enum Set {
 }
 
 #[derive(SystemParam)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct RestoreInput<'w, 's> {
     requests: Query<'w, 's, Entity, With<RestoreRequest>>,
     registry: Res<'w, AppTypeRegistry>,
@@ -572,6 +573,7 @@ fn detect(
 }
 
 #[derive(SystemParam)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 struct CaptureInput<'w, 's> {
     requests: Query<'w, 's, Entity, With<CaptureRequest>>,
     registry: Res<'w, AppTypeRegistry>,

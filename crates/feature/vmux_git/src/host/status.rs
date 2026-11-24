@@ -60,6 +60,7 @@ pub struct FileGit {
     document: u64,
     generation: u64,
     status_applied: bool,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     revealed_diff: super::state::GitDiffRevealRanges,
     state: FileGitState,
 }

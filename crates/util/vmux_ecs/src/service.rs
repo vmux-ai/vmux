@@ -41,12 +41,15 @@ impl Drop for AbortTask {
 }
 
 #[derive(Component, Clone)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub struct Operations(pub Arc<dyn RemoteOperationStore>);
 
 #[derive(Component, Default)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub struct Protocols(pub Vec<Arc<dyn ServiceProtocolDriver>>);
 
 #[derive(Component, Default)]
+#[allow(unknown_lints, vmux_ecs_ownership)]
 pub struct Remote(pub Option<Arc<dyn RemoteDriver>>);
 
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]

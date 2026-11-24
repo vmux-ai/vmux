@@ -65,6 +65,7 @@ struct Change {
     release_requester: bool,
     store: Entity,
     provider: Entity,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     id: ToolProviderId,
     item: String,
     enabled: bool,

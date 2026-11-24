@@ -506,11 +506,13 @@ const REPO_INFO_WATCH_BUDGET: usize = 4;
 
 #[derive(Component)]
 pub struct RepoInfoCache {
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     entries: HashMap<PathBuf, RepoInfoCacheEntry>,
     dirty: HashSet<PathBuf>,
     pending: HashSet<PathBuf>,
     canonical: HashMap<PathBuf, PathBuf>,
     repositories: HashMap<PathBuf, PathBuf>,
+    #[allow(unknown_lints, vmux_ecs_ownership)]
     leases: HashMap<Entity, RepoInfoLease>,
     maintenance_dirty: bool,
     next_gc: Instant,
