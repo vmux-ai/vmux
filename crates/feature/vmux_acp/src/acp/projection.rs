@@ -14,7 +14,7 @@ use vmux_api::protocol::{
     AgentRequestId, FileTouchKind, ServiceMessage, SharedEvent,
 };
 use vmux_api::session::{AssistantBlock, Message, PlanStep};
-use vmux_ecs::{EntityChannel, Order};
+use vmux_ecs::{AsyncChannel, Order};
 
 use super::workspace_driver::WorkspaceLocation;
 use super::{
@@ -1225,11 +1225,11 @@ impl AcpSessionConfigs {
 fn drain_inboxes(
     sessions: Query<(
         Entity,
-        &EntityChannel<AcpReplayBegin>,
-        &EntityChannel<AcpSessionUpdate>,
-        &EntityChannel<AcpReplayFinish>,
-        &EntityChannel<AcpSnapshotRequest>,
-        &EntityChannel<AcpApprovalDetails>,
+        &AsyncChannel<AcpReplayBegin>,
+        &AsyncChannel<AcpSessionUpdate>,
+        &AsyncChannel<AcpReplayFinish>,
+        &AsyncChannel<AcpSnapshotRequest>,
+        &AsyncChannel<AcpApprovalDetails>,
     )>,
     mut commands: Commands,
 ) {
@@ -1555,7 +1555,7 @@ mod tests {
             let (wake, _) = mpsc::unbounded_channel();
             let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
             let (projection, projection_inboxes) =
-                AcpProjectionSenders::open(super::super::AcpWake::waker(wake));
+                AcpProjectionSenders::open_with_waker(super::super::AcpWake::waker(wake));
             let shared = Arc::new(AcpShared::new(
                 "s1".into(),
                 PathBuf::from("/tmp"),

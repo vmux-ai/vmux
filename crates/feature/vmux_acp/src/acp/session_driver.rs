@@ -5,7 +5,7 @@ use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_api::protocol::{AgentAttachment, ApprovalDecision, ServiceMessage};
 use vmux_api::session::RemoteSession;
-use vmux_ecs::{EntitySpawnChannel, ProcessId};
+use vmux_ecs::ProcessId;
 use vmux_process::ProcessRuntime;
 
 use super::driver::AcpMcpServers;
@@ -19,62 +19,10 @@ use super::{
 impl AcpSessions {
     pub fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
         let waker = AcpWake::waker(wake);
-        let (spawns, spawn_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (prompts, prompt_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (approvals, approval_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (configs, config_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (cancels, cancel_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (subscriptions, subscription_inbox) =
-            EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (snapshots, snapshot_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (agent_infos, agent_info_inbox) =
-            EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (config_states, config_state_inbox) =
-            EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (statuses, status_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (lists, list_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (lookups, lookup_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (rebinds, rebind_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
-        let (closes, close_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
+        let (sessions, receivers) = Self::open_with_waker(waker.clone());
         (
-            Self {
-                spawns,
-                prompts,
-                approvals,
-                configs,
-                cancels,
-                subscriptions,
-                snapshots,
-                agent_infos,
-                config_states,
-                statuses,
-                lists,
-                lookups,
-                rebinds,
-                closes,
-            },
-            (
-                AcpSessionRuntime(runtime),
-                AcpSessionWake(waker),
-                (
-                    spawn_inbox,
-                    prompt_inbox,
-                    approval_inbox,
-                    config_inbox,
-                    cancel_inbox,
-                    subscription_inbox,
-                    snapshot_inbox,
-                ),
-                (
-                    agent_info_inbox,
-                    config_state_inbox,
-                    status_inbox,
-                    list_inbox,
-                    lookup_inbox,
-                    rebind_inbox,
-                    close_inbox,
-                ),
-            ),
+            sessions,
+            (AcpSessionRuntime(runtime), AcpSessionWake(waker), receivers),
         )
     }
     #[allow(clippy::too_many_arguments)]

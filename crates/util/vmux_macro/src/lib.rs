@@ -6,6 +6,7 @@ use syn::{DeriveInput, Meta, Token, Type, parse_macro_input};
 
 mod app_plugin;
 mod bin_event;
+mod channel;
 mod command;
 mod contract;
 mod page;
@@ -17,6 +18,24 @@ mod tool_input;
 mod ui_event_variants;
 mod ui_state;
 mod variant_names;
+
+#[proc_macro_attribute]
+pub fn channels(args: TokenStream, input: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(input as DeriveInput);
+    match channel::Declaration::parse(args.into(), item, "::vmux_channel") {
+        Ok(declaration) => declaration.expand().into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn ecs_channels(args: TokenStream, input: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(input as DeriveInput);
+    match channel::Declaration::parse(args.into(), item, "::vmux_ecs::channel") {
+        Ok(declaration) => declaration.expand().into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
 
 #[proc_macro_attribute]
 pub fn types(args: TokenStream, input: TokenStream) -> TokenStream {

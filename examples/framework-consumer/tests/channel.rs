@@ -6,7 +6,7 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_app::VmuxPlugin;
 use vmux_app::ecs::{
-    AsyncChannelPlugin, ChannelClosed, ChannelReceived, ChannelSendErrorKind, EntityChannel,
+    AsyncChannel, AsyncChannelPlugin, ChannelClosed, ChannelReceived, ChannelSendErrorKind,
     JobWake, MessageSender, SpawnSender,
 };
 
@@ -52,7 +52,7 @@ impl Plugin for ConsumerChannelPlugin {
             VmuxPlugin::builder().jobs(true).build(),
             AsyncChannelPlugin::message::<NoteEvent>().bounded(2),
             AsyncChannelPlugin::spawn::<WorkOrder>(),
-            AsyncChannelPlugin::entity::<String>(),
+            AsyncChannelPlugin::<String>::default(),
         ))
         .init_resource::<ObservedNotes>()
         .init_resource::<ObservedChunks>()
@@ -85,7 +85,7 @@ fn consumer_uses_message_spawn_and_entity_channels_through_job_wake() {
 
     let notes = app.world().resource::<MessageSender<NoteEvent>>().clone();
     let orders = app.world().resource::<SpawnSender<WorkOrder>>().clone();
-    let (stream_tx, stream_rx) = EntityChannel::<String>::unbounded();
+    let (stream_tx, stream_rx) = AsyncChannel::<String>::unbounded();
     let worker = app.world_mut().spawn(stream_rx).id();
     app.update();
 

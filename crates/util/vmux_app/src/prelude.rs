@@ -6,9 +6,9 @@ pub use vmux_acp::AcpPlugin;
 pub use vmux_browser::BrowserPlugin;
 #[cfg(feature = "ecs")]
 pub use vmux_ecs::{
-    AsyncChannelPlugin, ChannelClosed, ChannelReceived, ChannelSendError, ChannelSendErrorKind,
-    ChannelSet, ChannelWake, EntityChannel, EntityMode, EntitySender, EntitySpawnChannel,
-    MessageChannel, MessageMode, MessageSender, SpawnChannel, SpawnMode, SpawnSender,
+    AsyncChannel, AsyncChannelPlugin, ChannelClosed, ChannelMode, ChannelReceived,
+    ChannelSendError, ChannelSendErrorKind, ChannelSender, ChannelSet, ChannelWake, MessageChannel,
+    MessageMode, MessageSender, SpawnChannel, SpawnMode, SpawnReceiver, SpawnSender,
 };
 #[cfg(feature = "jobs")]
 pub use vmux_ecs::{

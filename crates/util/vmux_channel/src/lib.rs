@@ -1,3 +1,5 @@
+extern crate self as vmux_channel;
+
 use std::collections::VecDeque;
 use std::fmt;
 use std::marker::PhantomData;
@@ -10,8 +12,19 @@ use bevy_ecs::lifecycle::HookContext;
 use bevy_ecs::prelude::*;
 use bevy_ecs::world::DeferredWorld;
 
+pub use vmux_macro::channels;
+
+#[doc(hidden)]
+pub mod macro_support {
+    pub use bevy_app::App;
+    pub use bevy_ecs::bundle::Bundle;
+}
+
 #[derive(Resource, Clone)]
 pub struct ChannelWake(pub Waker);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ChannelMode;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MessageMode;
@@ -19,16 +32,23 @@ pub struct MessageMode;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SpawnMode;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct EntityMode;
-
-pub struct AsyncChannelPlugin<T = (), Mode = ()> {
+pub struct AsyncChannelPlugin<T = (), Mode = ChannelMode> {
     capacity: Option<usize>,
     resource: bool,
     marker: PhantomData<fn() -> (T, Mode)>,
 }
 
-impl AsyncChannelPlugin<(), ()> {
+impl<T: Send + Sync + 'static> Default for AsyncChannelPlugin<T, ChannelMode> {
+    fn default() -> Self {
+        Self {
+            capacity: None,
+            resource: false,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl AsyncChannelPlugin<(), ChannelMode> {
     pub fn message<M: Message>() -> AsyncChannelPlugin<M, MessageMode> {
         AsyncChannelPlugin {
             capacity: None,
@@ -41,14 +61,6 @@ impl AsyncChannelPlugin<(), ()> {
         AsyncChannelPlugin {
             capacity: None,
             resource: true,
-            marker: PhantomData,
-        }
-    }
-
-    pub fn entity<T: Send + Sync + 'static>() -> AsyncChannelPlugin<T, EntityMode> {
-        AsyncChannelPlugin {
-            capacity: None,
-            resource: false,
             marker: PhantomData,
         }
     }
@@ -119,7 +131,7 @@ impl<B: Bundle> Plugin for AsyncChannelPlugin<B, SpawnMode> {
     }
 }
 
-impl<T: Send + Sync + 'static> Plugin for AsyncChannelPlugin<T, EntityMode> {
+impl<T: Send + Sync + 'static> Plugin for AsyncChannelPlugin<T, ChannelMode> {
     fn build(&self, app: &mut App) {
         app.configure_sets(PreUpdate, (ChannelSet::BindWake, ChannelSet::Drain).chain())
             .add_systems(
@@ -182,7 +194,7 @@ impl<T> std::error::Error for ChannelSendError<T> {}
 
 #[derive(Resource)]
 pub struct MessageSender<M: Message> {
-    sender: ChannelSender<M>,
+    sender: RawSender<M>,
 }
 
 impl<M: Message> Clone for MessageSender<M> {
@@ -209,7 +221,7 @@ impl<M: Message> MessageSender<M> {
 
 #[derive(Resource)]
 pub struct MessageChannel<M: Message> {
-    receiver: ChannelReceiver<M>,
+    receiver: RawReceiver<M>,
 }
 
 impl<M: Message> MessageChannel<M> {
@@ -248,7 +260,7 @@ impl<M: Message> MessageChannel<M> {
 
 #[derive(Resource)]
 pub struct SpawnSender<B: Bundle> {
-    sender: ChannelSender<B>,
+    sender: RawSender<B>,
 }
 
 impl<B: Bundle> Clone for SpawnSender<B> {
@@ -275,7 +287,7 @@ impl<B: Bundle> SpawnSender<B> {
 
 #[derive(Resource)]
 pub struct SpawnChannel<B: Bundle> {
-    receiver: ChannelReceiver<B>,
+    receiver: RawReceiver<B>,
 }
 
 impl<B: Bundle> SpawnChannel<B> {
@@ -313,11 +325,11 @@ impl<B: Bundle> SpawnChannel<B> {
 }
 
 #[derive(Component)]
-pub struct EntitySpawnChannel<B: Bundle> {
-    receiver: ChannelReceiver<B>,
+pub struct SpawnReceiver<B: Bundle> {
+    receiver: RawReceiver<B>,
 }
 
-impl<B: Bundle> EntitySpawnChannel<B> {
+impl<B: Bundle> SpawnReceiver<B> {
     pub fn unbounded() -> (SpawnSender<B>, Self) {
         let (sender, receiver) = Channel::open(None, None);
         (SpawnSender { sender }, Self { receiver })
@@ -351,11 +363,11 @@ impl<B: Bundle> EntitySpawnChannel<B> {
     }
 }
 
-pub struct EntitySender<T: Send + Sync + 'static> {
-    sender: ChannelSender<T>,
+pub struct ChannelSender<T: Send + Sync + 'static> {
+    sender: RawSender<T>,
 }
 
-impl<T: Send + Sync + 'static> Clone for EntitySender<T> {
+impl<T: Send + Sync + 'static> Clone for ChannelSender<T> {
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
@@ -363,11 +375,11 @@ impl<T: Send + Sync + 'static> Clone for EntitySender<T> {
     }
 }
 
-impl<T: Send + Sync + 'static> Drop for EntitySender<T> {
+impl<T: Send + Sync + 'static> Drop for ChannelSender<T> {
     fn drop(&mut self) {}
 }
 
-impl<T: Send + Sync + 'static> EntitySender<T> {
+impl<T: Send + Sync + 'static> ChannelSender<T> {
     pub fn send(&self, item: T) -> Result<(), ChannelSendError<T>> {
         self.sender.send(item)
     }
@@ -383,29 +395,29 @@ impl<T: Send + Sync + 'static> EntitySender<T> {
 
 #[derive(Component)]
 #[component(on_insert = clear_closed::<T>)]
-pub struct EntityChannel<T: Send + Sync + 'static> {
-    receiver: ChannelReceiver<T>,
+pub struct AsyncChannel<T: Send + Sync + 'static> {
+    receiver: RawReceiver<T>,
 }
 
-impl<T: Send + Sync + 'static> EntityChannel<T> {
-    pub fn unbounded() -> (EntitySender<T>, Self) {
+impl<T: Send + Sync + 'static> AsyncChannel<T> {
+    pub fn unbounded() -> (ChannelSender<T>, Self) {
         let (sender, receiver) = Channel::open(None, None);
-        (EntitySender { sender }, Self { receiver })
+        (ChannelSender { sender }, Self { receiver })
     }
 
-    pub fn bounded(capacity: usize) -> (EntitySender<T>, Self) {
+    pub fn bounded(capacity: usize) -> (ChannelSender<T>, Self) {
         let (sender, receiver) = Channel::open(Some(capacity), None);
-        (EntitySender { sender }, Self { receiver })
+        (ChannelSender { sender }, Self { receiver })
     }
 
-    pub fn unbounded_with_waker(waker: Waker) -> (EntitySender<T>, Self) {
+    pub fn unbounded_with_waker(waker: Waker) -> (ChannelSender<T>, Self) {
         let (sender, receiver) = Channel::open(None, Some(waker));
-        (EntitySender { sender }, Self { receiver })
+        (ChannelSender { sender }, Self { receiver })
     }
 
-    pub fn bounded_with_waker(capacity: usize, waker: Waker) -> (EntitySender<T>, Self) {
+    pub fn bounded_with_waker(capacity: usize, waker: Waker) -> (ChannelSender<T>, Self) {
         let (sender, receiver) = Channel::open(Some(capacity), Some(waker));
-        (EntitySender { sender }, Self { receiver })
+        (ChannelSender { sender }, Self { receiver })
     }
 
     pub fn try_recv(&self) -> Option<T> {
@@ -496,10 +508,7 @@ struct WakeState {
 }
 
 impl<T> Channel<T> {
-    fn open(
-        capacity: Option<usize>,
-        waker: Option<Waker>,
-    ) -> (ChannelSender<T>, ChannelReceiver<T>) {
+    fn open(capacity: Option<usize>, waker: Option<Waker>) -> (RawSender<T>, RawReceiver<T>) {
         let custom = waker.is_some();
         let channel = Arc::new(Self {
             state: Mutex::new(Queue {
@@ -510,10 +519,7 @@ impl<T> Channel<T> {
             }),
             wake: Mutex::new(WakeState { waker, custom }),
         });
-        (
-            ChannelSender(Arc::clone(&channel)),
-            ChannelReceiver(channel),
-        )
+        (RawSender(Arc::clone(&channel)), RawReceiver(channel))
     }
 
     fn wake(&self) {
@@ -585,9 +591,9 @@ impl<T> Channel<T> {
     }
 }
 
-struct ChannelSender<T>(Arc<Channel<T>>);
+struct RawSender<T>(Arc<Channel<T>>);
 
-impl<T> Clone for ChannelSender<T> {
+impl<T> Clone for RawSender<T> {
     fn clone(&self) -> Self {
         if let Ok(mut queue) = self.0.state.lock() {
             queue.senders = queue.senders.saturating_add(1);
@@ -596,7 +602,7 @@ impl<T> Clone for ChannelSender<T> {
     }
 }
 
-impl<T> Drop for ChannelSender<T> {
+impl<T> Drop for RawSender<T> {
     fn drop(&mut self) {
         let disconnected = {
             let Ok(mut queue) = self.0.state.lock() else {
@@ -611,7 +617,7 @@ impl<T> Drop for ChannelSender<T> {
     }
 }
 
-impl<T> ChannelSender<T> {
+impl<T> RawSender<T> {
     fn send(&self, value: T) -> Result<(), ChannelSendError<T>> {
         let result = {
             let Ok(mut queue) = self.0.state.lock() else {
@@ -656,16 +662,16 @@ impl<T> ChannelSender<T> {
     }
 }
 
-struct ChannelReceiver<T>(Arc<Channel<T>>);
+struct RawReceiver<T>(Arc<Channel<T>>);
 
-impl<T> Drop for ChannelReceiver<T> {
+impl<T> Drop for RawReceiver<T> {
     fn drop(&mut self) {
         self.0.clear_waker();
         self.close_and_clear();
     }
 }
 
-impl<T> ChannelReceiver<T> {
+impl<T> RawReceiver<T> {
     fn try_recv(&self) -> Option<T> {
         let Ok(mut queue) = self.0.state.lock() else {
             return None;
@@ -724,7 +730,7 @@ impl<T: Send + Sync + 'static> Command for DeliverEntityItem<T> {
         let Some(expected) = self.channel.upgrade() else {
             return;
         };
-        let Some(current) = world.get::<EntityChannel<T>>(self.entity) else {
+        let Some(current) = world.get::<AsyncChannel<T>>(self.entity) else {
             return;
         };
         if !Arc::ptr_eq(&current.receiver.0, &expected) {
@@ -750,7 +756,7 @@ impl<T: Send + Sync + 'static> Command for MarkChannelClosed<T> {
         let Some(expected) = self.channel.upgrade() else {
             return;
         };
-        let Some(current) = world.get::<EntityChannel<T>>(self.entity) else {
+        let Some(current) = world.get::<AsyncChannel<T>>(self.entity) else {
             return;
         };
         if !Arc::ptr_eq(&current.receiver.0, &expected) {
@@ -795,7 +801,7 @@ fn drain_messages<M: Message>(
 fn bind_spawn_wake<B: Bundle>(
     wake: Option<Res<ChannelWake>>,
     resource: Option<Res<SpawnChannel<B>>>,
-    components: Query<&EntitySpawnChannel<B>>,
+    components: Query<&SpawnReceiver<B>>,
 ) {
     let Some(wake) = wake else {
         return;
@@ -810,7 +816,7 @@ fn bind_spawn_wake<B: Bundle>(
 
 fn drain_spawns<B: Bundle>(
     resource: Option<Res<SpawnChannel<B>>>,
-    components: Query<&EntitySpawnChannel<B>>,
+    components: Query<&SpawnReceiver<B>>,
     mut commands: Commands,
 ) {
     if let Some(channel) = resource {
@@ -829,7 +835,7 @@ fn drain_spawns<B: Bundle>(
 
 fn bind_entity_wake<T: Send + Sync + 'static>(
     wake: Option<Res<ChannelWake>>,
-    channels: Query<&EntityChannel<T>>,
+    channels: Query<&AsyncChannel<T>>,
 ) {
     let Some(wake) = wake else {
         return;
@@ -840,7 +846,7 @@ fn bind_entity_wake<T: Send + Sync + 'static>(
 }
 
 type EntityChannels<'w, 's, T> =
-    Query<'w, 's, (Entity, &'static EntityChannel<T>, Has<ChannelClosed<T>>)>;
+    Query<'w, 's, (Entity, &'static AsyncChannel<T>, Has<ChannelClosed<T>>)>;
 
 fn drain_entities<T: Send + Sync + 'static>(channels: EntityChannels<T>, mut commands: Commands) {
     for (entity, channel, closed) in &channels {
@@ -1018,7 +1024,7 @@ mod tests {
         let resource_sender = app.world().resource::<SpawnSender<SpawnedItem>>().clone();
         resource_sender.bind_waker(Waker::from(Arc::clone(&wake)));
         let (component_sender, component_channel) =
-            EntitySpawnChannel::<SpawnedItem>::unbounded_with_waker(Waker::from(Arc::clone(&wake)));
+            SpawnReceiver::<SpawnedItem>::unbounded_with_waker(Waker::from(Arc::clone(&wake)));
         let owner = app.world_mut().spawn(component_channel).id();
 
         resource_sender.send(SpawnedItem(1)).unwrap();
@@ -1052,13 +1058,13 @@ mod tests {
     fn entity_channel_delivers_per_entity_and_marks_disconnect_after_draining() {
         let mut app = App::new();
         app.init_resource::<DeliveredItems>()
-            .add_plugins(AsyncChannelPlugin::entity::<u32>())
+            .add_plugins(AsyncChannelPlugin::<u32>::default())
             .add_observer(record_entity_item);
 
         let wake = CountWake::new();
         let (first_tx, first_rx) =
-            EntityChannel::<u32>::unbounded_with_waker(Waker::from(Arc::clone(&wake)));
-        let (second_tx, second_rx) = EntityChannel::<u32>::unbounded();
+            AsyncChannel::<u32>::unbounded_with_waker(Waker::from(Arc::clone(&wake)));
+        let (second_tx, second_rx) = AsyncChannel::<u32>::unbounded();
         let first = app.world_mut().spawn(first_rx).id();
         let second = app.world_mut().spawn(second_rx).id();
 
@@ -1084,7 +1090,7 @@ mod tests {
         assert!(app.world().get::<ChannelClosed<u32>>(first).is_some());
         assert!(app.world().get::<ChannelClosed<u32>>(second).is_none());
 
-        let (replacement_tx, replacement_rx) = EntityChannel::<u32>::unbounded();
+        let (replacement_tx, replacement_rx) = AsyncChannel::<u32>::unbounded();
         app.world_mut().entity_mut(first).insert(replacement_rx);
         app.update();
         assert!(app.world().get::<ChannelClosed<u32>>(first).is_none());
@@ -1102,10 +1108,10 @@ mod tests {
     fn despawning_entity_closes_channel_and_skips_remaining_queued_items() {
         let mut app = App::new();
         app.init_resource::<DeliveredItems>()
-            .add_plugins(AsyncChannelPlugin::entity::<u32>())
+            .add_plugins(AsyncChannelPlugin::<u32>::default())
             .add_observer(record_entity_item);
 
-        let (tx, rx) = EntityChannel::<u32>::unbounded();
+        let (tx, rx) = AsyncChannel::<u32>::unbounded();
         let entity = app.world_mut().spawn((rx, DespawnOnItem(1))).id();
 
         tx.send(1).unwrap();
@@ -1120,7 +1126,7 @@ mod tests {
 
     #[test]
     fn closing_channel_with_self_referential_sender_payload_does_not_deadlock() {
-        let (self_tx, self_rx) = EntityChannel::<SelfPayload>::unbounded();
+        let (self_tx, self_rx) = AsyncChannel::<SelfPayload>::unbounded();
         self_tx
             .send(SelfPayload {
                 _sender: Some(self_tx.clone()),
@@ -1137,24 +1143,24 @@ mod tests {
     }
 
     struct SelfPayload {
-        _sender: Option<EntitySender<SelfPayload>>,
+        _sender: Option<ChannelSender<SelfPayload>>,
     }
 
     #[derive(Component)]
     struct ReplaceOnItem {
         trigger: u32,
-        replacement: Mutex<Option<EntityChannel<u32>>>,
+        replacement: Mutex<Option<AsyncChannel<u32>>>,
     }
 
     #[test]
     fn replacing_entity_channel_during_final_delivery_does_not_mark_replacement_closed() {
         let mut app = App::new();
         app.init_resource::<DeliveredItems>()
-            .add_plugins(AsyncChannelPlugin::entity::<u32>())
+            .add_plugins(AsyncChannelPlugin::<u32>::default())
             .add_observer(record_entity_item);
 
-        let (old_tx, old_rx) = EntityChannel::<u32>::unbounded();
-        let (new_tx, new_rx) = EntityChannel::<u32>::unbounded();
+        let (old_tx, old_rx) = AsyncChannel::<u32>::unbounded();
+        let (new_tx, new_rx) = AsyncChannel::<u32>::unbounded();
         let entity = app
             .world_mut()
             .spawn((
@@ -1181,5 +1187,52 @@ mod tests {
             [(entity, 1), (entity, 3)]
         );
         assert!(app.world().get::<ChannelClosed<u32>>(entity).is_none());
+    }
+
+    #[crate::channels]
+    struct GroupedSenders {
+        #[channel(default)]
+        counter: AtomicUsize,
+        spawns: SpawnSender<SpawnedItem>,
+        stream: ChannelSender<u32>,
+        #[channel(manual)]
+        manual: ChannelSender<String>,
+    }
+
+    #[test]
+    fn channels_attribute_opens_registers_and_respects_manual_opt_out() {
+        let mut app = App::new();
+        app.init_resource::<DeliveredItems>()
+            .add_observer(record_entity_item);
+        GroupedSenders::add_channels(&mut app);
+
+        let wake = CountWake::new();
+        let (senders, receivers) = GroupedSenders::open_with_waker(Waker::from(Arc::clone(&wake)));
+        let entity = app.world_mut().spawn(receivers).id();
+
+        assert_eq!(senders.counter.load(Ordering::Acquire), 0);
+        senders.spawns.send(SpawnedItem(7)).unwrap();
+        senders.stream.send(99).unwrap();
+        senders.manual.send("held".into()).unwrap();
+        assert_eq!(wake.count(), 3);
+
+        app.update();
+
+        let spawned = app
+            .world_mut()
+            .query::<&SpawnedItem>()
+            .iter(app.world())
+            .map(|item| item.0)
+            .collect::<Vec<_>>();
+        assert_eq!(spawned, [7]);
+        assert_eq!(app.world().resource::<DeliveredItems>().0, [(entity, 99)]);
+        assert_eq!(
+            app.world()
+                .get::<AsyncChannel<String>>(entity)
+                .unwrap()
+                .try_recv()
+                .as_deref(),
+            Some("held")
+        );
     }
 }

@@ -1,12 +1,13 @@
 extern crate self as vmux_ecs;
 
+pub use vmux_macro::ecs_channels as channels;
 pub use vmux_macro::types;
 
 pub use vmux_channel as channel;
 pub use vmux_channel::{
-    AsyncChannelPlugin, ChannelClosed, ChannelReceived, ChannelSendError, ChannelSendErrorKind,
-    ChannelSet, ChannelWake, EntityChannel, EntityMode, EntitySender, EntitySpawnChannel,
-    MessageChannel, MessageMode, MessageSender, SpawnChannel, SpawnMode, SpawnSender,
+    AsyncChannel, AsyncChannelPlugin, ChannelClosed, ChannelMode, ChannelReceived,
+    ChannelSendError, ChannelSendErrorKind, ChannelSender, ChannelSet, ChannelWake, MessageChannel,
+    MessageMode, MessageSender, SpawnChannel, SpawnMode, SpawnReceiver, SpawnSender,
 };
 #[cfg(feature = "store")]
 pub use vmux_macro::store;

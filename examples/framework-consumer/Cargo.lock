@@ -2968,6 +2968,7 @@ version = "0.0.35"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
+ "vmux_macro",
 ]
 
 [[package]]

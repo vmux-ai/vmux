@@ -25,10 +25,7 @@ use vmux_api::protocol::{
 use vmux_api::session::Message;
 use vmux_api::session::{RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_ecs::service::{AbortTask, Shutdown, ShutdownComplete, ShutdownPending};
-use vmux_ecs::{
-    AsyncChannelPlugin, ChannelReceived, CreatedAt, EntityChannel, EntitySpawnChannel, ProcessId,
-    SpawnSender,
-};
+use vmux_ecs::{AsyncChannel, ChannelReceived, CreatedAt, ProcessId, SpawnReceiver, SpawnSender};
 use vmux_process::ProcessRuntime;
 use vmux_session::SessionId;
 
@@ -44,61 +41,37 @@ pub(crate) struct AcpRuntimePlugin;
 
 impl bevy::prelude::Plugin for AcpRuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            AcpProjectionPlugin,
-            (
-                AsyncChannelPlugin::spawn::<SpawnAcpSession>().components(),
-                AsyncChannelPlugin::spawn::<SendAcpPrompt>().components(),
-                AsyncChannelPlugin::spawn::<ApproveAcpTool>().components(),
-                AsyncChannelPlugin::spawn::<SetAcpConfig>().components(),
-                AsyncChannelPlugin::spawn::<CancelAcpSession>().components(),
-                AsyncChannelPlugin::spawn::<SubscribeAcpSession>().components(),
-                AsyncChannelPlugin::spawn::<SnapshotAcpSession>().components(),
-            ),
-            (
-                AsyncChannelPlugin::spawn::<AcpSessionAgentInfo>().components(),
-                AsyncChannelPlugin::spawn::<AcpSessionConfigRequest>().components(),
-                AsyncChannelPlugin::spawn::<AcpSessionStatusRequest>().components(),
-                AsyncChannelPlugin::spawn::<ListAcpSessions>().components(),
-                AsyncChannelPlugin::spawn::<FindAcpSession>().components(),
-                AsyncChannelPlugin::spawn::<RebindAcpSession>().components(),
-                AsyncChannelPlugin::spawn::<CloseAcpSession>().components(),
-            ),
-            (
-                AsyncChannelPlugin::entity::<AcpAgentInfoUpdate>(),
-                AsyncChannelPlugin::entity::<AcpConfigStateInput>(),
-                AsyncChannelPlugin::entity::<AgentRunStatus>(),
-                AsyncChannelPlugin::entity::<AcpStartup>(),
-            ),
-        ))
-        .add_observer(project_info)
-        .add_observer(project_config_state)
-        .add_observer(project_status)
-        .add_observer(project_startup)
-        .add_systems(
-            Update,
-            (spawn, ApplyDeferred).chain().before(AcpProjectionSet),
-        )
-        .add_systems(
-            Update,
-            (
-                ApplyDeferred,
-                (
-                    project_selected_config,
-                    project_approval_requested,
-                    project_approval_resolved,
-                    snapshot_selection,
-                )
-                    .chain(),
-                (route_prompts, route_approvals, route_configs, route_cancels).chain(),
-                ApplyDeferred,
-                (subscribe, read, list, rebind, close, reap).chain(),
+        AcpSessions::add_channels(app);
+        AcpProjectionSenders::add_channels(app);
+        app.add_plugins(AcpProjectionPlugin)
+            .add_observer(project_info)
+            .add_observer(project_config_state)
+            .add_observer(project_status)
+            .add_observer(project_startup)
+            .add_systems(
+                Update,
+                (spawn, ApplyDeferred).chain().before(AcpProjectionSet),
             )
-                .chain()
-                .after(AcpProjectionSet),
-        )
-        .add_systems(Shutdown, begin_shutdown)
-        .add_systems(ShutdownComplete, shutdown);
+            .add_systems(
+                Update,
+                (
+                    ApplyDeferred,
+                    (
+                        project_selected_config,
+                        project_approval_requested,
+                        project_approval_resolved,
+                        snapshot_selection,
+                    )
+                        .chain(),
+                    (route_prompts, route_approvals, route_configs, route_cancels).chain(),
+                    ApplyDeferred,
+                    (subscribe, read, list, rebind, close, reap).chain(),
+                )
+                    .chain()
+                    .after(AcpProjectionSet),
+            )
+            .add_systems(Shutdown, begin_shutdown)
+            .add_systems(ShutdownComplete, shutdown);
     }
 }
 
@@ -128,6 +101,7 @@ impl std::task::Wake for AcpWake {
     }
 }
 
+#[vmux_ecs::channels]
 #[derive(Clone)]
 pub struct AcpSessions {
     spawns: SpawnSender<SpawnAcpSession>,
@@ -361,7 +335,8 @@ fn spawn(
             let (config_tx, config_rx) = mpsc::unbounded_channel();
             let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
             let (close_tx, close_rx) = mpsc::unbounded_channel();
-            let (projection, projection_inboxes) = AcpProjectionSenders::open(wake.0.clone());
+            let (projection, projection_inboxes) =
+                AcpProjectionSenders::open_with_waker(wake.0.clone());
             let (stream_tx, _) = broadcast::channel(256);
             let cwd = std::mem::take(&mut request.cwd);
             let shared = Arc::new(AcpShared::with_projection(
@@ -480,7 +455,7 @@ fn project_selected_config(
     mut sessions: Query<(
         &SessionId,
         &AcpSessionShared,
-        &EntityChannel<AcpSelectedConfigInput>,
+        &AsyncChannel<AcpSelectedConfigInput>,
         &mut AcpSessionConfigs,
     )>,
 ) {
@@ -562,7 +537,7 @@ fn project_approval_requested(
     mut sessions: Query<(
         &SessionId,
         &AcpSessionShared,
-        &EntityChannel<RemoteApproval>,
+        &AsyncChannel<RemoteApproval>,
         &mut AcpApprovalState,
     )>,
 ) {
@@ -585,7 +560,7 @@ fn project_approval_resolved(
     mut sessions: Query<(
         &SessionId,
         &AcpSessionShared,
-        &EntityChannel<AcpApprovalResolved>,
+        &AsyncChannel<AcpApprovalResolved>,
         &mut AcpApprovalState,
     )>,
 ) {
@@ -612,7 +587,7 @@ fn project_approval_resolved(
 
 fn snapshot_selection(
     sessions: Query<(
-        &EntityChannel<AcpSelectionSnapshotRequest>,
+        &AsyncChannel<AcpSelectionSnapshotRequest>,
         &AcpSessionConfigs,
     )>,
 ) {
@@ -987,11 +962,11 @@ fn reap(
 
 fn begin_shutdown(
     channels: Single<(
-        &EntitySpawnChannel<SpawnAcpSession>,
-        &EntitySpawnChannel<SendAcpPrompt>,
-        &EntitySpawnChannel<ApproveAcpTool>,
-        &EntitySpawnChannel<SetAcpConfig>,
-        &EntitySpawnChannel<CancelAcpSession>,
+        &SpawnReceiver<SpawnAcpSession>,
+        &SpawnReceiver<SendAcpPrompt>,
+        &SpawnReceiver<ApproveAcpTool>,
+        &SpawnReceiver<SetAcpConfig>,
+        &SpawnReceiver<CancelAcpSession>,
     )>,
     tasks: Query<(Entity, &AcpCloseInput), bevy::prelude::With<AcpSessionShared>>,
     mut commands: Commands,

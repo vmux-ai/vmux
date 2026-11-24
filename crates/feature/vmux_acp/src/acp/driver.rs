@@ -28,7 +28,7 @@ use base64::Engine;
 use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-use vmux_ecs::{EntityChannel, EntitySender, ProcessId};
+use vmux_ecs::{ChannelSender, ProcessId};
 
 use super::agent_process::AgentProcess;
 #[cfg(test)]
@@ -199,109 +199,35 @@ pub(super) struct AcpSelectedConfigInput {
     pub(super) config_options: Vec<SessionConfigOption>,
 }
 
+#[vmux_ecs::channels]
 pub(super) struct AcpProjectionSenders {
+    #[channel(default)]
     next_seq: AtomicU64,
-    replay_begin: EntitySender<AcpReplayBegin>,
-    session_update: EntitySender<AcpSessionUpdate>,
-    replay_finish: EntitySender<AcpReplayFinish>,
-    snapshot_request: EntitySender<AcpSnapshotRequest>,
-    approval_details: EntitySender<AcpApprovalDetails>,
-    agent_info: EntitySender<AcpAgentInfoUpdate>,
-    config_state: EntitySender<AcpConfigStateInput>,
-    selected_config: EntitySender<AcpSelectedConfigInput>,
-    status: EntitySender<AgentRunStatus>,
-    approval_requested: EntitySender<RemoteApproval>,
-    approval_resolved: EntitySender<AcpApprovalResolved>,
-    selection_snapshot: EntitySender<AcpSelectionSnapshotRequest>,
-    startup: EntitySender<AcpStartup>,
+    #[channel(manual)]
+    replay_begin: ChannelSender<AcpReplayBegin>,
+    #[channel(manual)]
+    session_update: ChannelSender<AcpSessionUpdate>,
+    #[channel(manual)]
+    replay_finish: ChannelSender<AcpReplayFinish>,
+    #[channel(manual)]
+    snapshot_request: ChannelSender<AcpSnapshotRequest>,
+    #[channel(manual)]
+    approval_details: ChannelSender<AcpApprovalDetails>,
+    agent_info: ChannelSender<AcpAgentInfoUpdate>,
+    config_state: ChannelSender<AcpConfigStateInput>,
+    #[channel(manual)]
+    selected_config: ChannelSender<AcpSelectedConfigInput>,
+    status: ChannelSender<AgentRunStatus>,
+    #[channel(manual)]
+    approval_requested: ChannelSender<RemoteApproval>,
+    #[channel(manual)]
+    approval_resolved: ChannelSender<AcpApprovalResolved>,
+    #[channel(manual)]
+    selection_snapshot: ChannelSender<AcpSelectionSnapshotRequest>,
+    startup: ChannelSender<AcpStartup>,
 }
 
 impl AcpProjectionSenders {
-    #[allow(clippy::type_complexity)]
-    pub(super) fn open(
-        waker: Waker,
-    ) -> (
-        Self,
-        (
-            (
-                EntityChannel<AcpReplayBegin>,
-                EntityChannel<AcpSessionUpdate>,
-                EntityChannel<AcpReplayFinish>,
-                EntityChannel<AcpSnapshotRequest>,
-                EntityChannel<AcpApprovalDetails>,
-            ),
-            (
-                EntityChannel<AcpAgentInfoUpdate>,
-                EntityChannel<AcpConfigStateInput>,
-                EntityChannel<AcpSelectedConfigInput>,
-                EntityChannel<AgentRunStatus>,
-                EntityChannel<RemoteApproval>,
-                EntityChannel<AcpApprovalResolved>,
-                EntityChannel<AcpSelectionSnapshotRequest>,
-                EntityChannel<AcpStartup>,
-            ),
-        ),
-    ) {
-        let (replay_begin, replay_begin_inbox) = EntityChannel::unbounded_with_waker(waker.clone());
-        let (session_update, session_update_inbox) =
-            EntityChannel::unbounded_with_waker(waker.clone());
-        let (replay_finish, replay_finish_inbox) =
-            EntityChannel::unbounded_with_waker(waker.clone());
-        let (snapshot_request, snapshot_request_inbox) =
-            EntityChannel::unbounded_with_waker(waker.clone());
-        let (approval_details, approval_details_inbox) =
-            EntityChannel::unbounded_with_waker(waker.clone());
-        let (agent_info, agent_info_inbox) = EntityChannel::unbounded_with_waker(waker.clone());
-        let (config_state, config_state_inbox) = EntityChannel::unbounded_with_waker(waker.clone());
-        let (selected_config, selected_config_inbox) =
-            EntityChannel::unbounded_with_waker(waker.clone());
-        let (status, status_inbox) = EntityChannel::unbounded_with_waker(waker.clone());
-        let (approval_requested, approval_requested_inbox) =
-            EntityChannel::unbounded_with_waker(waker.clone());
-        let (approval_resolved, approval_resolved_inbox) =
-            EntityChannel::unbounded_with_waker(waker.clone());
-        let (selection_snapshot, selection_snapshot_inbox) =
-            EntityChannel::unbounded_with_waker(waker.clone());
-        let (startup, startup_inbox) = EntityChannel::unbounded_with_waker(waker);
-        (
-            Self {
-                next_seq: AtomicU64::new(0),
-                replay_begin,
-                session_update,
-                replay_finish,
-                snapshot_request,
-                approval_details,
-                agent_info,
-                config_state,
-                selected_config,
-                status,
-                approval_requested,
-                approval_resolved,
-                selection_snapshot,
-                startup,
-            },
-            (
-                (
-                    replay_begin_inbox,
-                    session_update_inbox,
-                    replay_finish_inbox,
-                    snapshot_request_inbox,
-                    approval_details_inbox,
-                ),
-                (
-                    agent_info_inbox,
-                    config_state_inbox,
-                    selected_config_inbox,
-                    status_inbox,
-                    approval_requested_inbox,
-                    approval_resolved_inbox,
-                    selection_snapshot_inbox,
-                    startup_inbox,
-                ),
-            ),
-        )
-    }
-
     fn next_seq(&self) -> u64 {
         self.next_seq.fetch_add(1, Ordering::Relaxed)
     }
@@ -681,7 +607,7 @@ impl AcpShared {
         stream_tx: broadcast::Sender<ServiceMessage>,
         processes: impl Into<AcpProcesses>,
     ) -> Self {
-        let (projection, _) = AcpProjectionSenders::open(Waker::noop().clone());
+        let (projection, _) = AcpProjectionSenders::open_with_waker(Waker::noop().clone());
         Self::with_projection(sid, cwd, anchor, stream_tx, processes, projection)
     }
 
@@ -1866,7 +1792,7 @@ mod tests {
             let (wake, _) = mpsc::unbounded_channel();
             let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
             let (projection, projection_inboxes) =
-                AcpProjectionSenders::open(super::super::AcpWake::waker(wake));
+                AcpProjectionSenders::open_with_waker(super::super::AcpWake::waker(wake));
             let shared = Arc::new(AcpShared::with_projection(
                 "s1".into(),
                 PathBuf::from("/tmp"),

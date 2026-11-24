@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
+vmux_macro = { path = "../vmux_macro" }
 
 [lints]
 workspace = true
