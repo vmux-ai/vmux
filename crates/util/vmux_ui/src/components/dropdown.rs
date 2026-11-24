@@ -317,188 +317,11 @@ impl DropdownPlacement {
 struct DropdownPopupOwner(usize);
 
 impl DropdownPopupOwner {
-    const CONNECTION_WATCHER: &str = r#"
-    const watchConnection = globalThis.__vmuxDropdownWatchConnection ??= (() => {
-      const entries = new Map();
-      let observer = null;
-      const stop = () => {
-        if (entries.size || !observer) return;
-        observer.disconnect();
-        observer = null;
-      };
-      const inspect = () => {
-        for (const [key, entry] of entries) {
-          if (entry.active()) continue;
-          entries.delete(key);
-          for (const cleanup of entry.cleanups) cleanup();
-        }
-        stop();
-      };
-      const start = () => {
-        if (observer) return;
-        observer = new MutationObserver(inspect);
-        observer.observe(document, {
-          childList: true,
-          subtree: true,
-          attributes: true,
-          attributeFilter: ['data-vmux-dropdown-open'],
-        });
-      };
-      return (key, element, cleanup, active = () => element.isConnected) => {
-        let entry = entries.get(key);
-        if (!entry) {
-          entry = { element, active, cleanups: new Set() };
-          entries.set(key, entry);
-        }
-        entry.element = element;
-        entry.active = active;
-        entry.cleanups.add(cleanup);
-        start();
-        return () => {
-          const current = entries.get(key);
-          if (!current) return;
-          current.cleanups.delete(cleanup);
-          if (!current.cleanups.size) entries.delete(key);
-          stop();
-        };
-      };
-    })();
-    "#;
+    const CONNECTION_WATCHER: &str = include_str!("dropdown_connection_watcher.js");
 
-    const KEYBOARD_SCRIPT: &str = r#"
-    __VMUX_POPUP_RUNTIME__
-    __VMUX_DropdownPopupOwner::CONNECTION_WATCHER__
-    globalThis.__vmuxDropdownKeyboardCleanup?.();
-    let active = true;
-    const root = document.getElementById('__VMUX_DROPDOWN_ROOT__');
-    let unwatch = () => {};
-    const rootFor = event => event.target instanceof Element
-      ? event.target.closest('[data-vmux-dropdown-keyboard="true"]')
-      : null;
-    const optionsFor = root => [...root.querySelectorAll('[data-vmux-dropdown-option]:not(:disabled)')];
-    const clear = root => {
-      for (const option of optionsFor(root)) {
-        option.removeAttribute('data-vmux-dropdown-active');
-        option.removeAttribute('aria-selected');
-      }
-    };
-    const activate = (root, options, index) => {
-      clear(root);
-      const option = options[index];
-      option.setAttribute('data-vmux-dropdown-active', 'true');
-      option.setAttribute('aria-selected', 'true');
-      const popup = option.closest('[data-vmux-dropdown-popup]');
-      if (popup) globalThis.__vmuxPopupPresentation.reveal(popup, option);
-    };
-    const keydown = event => {
-      if (event.isComposing) return;
-      const root = rootFor(event);
-      if (!root) return;
-      const options = optionsFor(root);
-      if (!options.length) return;
-      const current = options.findIndex(option => option.getAttribute('data-vmux-dropdown-active') === 'true');
-      const control = event.ctrlKey && !event.altKey && !event.metaKey;
-      const key = event.key.toLowerCase();
-      const forward = event.key === 'ArrowDown' || (control && key === 'n');
-      const backward = event.key === 'ArrowUp' || (control && key === 'p');
-      if (forward || backward) {
-        event.preventDefault();
-        event.stopPropagation();
-        const index = forward
-          ? (current < 0 ? 0 : (current + 1) % options.length)
-          : (current < 0 ? options.length - 1 : (current - 1 + options.length) % options.length);
-        activate(root, options, index);
-        return;
-      }
-      if (event.key === 'Enter' && current >= 0) {
-        event.preventDefault();
-        event.stopPropagation();
-        options[current].click();
-      }
-    };
-    const input = event => {
-      const root = rootFor(event);
-      if (root) clear(root);
-    };
-    const cleanup = () => {
-      if (!active) return;
-      active = false;
-      unwatch();
-      document.removeEventListener('keydown', keydown, true);
-      document.removeEventListener('input', input, true);
-      if (globalThis.__vmuxDropdownKeyboardCleanup === cleanup) {
-        delete globalThis.__vmuxDropdownKeyboardCleanup;
-      }
-    };
-    globalThis.__vmuxDropdownKeyboardCleanup = cleanup;
-    document.addEventListener('keydown', keydown, true);
-    document.addEventListener('input', input, true);
-    if (root) {
-      unwatch = watchConnection(
-        `keyboard:${root.id}`,
-        root,
-        cleanup,
-        () => root.isConnected && root.getAttribute('data-vmux-dropdown-open') === 'true',
-      );
-    }
-    dioxus.send(true);
-    "#;
+    const KEYBOARD_SCRIPT: &str = include_str!("dropdown_keyboard.js");
 
-    const POPUP_SCRIPT: &str = r#"
-    __VMUX_POPUP_RUNTIME__
-    __VMUX_DropdownPopupOwner::CONNECTION_WATCHER__
-    const id = '__VMUX_DROPDOWN_POPUP__';
-    const entries = globalThis.__vmuxDropdownPopupEntries ??= new Map();
-    entries.get(id)?.cleanup();
-    const popup = document.getElementById(id);
-    const root = popup?.closest('[data-vmux-dropdown-root]');
-    if (popup && root) {
-      for (const other of document.querySelectorAll(
-        '[data-vmux-dropdown-popup]:popover-open'
-      )) {
-        if (other !== popup) other.hidePopover();
-      }
-      let active = true;
-      let frame = 0;
-      const anchor = root.querySelector('[data-vmux-dropdown-trigger]') ?? root;
-      let unwatch = () => {};
-      const place = () => {
-        frame = 0;
-        if (!active || !popup.isConnected || !popup.matches(':popover-open')) return;
-        globalThis.__vmuxPopupPresentation.place(popup);
-      };
-      const schedule = () => {
-        if (!active || frame) return;
-        frame = requestAnimationFrame(place);
-      };
-      const toggle = event => {
-        if (event.newState === 'open') schedule();
-      };
-      const observer = new ResizeObserver(schedule);
-      observer.observe(anchor);
-      observer.observe(popup);
-      popup.addEventListener('toggle', toggle);
-      window.addEventListener('resize', schedule, true);
-      window.addEventListener('scroll', schedule, true);
-      const cleanup = () => {
-        if (!active) return;
-        active = false;
-        if (frame) cancelAnimationFrame(frame);
-        observer.disconnect();
-        unwatch();
-        popup.removeEventListener('toggle', toggle);
-        window.removeEventListener('resize', schedule, true);
-        window.removeEventListener('scroll', schedule, true);
-        if (popup.matches(':popover-open')) {
-          try { popup.hidePopover(); } catch (error) {}
-        }
-        if (entries.get(id)?.cleanup === cleanup) entries.delete(id);
-      };
-      unwatch = watchConnection(id, popup, cleanup);
-      entries.set(id, { cleanup });
-      place();
-    }
-    "#;
+    const POPUP_SCRIPT: &str = include_str!("dropdown_popup.js");
 
     fn id(self) -> String {
         format!("vmux-dropdown-popup-{}", self.0)
@@ -514,67 +337,16 @@ impl DropdownPopupOwner {
             .replace("__VMUX_DROPDOWN_POPUP__", &self.id())
     }
 
+    const DISMISS_SCRIPT: &str = include_str!("dropdown_dismiss.js");
+
     fn dismiss_script(self, activation: u64) -> String {
-        format!(
-            r#"
-__VMUX_DropdownPopupOwner::CONNECTION_WATCHER__
-const id = '{}';
-const activation = {};
-const popup = document.getElementById(id);
-if (popup) {{
-  let opened = popup.matches(':popover-open');
-  const root = popup.closest('[data-vmux-dropdown-root]');
-  const manual = popup.getAttribute('popover') === 'manual';
-  const entries = globalThis.__vmuxDropdownToggleEntries ??= new Map();
-  entries.get(id)?.cleanup();
-  let active = true;
-  let unwatch = () => {{}};
-  const cleanup = () => {{
-    if (!active) return;
-    active = false;
-    unwatch();
-    popup.removeEventListener('beforetoggle', beforetoggle);
-    document.removeEventListener('pointerdown', pointerdown, true);
-    document.removeEventListener('keydown', keydown, true);
-    if (entries.get(id)?.cleanup === cleanup) entries.delete(id);
-  }};
-  const dismiss = () => {{
-    if (!active) return;
-    cleanup();
-    if (Number(root?.dataset.vmuxDropdownActivation ?? 0) !== activation) return;
-    dioxus.send('dismissed');
-  }};
-  const beforetoggle = event => {{
-    if (event.newState === 'open') opened = true;
-    if (event.newState === 'closed' && opened) dismiss();
-  }};
-  const pointerdown = event => {{
-    const path = event.composedPath();
-    if (path.includes(popup) || (root && path.includes(root))) return;
-    dismiss();
-  }};
-  const keydown = event => {{
-    if (event.key !== 'Escape' || popup.getAttribute('popover') !== 'manual') return;
-    event.preventDefault();
-    event.stopPropagation();
-    dismiss();
-  }};
-  entries.set(id, {{ cleanup }});
-  unwatch = watchConnection(id, popup, cleanup);
-  popup.addEventListener('beforetoggle', beforetoggle);
-  if (manual) {{
-    document.addEventListener('pointerdown', pointerdown, true);
-    document.addEventListener('keydown', keydown, true);
-  }}
-}}
-"#,
-            self.id(),
-            activation
-        )
-        .replace(
-            "__VMUX_DropdownPopupOwner::CONNECTION_WATCHER__",
-            DropdownPopupOwner::CONNECTION_WATCHER,
-        )
+        Self::DISMISS_SCRIPT
+            .replace("__VMUX_DROPDOWN_ID__", &self.id())
+            .replace("__VMUX_ACTIVATION__", &activation.to_string())
+            .replace(
+                "__VMUX_DropdownPopupOwner::CONNECTION_WATCHER__",
+                DropdownPopupOwner::CONNECTION_WATCHER,
+            )
     }
 
     fn mount(self) {

@@ -13291,8 +13291,12 @@ impl Inventory {
                         }
                     }
                 }
-                let script_owners: Vec<String> =
-                    roots.iter().chain(finalized.iter()).cloned().collect();
+                let script_owners: Vec<String> = roots
+                    .iter()
+                    .chain(finalized.iter())
+                    .chain(self.registered_keys.iter())
+                    .cloned()
+                    .collect();
                 for key in &script_owners {
                     let Some(entry) = self.entries.get(key) else {
                         continue;
