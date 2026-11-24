@@ -4,6 +4,12 @@ pub use crate::{VmuxPlugin, VmuxPluginBuilder, VmuxPluginOptions};
 pub use vmux_acp::AcpPlugin;
 #[cfg(feature = "browser")]
 pub use vmux_browser::BrowserPlugin;
+#[cfg(feature = "ecs")]
+pub use vmux_ecs::{
+    EntityBridge, EntityInbox, EntityInboxPlugin, EntityInboxReceived, EntitySpawnInbox,
+    InboxClosed, InboxPlugin, InboxSendError, InboxSendErrorKind, InboxSet, MessageBridge,
+    MessageInbox, SpawnBridge, SpawnInbox, SpawnInboxPlugin,
+};
 #[cfg(feature = "jobs")]
 pub use vmux_ecs::{
     Job, JobOwner, JobPlugin, JobReady, JobRequest, JobResult, JobSet, JobWake, JobsPlugin,

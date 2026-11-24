@@ -14,13 +14,12 @@ use vmux_api::protocol::{
     AgentRequestId, FileTouchKind, ServiceMessage, SharedEvent,
 };
 use vmux_api::session::{AssistantBlock, Message, PlanStep};
-use vmux_ecs::Order;
+use vmux_ecs::{EntityInbox, Order};
 
 use super::workspace_driver::WorkspaceLocation;
 use super::{
-    AcpApprovalDetailsInbox, AcpHistoryReplay, AcpReplayBeginInbox, AcpReplayFinishInbox,
-    AcpSessionConfigs, AcpSessionCwd, AcpSessionShared, AcpSessionUpdateInbox,
-    AcpSnapshotRequestInbox, SessionId,
+    AcpApprovalDetails, AcpHistoryReplay, AcpReplayBegin, AcpReplayFinish, AcpSessionConfigs,
+    AcpSessionCwd, AcpSessionShared, AcpSessionUpdate, AcpSnapshotRequest, SessionId,
 };
 
 pub(super) struct AcpProjectionPlugin;
@@ -1224,29 +1223,29 @@ impl AcpSessionConfigs {
 }
 
 fn drain_inboxes(
-    mut sessions: Query<(
+    sessions: Query<(
         Entity,
-        &mut AcpReplayBeginInbox,
-        &mut AcpSessionUpdateInbox,
-        &mut AcpReplayFinishInbox,
-        &mut AcpSnapshotRequestInbox,
-        &mut AcpApprovalDetailsInbox,
+        &EntityInbox<AcpReplayBegin>,
+        &EntityInbox<AcpSessionUpdate>,
+        &EntityInbox<AcpReplayFinish>,
+        &EntityInbox<AcpSnapshotRequest>,
+        &EntityInbox<AcpApprovalDetails>,
     )>,
     mut commands: Commands,
 ) {
-    for (session, mut begin, mut update, mut finish, mut snapshot, mut approval) in &mut sessions {
-        let mut next_begin = begin.0.try_recv().ok();
-        let mut next_update = update.0.try_recv().ok();
-        let mut next_finish = finish.0.try_recv().ok();
-        let mut next_snapshot = snapshot.0.try_recv().ok();
-        let mut next_approval = approval.0.try_recv().ok();
+    for (session, begin, update, finish, snapshot, approval) in &sessions {
+        let mut next_begin = begin.try_recv();
+        let mut next_update = update.try_recv();
+        let mut next_finish = finish.try_recv();
+        let mut next_snapshot = snapshot.try_recv();
+        let mut next_approval = approval.try_recv();
         loop {
             let min_seq = [
-                next_begin,
-                next_update.as_ref().map(|(seq, _)| *seq),
-                next_finish.map(|(seq, _)| seq),
-                next_snapshot,
-                next_approval.as_ref().map(|(seq, _)| *seq),
+                next_begin.map(|item| item.0),
+                next_update.as_ref().map(|item| item.0),
+                next_finish.map(|item| item.0),
+                next_snapshot.map(|item| item.0),
+                next_approval.as_ref().map(|item| item.0),
             ]
             .into_iter()
             .flatten()
@@ -1254,26 +1253,26 @@ fn drain_inboxes(
             let Some(seq) = min_seq else {
                 break;
             };
-            if next_begin == Some(seq) {
-                next_begin = begin.0.try_recv().ok();
+            if next_begin.is_some_and(|item| item.0 == seq) {
+                next_begin = begin.try_recv();
                 commands.trigger(BeginHistoryReplay { session });
-            } else if next_update.as_ref().is_some_and(|(s, _)| *s == seq) {
-                let (_, payload) = next_update.take().unwrap();
-                next_update = update.0.try_recv().ok();
+            } else if next_update.as_ref().is_some_and(|item| item.0 == seq) {
+                let AcpSessionUpdate(_, payload) = next_update.take().unwrap();
+                next_update = update.try_recv();
                 commands.trigger(ApplySessionUpdate {
                     session,
                     update: payload,
                 });
-            } else if next_finish.is_some_and(|(s, _)| s == seq) {
-                let (_, loaded) = next_finish.take().unwrap();
-                next_finish = finish.0.try_recv().ok();
+            } else if next_finish.is_some_and(|item| item.0 == seq) {
+                let AcpReplayFinish(_, loaded) = next_finish.take().unwrap();
+                next_finish = finish.try_recv();
                 commands.trigger(FinishHistoryReplay { session, loaded });
-            } else if next_snapshot == Some(seq) {
-                next_snapshot = snapshot.0.try_recv().ok();
+            } else if next_snapshot.is_some_and(|item| item.0 == seq) {
+                next_snapshot = snapshot.try_recv();
                 commands.trigger(EmitTranscriptSnapshot { session });
-            } else if next_approval.as_ref().is_some_and(|(s, _)| *s == seq) {
-                let (_, request) = next_approval.take().unwrap();
-                next_approval = approval.0.try_recv().ok();
+            } else if next_approval.as_ref().is_some_and(|item| item.0 == seq) {
+                let AcpApprovalDetails(_, request) = next_approval.take().unwrap();
+                next_approval = approval.try_recv();
                 commands.trigger(ResolveApprovalDetails { session, request });
             }
         }
@@ -1555,7 +1554,8 @@ mod tests {
             let (stream_tx, stream) = broadcast::channel(64);
             let (wake, _) = mpsc::unbounded_channel();
             let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
-            let (projection, projection_inboxes) = AcpProjectionSenders::open(wake);
+            let (projection, projection_inboxes) =
+                AcpProjectionSenders::open(super::super::AcpWake::waker(wake));
             let shared = Arc::new(AcpShared::new(
                 "s1".into(),
                 PathBuf::from("/tmp"),

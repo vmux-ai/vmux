@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use bevy::window::WindowCloseRequested;
-use crossbeam_channel::Receiver;
 #[cfg(target_os = "macos")]
 use muda::ContextMenu;
 use muda::{AboutMetadata, Menu, MenuEvent, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
@@ -24,6 +23,7 @@ use vmux_command::{
 #[cfg(target_os = "macos")]
 use vmux_ecs::page::BindsEditingChords;
 use vmux_ecs::team::User;
+use vmux_ecs::{InboxPlugin, MessageBridge};
 use vmux_layout::stack::CloseRequest;
 use vmux_layout::tab::TabClosed;
 #[cfg(target_os = "macos")]
@@ -36,7 +36,8 @@ pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.init_non_send::<OsMenuResource>()
+        app.add_plugins(InboxPlugin::<OsMenuEvent>::default())
+            .init_non_send::<OsMenuResource>()
             .add_systems(PreStartup, spawn_state)
             .add_message::<OsMenuSelection>()
             .add_message::<WindowCloseRequested>()
@@ -109,8 +110,8 @@ impl OsMenuState {
 #[derive(Component)]
 struct HideWindowsMenuEntry;
 
-#[derive(Component, Clone)]
-struct OsMenuInbox(Receiver<String>);
+#[derive(Message, Debug)]
+struct OsMenuEvent(String);
 
 fn spawn_state(mut commands: Commands) {
     commands.spawn((Name::new("OS menu runtime"), OsMenuState::default()));
@@ -207,8 +208,7 @@ fn setup(
     mut commands: Commands,
     definitions: Query<(Entity, &CommandDefinition)>,
     settings: Option<Res<AppSettings>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    runtime: Single<Entity, With<OsMenuState>>,
+    bridge: Res<MessageBridge<OsMenuEvent>>,
     mut menu_resource: NonSendMut<OsMenuResource>,
 ) {
     let mut menu_definitions = Vec::new();
@@ -238,17 +238,11 @@ fn setup(
     #[cfg(target_os = "macos")]
     let edit_items = collect_edit_menu_items();
 
-    let proxy = proxy.as_deref().map(|proxy| (**proxy).clone());
-
-    let (menu_events, inbox) = crossbeam_channel::unbounded();
+    let bridge = bridge.clone();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        let _ = menu_events.send(event.id.0.clone());
-        if let Some(proxy) = &proxy {
-            let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
-        }
+        let _ = bridge.send(OsMenuEvent(event.id.0.clone()));
     }));
 
-    commands.entity(*runtime).insert(OsMenuInbox(inbox));
     commands.spawn((
         Name::new("Close Vmux menu item"),
         OsMenuEntry::identified("app_quit".to_string()),
@@ -510,27 +504,23 @@ fn sync_close_menu_item(
 }
 
 fn forward_menu_events(
-    inbox: Option<Single<&OsMenuInbox>>,
+    mut events: MessageReader<OsMenuEvent>,
     menu_entries: Query<(Entity, &OsMenuEntry)>,
     mut state: Single<&mut OsMenuState>,
     mut selections: MessageWriter<OsMenuSelection>,
 ) {
-    let Some(inbox) = inbox else {
-        return;
-    };
-    let drained = inbox.0.try_iter().collect::<Vec<_>>();
-    if drained.is_empty() {
-        return;
-    }
-
-    state.last_menu_command_at = Some(std::time::Instant::now());
-    for event_id in drained {
+    let mut received = false;
+    for event in events.read() {
+        received = true;
         let selected = menu_entries
             .iter()
-            .find_map(|(entity, entry)| entry.matches(&event_id).then_some(entity));
+            .find_map(|(entity, entry)| entry.matches(&event.0).then_some(entity));
         if let Some(entity) = selected {
             selections.write(OsMenuSelection::new(entity));
         }
+    }
+    if received {
+        state.last_menu_command_at = Some(std::time::Instant::now());
     }
 }
 
@@ -642,6 +632,10 @@ fn hide_window_on_close_request(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::Waker;
+
     use super::*;
     use bevy::ecs::message::Messages;
     use bevy::window::Window;
@@ -917,5 +911,58 @@ mod tests {
             state.single(world).unwrap().close_item_enabled
         };
         assert!(enabled, "showing a window re-enables Close");
+    }
+
+    #[test]
+    fn menu_bridge_forwards_os_events_and_wakes_job_wake() {
+        struct WakeCount(AtomicUsize);
+
+        impl std::task::Wake for WakeCount {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::AcqRel);
+            }
+
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.0.fetch_add(1, Ordering::AcqRel);
+            }
+        }
+
+        let mut app = App::new();
+        let wakes = Arc::new(WakeCount(AtomicUsize::new(0)));
+        app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .insert_resource(test_settings())
+            .insert_resource(vmux_ecs::JobWake(Waker::from(Arc::clone(&wakes))));
+        app.world_mut().run_schedule(PreStartup);
+
+        let entry = app
+            .world_mut()
+            .spawn((
+                CommandDefinition::new("terminal_next", "Next Terminal", "Terminal"),
+                OsMenuEntry::identified("terminal_next".to_string()),
+            ))
+            .id();
+
+        app.world_mut().run_schedule(PreUpdate);
+        let bridge = app.world().resource::<MessageBridge<OsMenuEvent>>().clone();
+        bridge
+            .send(OsMenuEvent("terminal_next".to_string()))
+            .unwrap();
+        assert_eq!(wakes.0.load(Ordering::Acquire), 1);
+
+        app.world_mut().run_schedule(PreUpdate);
+        app.world_mut().run_schedule(Update);
+        let invocations = app
+            .world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            invocations,
+            vec![CommandInvocation::new(Entity::PLACEHOLDER, "terminal_next")]
+        );
+        let world = app.world_mut();
+        let state = world.query::<&OsMenuState>().single(world).unwrap();
+        assert!(state.last_menu_command_at.is_some());
+        assert!(world.get::<OsMenuEntry>(entry).is_some());
     }
 }

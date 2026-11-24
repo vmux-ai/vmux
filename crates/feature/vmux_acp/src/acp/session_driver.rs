@@ -5,33 +5,36 @@ use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_api::protocol::{AgentAttachment, ApprovalDecision, ServiceMessage};
 use vmux_api::session::RemoteSession;
-use vmux_ecs::ProcessId;
+use vmux_ecs::{EntitySpawnInbox, ProcessId};
 use vmux_process::ProcessRuntime;
 
 use super::driver::AcpMcpServers;
 use super::{
-    AcpSessionAgentInfo, AcpSessionConfigRequest, AcpSessionInbox, AcpSessionReceivers,
-    AcpSessionRuntime, AcpSessionStatusRequest, AcpSessionWake, AcpSessions, ApproveAcpTool,
-    CancelAcpSession, CloseAcpSession, FindAcpSession, ListAcpSessions, RebindAcpSession,
-    SendAcpPrompt, SetAcpConfig, SnapshotAcpSession, SpawnAcpSession, SubscribeAcpSession,
+    AcpSessionAgentInfo, AcpSessionConfigRequest, AcpSessionRuntime, AcpSessionStatusRequest,
+    AcpSessionWake, AcpSessions, AcpWake, ApproveAcpTool, CancelAcpSession, CloseAcpSession,
+    FindAcpSession, ListAcpSessions, RebindAcpSession, SendAcpPrompt, SetAcpConfig,
+    SnapshotAcpSession, SpawnAcpSession, SubscribeAcpSession,
 };
 
 impl AcpSessions {
     pub fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
-        let (spawns, spawn_inbox) = mpsc::unbounded_channel();
-        let (prompts, prompt_inbox) = mpsc::unbounded_channel();
-        let (approvals, approval_inbox) = mpsc::unbounded_channel();
-        let (configs, config_inbox) = mpsc::unbounded_channel();
-        let (cancels, cancel_inbox) = mpsc::unbounded_channel();
-        let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
-        let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
-        let (agent_infos, agent_info_inbox) = mpsc::unbounded_channel();
-        let (config_states, config_state_inbox) = mpsc::unbounded_channel();
-        let (statuses, status_inbox) = mpsc::unbounded_channel();
-        let (lists, list_inbox) = mpsc::unbounded_channel();
-        let (lookups, lookup_inbox) = mpsc::unbounded_channel();
-        let (rebinds, rebind_inbox) = mpsc::unbounded_channel();
-        let (closes, close_inbox) = mpsc::unbounded_channel();
+        let waker = AcpWake::waker(wake);
+        let (spawns, spawn_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (prompts, prompt_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (approvals, approval_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (configs, config_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (cancels, cancel_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (subscriptions, subscription_inbox) =
+            EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (snapshots, snapshot_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (agent_infos, agent_info_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (config_states, config_state_inbox) =
+            EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (statuses, status_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (lists, list_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (lookups, lookup_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (rebinds, rebind_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (closes, close_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
         (
             Self {
                 spawns,
@@ -48,27 +51,28 @@ impl AcpSessions {
                 lookups,
                 rebinds,
                 closes,
-                wake: wake.clone(),
             },
             (
                 AcpSessionRuntime(runtime),
-                AcpSessionWake(wake),
-                AcpSessionInbox(AcpSessionReceivers {
-                    spawns: spawn_inbox,
-                    prompts: prompt_inbox,
-                    approvals: approval_inbox,
-                    configs: config_inbox,
-                    cancels: cancel_inbox,
-                    subscriptions: subscription_inbox,
-                    snapshots: snapshot_inbox,
-                    agent_infos: agent_info_inbox,
-                    config_states: config_state_inbox,
-                    statuses: status_inbox,
-                    lists: list_inbox,
-                    lookups: lookup_inbox,
-                    rebinds: rebind_inbox,
-                    closes: close_inbox,
-                }),
+                AcpSessionWake(waker),
+                (
+                    spawn_inbox,
+                    prompt_inbox,
+                    approval_inbox,
+                    config_inbox,
+                    cancel_inbox,
+                    subscription_inbox,
+                    snapshot_inbox,
+                ),
+                (
+                    agent_info_inbox,
+                    config_state_inbox,
+                    status_inbox,
+                    list_inbox,
+                    lookup_inbox,
+                    rebind_inbox,
+                    close_inbox,
+                ),
             ),
         )
     }
@@ -138,9 +142,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .map_err(|_| "ACP session runtime unavailable".to_string())?;
-        self.wake
-            .send(())
-            .map_err(|_| "ACP session runtime unavailable".to_string())?;
         receiver
             .await
             .map_err(|_| "ACP session spawn was cancelled".to_string())
@@ -166,7 +167,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .is_err()
-            || self.wake.send(()).is_err()
         {
             return false;
         }
@@ -184,7 +184,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .is_err()
-            || self.wake.send(()).is_err()
         {
             return false;
         }
@@ -209,7 +208,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .is_err()
-            || self.wake.send(()).is_err()
         {
             return false;
         }
@@ -225,7 +223,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .is_err()
-            || self.wake.send(()).is_err()
         {
             return false;
         }
@@ -240,7 +237,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .ok()?;
-        self.wake.send(()).ok()?;
         receiver.await.ok().flatten()
     }
 
@@ -252,7 +248,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .ok()?;
-        self.wake.send(()).ok()?;
         receiver.await.ok().flatten()
     }
 
@@ -264,7 +259,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .ok()?;
-        self.wake.send(()).ok()?;
         receiver.await.ok().flatten()
     }
 
@@ -276,7 +270,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .ok()?;
-        self.wake.send(()).ok()?;
         receiver.await.ok().flatten()
     }
 
@@ -288,7 +281,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .ok()?;
-        self.wake.send(()).ok()?;
         receiver.await.ok().flatten()
     }
 
@@ -300,7 +292,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .is_err()
-            || self.wake.send(()).is_err()
         {
             return Vec::new();
         }
@@ -315,7 +306,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .ok()?;
-        self.wake.send(()).ok()?;
         receiver.await.ok().flatten()
     }
 
@@ -327,9 +317,6 @@ impl AcpSessions {
                 cwd,
                 response: Some(response),
             })
-            .map_err(|_| "ACP session runtime unavailable".to_string())?;
-        self.wake
-            .send(())
             .map_err(|_| "ACP session runtime unavailable".to_string())?;
         receiver
             .await
@@ -345,7 +332,6 @@ impl AcpSessions {
                 response: Some(response),
             })
             .is_err()
-            || self.wake.send(()).is_err()
         {
             return false;
         }

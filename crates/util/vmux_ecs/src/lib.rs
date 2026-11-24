@@ -31,6 +31,11 @@ pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
 pub use identity::{
     IdentityIndex, IdentityIndexPlugin, IdentityIndexSet, IdentityIndexWriter, IdentityLookupError,
 };
+pub use inbox::{
+    EntityBridge, EntityInbox, EntityInboxPlugin, EntityInboxReceived, EntitySpawnInbox,
+    InboxClosed, InboxPlugin, InboxSendError, InboxSendErrorKind, InboxSet, MessageBridge,
+    MessageInbox, SpawnBridge, SpawnInbox, SpawnInboxPlugin,
+};
 #[cfg(feature = "jobs")]
 pub use jobs::{
     Job, JobOwner, JobPlugin, JobReady, JobRequest, JobResult, JobSet, JobWake, JobsPlugin,
@@ -91,6 +96,7 @@ mod file_ui_state;
 #[cfg(all(host, feature = "host"))]
 pub mod host_spawn;
 mod identity;
+pub mod inbox;
 #[cfg(feature = "jobs")]
 pub mod jobs;
 #[cfg(all(host, feature = "host"))]
