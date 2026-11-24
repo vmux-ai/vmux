@@ -179,8 +179,11 @@ impl Plugin for ToolRuntimePlugin {
             tool_inventory::InventoryPlugin,
             package::PackageChangePlugin,
             apply::ApplyPlugin,
-            McpRegistryPlugin,
         ));
+        #[cfg(host)]
+        if !app.is_plugin_added::<McpRegistryPlugin>() {
+            app.add_plugins(McpRegistryPlugin);
+        }
         #[cfg(host)]
         if !app.is_plugin_added::<io::ObservationIoPlugin>() {
             app.add_plugins(io::ObservationIoPlugin);
@@ -1095,5 +1098,18 @@ brew "ripgrep"
         assert_eq!(loaded.packages["npm"], ["eslint", "existing"]);
         assert_eq!(loaded.packages["homebrew-formula"], ["ripgrep"]);
         assert_eq!(loaded.packages["homebrew-cask"], ["ghostty"]);
+    }
+
+    #[cfg(host)]
+    #[test]
+    fn tool_runtime_composes_when_mcp_registry_is_already_registered() {
+        let mut app = App::new();
+        app.add_plugins((
+            bevy_app::TaskPoolPlugin::default(),
+            McpRegistryPlugin,
+            ToolRuntimePlugin,
+        ));
+        assert!(app.is_plugin_added::<McpRegistryPlugin>());
+        assert!(app.is_plugin_added::<ToolRuntimePlugin>());
     }
 }

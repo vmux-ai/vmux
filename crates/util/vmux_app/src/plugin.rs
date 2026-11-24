@@ -206,6 +206,19 @@ mod tests {
         assert!(options.knowledge);
         assert!(options.service);
     }
+
+    #[cfg(all(feature = "acp", feature = "tool"))]
+    #[test]
+    fn acp_and_tool_compose_without_duplicate_plugin_panics() {
+        let mut app = App::new();
+        app.add_plugins((
+            bevy_app::TaskPoolPlugin::default(),
+            VmuxPlugin::builder().acp(true).tool(true).build(),
+        ));
+        assert!(app.is_plugin_added::<vmux_acp::AcpPlugin>());
+        assert!(app.is_plugin_added::<vmux_tool::ToolPlugin>());
+        assert!(app.is_plugin_added::<vmux_tool::McpRegistryPlugin>());
+    }
 }
 
 #[cfg(all(test, feature = "account-local", feature = "jobs"))]
