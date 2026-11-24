@@ -23,42 +23,17 @@ impl Shell {
     }
 }
 
-const BASH_RC: &str = r#"[ -r "$HOME/.bashrc" ] && . "$HOME/.bashrc"
-if [[ $- == *i* ]]; then
-  __vmux_at_prompt=1
-  __vmux_preexec() { [ -n "$__vmux_at_prompt" ] || return; __vmux_at_prompt=; printf '\033]2;%s\007\033]133;C\007' "$1"; }
-  __vmux_precmd() { local s=$? p=$PWD; p=${p//%/%25}; p=${p//\\/%5C}; p=${p//#/%23}; p=${p//\?/%3F}; printf '\033]133;D;%s\007\033]7;file://localhost%s\007' "$s" "$p"; __vmux_at_prompt=1; }
-  trap '__vmux_preexec "$BASH_COMMAND"' DEBUG
-  PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND;}"'__vmux_precmd'
-fi
-"#;
+const BASH_RC: &str = include_str!("shell_integration/bash.sh");
 
 const ZSH_ZSHENV: &str = r#"ZDOTDIR="${__VMUX_ZDOTDIR_ORIG:-$HOME}"
 [ -r "$ZDOTDIR/.zshenv" ] && source "$ZDOTDIR/.zshenv"
 "#;
 
-const ZSH_ZSHRC: &str = r#"ZDOTDIR="${__VMUX_ZDOTDIR_ORIG:-$HOME}"
-[ -r "$ZDOTDIR/.zshrc" ] && source "$ZDOTDIR/.zshrc"
-autoload -Uz add-zsh-hook 2>/dev/null
-__vmux_pe() { printf '\033]2;%s\007\033]133;C\007' "$1" }
-__vmux_pc() { local s=$? p=$PWD; p=${p//%/%25}; p=${p//\\/%5C}; p=${p//#/%23}; p=${p//\?/%3F}; printf '\033]133;D;%s\007\033]7;file://localhost%s\007' "$s" "$p" }
-add-zsh-hook preexec __vmux_pe 2>/dev/null
-add-zsh-hook precmd __vmux_pc 2>/dev/null
-"#;
+const ZSH_ZSHRC: &str = include_str!("shell_integration/zsh.sh");
 
-const FISH_INIT: &str = r#"function __vmux_pe --on-event fish_preexec; printf '\033]2;%s\007\033]133;C\007' $argv[1]; end
-function __vmux_pc --on-event fish_postexec
-    set -l s $status
-    set -l p (string replace -a '%' '%25' -- $PWD | string replace -a '\\' '%5C' | string replace -a '#' '%23' | string replace -a '?' '%3F')
-    printf '\033]133;D;%s\007\033]7;file://localhost%s\007' $s $p
-end
-__vmux_pc
-"#;
+const FISH_INIT: &str = include_str!("shell_integration/fish.fish");
 
-const NU_HOOKS: &str = r#"$env.config.shell_integration.osc133 = false
-$env.config.hooks.pre_execution = ($env.config.hooks.pre_execution? | default [] | append {|| print -rn $"\u{1b}]2;(commandline)\u{7}\u{1b}]133;C\u{7}" })
-$env.config.hooks.pre_prompt = ($env.config.hooks.pre_prompt? | default [] | append {|| print -rn $"\u{1b}]133;D;($env.LAST_EXIT_CODE)\u{7}\u{1b}]7;file://localhost($env.PWD | str replace --all '%' '%25' | str replace --all '\' '%5C' | str replace --all '#' '%23' | str replace --all '?' '%3F')\u{7}" })
-"#;
+const NU_HOOKS: &str = include_str!("shell_integration/nu.nu");
 
 pub(crate) type ShellIntegration = ProcessShell;
 
