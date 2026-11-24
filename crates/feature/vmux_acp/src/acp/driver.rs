@@ -3,7 +3,7 @@ use std::future::Future;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Waker;
 
@@ -28,18 +28,14 @@ use base64::Engine;
 use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-use vmux_ecs::{ChannelSender, ProcessId};
+use vmux_ecs::{AsyncChannel, ChannelSender, ProcessId};
 
 use super::agent_process::AgentProcess;
 #[cfg(test)]
 use super::projection::AcpTranscripts;
 use super::projection::{AcpToolCallId, ApprovalDetailsQuery, ApprovalDetailsRequest};
 use super::workspace_driver::WorkspaceLocation;
-use super::{
-    AcpAgentInfoUpdate, AcpApprovalDetails, AcpApprovalResolved, AcpReplayBegin, AcpReplayFinish,
-    AcpSelectionSnapshot, AcpSelectionSnapshotRequest, AcpSessionUpdate, AcpSnapshotRequest,
-    AcpStartup,
-};
+use super::{AcpProjectionEvent, AcpSelectionSnapshot};
 #[cfg(test)]
 use bevy::prelude::{MinimalPlugins, Name};
 use vmux_api::protocol::{
@@ -199,81 +195,62 @@ pub(super) struct AcpSelectedConfigInput {
     pub(super) config_options: Vec<SessionConfigOption>,
 }
 
-#[vmux_ecs::channels]
 pub(super) struct AcpProjectionSenders {
-    #[channel(default)]
-    next_seq: AtomicU64,
-    #[channel(manual)]
-    replay_begin: ChannelSender<AcpReplayBegin>,
-    #[channel(manual)]
-    session_update: ChannelSender<AcpSessionUpdate>,
-    #[channel(manual)]
-    replay_finish: ChannelSender<AcpReplayFinish>,
-    #[channel(manual)]
-    snapshot_request: ChannelSender<AcpSnapshotRequest>,
-    #[channel(manual)]
-    approval_details: ChannelSender<AcpApprovalDetails>,
-    agent_info: ChannelSender<AcpAgentInfoUpdate>,
-    config_state: ChannelSender<AcpConfigStateInput>,
-    #[channel(manual)]
-    selected_config: ChannelSender<AcpSelectedConfigInput>,
-    status: ChannelSender<AgentRunStatus>,
-    approval_requested: ChannelSender<RemoteApproval>,
-    approval_resolved: ChannelSender<AcpApprovalResolved>,
-    #[channel(manual)]
-    selection_snapshot: ChannelSender<AcpSelectionSnapshotRequest>,
-    startup: ChannelSender<AcpStartup>,
+    events: ChannelSender<AcpProjectionEvent>,
 }
 
 impl AcpProjectionSenders {
-    fn next_seq(&self) -> u64 {
-        self.next_seq.fetch_add(1, Ordering::Relaxed)
+    pub(super) fn open_with_waker(waker: Waker) -> (Self, AsyncChannel<AcpProjectionEvent>) {
+        let (events, channel) = AsyncChannel::unbounded_with_waker(waker);
+        (Self { events }, channel)
     }
 
     pub(super) fn begin_history_replay(&self) {
-        let _ = self.replay_begin.send(AcpReplayBegin(self.next_seq()));
+        let _ = self.events.send(AcpProjectionEvent::BeginHistoryReplay);
     }
 
     pub(super) fn session_update(&self, update: SessionUpdate) {
         let _ = self
-            .session_update
-            .send(AcpSessionUpdate(self.next_seq(), Box::new(update)));
+            .events
+            .send(AcpProjectionEvent::SessionUpdate(Box::new(update)));
     }
 
     pub(super) fn finish_history_replay(&self, loaded: bool) {
         let _ = self
-            .replay_finish
-            .send(AcpReplayFinish(self.next_seq(), loaded));
+            .events
+            .send(AcpProjectionEvent::FinishHistoryReplay { loaded });
     }
 
     pub(super) fn request_snapshot(&self) {
-        let _ = self
-            .snapshot_request
-            .send(AcpSnapshotRequest(self.next_seq()));
+        let _ = self.events.send(AcpProjectionEvent::RequestSnapshot);
     }
 
     fn agent_info(&self, name: String) {
-        let _ = self.agent_info.send(AcpAgentInfoUpdate(name));
+        let _ = self.events.send(AcpProjectionEvent::AgentInfo(name));
     }
 
     fn config_state(&self, input: AcpConfigStateInput) {
-        let _ = self.config_state.send(input);
+        let _ = self.events.send(AcpProjectionEvent::ConfigState(input));
     }
 
     fn selected_config(&self, input: AcpSelectedConfigInput) {
-        let _ = self.selected_config.send(input);
+        let _ = self.events.send(AcpProjectionEvent::SelectedConfig(input));
     }
 
     fn status(&self, status: AgentRunStatus) {
-        let _ = self.status.send(status);
+        let _ = self.events.send(AcpProjectionEvent::Status(status));
     }
 
     fn approval_requested(&self, approval: RemoteApproval) {
-        let _ = self.approval_requested.send(approval);
+        let _ = self
+            .events
+            .send(AcpProjectionEvent::ApprovalRequested(approval));
     }
 
     fn approval_resolved(&self, call_id: String) {
-        let _ = self.approval_resolved.send(AcpApprovalResolved(call_id));
+        let _ = self
+            .events
+            .send(AcpProjectionEvent::ApprovalResolved(call_id));
     }
 
     pub(super) fn approval_details(
@@ -281,25 +258,24 @@ impl AcpProjectionSenders {
         query: ApprovalDetailsQuery,
         response: oneshot::Sender<Option<(String, String)>>,
     ) {
-        let _ = self.approval_details.send(AcpApprovalDetails(
-            self.next_seq(),
+        let _ = self.events.send(AcpProjectionEvent::ApprovalDetails(
             ApprovalDetailsRequest { query, response },
         ));
     }
 
     fn startup_ready(&self) {
-        let _ = self.startup.send(AcpStartup(true));
+        let _ = self.events.send(AcpProjectionEvent::Startup(true));
     }
 
     fn startup_failed(&self) {
-        let _ = self.startup.send(AcpStartup(false));
+        let _ = self.events.send(AcpProjectionEvent::Startup(false));
     }
 
     async fn selection_snapshot(&self) -> AcpSelectionSnapshot {
         let (response, receiver) = oneshot::channel();
         let _ = self
-            .selection_snapshot
-            .send(AcpSelectionSnapshotRequest(response));
+            .events
+            .send(AcpProjectionEvent::SelectionSnapshot(response));
         receiver.await.unwrap_or_default()
     }
 }

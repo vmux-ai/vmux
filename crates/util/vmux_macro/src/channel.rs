@@ -89,7 +89,7 @@ impl Declaration {
                     });
                     open_waker_stmts.push(quote! {
                         let (#ident, #rx) = #crate_path::SpawnReceiver::<#payload>::unbounded_with_waker(
-                            ::core::clone::Clone::clone(&waker),
+                            ::core::clone::Clone::clone(&__vmux_channel_waker),
                         );
                     });
                     sender_inits.push(quote!(#ident));
@@ -107,7 +107,7 @@ impl Declaration {
                     });
                     open_waker_stmts.push(quote! {
                         let (#ident, #rx) = #crate_path::AsyncChannel::<#payload>::unbounded_with_waker(
-                            ::core::clone::Clone::clone(&waker),
+                            ::core::clone::Clone::clone(&__vmux_channel_waker),
                         );
                     });
                     sender_inits.push(quote!(#ident));
@@ -150,7 +150,7 @@ impl Declaration {
 
                 #[allow(dead_code)]
                 #vis fn open_with_waker(
-                    waker: ::std::task::Waker,
+                    __vmux_channel_waker: ::std::task::Waker,
                 ) -> (Self, impl #crate_path::macro_support::Bundle) {
                     #(#open_waker_stmts)*
                     (Self { #(#sender_inits,)* }, #receiver_bundle)
@@ -185,10 +185,7 @@ struct Arguments {
 
 impl Parse for Arguments {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let key: Ident = input.parse()?;
-        if key != "crate" {
-            return Err(syn::Error::new_spanned(key, "expected `crate = ...`"));
-        }
+        input.parse::<Token![crate]>()?;
         input.parse::<Token![=]>()?;
         let crate_path: Path = input.parse()?;
         if input.peek(Token![,]) {
@@ -263,6 +260,12 @@ impl FieldOptions {
         let mut options = Self::default();
         let mut kept = Vec::with_capacity(attrs.len());
         for attr in attrs.drain(..) {
+            if attr.path().is_ident("cfg") {
+                return Err(syn::Error::new_spanned(
+                    attr,
+                    "`#[cfg]` is not supported on fields of a `#[channels]` struct",
+                ));
+            }
             if !attr.path().is_ident("channel") {
                 kept.push(attr);
                 continue;
@@ -359,5 +362,28 @@ mod tests {
             }
         };
         assert!(Declaration::parse(quote!(), unknown, "::vmux_channel").is_err());
+
+        let conditional: DeriveInput = parse_quote! {
+            struct BadCfg {
+                #[cfg(test)]
+                items: SpawnSender<Work>,
+            }
+        };
+        assert!(Declaration::parse(quote!(), conditional, "::vmux_channel").is_err());
+    }
+
+    #[test]
+    fn channels_macro_supports_crate_override_and_field_named_waker() {
+        let item: DeriveInput = parse_quote! {
+            struct Group {
+                waker: ChannelSender<WakeEvent>,
+                other: ChannelSender<OtherEvent>,
+            }
+        };
+        let declaration =
+            Declaration::parse(quote!(crate = ::my_ecs::channel), item, "::vmux_channel").unwrap();
+        let output = declaration.expand().to_string();
+        assert!(output.contains("__vmux_channel_waker : :: std :: task :: Waker"));
+        assert!(output.contains(":: my_ecs :: channel :: AsyncChannel :: < WakeEvent >"));
     }
 }

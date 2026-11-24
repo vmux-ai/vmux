@@ -32,6 +32,9 @@ impl Source {
                 _ => "util",
             };
             let directory = root.join("crates").join(group).join(name);
+            if !directory.is_dir() {
+                continue;
+            }
             paths.push(directory.join("Cargo.toml"));
             Self::files(
                 &directory.join("src"),
