@@ -23,7 +23,7 @@ use vmux_command::{
 #[cfg(target_os = "macos")]
 use vmux_ecs::page::BindsEditingChords;
 use vmux_ecs::team::User;
-use vmux_ecs::{InboxPlugin, MessageBridge};
+use vmux_ecs::{AsyncChannelPlugin, MessageSender};
 use vmux_layout::stack::CloseRequest;
 use vmux_layout::tab::TabClosed;
 #[cfg(target_os = "macos")]
@@ -36,7 +36,7 @@ pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(InboxPlugin::<OsMenuEvent>::default())
+        app.add_plugins(AsyncChannelPlugin::message::<OsMenuEvent>())
             .init_non_send::<OsMenuResource>()
             .add_systems(PreStartup, spawn_state)
             .add_message::<OsMenuSelection>()
@@ -209,7 +209,7 @@ fn setup(
     mut commands: Commands,
     definitions: Query<(Entity, &CommandDefinition)>,
     settings: Option<Res<AppSettings>>,
-    bridge: Res<MessageBridge<OsMenuEvent>>,
+    sender: Res<MessageSender<OsMenuEvent>>,
     mut menu_resource: NonSendMut<OsMenuResource>,
 ) {
     let mut menu_definitions = Vec::new();
@@ -239,9 +239,9 @@ fn setup(
     #[cfg(target_os = "macos")]
     let edit_items = collect_edit_menu_items();
 
-    let bridge = bridge.clone();
+    let sender = sender.clone();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        let _ = bridge.send(OsMenuEvent(event.id.0.clone()));
+        let _ = sender.send(OsMenuEvent(event.id.0.clone()));
     }));
 
     commands.spawn((
@@ -915,7 +915,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_bridge_forwards_os_events_and_wakes_job_wake() {
+    fn menu_channel_forwards_os_events_and_wakes_job_wake() {
         struct WakeCount(AtomicUsize);
 
         impl std::task::Wake for WakeCount {
@@ -944,8 +944,8 @@ mod tests {
             .id();
 
         app.world_mut().run_schedule(PreUpdate);
-        let bridge = app.world().resource::<MessageBridge<OsMenuEvent>>().clone();
-        bridge
+        let sender = app.world().resource::<MessageSender<OsMenuEvent>>().clone();
+        sender
             .send(OsMenuEvent("terminal_next".to_string()))
             .unwrap();
         assert_eq!(wakes.0.load(Ordering::Acquire), 1);

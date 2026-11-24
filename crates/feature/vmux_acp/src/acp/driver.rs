@@ -28,7 +28,7 @@ use base64::Engine;
 use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-use vmux_ecs::{EntityBridge, EntityInbox, ProcessId};
+use vmux_ecs::{EntityChannel, EntitySender, ProcessId};
 
 use super::agent_process::AgentProcess;
 #[cfg(test)]
@@ -201,19 +201,19 @@ pub(super) struct AcpSelectedConfigInput {
 
 pub(super) struct AcpProjectionSenders {
     next_seq: AtomicU64,
-    replay_begin: EntityBridge<AcpReplayBegin>,
-    session_update: EntityBridge<AcpSessionUpdate>,
-    replay_finish: EntityBridge<AcpReplayFinish>,
-    snapshot_request: EntityBridge<AcpSnapshotRequest>,
-    approval_details: EntityBridge<AcpApprovalDetails>,
-    agent_info: EntityBridge<AcpAgentInfoUpdate>,
-    config_state: EntityBridge<AcpConfigStateInput>,
-    selected_config: EntityBridge<AcpSelectedConfigInput>,
-    status: EntityBridge<AgentRunStatus>,
-    approval_requested: EntityBridge<RemoteApproval>,
-    approval_resolved: EntityBridge<AcpApprovalResolved>,
-    selection_snapshot: EntityBridge<AcpSelectionSnapshotRequest>,
-    startup: EntityBridge<AcpStartup>,
+    replay_begin: EntitySender<AcpReplayBegin>,
+    session_update: EntitySender<AcpSessionUpdate>,
+    replay_finish: EntitySender<AcpReplayFinish>,
+    snapshot_request: EntitySender<AcpSnapshotRequest>,
+    approval_details: EntitySender<AcpApprovalDetails>,
+    agent_info: EntitySender<AcpAgentInfoUpdate>,
+    config_state: EntitySender<AcpConfigStateInput>,
+    selected_config: EntitySender<AcpSelectedConfigInput>,
+    status: EntitySender<AgentRunStatus>,
+    approval_requested: EntitySender<RemoteApproval>,
+    approval_resolved: EntitySender<AcpApprovalResolved>,
+    selection_snapshot: EntitySender<AcpSelectionSnapshotRequest>,
+    startup: EntitySender<AcpStartup>,
 }
 
 impl AcpProjectionSenders {
@@ -224,44 +224,45 @@ impl AcpProjectionSenders {
         Self,
         (
             (
-                EntityInbox<AcpReplayBegin>,
-                EntityInbox<AcpSessionUpdate>,
-                EntityInbox<AcpReplayFinish>,
-                EntityInbox<AcpSnapshotRequest>,
-                EntityInbox<AcpApprovalDetails>,
+                EntityChannel<AcpReplayBegin>,
+                EntityChannel<AcpSessionUpdate>,
+                EntityChannel<AcpReplayFinish>,
+                EntityChannel<AcpSnapshotRequest>,
+                EntityChannel<AcpApprovalDetails>,
             ),
             (
-                EntityInbox<AcpAgentInfoUpdate>,
-                EntityInbox<AcpConfigStateInput>,
-                EntityInbox<AcpSelectedConfigInput>,
-                EntityInbox<AgentRunStatus>,
-                EntityInbox<RemoteApproval>,
-                EntityInbox<AcpApprovalResolved>,
-                EntityInbox<AcpSelectionSnapshotRequest>,
-                EntityInbox<AcpStartup>,
+                EntityChannel<AcpAgentInfoUpdate>,
+                EntityChannel<AcpConfigStateInput>,
+                EntityChannel<AcpSelectedConfigInput>,
+                EntityChannel<AgentRunStatus>,
+                EntityChannel<RemoteApproval>,
+                EntityChannel<AcpApprovalResolved>,
+                EntityChannel<AcpSelectionSnapshotRequest>,
+                EntityChannel<AcpStartup>,
             ),
         ),
     ) {
-        let (replay_begin, replay_begin_inbox) = EntityInbox::unbounded_with_waker(waker.clone());
+        let (replay_begin, replay_begin_inbox) = EntityChannel::unbounded_with_waker(waker.clone());
         let (session_update, session_update_inbox) =
-            EntityInbox::unbounded_with_waker(waker.clone());
-        let (replay_finish, replay_finish_inbox) = EntityInbox::unbounded_with_waker(waker.clone());
+            EntityChannel::unbounded_with_waker(waker.clone());
+        let (replay_finish, replay_finish_inbox) =
+            EntityChannel::unbounded_with_waker(waker.clone());
         let (snapshot_request, snapshot_request_inbox) =
-            EntityInbox::unbounded_with_waker(waker.clone());
+            EntityChannel::unbounded_with_waker(waker.clone());
         let (approval_details, approval_details_inbox) =
-            EntityInbox::unbounded_with_waker(waker.clone());
-        let (agent_info, agent_info_inbox) = EntityInbox::unbounded_with_waker(waker.clone());
-        let (config_state, config_state_inbox) = EntityInbox::unbounded_with_waker(waker.clone());
+            EntityChannel::unbounded_with_waker(waker.clone());
+        let (agent_info, agent_info_inbox) = EntityChannel::unbounded_with_waker(waker.clone());
+        let (config_state, config_state_inbox) = EntityChannel::unbounded_with_waker(waker.clone());
         let (selected_config, selected_config_inbox) =
-            EntityInbox::unbounded_with_waker(waker.clone());
-        let (status, status_inbox) = EntityInbox::unbounded_with_waker(waker.clone());
+            EntityChannel::unbounded_with_waker(waker.clone());
+        let (status, status_inbox) = EntityChannel::unbounded_with_waker(waker.clone());
         let (approval_requested, approval_requested_inbox) =
-            EntityInbox::unbounded_with_waker(waker.clone());
+            EntityChannel::unbounded_with_waker(waker.clone());
         let (approval_resolved, approval_resolved_inbox) =
-            EntityInbox::unbounded_with_waker(waker.clone());
+            EntityChannel::unbounded_with_waker(waker.clone());
         let (selection_snapshot, selection_snapshot_inbox) =
-            EntityInbox::unbounded_with_waker(waker.clone());
-        let (startup, startup_inbox) = EntityInbox::unbounded_with_waker(waker);
+            EntityChannel::unbounded_with_waker(waker.clone());
+        let (startup, startup_inbox) = EntityChannel::unbounded_with_waker(waker);
         (
             Self {
                 next_seq: AtomicU64::new(0),

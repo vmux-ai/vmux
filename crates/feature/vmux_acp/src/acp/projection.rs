@@ -14,7 +14,7 @@ use vmux_api::protocol::{
     AgentRequestId, FileTouchKind, ServiceMessage, SharedEvent,
 };
 use vmux_api::session::{AssistantBlock, Message, PlanStep};
-use vmux_ecs::{EntityInbox, Order};
+use vmux_ecs::{EntityChannel, Order};
 
 use super::workspace_driver::WorkspaceLocation;
 use super::{
@@ -1225,11 +1225,11 @@ impl AcpSessionConfigs {
 fn drain_inboxes(
     sessions: Query<(
         Entity,
-        &EntityInbox<AcpReplayBegin>,
-        &EntityInbox<AcpSessionUpdate>,
-        &EntityInbox<AcpReplayFinish>,
-        &EntityInbox<AcpSnapshotRequest>,
-        &EntityInbox<AcpApprovalDetails>,
+        &EntityChannel<AcpReplayBegin>,
+        &EntityChannel<AcpSessionUpdate>,
+        &EntityChannel<AcpReplayFinish>,
+        &EntityChannel<AcpSnapshotRequest>,
+        &EntityChannel<AcpApprovalDetails>,
     )>,
     mut commands: Commands,
 ) {

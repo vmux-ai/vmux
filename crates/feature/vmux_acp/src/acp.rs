@@ -26,8 +26,8 @@ use vmux_api::session::Message;
 use vmux_api::session::{RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_ecs::service::{AbortTask, Shutdown, ShutdownComplete, ShutdownPending};
 use vmux_ecs::{
-    CreatedAt, EntityInbox, EntityInboxPlugin, EntityInboxReceived, EntitySpawnInbox, ProcessId,
-    SpawnBridge, SpawnInboxPlugin,
+    AsyncChannelPlugin, ChannelReceived, CreatedAt, EntityChannel, EntitySpawnChannel, ProcessId,
+    SpawnSender,
 };
 use vmux_process::ProcessRuntime;
 use vmux_session::SessionId;
@@ -47,31 +47,31 @@ impl bevy::prelude::Plugin for AcpRuntimePlugin {
         app.add_plugins((
             AcpProjectionPlugin,
             (
-                SpawnInboxPlugin::<SpawnAcpSession>::components(),
-                SpawnInboxPlugin::<SendAcpPrompt>::components(),
-                SpawnInboxPlugin::<ApproveAcpTool>::components(),
-                SpawnInboxPlugin::<SetAcpConfig>::components(),
-                SpawnInboxPlugin::<CancelAcpSession>::components(),
-                SpawnInboxPlugin::<SubscribeAcpSession>::components(),
-                SpawnInboxPlugin::<SnapshotAcpSession>::components(),
+                AsyncChannelPlugin::spawn::<SpawnAcpSession>().components(),
+                AsyncChannelPlugin::spawn::<SendAcpPrompt>().components(),
+                AsyncChannelPlugin::spawn::<ApproveAcpTool>().components(),
+                AsyncChannelPlugin::spawn::<SetAcpConfig>().components(),
+                AsyncChannelPlugin::spawn::<CancelAcpSession>().components(),
+                AsyncChannelPlugin::spawn::<SubscribeAcpSession>().components(),
+                AsyncChannelPlugin::spawn::<SnapshotAcpSession>().components(),
             ),
             (
-                SpawnInboxPlugin::<AcpSessionAgentInfo>::components(),
-                SpawnInboxPlugin::<AcpSessionConfigRequest>::components(),
-                SpawnInboxPlugin::<AcpSessionStatusRequest>::components(),
-                SpawnInboxPlugin::<ListAcpSessions>::components(),
-                SpawnInboxPlugin::<FindAcpSession>::components(),
-                SpawnInboxPlugin::<RebindAcpSession>::components(),
-                SpawnInboxPlugin::<CloseAcpSession>::components(),
+                AsyncChannelPlugin::spawn::<AcpSessionAgentInfo>().components(),
+                AsyncChannelPlugin::spawn::<AcpSessionConfigRequest>().components(),
+                AsyncChannelPlugin::spawn::<AcpSessionStatusRequest>().components(),
+                AsyncChannelPlugin::spawn::<ListAcpSessions>().components(),
+                AsyncChannelPlugin::spawn::<FindAcpSession>().components(),
+                AsyncChannelPlugin::spawn::<RebindAcpSession>().components(),
+                AsyncChannelPlugin::spawn::<CloseAcpSession>().components(),
             ),
             (
-                EntityInboxPlugin::<AcpAgentInfoUpdate>::default(),
-                EntityInboxPlugin::<AcpConfigStateInput>::default(),
-                EntityInboxPlugin::<AcpSelectedConfigInput>::default(),
-                EntityInboxPlugin::<AgentRunStatus>::default(),
-                EntityInboxPlugin::<AcpStartup>::default(),
-                EntityInboxPlugin::<RemoteApproval>::default(),
-                EntityInboxPlugin::<AcpApprovalResolved>::default(),
+                AsyncChannelPlugin::entity::<AcpAgentInfoUpdate>(),
+                AsyncChannelPlugin::entity::<AcpConfigStateInput>(),
+                AsyncChannelPlugin::entity::<AcpSelectedConfigInput>(),
+                AsyncChannelPlugin::entity::<AgentRunStatus>(),
+                AsyncChannelPlugin::entity::<AcpStartup>(),
+                AsyncChannelPlugin::entity::<RemoteApproval>(),
+                AsyncChannelPlugin::entity::<AcpApprovalResolved>(),
             ),
         ))
         .add_observer(project_info)
@@ -130,20 +130,20 @@ impl std::task::Wake for AcpWake {
 
 #[derive(Clone)]
 pub struct AcpSessions {
-    spawns: SpawnBridge<SpawnAcpSession>,
-    prompts: SpawnBridge<SendAcpPrompt>,
-    approvals: SpawnBridge<ApproveAcpTool>,
-    configs: SpawnBridge<SetAcpConfig>,
-    cancels: SpawnBridge<CancelAcpSession>,
-    subscriptions: SpawnBridge<SubscribeAcpSession>,
-    snapshots: SpawnBridge<SnapshotAcpSession>,
-    agent_infos: SpawnBridge<AcpSessionAgentInfo>,
-    config_states: SpawnBridge<AcpSessionConfigRequest>,
-    statuses: SpawnBridge<AcpSessionStatusRequest>,
-    lists: SpawnBridge<ListAcpSessions>,
-    lookups: SpawnBridge<FindAcpSession>,
-    rebinds: SpawnBridge<RebindAcpSession>,
-    closes: SpawnBridge<CloseAcpSession>,
+    spawns: SpawnSender<SpawnAcpSession>,
+    prompts: SpawnSender<SendAcpPrompt>,
+    approvals: SpawnSender<ApproveAcpTool>,
+    configs: SpawnSender<SetAcpConfig>,
+    cancels: SpawnSender<CancelAcpSession>,
+    subscriptions: SpawnSender<SubscribeAcpSession>,
+    snapshots: SpawnSender<SnapshotAcpSession>,
+    agent_infos: SpawnSender<AcpSessionAgentInfo>,
+    config_states: SpawnSender<AcpSessionConfigRequest>,
+    statuses: SpawnSender<AcpSessionStatusRequest>,
+    lists: SpawnSender<ListAcpSessions>,
+    lookups: SpawnSender<FindAcpSession>,
+    rebinds: SpawnSender<RebindAcpSession>,
+    closes: SpawnSender<CloseAcpSession>,
 }
 
 #[derive(Component)]
@@ -416,7 +416,7 @@ fn spawn(
     }
 }
 
-fn project_startup(trigger: On<EntityInboxReceived<AcpStartup>>, mut commands: Commands) {
+fn project_startup(trigger: On<ChannelReceived<AcpStartup>>, mut commands: Commands) {
     let entity = trigger.event().entity;
     let Some(ready) = trigger.event().get() else {
         return;
@@ -435,7 +435,7 @@ fn project_startup(trigger: On<EntityInboxReceived<AcpStartup>>, mut commands: C
 }
 
 fn project_info(
-    mut trigger: On<EntityInboxReceived<AcpAgentInfoUpdate>>,
+    mut trigger: On<ChannelReceived<AcpAgentInfoUpdate>>,
     mut sessions: Query<(&SessionId, &AcpSessionShared, &mut AcpAgentName)>,
 ) {
     let entity = trigger.event().entity;
@@ -455,7 +455,7 @@ fn project_info(
 }
 
 fn project_config_state(
-    mut trigger: On<EntityInboxReceived<AcpConfigStateInput>>,
+    mut trigger: On<ChannelReceived<AcpConfigStateInput>>,
     mut sessions: Query<(&SessionId, &AcpSessionShared, &mut AcpSessionConfigs)>,
 ) {
     let entity = trigger.event().entity;
@@ -477,7 +477,7 @@ fn project_config_state(
 }
 
 fn project_selected_config(
-    mut trigger: On<EntityInboxReceived<AcpSelectedConfigInput>>,
+    mut trigger: On<ChannelReceived<AcpSelectedConfigInput>>,
     mut sessions: Query<(&SessionId, &AcpSessionShared, &mut AcpSessionConfigs)>,
 ) {
     let entity = trigger.event().entity;
@@ -527,7 +527,7 @@ fn project_selected_config(
 }
 
 fn project_status(
-    mut trigger: On<EntityInboxReceived<AgentRunStatus>>,
+    mut trigger: On<ChannelReceived<AgentRunStatus>>,
     mut sessions: Query<(
         &SessionId,
         &AcpSessionShared,
@@ -558,7 +558,7 @@ fn project_status(
 }
 
 fn project_approval_requested(
-    mut trigger: On<EntityInboxReceived<RemoteApproval>>,
+    mut trigger: On<ChannelReceived<RemoteApproval>>,
     mut sessions: Query<(&SessionId, &AcpSessionShared, &mut AcpApprovalState)>,
 ) {
     let entity = trigger.event().entity;
@@ -580,7 +580,7 @@ fn project_approval_requested(
 }
 
 fn project_approval_resolved(
-    mut trigger: On<EntityInboxReceived<AcpApprovalResolved>>,
+    mut trigger: On<ChannelReceived<AcpApprovalResolved>>,
     mut sessions: Query<(&SessionId, &AcpSessionShared, &mut AcpApprovalState)>,
 ) {
     let entity = trigger.event().entity;
@@ -609,12 +609,12 @@ fn project_approval_resolved(
 
 fn snapshot_selection(
     sessions: Query<(
-        &EntityInbox<AcpSelectionSnapshotRequest>,
+        &EntityChannel<AcpSelectionSnapshotRequest>,
         &AcpSessionConfigs,
     )>,
 ) {
-    for (inbox, configs) in &sessions {
-        for request in inbox.drain() {
+    for (channel, configs) in &sessions {
+        for request in channel.drain() {
             let _ = request.0.send(AcpSelectionSnapshot {
                 configs: configs.0.clone(),
             });
@@ -983,17 +983,17 @@ fn reap(
 }
 
 fn begin_shutdown(
-    inboxes: Single<(
-        &EntitySpawnInbox<SpawnAcpSession>,
-        &EntitySpawnInbox<SendAcpPrompt>,
-        &EntitySpawnInbox<ApproveAcpTool>,
-        &EntitySpawnInbox<SetAcpConfig>,
-        &EntitySpawnInbox<CancelAcpSession>,
+    channels: Single<(
+        &EntitySpawnChannel<SpawnAcpSession>,
+        &EntitySpawnChannel<SendAcpPrompt>,
+        &EntitySpawnChannel<ApproveAcpTool>,
+        &EntitySpawnChannel<SetAcpConfig>,
+        &EntitySpawnChannel<CancelAcpSession>,
     )>,
     tasks: Query<(Entity, &AcpCloseInput), bevy::prelude::With<AcpSessionShared>>,
     mut commands: Commands,
 ) {
-    let (spawns, prompts, approvals, configs, cancels) = inboxes.into_inner();
+    let (spawns, prompts, approvals, configs, cancels) = channels.into_inner();
     spawns.close_and_clear();
     prompts.close_and_clear();
     approvals.close_and_clear();

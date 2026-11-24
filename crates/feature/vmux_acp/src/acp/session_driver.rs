@@ -5,7 +5,7 @@ use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_api::protocol::{AgentAttachment, ApprovalDecision, ServiceMessage};
 use vmux_api::session::RemoteSession;
-use vmux_ecs::{EntitySpawnInbox, ProcessId};
+use vmux_ecs::{EntitySpawnChannel, ProcessId};
 use vmux_process::ProcessRuntime;
 
 use super::driver::AcpMcpServers;
@@ -19,22 +19,23 @@ use super::{
 impl AcpSessions {
     pub fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
         let waker = AcpWake::waker(wake);
-        let (spawns, spawn_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
-        let (prompts, prompt_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
-        let (approvals, approval_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
-        let (configs, config_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
-        let (cancels, cancel_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+        let (spawns, spawn_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
+        let (prompts, prompt_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
+        let (approvals, approval_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
+        let (configs, config_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
+        let (cancels, cancel_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
         let (subscriptions, subscription_inbox) =
-            EntitySpawnInbox::unbounded_with_waker(waker.clone());
-        let (snapshots, snapshot_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
-        let (agent_infos, agent_info_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+            EntitySpawnChannel::unbounded_with_waker(waker.clone());
+        let (snapshots, snapshot_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
+        let (agent_infos, agent_info_inbox) =
+            EntitySpawnChannel::unbounded_with_waker(waker.clone());
         let (config_states, config_state_inbox) =
-            EntitySpawnInbox::unbounded_with_waker(waker.clone());
-        let (statuses, status_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
-        let (lists, list_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
-        let (lookups, lookup_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
-        let (rebinds, rebind_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
-        let (closes, close_inbox) = EntitySpawnInbox::unbounded_with_waker(waker.clone());
+            EntitySpawnChannel::unbounded_with_waker(waker.clone());
+        let (statuses, status_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
+        let (lists, list_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
+        let (lookups, lookup_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
+        let (rebinds, rebind_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
+        let (closes, close_inbox) = EntitySpawnChannel::unbounded_with_waker(waker.clone());
         (
             Self {
                 spawns,

@@ -13,75 +13,40 @@ use bevy_ecs::world::DeferredWorld;
 #[cfg(feature = "jobs")]
 use crate::JobWake;
 
-pub struct InboxPlugin<M: Message> {
-    capacity: Option<usize>,
-    marker: PhantomData<fn() -> M>,
-}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MessageMode;
 
-impl<M: Message> Default for InboxPlugin<M> {
-    fn default() -> Self {
-        Self {
-            capacity: None,
-            marker: PhantomData,
-        }
-    }
-}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SpawnMode;
 
-impl<M: Message> InboxPlugin<M> {
-    pub fn bounded(capacity: usize) -> Self {
-        Self {
-            capacity: Some(capacity),
-            marker: PhantomData,
-        }
-    }
-}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EntityMode;
 
-impl<M: Message> Plugin for InboxPlugin<M> {
-    fn build(&self, app: &mut App) {
-        app.add_message::<M>()
-            .configure_sets(PreUpdate, (InboxSet::BindWake, InboxSet::Drain).chain());
-        if !app.world().contains_resource::<MessageInbox<M>>()
-            && !app.world().contains_resource::<MessageBridge<M>>()
-        {
-            let (bridge, inbox) = match self.capacity {
-                Some(capacity) => MessageInbox::<M>::bounded(capacity),
-                None => MessageInbox::<M>::unbounded(),
-            };
-            app.insert_resource(bridge).insert_resource(inbox);
-        }
-        #[cfg(feature = "jobs")]
-        app.add_systems(PreUpdate, bind_message_wake::<M>.in_set(InboxSet::BindWake));
-        app.add_systems(PreUpdate, drain_messages::<M>.in_set(InboxSet::Drain));
-    }
-}
-
-pub struct SpawnInboxPlugin<B: Bundle> {
+pub struct AsyncChannelPlugin<T = (), Mode = ()> {
     capacity: Option<usize>,
     resource: bool,
-    marker: PhantomData<fn() -> B>,
+    marker: PhantomData<fn() -> (T, Mode)>,
 }
 
-impl<B: Bundle> Default for SpawnInboxPlugin<B> {
-    fn default() -> Self {
-        Self {
+impl AsyncChannelPlugin<(), ()> {
+    pub fn message<M: Message>() -> AsyncChannelPlugin<M, MessageMode> {
+        AsyncChannelPlugin {
             capacity: None,
             resource: true,
             marker: PhantomData,
         }
     }
-}
 
-impl<B: Bundle> SpawnInboxPlugin<B> {
-    pub fn bounded(capacity: usize) -> Self {
-        Self {
-            capacity: Some(capacity),
+    pub fn spawn<B: Bundle>() -> AsyncChannelPlugin<B, SpawnMode> {
+        AsyncChannelPlugin {
+            capacity: None,
             resource: true,
             marker: PhantomData,
         }
     }
 
-    pub fn components() -> Self {
-        Self {
+    pub fn entity<T: Send + Sync + 'static>() -> AsyncChannelPlugin<T, EntityMode> {
+        AsyncChannelPlugin {
             capacity: None,
             resource: false,
             marker: PhantomData,
@@ -89,62 +54,98 @@ impl<B: Bundle> SpawnInboxPlugin<B> {
     }
 }
 
-impl<B: Bundle> Plugin for SpawnInboxPlugin<B> {
+impl<M: Message> AsyncChannelPlugin<M, MessageMode> {
+    pub fn bounded(mut self, capacity: usize) -> Self {
+        self.capacity = Some(capacity);
+        self
+    }
+}
+
+impl<M: Message> Plugin for AsyncChannelPlugin<M, MessageMode> {
     fn build(&self, app: &mut App) {
-        app.configure_sets(PreUpdate, (InboxSet::BindWake, InboxSet::Drain).chain());
-        if self.resource
-            && !app.world().contains_resource::<SpawnInbox<B>>()
-            && !app.world().contains_resource::<SpawnBridge<B>>()
+        app.add_message::<M>()
+            .configure_sets(PreUpdate, (ChannelSet::BindWake, ChannelSet::Drain).chain());
+        if !app.world().contains_resource::<MessageChannel<M>>()
+            && !app.world().contains_resource::<MessageSender<M>>()
         {
-            let (bridge, inbox) = match self.capacity {
-                Some(capacity) => SpawnInbox::<B>::bounded(capacity),
-                None => SpawnInbox::<B>::unbounded(),
+            let (sender, channel) = match self.capacity {
+                Some(capacity) => MessageChannel::<M>::bounded(capacity),
+                None => MessageChannel::<M>::unbounded(),
             };
-            app.insert_resource(bridge).insert_resource(inbox);
+            app.insert_resource(sender).insert_resource(channel);
         }
         #[cfg(feature = "jobs")]
-        app.add_systems(PreUpdate, bind_spawn_wake::<B>.in_set(InboxSet::BindWake));
-        app.add_systems(PreUpdate, drain_spawns::<B>.in_set(InboxSet::Drain));
+        app.add_systems(
+            PreUpdate,
+            bind_message_wake::<M>.in_set(ChannelSet::BindWake),
+        );
+        app.add_systems(PreUpdate, drain_messages::<M>.in_set(ChannelSet::Drain));
     }
 }
 
-pub struct EntityInboxPlugin<T: Send + Sync + 'static>(PhantomData<fn() -> T>);
+impl<B: Bundle> AsyncChannelPlugin<B, SpawnMode> {
+    pub fn bounded(mut self, capacity: usize) -> Self {
+        self.capacity = Some(capacity);
+        self
+    }
 
-impl<T: Send + Sync + 'static> Default for EntityInboxPlugin<T> {
-    fn default() -> Self {
-        Self(PhantomData)
+    pub fn components(mut self) -> Self {
+        self.resource = false;
+        self
     }
 }
 
-impl<T: Send + Sync + 'static> Plugin for EntityInboxPlugin<T> {
+impl<B: Bundle> Plugin for AsyncChannelPlugin<B, SpawnMode> {
     fn build(&self, app: &mut App) {
-        app.configure_sets(PreUpdate, (InboxSet::BindWake, InboxSet::Drain).chain());
+        app.configure_sets(PreUpdate, (ChannelSet::BindWake, ChannelSet::Drain).chain());
+        if self.resource
+            && !app.world().contains_resource::<SpawnChannel<B>>()
+            && !app.world().contains_resource::<SpawnSender<B>>()
+        {
+            let (sender, channel) = match self.capacity {
+                Some(capacity) => SpawnChannel::<B>::bounded(capacity),
+                None => SpawnChannel::<B>::unbounded(),
+            };
+            app.insert_resource(sender).insert_resource(channel);
+        }
         #[cfg(feature = "jobs")]
-        app.add_systems(PreUpdate, bind_entity_wake::<T>.in_set(InboxSet::BindWake));
-        app.add_systems(PreUpdate, drain_entities::<T>.in_set(InboxSet::Drain));
+        app.add_systems(PreUpdate, bind_spawn_wake::<B>.in_set(ChannelSet::BindWake));
+        app.add_systems(PreUpdate, drain_spawns::<B>.in_set(ChannelSet::Drain));
+    }
+}
+
+impl<T: Send + Sync + 'static> Plugin for AsyncChannelPlugin<T, EntityMode> {
+    fn build(&self, app: &mut App) {
+        app.configure_sets(PreUpdate, (ChannelSet::BindWake, ChannelSet::Drain).chain());
+        #[cfg(feature = "jobs")]
+        app.add_systems(
+            PreUpdate,
+            bind_entity_wake::<T>.in_set(ChannelSet::BindWake),
+        );
+        app.add_systems(PreUpdate, drain_entities::<T>.in_set(ChannelSet::Drain));
     }
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum InboxSet {
+pub enum ChannelSet {
     BindWake,
     Drain,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InboxSendErrorKind {
+pub enum ChannelSendErrorKind {
     Full,
     Closed,
 }
 
 #[derive(PartialEq, Eq)]
-pub struct InboxSendError<T> {
-    kind: InboxSendErrorKind,
+pub struct ChannelSendError<T> {
+    kind: ChannelSendErrorKind,
     value: T,
 }
 
-impl<T> InboxSendError<T> {
-    pub fn kind(&self) -> InboxSendErrorKind {
+impl<T> ChannelSendError<T> {
+    pub fn kind(&self) -> ChannelSendErrorKind {
         self.kind
     }
 
@@ -153,32 +154,32 @@ impl<T> InboxSendError<T> {
     }
 }
 
-impl<T> fmt::Debug for InboxSendError<T> {
+impl<T> fmt::Debug for ChannelSendError<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("InboxSendError")
+            .debug_struct("ChannelSendError")
             .field("kind", &self.kind)
             .finish_non_exhaustive()
     }
 }
 
-impl<T> fmt::Display for InboxSendError<T> {
+impl<T> fmt::Display for ChannelSendError<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self.kind {
-            InboxSendErrorKind::Full => "inbox channel is full",
-            InboxSendErrorKind::Closed => "inbox channel is closed",
+            ChannelSendErrorKind::Full => "async channel is full",
+            ChannelSendErrorKind::Closed => "async channel is closed",
         })
     }
 }
 
-impl<T> std::error::Error for InboxSendError<T> {}
+impl<T> std::error::Error for ChannelSendError<T> {}
 
 #[derive(Resource)]
-pub struct MessageBridge<M: Message> {
+pub struct MessageSender<M: Message> {
     sender: ChannelSender<M>,
 }
 
-impl<M: Message> Clone for MessageBridge<M> {
+impl<M: Message> Clone for MessageSender<M> {
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
@@ -186,8 +187,8 @@ impl<M: Message> Clone for MessageBridge<M> {
     }
 }
 
-impl<M: Message> MessageBridge<M> {
-    pub fn send(&self, message: M) -> Result<(), InboxSendError<M>> {
+impl<M: Message> MessageSender<M> {
+    pub fn send(&self, message: M) -> Result<(), ChannelSendError<M>> {
         self.sender.send(message)
     }
 
@@ -201,29 +202,29 @@ impl<M: Message> MessageBridge<M> {
 }
 
 #[derive(Resource)]
-pub struct MessageInbox<M: Message> {
+pub struct MessageChannel<M: Message> {
     receiver: ChannelReceiver<M>,
 }
 
-impl<M: Message> MessageInbox<M> {
-    pub fn unbounded() -> (MessageBridge<M>, Self) {
+impl<M: Message> MessageChannel<M> {
+    pub fn unbounded() -> (MessageSender<M>, Self) {
         let (sender, receiver) = Channel::open(None, None);
-        (MessageBridge { sender }, Self { receiver })
+        (MessageSender { sender }, Self { receiver })
     }
 
-    pub fn bounded(capacity: usize) -> (MessageBridge<M>, Self) {
+    pub fn bounded(capacity: usize) -> (MessageSender<M>, Self) {
         let (sender, receiver) = Channel::open(Some(capacity), None);
-        (MessageBridge { sender }, Self { receiver })
+        (MessageSender { sender }, Self { receiver })
     }
 
-    pub fn unbounded_with_waker(waker: Waker) -> (MessageBridge<M>, Self) {
+    pub fn unbounded_with_waker(waker: Waker) -> (MessageSender<M>, Self) {
         let (sender, receiver) = Channel::open(None, Some(waker));
-        (MessageBridge { sender }, Self { receiver })
+        (MessageSender { sender }, Self { receiver })
     }
 
-    pub fn bounded_with_waker(capacity: usize, waker: Waker) -> (MessageBridge<M>, Self) {
+    pub fn bounded_with_waker(capacity: usize, waker: Waker) -> (MessageSender<M>, Self) {
         let (sender, receiver) = Channel::open(Some(capacity), Some(waker));
-        (MessageBridge { sender }, Self { receiver })
+        (MessageSender { sender }, Self { receiver })
     }
 
     pub fn close(&self) {
@@ -240,11 +241,11 @@ impl<M: Message> MessageInbox<M> {
 }
 
 #[derive(Resource)]
-pub struct SpawnBridge<B: Bundle> {
+pub struct SpawnSender<B: Bundle> {
     sender: ChannelSender<B>,
 }
 
-impl<B: Bundle> Clone for SpawnBridge<B> {
+impl<B: Bundle> Clone for SpawnSender<B> {
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
@@ -252,8 +253,8 @@ impl<B: Bundle> Clone for SpawnBridge<B> {
     }
 }
 
-impl<B: Bundle> SpawnBridge<B> {
-    pub fn send(&self, bundle: B) -> Result<(), InboxSendError<B>> {
+impl<B: Bundle> SpawnSender<B> {
+    pub fn send(&self, bundle: B) -> Result<(), ChannelSendError<B>> {
         self.sender.send(bundle)
     }
 
@@ -267,29 +268,29 @@ impl<B: Bundle> SpawnBridge<B> {
 }
 
 #[derive(Resource)]
-pub struct SpawnInbox<B: Bundle> {
+pub struct SpawnChannel<B: Bundle> {
     receiver: ChannelReceiver<B>,
 }
 
-impl<B: Bundle> SpawnInbox<B> {
-    pub fn unbounded() -> (SpawnBridge<B>, Self) {
+impl<B: Bundle> SpawnChannel<B> {
+    pub fn unbounded() -> (SpawnSender<B>, Self) {
         let (sender, receiver) = Channel::open(None, None);
-        (SpawnBridge { sender }, Self { receiver })
+        (SpawnSender { sender }, Self { receiver })
     }
 
-    pub fn bounded(capacity: usize) -> (SpawnBridge<B>, Self) {
+    pub fn bounded(capacity: usize) -> (SpawnSender<B>, Self) {
         let (sender, receiver) = Channel::open(Some(capacity), None);
-        (SpawnBridge { sender }, Self { receiver })
+        (SpawnSender { sender }, Self { receiver })
     }
 
-    pub fn unbounded_with_waker(waker: Waker) -> (SpawnBridge<B>, Self) {
+    pub fn unbounded_with_waker(waker: Waker) -> (SpawnSender<B>, Self) {
         let (sender, receiver) = Channel::open(None, Some(waker));
-        (SpawnBridge { sender }, Self { receiver })
+        (SpawnSender { sender }, Self { receiver })
     }
 
-    pub fn bounded_with_waker(capacity: usize, waker: Waker) -> (SpawnBridge<B>, Self) {
+    pub fn bounded_with_waker(capacity: usize, waker: Waker) -> (SpawnSender<B>, Self) {
         let (sender, receiver) = Channel::open(Some(capacity), Some(waker));
-        (SpawnBridge { sender }, Self { receiver })
+        (SpawnSender { sender }, Self { receiver })
     }
 
     pub fn close(&self) {
@@ -306,29 +307,29 @@ impl<B: Bundle> SpawnInbox<B> {
 }
 
 #[derive(Component)]
-pub struct EntitySpawnInbox<B: Bundle> {
+pub struct EntitySpawnChannel<B: Bundle> {
     receiver: ChannelReceiver<B>,
 }
 
-impl<B: Bundle> EntitySpawnInbox<B> {
-    pub fn unbounded() -> (SpawnBridge<B>, Self) {
+impl<B: Bundle> EntitySpawnChannel<B> {
+    pub fn unbounded() -> (SpawnSender<B>, Self) {
         let (sender, receiver) = Channel::open(None, None);
-        (SpawnBridge { sender }, Self { receiver })
+        (SpawnSender { sender }, Self { receiver })
     }
 
-    pub fn bounded(capacity: usize) -> (SpawnBridge<B>, Self) {
+    pub fn bounded(capacity: usize) -> (SpawnSender<B>, Self) {
         let (sender, receiver) = Channel::open(Some(capacity), None);
-        (SpawnBridge { sender }, Self { receiver })
+        (SpawnSender { sender }, Self { receiver })
     }
 
-    pub fn unbounded_with_waker(waker: Waker) -> (SpawnBridge<B>, Self) {
+    pub fn unbounded_with_waker(waker: Waker) -> (SpawnSender<B>, Self) {
         let (sender, receiver) = Channel::open(None, Some(waker));
-        (SpawnBridge { sender }, Self { receiver })
+        (SpawnSender { sender }, Self { receiver })
     }
 
-    pub fn bounded_with_waker(capacity: usize, waker: Waker) -> (SpawnBridge<B>, Self) {
+    pub fn bounded_with_waker(capacity: usize, waker: Waker) -> (SpawnSender<B>, Self) {
         let (sender, receiver) = Channel::open(Some(capacity), Some(waker));
-        (SpawnBridge { sender }, Self { receiver })
+        (SpawnSender { sender }, Self { receiver })
     }
 
     pub fn close(&self) {
@@ -344,11 +345,11 @@ impl<B: Bundle> EntitySpawnInbox<B> {
     }
 }
 
-pub struct EntityBridge<T: Send + Sync + 'static> {
+pub struct EntitySender<T: Send + Sync + 'static> {
     sender: ChannelSender<T>,
 }
 
-impl<T: Send + Sync + 'static> Clone for EntityBridge<T> {
+impl<T: Send + Sync + 'static> Clone for EntitySender<T> {
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
@@ -356,12 +357,12 @@ impl<T: Send + Sync + 'static> Clone for EntityBridge<T> {
     }
 }
 
-impl<T: Send + Sync + 'static> Drop for EntityBridge<T> {
+impl<T: Send + Sync + 'static> Drop for EntitySender<T> {
     fn drop(&mut self) {}
 }
 
-impl<T: Send + Sync + 'static> EntityBridge<T> {
-    pub fn send(&self, item: T) -> Result<(), InboxSendError<T>> {
+impl<T: Send + Sync + 'static> EntitySender<T> {
+    pub fn send(&self, item: T) -> Result<(), ChannelSendError<T>> {
         self.sender.send(item)
     }
 
@@ -376,29 +377,29 @@ impl<T: Send + Sync + 'static> EntityBridge<T> {
 
 #[derive(Component)]
 #[component(on_insert = clear_closed::<T>)]
-pub struct EntityInbox<T: Send + Sync + 'static> {
+pub struct EntityChannel<T: Send + Sync + 'static> {
     receiver: ChannelReceiver<T>,
 }
 
-impl<T: Send + Sync + 'static> EntityInbox<T> {
-    pub fn unbounded() -> (EntityBridge<T>, Self) {
+impl<T: Send + Sync + 'static> EntityChannel<T> {
+    pub fn unbounded() -> (EntitySender<T>, Self) {
         let (sender, receiver) = Channel::open(None, None);
-        (EntityBridge { sender }, Self { receiver })
+        (EntitySender { sender }, Self { receiver })
     }
 
-    pub fn bounded(capacity: usize) -> (EntityBridge<T>, Self) {
+    pub fn bounded(capacity: usize) -> (EntitySender<T>, Self) {
         let (sender, receiver) = Channel::open(Some(capacity), None);
-        (EntityBridge { sender }, Self { receiver })
+        (EntitySender { sender }, Self { receiver })
     }
 
-    pub fn unbounded_with_waker(waker: Waker) -> (EntityBridge<T>, Self) {
+    pub fn unbounded_with_waker(waker: Waker) -> (EntitySender<T>, Self) {
         let (sender, receiver) = Channel::open(None, Some(waker));
-        (EntityBridge { sender }, Self { receiver })
+        (EntitySender { sender }, Self { receiver })
     }
 
-    pub fn bounded_with_waker(capacity: usize, waker: Waker) -> (EntityBridge<T>, Self) {
+    pub fn bounded_with_waker(capacity: usize, waker: Waker) -> (EntitySender<T>, Self) {
         let (sender, receiver) = Channel::open(Some(capacity), Some(waker));
-        (EntityBridge { sender }, Self { receiver })
+        (EntitySender { sender }, Self { receiver })
     }
 
     pub fn try_recv(&self) -> Option<T> {
@@ -423,13 +424,13 @@ impl<T: Send + Sync + 'static> EntityInbox<T> {
 }
 
 #[derive(EntityEvent)]
-pub struct EntityInboxReceived<T: Send + Sync + 'static> {
+pub struct ChannelReceived<T: Send + Sync + 'static> {
     #[event_target]
     pub entity: Entity,
     item: Option<T>,
 }
 
-impl<T: Send + Sync + 'static> EntityInboxReceived<T> {
+impl<T: Send + Sync + 'static> ChannelReceived<T> {
     pub fn get(&self) -> Option<&T> {
         self.item.as_ref()
     }
@@ -440,35 +441,35 @@ impl<T: Send + Sync + 'static> EntityInboxReceived<T> {
 }
 
 #[derive(Component)]
-pub struct InboxClosed<T: Send + Sync + 'static>(PhantomData<fn() -> T>);
+pub struct ChannelClosed<T: Send + Sync + 'static>(PhantomData<fn() -> T>);
 
-impl<T: Send + Sync + 'static> Default for InboxClosed<T> {
+impl<T: Send + Sync + 'static> Default for ChannelClosed<T> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<T: Send + Sync + 'static> Clone for InboxClosed<T> {
+impl<T: Send + Sync + 'static> Clone for ChannelClosed<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: Send + Sync + 'static> Copy for InboxClosed<T> {}
+impl<T: Send + Sync + 'static> Copy for ChannelClosed<T> {}
 
-impl<T: Send + Sync + 'static> fmt::Debug for InboxClosed<T> {
+impl<T: Send + Sync + 'static> fmt::Debug for ChannelClosed<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("InboxClosed")
+        formatter.write_str("ChannelClosed")
     }
 }
 
-impl<T: Send + Sync + 'static> PartialEq for InboxClosed<T> {
+impl<T: Send + Sync + 'static> PartialEq for ChannelClosed<T> {
     fn eq(&self, _: &Self) -> bool {
         true
     }
 }
 
-impl<T: Send + Sync + 'static> Eq for InboxClosed<T> {}
+impl<T: Send + Sync + 'static> Eq for ChannelClosed<T> {}
 
 #[allow(unknown_lints, vmux_ecs_ownership)]
 struct Channel<T> {
@@ -594,25 +595,25 @@ impl<T> Drop for ChannelSender<T> {
 }
 
 impl<T> ChannelSender<T> {
-    fn send(&self, value: T) -> Result<(), InboxSendError<T>> {
+    fn send(&self, value: T) -> Result<(), ChannelSendError<T>> {
         let result = {
             let Ok(mut queue) = self.0.state.lock() else {
-                return Err(InboxSendError {
-                    kind: InboxSendErrorKind::Closed,
+                return Err(ChannelSendError {
+                    kind: ChannelSendErrorKind::Closed,
                     value,
                 });
             };
             if queue.closed {
-                Err(InboxSendError {
-                    kind: InboxSendErrorKind::Closed,
+                Err(ChannelSendError {
+                    kind: ChannelSendErrorKind::Closed,
                     value,
                 })
             } else if queue
                 .capacity
                 .is_some_and(|capacity| queue.items.len() >= capacity)
             {
-                Err(InboxSendError {
-                    kind: InboxSendErrorKind::Full,
+                Err(ChannelSendError {
+                    kind: ChannelSendErrorKind::Full,
                     value,
                 })
             } else {
@@ -701,7 +702,7 @@ impl<T: Send + Sync + 'static> Command for DeliverEntityItem<T> {
         if world.get_entity(self.entity).is_err() {
             return;
         }
-        world.trigger(EntityInboxReceived {
+        world.trigger(ChannelReceived {
             entity: self.entity,
             item: Some(self.item),
         });
@@ -712,22 +713,28 @@ fn clear_closed<T: Send + Sync + 'static>(mut world: DeferredWorld, context: Hoo
     world
         .commands()
         .entity(context.entity)
-        .try_remove::<InboxClosed<T>>();
+        .try_remove::<ChannelClosed<T>>();
 }
 
 #[cfg(feature = "jobs")]
-fn bind_message_wake<M: Message>(wake: Option<Res<JobWake>>, inbox: Option<Res<MessageInbox<M>>>) {
-    let (Some(wake), Some(inbox)) = (wake, inbox) else {
+fn bind_message_wake<M: Message>(
+    wake: Option<Res<JobWake>>,
+    channel: Option<Res<MessageChannel<M>>>,
+) {
+    let (Some(wake), Some(channel)) = (wake, channel) else {
         return;
     };
-    inbox.receiver.bind_auto_waker(&wake.0);
+    channel.receiver.bind_auto_waker(&wake.0);
 }
 
-fn drain_messages<M: Message>(inbox: Option<Res<MessageInbox<M>>>, mut writer: MessageWriter<M>) {
-    let Some(inbox) = inbox else {
+fn drain_messages<M: Message>(
+    channel: Option<Res<MessageChannel<M>>>,
+    mut writer: MessageWriter<M>,
+) {
+    let Some(channel) = channel else {
         return;
     };
-    let (items, _) = inbox.receiver.drain_all();
+    let (items, _) = channel.receiver.drain_all();
     for item in items {
         writer.write(item);
     }
@@ -736,33 +743,33 @@ fn drain_messages<M: Message>(inbox: Option<Res<MessageInbox<M>>>, mut writer: M
 #[cfg(feature = "jobs")]
 fn bind_spawn_wake<B: Bundle>(
     wake: Option<Res<JobWake>>,
-    resource: Option<Res<SpawnInbox<B>>>,
-    components: Query<&EntitySpawnInbox<B>>,
+    resource: Option<Res<SpawnChannel<B>>>,
+    components: Query<&EntitySpawnChannel<B>>,
 ) {
     let Some(wake) = wake else {
         return;
     };
-    if let Some(inbox) = resource {
-        inbox.receiver.bind_auto_waker(&wake.0);
+    if let Some(channel) = resource {
+        channel.receiver.bind_auto_waker(&wake.0);
     }
-    for inbox in &components {
-        inbox.receiver.bind_auto_waker(&wake.0);
+    for channel in &components {
+        channel.receiver.bind_auto_waker(&wake.0);
     }
 }
 
 fn drain_spawns<B: Bundle>(
-    resource: Option<Res<SpawnInbox<B>>>,
-    components: Query<&EntitySpawnInbox<B>>,
+    resource: Option<Res<SpawnChannel<B>>>,
+    components: Query<&EntitySpawnChannel<B>>,
     mut commands: Commands,
 ) {
-    if let Some(inbox) = resource {
-        let (items, _) = inbox.receiver.drain_all();
+    if let Some(channel) = resource {
+        let (items, _) = channel.receiver.drain_all();
         for item in items {
             commands.spawn(item);
         }
     }
-    for inbox in &components {
-        let (items, _) = inbox.receiver.drain_all();
+    for channel in &components {
+        let (items, _) = channel.receiver.drain_all();
         for item in items {
             commands.spawn(item);
         }
@@ -772,29 +779,29 @@ fn drain_spawns<B: Bundle>(
 #[cfg(feature = "jobs")]
 fn bind_entity_wake<T: Send + Sync + 'static>(
     wake: Option<Res<JobWake>>,
-    inboxes: Query<&EntityInbox<T>>,
+    channels: Query<&EntityChannel<T>>,
 ) {
     let Some(wake) = wake else {
         return;
     };
-    for inbox in &inboxes {
-        inbox.receiver.bind_auto_waker(&wake.0);
+    for channel in &channels {
+        channel.receiver.bind_auto_waker(&wake.0);
     }
 }
 
-type EntityInboxes<'w, 's, T> =
-    Query<'w, 's, (Entity, &'static EntityInbox<T>, Has<InboxClosed<T>>)>;
+type EntityChannels<'w, 's, T> =
+    Query<'w, 's, (Entity, &'static EntityChannel<T>, Has<ChannelClosed<T>>)>;
 
-fn drain_entities<T: Send + Sync + 'static>(inboxes: EntityInboxes<T>, mut commands: Commands) {
-    for (entity, inbox, closed) in &inboxes {
-        let (items, disconnected) = inbox.receiver.drain_all();
+fn drain_entities<T: Send + Sync + 'static>(channels: EntityChannels<T>, mut commands: Commands) {
+    for (entity, channel, closed) in &channels {
+        let (items, disconnected) = channel.receiver.drain_all();
         for item in items {
             commands.queue(DeliverEntityItem { entity, item });
         }
         if disconnected && !closed {
             commands
                 .entity(entity)
-                .try_insert(InboxClosed::<T>::default());
+                .try_insert(ChannelClosed::<T>::default());
         }
     }
 }
@@ -854,7 +861,7 @@ mod tests {
     struct DespawnOnItem(u32);
 
     fn record_entity_item(
-        mut trigger: On<EntityInboxReceived<u32>>,
+        mut trigger: On<ChannelReceived<u32>>,
         despawn_on: Query<&DespawnOnItem>,
         mut delivered: ResMut<DeliveredItems>,
         mut commands: Commands,
@@ -870,20 +877,20 @@ mod tests {
     }
 
     #[test]
-    fn message_inbox_drains_in_fifo_order_and_wakes_on_send() {
+    fn message_channel_drains_in_fifo_order_and_wakes_on_send() {
         let mut app = App::new();
         let wake = CountWake::new();
-        let (bridge, inbox) =
-            MessageInbox::<TestMessage>::unbounded_with_waker(Waker::from(Arc::clone(&wake)));
-        app.insert_resource(bridge.clone())
-            .insert_resource(inbox)
+        let (sender, channel) =
+            MessageChannel::<TestMessage>::unbounded_with_waker(Waker::from(Arc::clone(&wake)));
+        app.insert_resource(sender.clone())
+            .insert_resource(channel)
             .init_resource::<ReceivedMessages>()
-            .add_plugins(InboxPlugin::<TestMessage>::default())
+            .add_plugins(AsyncChannelPlugin::message::<TestMessage>())
             .add_systems(Update, record_messages);
 
-        bridge.send(TestMessage(10)).unwrap();
-        bridge.send(TestMessage(20)).unwrap();
-        bridge.send(TestMessage(30)).unwrap();
+        sender.send(TestMessage(10)).unwrap();
+        sender.send(TestMessage(20)).unwrap();
+        sender.send(TestMessage(30)).unwrap();
         assert_eq!(wake.count(), 3);
 
         app.update();
@@ -894,71 +901,71 @@ mod tests {
     }
 
     #[test]
-    fn bounded_message_inbox_enforces_capacity_and_preserves_order_after_drain() {
+    fn bounded_message_channel_enforces_capacity_and_preserves_order_after_drain() {
         let mut app = App::new();
         app.init_resource::<ReceivedMessages>()
-            .add_plugins(InboxPlugin::<TestMessage>::bounded(2))
+            .add_plugins(AsyncChannelPlugin::message::<TestMessage>().bounded(2))
             .add_systems(Update, record_messages);
 
-        let bridge = app.world().resource::<MessageBridge<TestMessage>>().clone();
-        bridge.send(TestMessage(1)).unwrap();
-        bridge.send(TestMessage(2)).unwrap();
-        let error = bridge.send(TestMessage(3)).unwrap_err();
-        assert_eq!(error.kind(), InboxSendErrorKind::Full);
+        let sender = app.world().resource::<MessageSender<TestMessage>>().clone();
+        sender.send(TestMessage(1)).unwrap();
+        sender.send(TestMessage(2)).unwrap();
+        let error = sender.send(TestMessage(3)).unwrap_err();
+        assert_eq!(error.kind(), ChannelSendErrorKind::Full);
         assert_eq!(error.into_inner(), TestMessage(3));
 
         app.update();
         assert_eq!(app.world().resource::<ReceivedMessages>().0, [1, 2]);
 
-        bridge.send(TestMessage(3)).unwrap();
+        sender.send(TestMessage(3)).unwrap();
         app.update();
         assert_eq!(app.world().resource::<ReceivedMessages>().0, [1, 2, 3]);
     }
 
     #[cfg(feature = "jobs")]
     #[test]
-    fn message_bridge_auto_binds_job_wake_and_wakes_for_queued_items() {
+    fn message_sender_auto_binds_job_wake_and_wakes_for_queued_items() {
         let mut app = App::new();
         app.init_resource::<ReceivedMessages>()
-            .add_plugins(InboxPlugin::<TestMessage>::default())
+            .add_plugins(AsyncChannelPlugin::message::<TestMessage>())
             .add_systems(Update, record_messages);
 
-        let bridge = app.world().resource::<MessageBridge<TestMessage>>().clone();
+        let sender = app.world().resource::<MessageSender<TestMessage>>().clone();
         let wake = CountWake::new();
         app.insert_resource(JobWake(Waker::from(Arc::clone(&wake))));
 
-        bridge.send(TestMessage(1)).unwrap();
+        sender.send(TestMessage(1)).unwrap();
         assert_eq!(wake.count(), 0);
 
         app.update();
         assert_eq!(wake.count(), 1);
         assert_eq!(app.world().resource::<ReceivedMessages>().0, [1]);
 
-        bridge.send(TestMessage(2)).unwrap();
+        sender.send(TestMessage(2)).unwrap();
         assert_eq!(wake.count(), 2);
         app.update();
         assert_eq!(app.world().resource::<ReceivedMessages>().0, [1, 2]);
     }
 
     #[test]
-    fn spawn_inbox_spawns_resource_and_component_bundles_before_update() {
+    fn spawn_channel_spawns_resource_and_component_bundles_before_update() {
         let mut app = App::new();
         let wake = CountWake::new();
-        app.add_plugins(SpawnInboxPlugin::<SpawnedItem>::bounded(2));
+        app.add_plugins(AsyncChannelPlugin::spawn::<SpawnedItem>().bounded(2));
 
-        let resource_bridge = app.world().resource::<SpawnBridge<SpawnedItem>>().clone();
-        resource_bridge.bind_waker(Waker::from(Arc::clone(&wake)));
-        let (component_bridge, component_inbox) =
-            EntitySpawnInbox::<SpawnedItem>::unbounded_with_waker(Waker::from(Arc::clone(&wake)));
-        let owner = app.world_mut().spawn(component_inbox).id();
+        let resource_sender = app.world().resource::<SpawnSender<SpawnedItem>>().clone();
+        resource_sender.bind_waker(Waker::from(Arc::clone(&wake)));
+        let (component_sender, component_channel) =
+            EntitySpawnChannel::<SpawnedItem>::unbounded_with_waker(Waker::from(Arc::clone(&wake)));
+        let owner = app.world_mut().spawn(component_channel).id();
 
-        resource_bridge.send(SpawnedItem(1)).unwrap();
-        resource_bridge.send(SpawnedItem(2)).unwrap();
+        resource_sender.send(SpawnedItem(1)).unwrap();
+        resource_sender.send(SpawnedItem(2)).unwrap();
         assert_eq!(
-            resource_bridge.send(SpawnedItem(99)).unwrap_err().kind(),
-            InboxSendErrorKind::Full
+            resource_sender.send(SpawnedItem(99)).unwrap_err().kind(),
+            ChannelSendErrorKind::Full
         );
-        component_bridge.send(SpawnedItem(3)).unwrap();
+        component_sender.send(SpawnedItem(3)).unwrap();
         assert_eq!(wake.count(), 3);
 
         app.update();
@@ -972,24 +979,24 @@ mod tests {
         assert_eq!(values, [1, 2, 3]);
 
         app.world_mut().entity_mut(owner).despawn();
-        assert!(component_bridge.is_closed());
+        assert!(component_sender.is_closed());
         assert_eq!(
-            component_bridge.send(SpawnedItem(4)).unwrap_err().kind(),
-            InboxSendErrorKind::Closed
+            component_sender.send(SpawnedItem(4)).unwrap_err().kind(),
+            ChannelSendErrorKind::Closed
         );
     }
 
     #[test]
-    fn entity_inbox_delivers_per_entity_and_marks_disconnect_after_draining() {
+    fn entity_channel_delivers_per_entity_and_marks_disconnect_after_draining() {
         let mut app = App::new();
         app.init_resource::<DeliveredItems>()
-            .add_plugins(EntityInboxPlugin::<u32>::default())
+            .add_plugins(AsyncChannelPlugin::entity::<u32>())
             .add_observer(record_entity_item);
 
         let wake = CountWake::new();
         let (first_tx, first_rx) =
-            EntityInbox::<u32>::unbounded_with_waker(Waker::from(Arc::clone(&wake)));
-        let (second_tx, second_rx) = EntityInbox::<u32>::unbounded();
+            EntityChannel::<u32>::unbounded_with_waker(Waker::from(Arc::clone(&wake)));
+        let (second_tx, second_rx) = EntityChannel::<u32>::unbounded();
         let first = app.world_mut().spawn(first_rx).id();
         let second = app.world_mut().spawn(second_rx).id();
 
@@ -1012,13 +1019,13 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(first_items, [1, 2]);
         assert_eq!(second_items, [10]);
-        assert!(app.world().get::<InboxClosed<u32>>(first).is_some());
-        assert!(app.world().get::<InboxClosed<u32>>(second).is_none());
+        assert!(app.world().get::<ChannelClosed<u32>>(first).is_some());
+        assert!(app.world().get::<ChannelClosed<u32>>(second).is_none());
 
-        let (replacement_tx, replacement_rx) = EntityInbox::<u32>::unbounded();
+        let (replacement_tx, replacement_rx) = EntityChannel::<u32>::unbounded();
         app.world_mut().entity_mut(first).insert(replacement_rx);
         app.update();
-        assert!(app.world().get::<InboxClosed<u32>>(first).is_none());
+        assert!(app.world().get::<ChannelClosed<u32>>(first).is_none());
         replacement_tx.send(3).unwrap();
         app.update();
         assert!(
@@ -1030,13 +1037,13 @@ mod tests {
     }
 
     #[test]
-    fn despawning_entity_closes_inbox_and_skips_remaining_queued_items() {
+    fn despawning_entity_closes_channel_and_skips_remaining_queued_items() {
         let mut app = App::new();
         app.init_resource::<DeliveredItems>()
-            .add_plugins(EntityInboxPlugin::<u32>::default())
+            .add_plugins(AsyncChannelPlugin::entity::<u32>())
             .add_observer(record_entity_item);
 
-        let (tx, rx) = EntityInbox::<u32>::unbounded();
+        let (tx, rx) = EntityChannel::<u32>::unbounded();
         let entity = app.world_mut().spawn((rx, DespawnOnItem(1))).id();
 
         tx.send(1).unwrap();
@@ -1046,6 +1053,6 @@ mod tests {
         assert_eq!(app.world().resource::<DeliveredItems>().0, [(entity, 1)]);
         assert!(app.world().get_entity(entity).is_err());
         assert!(tx.is_closed());
-        assert_eq!(tx.send(3).unwrap_err().kind(), InboxSendErrorKind::Closed);
+        assert_eq!(tx.send(3).unwrap_err().kind(), ChannelSendErrorKind::Closed);
     }
 }

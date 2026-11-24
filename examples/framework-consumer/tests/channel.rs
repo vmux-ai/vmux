@@ -6,8 +6,8 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_app::VmuxPlugin;
 use vmux_app::ecs::{
-    EntityInbox, EntityInboxPlugin, EntityInboxReceived, InboxClosed, InboxPlugin,
-    InboxSendErrorKind, JobWake, MessageBridge, SpawnBridge, SpawnInboxPlugin,
+    AsyncChannelPlugin, ChannelClosed, ChannelReceived, ChannelSendErrorKind, EntityChannel,
+    JobWake, MessageSender, SpawnSender,
 };
 
 struct WakeCounter(AtomicUsize);
@@ -44,15 +44,15 @@ struct ObservedNotes(Vec<String>);
 #[derive(Resource, Default)]
 struct ObservedChunks(Vec<(Entity, String)>);
 
-struct ConsumerInboxPlugin;
+struct ConsumerChannelPlugin;
 
-impl Plugin for ConsumerInboxPlugin {
+impl Plugin for ConsumerChannelPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             VmuxPlugin::builder().jobs(true).build(),
-            InboxPlugin::<NoteEvent>::bounded(2),
-            SpawnInboxPlugin::<WorkOrder>::default(),
-            EntityInboxPlugin::<String>::default(),
+            AsyncChannelPlugin::message::<NoteEvent>().bounded(2),
+            AsyncChannelPlugin::spawn::<WorkOrder>(),
+            AsyncChannelPlugin::entity::<String>(),
         ))
         .init_resource::<ObservedNotes>()
         .init_resource::<ObservedChunks>()
@@ -67,10 +67,7 @@ fn collect_notes(mut reader: MessageReader<NoteEvent>, mut notes: ResMut<Observe
     }
 }
 
-fn collect_chunk(
-    mut trigger: On<EntityInboxReceived<String>>,
-    mut chunks: ResMut<ObservedChunks>,
-) {
+fn collect_chunk(mut trigger: On<ChannelReceived<String>>, mut chunks: ResMut<ObservedChunks>) {
     let entity = trigger.event().entity;
     let Some(chunk) = trigger.event_mut().take() else {
         return;
@@ -79,16 +76,16 @@ fn collect_chunk(
 }
 
 #[test]
-fn consumer_uses_message_spawn_and_entity_inboxes_through_job_wake() {
+fn consumer_uses_message_spawn_and_entity_channels_through_job_wake() {
     let mut app = App::new();
     let wake = WakeCounter::new();
-    app.add_plugins(ConsumerInboxPlugin)
+    app.add_plugins(ConsumerChannelPlugin)
         .insert_resource(JobWake(Waker::from(Arc::clone(&wake))));
     app.update();
 
-    let notes = app.world().resource::<MessageBridge<NoteEvent>>().clone();
-    let orders = app.world().resource::<SpawnBridge<WorkOrder>>().clone();
-    let (stream_tx, stream_rx) = EntityInbox::<String>::unbounded();
+    let notes = app.world().resource::<MessageSender<NoteEvent>>().clone();
+    let orders = app.world().resource::<SpawnSender<WorkOrder>>().clone();
+    let (stream_tx, stream_rx) = EntityChannel::<String>::unbounded();
     let worker = app.world_mut().spawn(stream_rx).id();
     app.update();
 
@@ -96,7 +93,7 @@ fn consumer_uses_message_spawn_and_entity_inboxes_through_job_wake() {
     notes.send(NoteEvent("second".into())).unwrap();
     assert_eq!(
         notes.send(NoteEvent("overflow".into())).unwrap_err().kind(),
-        InboxSendErrorKind::Full
+        ChannelSendErrorKind::Full
     );
     orders.send(WorkOrder(42)).unwrap();
     stream_tx.send("chunk-a".into()).unwrap();
@@ -119,7 +116,10 @@ fn consumer_uses_message_spawn_and_entity_inboxes_through_job_wake() {
     assert_eq!(spawned, [42]);
     assert_eq!(
         app.world().resource::<ObservedChunks>().0,
-        [(worker, "chunk-a".to_string()), (worker, "chunk-b".to_string())]
+        [
+            (worker, "chunk-a".to_string()),
+            (worker, "chunk-b".to_string())
+        ]
     );
-    assert!(app.world().get::<InboxClosed<String>>(worker).is_some());
+    assert!(app.world().get::<ChannelClosed<String>>(worker).is_some());
 }

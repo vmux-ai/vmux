@@ -14,6 +14,11 @@ pub use archive::{
 };
 #[cfg(feature = "jobs")]
 pub use blocking::{BlockingCancellation, BlockingPool, BlockingRuntime, BlockingTask};
+pub use channel::{
+    AsyncChannelPlugin, ChannelClosed, ChannelReceived, ChannelSendError, ChannelSendErrorKind,
+    ChannelSet, EntityChannel, EntityMode, EntitySender, EntitySpawnChannel, MessageChannel,
+    MessageMode, MessageSender, SpawnChannel, SpawnMode, SpawnSender,
+};
 pub use component::{
     ActivateRequest, Active, ArchivedAt, Bookmark, BookmarkOrder, Collapsed, CollectionView,
     CreatedAt, Cwd, Description, EffectiveStartupUrl, EntityTarget, Folder, HostShell,
@@ -30,11 +35,6 @@ pub use external_identity::{
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
 pub use identity::{
     IdentityIndex, IdentityIndexPlugin, IdentityIndexSet, IdentityIndexWriter, IdentityLookupError,
-};
-pub use inbox::{
-    EntityBridge, EntityInbox, EntityInboxPlugin, EntityInboxReceived, EntitySpawnInbox,
-    InboxClosed, InboxPlugin, InboxSendError, InboxSendErrorKind, InboxSet, MessageBridge,
-    MessageInbox, SpawnBridge, SpawnInbox, SpawnInboxPlugin,
 };
 #[cfg(feature = "jobs")]
 pub use jobs::{
@@ -85,6 +85,7 @@ mod archive;
 pub mod blocking;
 #[cfg(all(host, feature = "host"))]
 pub mod browser;
+pub mod channel;
 #[cfg(feature = "cli")]
 pub mod cli;
 mod component;
@@ -96,7 +97,6 @@ mod file_ui_state;
 #[cfg(all(host, feature = "host"))]
 pub mod host_spawn;
 mod identity;
-pub mod inbox;
 #[cfg(feature = "jobs")]
 pub mod jobs;
 #[cfg(all(host, feature = "host"))]
