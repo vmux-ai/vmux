@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 
-use bevy_app::{App, Plugin, Update};
+use bevy_app::{App, Plugin, PreStartup, Update};
 use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use vmux_ecs::ProcessId;
@@ -16,11 +16,8 @@ pub struct McpCliPlugin;
 
 impl Plugin for McpCliPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("MCP async runtime"),
-            McpRuntime(tokio::runtime::Handle::current()),
-        ));
         app.add_plugins((FeaturePlugin::<crate::Feature>::default(), McpPlugin))
+            .add_systems(PreStartup, spawn_runtime)
             .add_systems(
                 Update,
                 (start_stdio, receive_stdio).chain().in_set(McpSet::Input),
@@ -30,6 +27,13 @@ impl Plugin for McpCliPlugin {
                 (write_stdio, finish_stdio).chain().in_set(McpSet::Output),
             );
     }
+}
+
+fn spawn_runtime(mut commands: Commands) {
+    commands.spawn((
+        Name::new("MCP async runtime"),
+        McpRuntime(tokio::runtime::Handle::current()),
+    ));
 }
 
 impl McpConfig {

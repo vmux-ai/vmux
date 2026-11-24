@@ -226,12 +226,18 @@ pub(super) struct EditExecutionPlugin;
 impl Plugin for EditExecutionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((document::DocumentPlugin, input::InputPlugin))
-            .insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
+            .init_non_send::<ClipboardHandle>()
             .add_plugins((projection::ProjectionPlugin, effects::EffectsPlugin));
     }
 }
 
 pub(super) struct ClipboardHandle(pub(super) Option<arboard::Clipboard>);
+
+impl Default for ClipboardHandle {
+    fn default() -> Self {
+        Self(arboard::Clipboard::new().ok())
+    }
+}
 
 #[cfg(test)]
 pub(super) struct EditRequest {

@@ -1500,14 +1500,20 @@ struct PageValues<'w, 's> {
 #[derive(Component)]
 struct LastEmittedUiState(FeaturesUiState);
 
-fn emit(
-    contexts: Query<(
+type EmittedContexts<'w, 's> = Query<
+    'w,
+    's,
+    (
         Entity,
-        &Context,
-        &Selection,
-        Option<&crate::inspection::OverrideOutcome>,
-        Option<&LastEmittedUiState>,
-    )>,
+        &'static Context,
+        &'static Selection,
+        Option<&'static crate::inspection::OverrideOutcome>,
+        Option<&'static LastEmittedUiState>,
+    ),
+>;
+
+fn emit(
+    contexts: EmittedContexts,
     values: PageValues,
     declarations: Declarations,
     inspection: crate::inspection::Inspection,

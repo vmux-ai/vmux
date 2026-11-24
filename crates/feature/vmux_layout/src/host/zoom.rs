@@ -39,39 +39,33 @@ impl Plugin for PaneZoomPlugin {
                     .chain()
                     .before(LayoutSystems::Layout),
             );
-        Zoomed::register_hooks(app);
     }
 }
 
 #[derive(Component, Debug)]
+#[component(on_remove = on_zoomed_remove)]
 pub struct Zoomed {
     pub leaf: Entity,
     pub hidden: Vec<Entity>,
 }
 
-impl Zoomed {
-    fn register_hooks(app: &mut App) {
-        app.world_mut()
-            .register_component_hooks::<Self>()
-            .on_remove(|mut world: DeferredWorld, ctx: HookContext| {
-                let Some(zoomed) = world.get::<Self>(ctx.entity) else {
-                    return;
-                };
-                if world.get::<PaneZoomTransition>(ctx.entity).is_some() {
-                    return;
-                }
-                let hidden = zoomed.hidden.clone();
-                for entity in hidden {
-                    let flex_grow = world
-                        .get::<PaneSize>(entity)
-                        .map(|size| size.flex_grow)
-                        .unwrap_or(1.0);
-                    if let Some(mut node) = world.get_mut::<Node>(entity) {
-                        node.display = Display::Flex;
-                        node.flex_grow = flex_grow;
-                    }
-                }
-            });
+fn on_zoomed_remove(mut world: DeferredWorld, ctx: HookContext) {
+    let Some(zoomed) = world.get::<Zoomed>(ctx.entity) else {
+        return;
+    };
+    if world.get::<PaneZoomTransition>(ctx.entity).is_some() {
+        return;
+    }
+    let hidden = zoomed.hidden.clone();
+    for entity in hidden {
+        let flex_grow = world
+            .get::<PaneSize>(entity)
+            .map(|size| size.flex_grow)
+            .unwrap_or(1.0);
+        if let Some(mut node) = world.get_mut::<Node>(entity) {
+            node.display = Display::Flex;
+            node.flex_grow = flex_grow;
+        }
     }
 }
 

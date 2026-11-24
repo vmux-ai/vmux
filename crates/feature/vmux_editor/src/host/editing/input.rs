@@ -19,20 +19,12 @@ use vmux_ecs::event::{FileViewMode, NoteBlock};
 
 pub(crate) struct InputPlugin;
 
-#[cfg(not(test))]
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(decode::<KeyInputRequest>)
             .add_observer(decode::<ExInputRequest>);
-    }
-}
-
-#[cfg(test)]
-impl Plugin for InputPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_observer(decode::<KeyInputRequest>)
-            .add_observer(decode::<ExInputRequest>)
-            .add_observer(decode_fixture);
+        #[cfg(test)]
+        app.add_observer(decode_fixture);
     }
 }
 

@@ -36,52 +36,43 @@ pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn((Name::new("OS menu runtime"), OsMenuState::default()));
-        app.insert_non_send(OsMenuResource {
-            menu: None,
-            #[cfg(target_os = "macos")]
-            context_menu: None,
-            locale: Locale::preferred(),
-            close_window: None,
-            #[cfg(target_os = "macos")]
-            edit_items: Vec::new(),
-        })
-        .add_message::<OsMenuSelection>()
-        .add_message::<WindowCloseRequested>()
-        .add_message::<crate::runtime::HideAllWindowsRequest>()
-        .add_message::<crate::window::CloseVmuxWindow>()
-        .add_message::<CloseRequest>()
-        .add_message::<OpenRequest>()
-        .add_observer(remember_tab_close)
-        .configure_sets(
-            Update,
-            (OsMenuSet::Forward, OsMenuSet::Dispatch, OsMenuSet::Cleanup)
-                .chain()
-                .in_set(WriteCommandRequests),
-        )
-        .add_systems(Startup, setup.after(SettingsLoadSet).after(BindCommands))
-        .add_systems(
-            Update,
-            (
-                sync_menu_locale,
-                remember_stack_close_commands.after(DispatchCommandInvocations),
-                remember_page_open.after(DispatchCommandInvocations),
-                hide_window_on_close_request
-                    .after(remember_stack_close_commands)
-                    .after(remember_page_open),
-                sync_close_menu_item.after(hide_window_on_close_request),
-            ),
-        )
-        .add_systems(
-            Update,
-            (
-                forward_menu_events.in_set(OsMenuSet::Forward),
-                (dispatch_command_menu_selection, hide_windows_from_menu)
-                    .in_set(OsMenuSet::Dispatch),
-                cleanup_transient_menu_entries.in_set(OsMenuSet::Cleanup),
-            ),
-        );
+        app.init_non_send::<OsMenuResource>()
+            .add_systems(PreStartup, spawn_state)
+            .add_message::<OsMenuSelection>()
+            .add_message::<WindowCloseRequested>()
+            .add_message::<crate::runtime::HideAllWindowsRequest>()
+            .add_message::<crate::window::CloseVmuxWindow>()
+            .add_message::<CloseRequest>()
+            .add_message::<OpenRequest>()
+            .add_observer(remember_tab_close)
+            .configure_sets(
+                Update,
+                (OsMenuSet::Forward, OsMenuSet::Dispatch, OsMenuSet::Cleanup)
+                    .chain()
+                    .in_set(WriteCommandRequests),
+            )
+            .add_systems(Startup, setup.after(SettingsLoadSet).after(BindCommands))
+            .add_systems(
+                Update,
+                (
+                    sync_menu_locale,
+                    remember_stack_close_commands.after(DispatchCommandInvocations),
+                    remember_page_open.after(DispatchCommandInvocations),
+                    hide_window_on_close_request
+                        .after(remember_stack_close_commands)
+                        .after(remember_page_open),
+                    sync_close_menu_item.after(hide_window_on_close_request),
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    forward_menu_events.in_set(OsMenuSet::Forward),
+                    (dispatch_command_menu_selection, hide_windows_from_menu)
+                        .in_set(OsMenuSet::Dispatch),
+                    cleanup_transient_menu_entries.in_set(OsMenuSet::Cleanup),
+                ),
+            );
         #[cfg(target_os = "macos")]
         app.add_systems(Update, sync_edit_menu_items.after(ReadCommandRequests))
             .add_systems(PostUpdate, present_context_menus);
@@ -121,6 +112,10 @@ struct HideWindowsMenuEntry;
 #[derive(Component, Clone)]
 struct OsMenuInbox(Receiver<String>);
 
+fn spawn_state(mut commands: Commands) {
+    commands.spawn((Name::new("OS menu runtime"), OsMenuState::default()));
+}
+
 struct OsMenuResource {
     menu: Option<Menu>,
     #[cfg(target_os = "macos")]
@@ -129,6 +124,20 @@ struct OsMenuResource {
     close_window: Option<MenuItem>,
     #[cfg(target_os = "macos")]
     edit_items: Vec<Retained<NSMenuItem>>,
+}
+
+impl Default for OsMenuResource {
+    fn default() -> Self {
+        Self {
+            menu: None,
+            #[cfg(target_os = "macos")]
+            context_menu: None,
+            locale: Locale::preferred(),
+            close_window: None,
+            #[cfg(target_os = "macos")]
+            edit_items: Vec::new(),
+        }
+    }
 }
 
 impl OsMenuResource {

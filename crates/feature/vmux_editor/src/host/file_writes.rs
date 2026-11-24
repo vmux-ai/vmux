@@ -103,7 +103,6 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("file.txt");
         std::fs::write(&path, "one two three\n").unwrap();
-        let (diagnostics, inbox) = crate::lsp::LspDiagnosticsSender::channel();
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -112,7 +111,7 @@ mod tests {
             WorkspaceEditPlugin,
             crate::lsp::server_request::ServerRequestPlugin,
             vmux_lsp::LspPlugin,
-            crate::lsp::manager::ManagerPlugin::new(diagnostics, inbox),
+            crate::lsp::manager::ManagerPlugin,
         ))
         .insert_resource(vmux_setting::AppSettings::default())
         .insert_non_send(Browsers::default())
@@ -275,9 +274,11 @@ mod tests {
             .id();
         FileLoadTask::settle(&mut app, view);
         EditRequest::new(view, vec![EditCommand::Save]).emit_world(app.world_mut());
-        app.world_mut().write_message(Observed(Ok(
-            notify::Event::new(notify::EventKind::Any).add_path(path.clone())
-        )));
+        app.world_mut()
+            .write_message(Observed::from_notify(Ok(notify::Event::new(
+                notify::EventKind::Any,
+            )
+            .add_path(path.clone()))));
         app.update();
         assert!(app.world().get::<FileLoadTask>(view).is_none());
         assert!(Editor::read(app.world(), view).is_some());
@@ -290,9 +291,11 @@ mod tests {
         app.world_mut().get_mut::<WrittenAt>(receipts[0]).unwrap().0 =
             Instant::now() - Duration::from_secs(3);
         std::fs::write(&path, "external\n").unwrap();
-        app.world_mut().write_message(Observed(Ok(
-            notify::Event::new(notify::EventKind::Any).add_path(path)
-        )));
+        app.world_mut()
+            .write_message(Observed::from_notify(Ok(notify::Event::new(
+                notify::EventKind::Any,
+            )
+            .add_path(path))));
         FileLoadTask::settle(&mut app, view);
         assert_eq!(
             Editor::read(app.world(), view).unwrap().core.buffer.text(),

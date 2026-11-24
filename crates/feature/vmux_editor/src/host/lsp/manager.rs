@@ -39,8 +39,7 @@ use crate::lsp::client::ServerClient;
 use crate::lsp::registry::{LspRegistry, ServerSpec};
 use crate::lsp::server_request::ServerInputSender;
 use crate::lsp::{
-    LintDiagnosticsInbox, LintDiagnosticsSender, LspDiagnosticsInbox, LspDiagnosticsSender,
-    OpenDoc, ServerKey, store,
+    LintDiagnosticsInbox, LintDiagnosticsSender, LspDiagnosticsSender, OpenDoc, ServerKey, store,
 };
 
 use lsp_types::GotoDefinitionResponse::*;
@@ -2029,35 +2028,10 @@ fn apply_semantic_tokens(
     }
 }
 
-pub(crate) struct ManagerPlugin {
-    diagnostics: LspDiagnosticsSender,
-    diagnostics_inbox: LspDiagnosticsInbox,
-}
-
-impl ManagerPlugin {
-    pub(crate) fn new(
-        diagnostics: LspDiagnosticsSender,
-        diagnostics_inbox: LspDiagnosticsInbox,
-    ) -> Self {
-        Self {
-            diagnostics,
-            diagnostics_inbox,
-        }
-    }
-}
+pub(crate) struct ManagerPlugin;
 
 impl Plugin for ManagerPlugin {
     fn build(&self, app: &mut App) {
-        let (lint, lint_inbox) = LintDiagnosticsSender::channel();
-        app.world_mut().spawn((
-            Name::new("LSP startup"),
-            LspStartup {
-                diagnostics: self.diagnostics.clone(),
-                diagnostics_inbox: self.diagnostics_inbox.clone(),
-                lint,
-                lint_inbox,
-            },
-        ));
         app.add_plugins((
             ServersPlugin,
             RequestsPlugin,
@@ -2111,37 +2085,18 @@ fn binding_removed<C: Component>(trigger: On<Remove, C>, mut commands: Commands)
     )>();
 }
 
-#[derive(Component)]
-struct LspStartup {
-    diagnostics: LspDiagnosticsSender,
-    diagnostics_inbox: LspDiagnosticsInbox,
-    lint: LintDiagnosticsSender,
-    lint_inbox: LintDiagnosticsInbox,
-}
-
-fn start(
-    startup: Single<(Entity, &LspStartup)>,
-    inputs: Single<&ServerInputSender>,
-    mut commands: Commands,
-) {
-    let (entity, startup) = *startup;
+fn start(inputs: Single<&ServerInputSender>, mut commands: Commands) {
+    let (diagnostics, diagnostics_inbox) = LspDiagnosticsSender::channel();
+    let (lint, lint_inbox) = LintDiagnosticsSender::channel();
     commands.spawn((
         Name::new("LSP manager"),
         LspContext {
-            diagnostics: startup.diagnostics.clone(),
+            diagnostics,
             inputs: inputs.clone(),
         },
     ));
-    commands.spawn((
-        Name::new("LSP diagnostics"),
-        startup.diagnostics_inbox.clone(),
-    ));
-    commands.spawn((
-        Name::new("Lint diagnostics"),
-        startup.lint.clone(),
-        startup.lint_inbox.clone(),
-    ));
-    commands.entity(entity).despawn();
+    commands.spawn((Name::new("LSP diagnostics"), diagnostics_inbox));
+    commands.spawn((Name::new("Lint diagnostics"), lint, lint_inbox));
 }
 
 struct CodeActionsPlugin;
@@ -2717,14 +2672,13 @@ mod tests {
             settings.editor.lsp.servers.insert("rs".into(), serde_json::from_value(serde_json::json!({
                 "command": server, "args": ["--record"], "language_id": "rust", "root_markers": [".git"]
             })).unwrap());
-            let (diagnostics, inbox) = LspDiagnosticsSender::channel();
             let mut app = App::new();
             app.add_plugins((
                 MinimalPlugins,
                 vmux_feature::manifest::FeaturePlugin::<crate::Feature>::default(),
                 crate::lsp::server_request::ServerRequestPlugin,
                 vmux_lsp::LspPlugin,
-                ManagerPlugin::new(diagnostics, inbox),
+                ManagerPlugin,
             ))
             .insert_resource(settings)
             .insert_non_send(Browsers::default())
