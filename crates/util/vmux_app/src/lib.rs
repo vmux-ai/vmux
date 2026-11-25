@@ -32,6 +32,17 @@ pub use vmux_project as project;
 mod feature_flags;
 #[cfg(feature = "daemon")]
 mod host_runtime;
+#[cfg(feature = "menu")]
+pub mod menu {
+    pub use vmux_macro::app_menu as menu;
+    #[cfg(feature = "menu-native")]
+    pub use vmux_menu::NativeMenuPlugin;
+    pub use vmux_menu::{
+        About, ContextMenu, Entry, EventSender, MenuAction, MenuActionPlugin, MenuBar, MenuPlugin,
+        MenuSet, MenuWake, Predefined, Selected, Selection, Separator, Submenu, Transient,
+        macro_support,
+    };
+}
 #[cfg(feature = "mobile")]
 mod mobile;
 mod plugin;

@@ -7,7 +7,7 @@ use crate::recording::RecordingStatus;
 #[cfg(feature = "recording")]
 use crate::recording::lifecycle::{FinishRecording, PauseRecording, ResumeRecording};
 use crate::runtime::{HideAllWindowsRequest, QuitRequest, ShowAllWindowsRequest};
-use vmux_page::menu::{OsMenuEntry, OsMenuSelection, OsMenuSet};
+use vmux_menu::{Entry, MenuSet, Selection};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
 
@@ -19,7 +19,7 @@ impl Plugin for TrayPlugin {
             .add_systems(Startup, setup.after(vmux_setting::SettingsLoadSet))
             .add_systems(
                 Update,
-                (toggle_visibility, quit_from, control_recording_from).in_set(OsMenuSet::Dispatch),
+                (toggle_visibility, quit_from, control_recording_from).in_set(MenuSet::Dispatch),
             )
             .add_systems(Update, (sync_menu_state, sync_recording));
     }
@@ -137,36 +137,36 @@ fn setup(settings: Res<AppSettings>, mut runtime: NonSendMut<TrayRuntime>, mut c
     });
     commands.spawn((
         Name::new("Toggle tray visibility"),
-        OsMenuEntry::identified(toggle_id),
+        Entry::identified(toggle_id),
         ToggleTrayVisibility,
     ));
     commands.spawn((
         Name::new("Quit from tray"),
-        OsMenuEntry::identified(quit_id),
+        Entry::identified(quit_id),
         QuitFromTray,
     ));
     #[cfg(feature = "recording")]
     commands.spawn((
         Name::new("Pause recording from tray"),
-        OsMenuEntry::identified(pause_id),
+        Entry::identified(pause_id),
         PauseRecordingFromTray,
     ));
     #[cfg(feature = "recording")]
     commands.spawn((
         Name::new("Resume recording from tray"),
-        OsMenuEntry::identified(resume_id),
+        Entry::identified(resume_id),
         ResumeRecordingFromTray,
     ));
     #[cfg(feature = "recording")]
     commands.spawn((
         Name::new("Finish recording from tray"),
-        OsMenuEntry::identified(done_id),
+        Entry::identified(done_id),
         FinishRecordingFromTray,
     ));
 }
 
 fn toggle_visibility(
-    mut selections: MessageReader<OsMenuSelection>,
+    mut selections: MessageReader<Selection>,
     menu_items: Query<(), With<ToggleTrayVisibility>>,
     windows: Query<&Window>,
     mut hide_windows: MessageWriter<HideAllWindowsRequest>,
@@ -187,7 +187,7 @@ fn toggle_visibility(
 }
 
 fn quit_from(
-    mut selections: MessageReader<OsMenuSelection>,
+    mut selections: MessageReader<Selection>,
     menu_items: Query<(), With<QuitFromTray>>,
     mut quit: MessageWriter<QuitRequest>,
 ) {
@@ -200,7 +200,7 @@ fn quit_from(
 }
 
 fn control_recording_from(
-    mut selections: MessageReader<OsMenuSelection>,
+    mut selections: MessageReader<Selection>,
     #[cfg(feature = "recording")] pause: Query<(), With<PauseRecordingFromTray>>,
     #[cfg(feature = "recording")] resume: Query<(), With<ResumeRecordingFromTray>>,
     #[cfg(feature = "recording")] finish: Query<(), With<FinishRecordingFromTray>>,

@@ -1053,6 +1053,7 @@ impl<'tcx> Ownership<'tcx> {
             "notify",
             "arboard",
             "cef",
+            "muda",
             "winit",
             "wry",
             "sysinfo",

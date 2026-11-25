@@ -34,6 +34,10 @@ pub enum VmuxPlugin {
     Lsp(vmux_lsp::LspPlugin),
     #[plugin(feature = "flex", desktop, requires(ecs))]
     Flex(vmux_flex::FlexPlugin),
+    #[plugin(feature = "menu", desktop, requires(ecs))]
+    Menu(vmux_menu::MenuPlugin),
+    #[plugin(feature = "menu-native", desktop, requires(menu))]
+    MenuNative(vmux_menu::NativeMenuPlugin),
     #[plugin(feature = "runtime", desktop, requires(ecs, flex))]
     Runtime(VmuxRuntimePlugin),
     #[plugin(
@@ -128,7 +132,27 @@ impl Plugin for VmuxRuntimePlugin {
             vmux_ecs::page::PagePlugin,
             vmux_ecs::wake::WakePlugin,
         ));
+        #[cfg(feature = "menu")]
+        app.add_systems(bevy_app::PreUpdate, sync_menu_wake);
     }
+}
+
+#[cfg(all(feature = "runtime", feature = "menu", not(target_os = "ios")))]
+fn sync_menu_wake(
+    job_wake: Option<bevy_ecs::prelude::Res<vmux_ecs::JobWake>>,
+    menu_wake: Option<bevy_ecs::prelude::Res<vmux_menu::MenuWake>>,
+    mut commands: bevy_ecs::prelude::Commands,
+) {
+    let Some(job_wake) = job_wake else {
+        return;
+    };
+    if menu_wake
+        .as_ref()
+        .is_some_and(|current| current.0.will_wake(&job_wake.0))
+    {
+        return;
+    }
+    commands.insert_resource(vmux_menu::MenuWake(job_wake.0.clone()));
 }
 
 #[cfg(all(test, any(feature = "layout", feature = "acp")))]

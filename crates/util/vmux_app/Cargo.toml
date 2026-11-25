@@ -52,6 +52,7 @@ desktop = [
     "history",
     "knowledge",
     "layout",
+    "menu-native",
     "remote",
     "tool",
     "service",
@@ -97,6 +98,8 @@ profile-account = ["account-local", "runtime"]
 jobs = ["ecs", "vmux_ecs/jobs"]
 watch = ["ecs", "vmux_ecs/watch"]
 flex = ["ecs", "dep:vmux_flex"]
+menu = ["ecs", "dep:vmux_menu"]
+menu-native = ["menu", "vmux_menu/native"]
 runtime = ["flex", "vmux_flex/window", "vmux_ecs/host"]
 command = ["runtime", "dep:vmux_command"]
 setting = ["runtime", "dep:vmux_setting"]
@@ -160,6 +163,7 @@ vmux_layout = { path = "../../feature/vmux_layout", optional = true }
 vmux_lsp = { path = "../vmux_lsp", optional = true }
 vmux_mcp = { path = "../vmux_mcp", optional = true }
 vmux_macro = { path = "../vmux_macro" }
+vmux_menu = { path = "../vmux_menu", optional = true }
 vmux_remote = { path = "../../feature/vmux_remote", optional = true, default-features = false }
 vmux_service = { path = "../../feature/vmux_service", optional = true }
 vmux_session = { path = "../../feature/vmux_session", default-features = false, optional = true }

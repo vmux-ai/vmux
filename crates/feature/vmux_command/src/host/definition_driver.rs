@@ -344,61 +344,15 @@ impl CommandDefinition {
         keymap.extend(Source::Default, Self::default_shortcuts(definitions));
     }
 
-    pub fn append_native_menus(
-        definitions: &[Self],
-        menu: &mut muda::Menu,
-    ) -> Result<(), muda::Error> {
-        for definition in definitions {
-            if definition.hidden || !definition.native_menu {
-                continue;
-            }
-            let mut path = definition.group.split(" > ");
-            let Some(root_name) = path.next() else {
-                continue;
-            };
-            let existing = menu
-                .items()
-                .into_iter()
-                .filter_map(|item| item.as_submenu().cloned())
-                .find(|submenu| submenu.text() == root_name);
-            let mut submenu = if let Some(existing) = existing {
-                existing
-            } else {
-                let created = muda::Submenu::new(root_name, true);
-                menu.append(&created)?;
-                created
-            };
-            for name in path {
-                let existing = submenu
-                    .items()
-                    .into_iter()
-                    .filter_map(|item| item.as_submenu().cloned())
-                    .find(|child| child.text() == name);
-                submenu = if let Some(existing) = existing {
-                    existing
-                } else {
-                    let created = muda::Submenu::new(name, true);
-                    submenu.append(&created)?;
-                    created
-                };
-            }
-            let accelerator = definition
-                .accelerator
-                .as_deref()
-                .or_else(|| {
-                    definition.shortcuts.iter().find_map(|shortcut| {
-                        if shortcut.when.is_some() || shortcut.chord {
-                            return None;
-                        }
-                        Some(shortcut.key.as_str())
-                    })
-                })
-                .and_then(|value| value.parse::<muda::accelerator::Accelerator>().ok());
-            let item =
-                muda::MenuItem::with_id(&definition.id, &definition.label, true, accelerator);
-            submenu.append(&item)?;
-        }
-        Ok(())
+    pub fn native_menu_accelerator(&self) -> Option<&str> {
+        self.accelerator.as_deref().or_else(|| {
+            self.shortcuts.iter().find_map(|shortcut| {
+                if shortcut.when.is_some() || shortcut.chord {
+                    return None;
+                }
+                Some(shortcut.key.as_str())
+            })
+        })
     }
 }
 

@@ -1,8 +1,7 @@
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use bevy::window::WindowCloseRequested;
-#[cfg(target_os = "macos")]
-use muda::ContextMenu;
-use muda::{AboutMetadata, Menu, MenuEvent, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
 #[cfg(target_os = "macos")]
 use objc2::rc::Retained;
 #[cfg(target_os = "macos")]
@@ -20,15 +19,16 @@ use vmux_command::{
     BindCommands, CommandDefinition, CommandInvocation, DispatchCommandInvocations,
     WriteCommandRequests,
 };
-use vmux_ecs::channel::{AsyncChannelPlugin, MessageSender};
 #[cfg(target_os = "macos")]
 use vmux_ecs::page::BindsEditingChords;
 use vmux_ecs::team::User;
+use vmux_ecs::wake::Wake;
 use vmux_layout::stack::CloseRequest;
 use vmux_layout::tab::TabClosed;
-#[cfg(target_os = "macos")]
-use vmux_page::menu::{OsContextMenu, OsMenuSeparator};
-use vmux_page::menu::{OsMenuEntry, OsMenuSelection, OsMenuSet, TransientOsMenuEntry};
+use vmux_menu::{
+    About, Entry, MenuBar, MenuPlugin, MenuSet, MenuWake, NativeMenuPlugin, Predefined, Selection,
+    Separator, Submenu,
+};
 use vmux_setting::{AppSettings, SettingsLoadSet};
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale, TranslationValue};
 
@@ -36,10 +36,14 @@ pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(AsyncChannelPlugin::message::<OsMenuEvent>())
-            .init_non_send::<OsMenuResource>()
-            .add_systems(PreStartup, spawn_state)
-            .add_message::<OsMenuSelection>()
+        if !app.is_plugin_added::<MenuPlugin>() {
+            app.add_plugins(MenuPlugin);
+        }
+        if !app.is_plugin_added::<NativeMenuPlugin>() {
+            app.add_plugins(NativeMenuPlugin);
+        }
+        app.add_systems(PreStartup, spawn_state)
+            .add_systems(PreUpdate, sync_wake)
             .add_message::<WindowCloseRequested>()
             .add_message::<crate::runtime::HideAllWindowsRequest>()
             .add_message::<crate::window::CloseVmuxWindow>()
@@ -48,7 +52,7 @@ impl Plugin for OsMenuPlugin {
             .add_observer(remember_tab_close)
             .configure_sets(
                 Update,
-                (OsMenuSet::Forward, OsMenuSet::Dispatch, OsMenuSet::Cleanup)
+                (MenuSet::Forward, MenuSet::Dispatch, MenuSet::Cleanup)
                     .chain()
                     .in_set(WriteCommandRequests),
             )
@@ -56,32 +60,34 @@ impl Plugin for OsMenuPlugin {
             .add_systems(
                 Update,
                 (
-                    sync_menu_locale,
+                    sync_locale,
                     remember_stack_close_commands.after(DispatchCommandInvocations),
                     remember_page_open.after(DispatchCommandInvocations),
                     hide_window_on_close_request
+                        .after(remember_selection)
                         .after(remember_stack_close_commands)
                         .after(remember_page_open),
-                    sync_close_menu_item.after(hide_window_on_close_request),
+                    sync_close_item.after(hide_window_on_close_request),
                 ),
             )
             .add_systems(
                 Update,
                 (
-                    forward_menu_events.in_set(OsMenuSet::Forward),
-                    (dispatch_command_menu_selection, hide_windows_from_menu)
-                        .in_set(OsMenuSet::Dispatch),
-                    cleanup_transient_menu_entries.in_set(OsMenuSet::Cleanup),
-                ),
+                    remember_selection,
+                    dispatch_command_selection,
+                    hide_windows_from_selection,
+                )
+                    .in_set(MenuSet::Dispatch),
             );
         #[cfg(target_os = "macos")]
-        app.add_systems(Update, sync_edit_menu_items.after(ReadCommandRequests))
-            .add_systems(PostUpdate, present_context_menus);
+        app.init_non_send::<EditMenuHandles>()
+            .add_systems(Update, sync_edit_items.after(ReadCommandRequests));
     }
 }
 
 #[derive(Component)]
 struct OsMenuState {
+    locale: Locale,
     last_menu_command_at: Option<std::time::Instant>,
     last_stack_close_at: Option<std::time::Instant>,
     last_tab_close_at: Option<std::time::Instant>,
@@ -92,6 +98,7 @@ struct OsMenuState {
 impl Default for OsMenuState {
     fn default() -> Self {
         Self {
+            locale: Locale::preferred(),
             last_menu_command_at: None,
             last_stack_close_at: None,
             last_tab_close_at: None,
@@ -110,58 +117,14 @@ impl OsMenuState {
 #[derive(Component)]
 struct HideWindowsMenuEntry;
 
-#[derive(Message, Debug)]
-struct OsMenuEvent(String);
+#[derive(Component)]
+struct CommandMenuEntry(Entity);
 
-fn spawn_state(mut commands: Commands) {
-    commands.spawn((Name::new("OS menu runtime"), OsMenuState::default()));
-}
+#[derive(Component)]
+struct LocalizedSubmenu(&'static str);
 
-#[allow(unknown_lints, vmux_ecs_ownership)]
-struct OsMenuResource {
-    menu: Option<Menu>,
-    #[cfg(target_os = "macos")]
-    context_menu: Option<Menu>,
-    locale: Locale,
-    close_window: Option<MenuItem>,
-    #[cfg(target_os = "macos")]
-    edit_items: Vec<Retained<NSMenuItem>>,
-}
-
-impl Default for OsMenuResource {
-    fn default() -> Self {
-        Self {
-            menu: None,
-            #[cfg(target_os = "macos")]
-            context_menu: None,
-            locale: Locale::preferred(),
-            close_window: None,
-            #[cfg(target_os = "macos")]
-            edit_items: Vec::new(),
-        }
-    }
-}
-
-impl OsMenuResource {
-    fn localize_root_menu(
-        menu: &Menu,
-        previous_locale: &Locale,
-        locale: &Locale,
-        definitions: &[CommandDefinition],
-    ) {
-        localize_menu_items(menu.items(), previous_locale, locale, definitions);
-    }
-
-    fn localized_submenu_title(
-        title: &str,
-        previous_locale: &Locale,
-        locale: &Locale,
-    ) -> Option<String> {
-        Self::submenu_message_id(title, previous_locale)
-            .map(|message_id| locale.translate(message_id))
-    }
-
-    fn submenu_message_id(title: &str, locale: &Locale) -> Option<&'static str> {
+impl LocalizedSubmenu {
+    fn message_id(title: &str, locale: &Locale) -> Option<&'static str> {
         let english = Locale::from(DEFAULT_LOCALE);
         [
             "menu-scene",
@@ -187,270 +150,237 @@ impl OsMenuResource {
             title == locale.translate(message_id) || title == english.translate(message_id)
         })
     }
+}
 
-    fn find_menu_item(items: Vec<MenuItemKind>, id: &str) -> Option<MenuItem> {
-        for item in items {
-            if item.id().0 == id
-                && let Some(menu_item) = item.as_menuitem()
-            {
-                return Some(menu_item.clone());
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+struct EditMenuHandles {
+    items: Vec<Retained<NSMenuItem>>,
+}
+
+#[cfg(target_os = "macos")]
+impl EditMenuHandles {
+    fn collect() -> Vec<Retained<NSMenuItem>> {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return Vec::new();
+        };
+        let Some(main_menu) = NSApplication::sharedApplication(mtm).mainMenu() else {
+            return Vec::new();
+        };
+        let selectors: [Sel; 6] = [
+            sel!(undo:),
+            sel!(redo:),
+            sel!(cut:),
+            sel!(copy:),
+            sel!(paste:),
+            sel!(selectAll:),
+        ];
+        let mut items = Vec::new();
+        for top in 0..main_menu.numberOfItems() {
+            let Some(submenu) = main_menu.itemAtIndex(top).and_then(|item| item.submenu()) else {
+                continue;
+            };
+            let mut found = false;
+            for idx in 0..submenu.numberOfItems() {
+                let Some(item) = submenu.itemAtIndex(idx) else {
+                    continue;
+                };
+                if item
+                    .action()
+                    .is_some_and(|selector| selectors.contains(&selector))
+                {
+                    items.push(item);
+                    found = true;
+                }
             }
-            if let Some(submenu) = item.as_submenu()
-                && let Some(menu_item) = Self::find_menu_item(submenu.items(), id)
-            {
-                return Some(menu_item);
+            if found {
+                submenu.setAutoenablesItems(false);
             }
         }
-        None
+        items
     }
+}
+
+fn spawn_state(mut commands: Commands) {
+    commands.spawn((Name::new("OS menu runtime"), OsMenuState::default()));
+}
+
+fn sync_wake(
+    job_wake: Option<Res<vmux_ecs::JobWake>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    menu_wake: Option<Res<MenuWake>>,
+    mut commands: Commands,
+) {
+    let waker = if let Some(job_wake) = job_wake {
+        Some(job_wake.0.clone())
+    } else {
+        Wake::optional_waker(proxy.as_deref().map(|proxy| (**proxy).clone()))
+    };
+    let Some(waker) = waker else {
+        return;
+    };
+    if menu_wake
+        .as_ref()
+        .is_some_and(|current| current.0.will_wake(&waker))
+    {
+        return;
+    }
+    commands.insert_resource(MenuWake(waker));
+}
+
+fn close_product_label(locale: &Locale) -> String {
+    locale.translate_with(
+        "menu-close-product",
+        &[(
+            "product",
+            TranslationValue::String(vmux_profile::Product::name()),
+        )],
+    )
+}
+
+fn localized_command_leaf(definition: &CommandDefinition, locale: &Locale) -> String {
+    let localized = definition.localized_name(locale.as_str());
+    localized
+        .rsplit(" > ")
+        .next()
+        .unwrap_or(&localized)
+        .to_string()
 }
 
 fn setup(
     mut commands: Commands,
     definitions: Query<(Entity, &CommandDefinition)>,
     settings: Option<Res<AppSettings>>,
-    sender: Res<MessageSender<OsMenuEvent>>,
-    mut menu_resource: NonSendMut<OsMenuResource>,
+    mut state: Single<&mut OsMenuState>,
 ) {
-    let mut menu_definitions = Vec::new();
-    let mut command_entries = Vec::new();
-    for (entity, definition) in &definitions {
-        menu_definitions.push(definition.clone());
-        command_entries.push((entity, definition.id.clone()));
-    }
-    let mut menu = Menu::new();
-    append_application_menu(&menu).unwrap();
-    CommandDefinition::append_native_menus(&menu_definitions, &mut menu).unwrap();
-    append_standard_edit_menu(&menu);
     let locale = settings
         .as_deref()
         .map(|settings| Locale::requested(Some(&settings.appearance.locale)))
         .unwrap_or_else(Locale::preferred);
-    OsMenuResource::localize_root_menu(
-        &menu,
-        &Locale::from(DEFAULT_LOCALE),
-        &locale,
-        &menu_definitions,
-    );
-    let close_window = OsMenuResource::find_menu_item(menu.items(), "app_quit");
+    let english = Locale::from(DEFAULT_LOCALE);
+    state.locale = locale.clone();
 
-    #[cfg(target_os = "macos")]
-    menu.init_for_nsapp();
-    #[cfg(target_os = "macos")]
-    let edit_items = collect_edit_menu_items();
-
-    MenuEvent::set_event_handler(Some(
-        sender.callback(|event: MenuEvent| OsMenuEvent(event.id.0)),
-    ));
-
-    commands.spawn((
-        Name::new("Close Vmux menu item"),
-        OsMenuEntry::identified("app_quit".to_string()),
-        HideWindowsMenuEntry,
-    ));
-    for (entity, id) in command_entries {
-        commands.entity(entity).insert(OsMenuEntry::identified(id));
-    }
-    *menu_resource = OsMenuResource {
-        menu: Some(menu),
-        #[cfg(target_os = "macos")]
-        context_menu: None,
-        locale,
-        close_window,
-        #[cfg(target_os = "macos")]
-        edit_items,
-    };
+    let bar = commands
+        .spawn((Name::new("Application menu bar"), MenuBar))
+        .id();
+    spawn_application_menu(&mut commands, bar, &locale);
+    spawn_command_menus(&mut commands, bar, &definitions, &english, &locale);
+    spawn_standard_edit_menu(&mut commands, bar, &locale);
 }
 
-#[cfg(target_os = "macos")]
-fn present_context_menus(
-    _non_send: bevy::ecs::system::NonSendMarker,
-    mut commands: Commands,
-    menu: Option<NonSendMut<OsMenuResource>>,
-    context_menus: Query<(&OsContextMenu, &Children), Added<OsContextMenu>>,
-    mut entries: Query<&mut OsMenuEntry>,
-    separators: Query<(), (With<OsMenuSeparator>, Without<OsMenuEntry>)>,
-) {
-    let Some(mut menu_resource) = menu else {
-        return;
-    };
-    for (context, children) in &context_menus {
-        let menu = Menu::new();
-        for child in children.iter() {
-            if let Ok(mut entry) = entries.get_mut(child) {
-                let id = format!("os_context_menu_{}", child.to_bits());
-                let item = MenuItem::with_id(id.clone(), entry.label(), entry.enabled(), None);
-                let _ = menu.append(&item);
-                entry.mark_presented(id);
-                commands.entity(child).insert(TransientOsMenuEntry);
-                continue;
-            }
-            if separators.contains(child) {
-                let _ = menu.append(&PredefinedMenuItem::separator());
-            }
-        }
-        menu_resource.context_menu = Some(menu);
-        let Some(menu) = menu_resource.context_menu.as_ref() else {
-            continue;
-        };
-        unsafe {
-            menu.show_context_menu_for_nsview(context.view(), None);
-        }
-    }
-}
-
-fn sync_menu_locale(
-    settings: Option<Res<AppSettings>>,
-    menu: Option<NonSendMut<OsMenuResource>>,
-    definitions: Query<&CommandDefinition>,
-) {
-    let (Some(settings), Some(mut menu)) = (settings, menu) else {
-        return;
-    };
-    let locale = Locale::requested(Some(&settings.appearance.locale));
-    if menu.locale == locale {
-        return;
-    }
-    let Some(native_menu) = menu.menu.as_ref() else {
-        return;
-    };
-    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
-    OsMenuResource::localize_root_menu(native_menu, &menu.locale, &locale, &definitions);
-    menu.locale = locale;
-}
-
-fn localize_menu_items(
-    items: Vec<MenuItemKind>,
-    previous_locale: &Locale,
-    locale: &Locale,
-    definitions: &[CommandDefinition],
-) {
-    for item in items {
-        let id = item.id().0.clone();
-        if let Some(menu_item) = item.as_menuitem() {
-            if id == "app_quit" {
-                menu_item.set_text(locale.translate_with(
-                    "menu-close-product",
-                    &[(
-                        "product",
-                        TranslationValue::String(vmux_profile::Product::name()),
-                    )],
-                ));
-            } else if let Some(definition) =
-                definitions.iter().find(|definition| definition.id == id)
-            {
-                let current = menu_item.text();
-                let suffix = current
-                    .split_once('\t')
-                    .map(|(_, suffix)| format!("\t{suffix}"))
-                    .unwrap_or_default();
-                let localized = definition.localized_name(locale.as_str());
-                let leaf = localized.rsplit(" > ").next().unwrap_or(&localized);
-                menu_item.set_text(format!("{leaf}{suffix}"));
-            }
-        }
-        if let Some(submenu) = item.as_submenu() {
-            if let Some(title) =
-                OsMenuResource::localized_submenu_title(&submenu.text(), previous_locale, locale)
-            {
-                submenu.set_text(title);
-            }
-            localize_menu_items(submenu.items(), previous_locale, locale, definitions);
-        }
-    }
-}
-
-fn append_standard_edit_menu(menu: &Menu) {
-    let undo = PredefinedMenuItem::undo(None);
-    let redo = PredefinedMenuItem::redo(None);
-    let sep = PredefinedMenuItem::separator();
-    let cut = PredefinedMenuItem::cut(None);
-    let copy = PredefinedMenuItem::copy(None);
-    let paste = PredefinedMenuItem::paste(None);
-    let select_all = PredefinedMenuItem::select_all(None);
-    let Ok(edit) = Submenu::with_items(
-        "Edit",
-        true,
-        &[&undo, &redo, &sep, &cut, &copy, &paste, &select_all],
-    ) else {
-        return;
-    };
-    let _ = menu.append(&edit);
-}
-
-fn append_application_menu(menu: &Menu) -> Result<(), muda::Error> {
+fn spawn_application_menu(commands: &mut Commands, bar: Entity, locale: &Locale) {
     let app_name = env!("VMUX_BUILD_TITLE").to_string();
     let version = match env!("VMUX_BUILD_PROFILE") {
         "local" | "dev" => format!("v{} ({})", env!("CARGO_PKG_VERSION"), env!("VMUX_GIT_HASH")),
         _ => format!("v{}", env!("CARGO_PKG_VERSION")),
     };
-    let submenu = Submenu::new(app_name, true);
-    let quit = MenuItem::with_id(
-        "app_quit",
-        Locale::from(DEFAULT_LOCALE).translate_with(
-            "menu-close-product",
-            &[(
-                "product",
-                TranslationValue::String(vmux_profile::Product::name()),
-            )],
-        ),
-        true,
-        Some("super+q".parse().unwrap()),
-    );
-    submenu.append_items(&[
-        &PredefinedMenuItem::about(
-            None,
-            Some(AboutMetadata {
-                version: Some(version),
-                copyright: Some(String::new()),
-                ..default()
-            }),
-        ),
-        &PredefinedMenuItem::separator(),
-        &quit,
-    ])?;
-    menu.append(&submenu)
+    commands.spawn((
+        Submenu::new(app_name),
+        ChildOf(bar),
+        children![
+            (
+                Predefined::About,
+                About {
+                    version: Some(version),
+                    copyright: Some(String::new()),
+                    ..default()
+                },
+            ),
+            Separator,
+            (
+                Name::new("Close Vmux menu item"),
+                Entry::new(close_product_label(locale), true)
+                    .with_id("app_quit")
+                    .with_accelerator("super+q"),
+                HideWindowsMenuEntry,
+            ),
+        ],
+    ));
 }
 
-#[cfg(target_os = "macos")]
-fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
-    let Some(mtm) = MainThreadMarker::new() else {
-        return Vec::new();
-    };
-    let Some(main_menu) = NSApplication::sharedApplication(mtm).mainMenu() else {
-        return Vec::new();
-    };
-    let selectors: [Sel; 6] = [
-        sel!(undo:),
-        sel!(redo:),
-        sel!(cut:),
-        sel!(copy:),
-        sel!(paste:),
-        sel!(selectAll:),
-    ];
-    let mut items = Vec::new();
-    for top in 0..main_menu.numberOfItems() {
-        let Some(submenu) = main_menu.itemAtIndex(top).and_then(|item| item.submenu()) else {
+fn spawn_command_menus(
+    commands: &mut Commands,
+    bar: Entity,
+    definitions: &Query<(Entity, &CommandDefinition)>,
+    english: &Locale,
+    locale: &Locale,
+) {
+    let mut submenus = HashMap::<(Entity, String), Entity>::new();
+    for (command_entity, definition) in definitions {
+        if definition.hidden || !definition.native_menu {
             continue;
-        };
-        let mut found = false;
-        for idx in 0..submenu.numberOfItems() {
-            let Some(item) = submenu.itemAtIndex(idx) else {
-                continue;
-            };
-            if item
-                .action()
-                .is_some_and(|selector| selectors.contains(&selector))
-            {
-                items.push(item);
-                found = true;
-            }
         }
-        if found {
-            submenu.setAutoenablesItems(false);
+        let mut parent = bar;
+        let mut has_group = false;
+        for segment in definition.group.split(" > ") {
+            if segment.is_empty() {
+                continue;
+            }
+            has_group = true;
+            let key = (parent, segment.to_string());
+            parent = if let Some(&existing) = submenus.get(&key) {
+                existing
+            } else {
+                let message_id = LocalizedSubmenu::message_id(segment, english);
+                let title = message_id
+                    .map(|id| locale.translate(id))
+                    .unwrap_or_else(|| segment.to_string());
+                let entity = commands.spawn((Submenu::new(title), ChildOf(parent))).id();
+                if let Some(id) = message_id {
+                    commands.entity(entity).insert(LocalizedSubmenu(id));
+                }
+                submenus.insert(key, entity);
+                entity
+            };
+        }
+        if !has_group {
+            continue;
+        }
+        let mut entry =
+            Entry::new(localized_command_leaf(definition, locale), true).with_id(&definition.id);
+        if let Some(accelerator) = definition.native_menu_accelerator() {
+            entry = entry.with_accelerator(accelerator);
+        }
+        commands.spawn((entry, CommandMenuEntry(command_entity), ChildOf(parent)));
+    }
+}
+
+fn spawn_standard_edit_menu(commands: &mut Commands, bar: Entity, locale: &Locale) {
+    commands.spawn((
+        Submenu::standard_edit(locale.translate("menu-edit")),
+        LocalizedSubmenu("menu-edit"),
+        ChildOf(bar),
+    ));
+}
+
+fn sync_locale(
+    settings: Option<Res<AppSettings>>,
+    mut state: Single<&mut OsMenuState>,
+    mut submenus: Query<(&mut Submenu, &LocalizedSubmenu)>,
+    mut close_entries: Query<&mut Entry, (With<HideWindowsMenuEntry>, Without<CommandMenuEntry>)>,
+    mut command_entries: Query<(&mut Entry, &CommandMenuEntry), Without<HideWindowsMenuEntry>>,
+    definitions: Query<&CommandDefinition>,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    let locale = Locale::requested(Some(&settings.appearance.locale));
+    if state.locale == locale {
+        return;
+    }
+    for (mut submenu, localized) in &mut submenus {
+        submenu.set_title(locale.translate(localized.0));
+    }
+    let close_label = close_product_label(&locale);
+    for mut entry in &mut close_entries {
+        entry.set_label(close_label.clone());
+    }
+    for (mut entry, command_entry) in &mut command_entries {
+        if let Ok(definition) = definitions.get(command_entry.0) {
+            entry.set_label(localized_command_leaf(definition, &locale));
         }
     }
-    items
+    state.locale = locale;
 }
 
 #[cfg(target_os = "macos")]
@@ -463,102 +393,84 @@ fn edit_menu_items_enabled(intent: HostFocusIntent, binds_chords: bool) -> bool 
 }
 
 #[cfg(target_os = "macos")]
-fn sync_edit_menu_items(
-    menu: Option<NonSend<OsMenuResource>>,
+fn sync_edit_items(
+    mut handles: NonSendMut<EditMenuHandles>,
     intent: Query<Ref<HostFocusIntent>>,
     chord_panes: Query<(), With<BindsEditingChords>>,
 ) {
     let Ok(intent) = intent.single() else {
         return;
     };
-    if !intent.is_changed() {
+    let collected_now = if handles.items.is_empty() {
+        handles.items = EditMenuHandles::collect();
+        !handles.items.is_empty()
+    } else {
+        false
+    };
+    if !collected_now && !intent.is_changed() {
         return;
     }
-    let Some(menu) = menu else {
-        return;
-    };
     let binds_chords = intent
         .hosted_pane_entity()
         .is_some_and(|pane| chord_panes.contains(pane));
     let enabled = edit_menu_items_enabled(*intent, binds_chords);
-    for item in &menu.edit_items {
+    for item in &handles.items {
         item.setEnabled(enabled);
     }
 }
 
-fn sync_close_menu_item(
-    menu: Option<NonSend<OsMenuResource>>,
+fn sync_close_item(
     windows: Query<&Window>,
     mut state: Single<&mut OsMenuState>,
+    mut close_entries: Query<&mut Entry, With<HideWindowsMenuEntry>>,
 ) {
     let any_visible = windows.iter().any(|w| w.visible);
     if state.close_item_enabled == any_visible {
         return;
     }
     state.close_item_enabled = any_visible;
-    if let Some(menu) = menu
-        && let Some(item) = &menu.close_window
-    {
-        item.set_enabled(any_visible);
+    for mut entry in &mut close_entries {
+        entry.set_enabled(any_visible);
     }
 }
 
-fn forward_menu_events(
-    mut events: MessageReader<OsMenuEvent>,
-    menu_entries: Query<(Entity, &OsMenuEntry)>,
+fn remember_selection(
+    mut selections: MessageReader<Selection>,
     mut state: Single<&mut OsMenuState>,
-    mut selections: MessageWriter<OsMenuSelection>,
 ) {
-    let mut received = false;
-    for event in events.read() {
-        received = true;
-        let selected = menu_entries
-            .iter()
-            .find_map(|(entity, entry)| entry.matches(&event.0).then_some(entity));
-        if let Some(entity) = selected {
-            selections.write(OsMenuSelection::new(entity));
-        }
-    }
-    if received {
+    if selections.read().next().is_some() {
         state.last_menu_command_at = Some(std::time::Instant::now());
     }
 }
 
-fn dispatch_command_menu_selection(
-    mut selections: MessageReader<OsMenuSelection>,
+fn dispatch_command_selection(
+    mut selections: MessageReader<Selection>,
+    command_entries: Query<&CommandMenuEntry>,
     definitions: Query<&CommandDefinition>,
     users: Query<Entity, With<User>>,
     mut invocations: MessageWriter<CommandInvocation>,
 ) {
     let caller = users.iter().next().unwrap_or(Entity::PLACEHOLDER);
     for selection in selections.read() {
-        let Ok(definition) = definitions.get(selection.target()) else {
+        let target = command_entries
+            .get(selection.target())
+            .map(|entry| entry.0)
+            .unwrap_or_else(|_| selection.target());
+        let Ok(definition) = definitions.get(target) else {
             continue;
         };
         invocations.write(CommandInvocation::new(caller, definition.id.clone()));
     }
 }
 
-fn hide_windows_from_menu(
-    mut selections: MessageReader<OsMenuSelection>,
+fn hide_windows_from_selection(
+    mut selections: MessageReader<Selection>,
     menu_items: Query<(), With<HideWindowsMenuEntry>>,
     mut hide_windows: MessageWriter<crate::runtime::HideAllWindowsRequest>,
 ) {
     for selection in selections.read() {
         if menu_items.contains(selection.target()) {
             hide_windows.write(crate::runtime::HideAllWindowsRequest);
-        }
-    }
-}
-
-fn cleanup_transient_menu_entries(
-    mut selections: MessageReader<OsMenuSelection>,
-    transient: Query<(), With<TransientOsMenuEntry>>,
-    mut commands: Commands,
-) {
-    for selection in selections.read() {
-        if transient.contains(selection.target()) {
-            commands.entity(selection.target()).despawn();
         }
     }
 }
@@ -643,6 +555,7 @@ mod tests {
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
+    use vmux_menu::EventSender;
     use vmux_setting::{AgentSettings, AppSettings, BrowserSettings, ShortcutSettings};
 
     #[cfg(target_os = "macos")]
@@ -694,29 +607,46 @@ mod tests {
 
     #[test]
     fn root_menu_titles_use_requested_locale() {
-        let titles = [
-            "Layout", "Terminal", "Browser", "Service", "Bookmark", "Edit",
-        ]
-        .into_iter()
-        .filter_map(|title| {
-            OsMenuResource::localized_submenu_title(
-                title,
-                &Locale::from("en-US"),
-                &Locale::from("ja"),
-            )
-        })
-        .collect::<Vec<_>>();
-        assert_eq!(
-            titles,
-            [
-                "レイアウト",
-                "ターミナル",
-                "ブラウザ",
-                "サービス",
-                "ブックマーク",
-                "編集",
-            ]
-        );
+        let mut app = App::new();
+        let mut settings = test_settings();
+        settings.appearance.locale = "en-US".to_string();
+        app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .insert_resource(settings);
+        app.world_mut().run_schedule(PreStartup);
+        for (id, group) in [
+            ("layout_cmd", "Layout"),
+            ("terminal_cmd", "Terminal"),
+            ("browser_cmd", "Browser"),
+            ("service_cmd", "Service"),
+            ("bookmark_cmd", "Bookmark"),
+        ] {
+            app.world_mut().spawn(CommandDefinition::new(id, id, group));
+        }
+        app.world_mut().run_schedule(Startup);
+
+        app.world_mut()
+            .resource_mut::<AppSettings>()
+            .appearance
+            .locale = "ja".to_string();
+        app.world_mut().run_schedule(Update);
+
+        let world = app.world_mut();
+        let mut titles = world
+            .query_filtered::<&Submenu, With<LocalizedSubmenu>>()
+            .iter(world)
+            .map(|submenu| submenu.title().to_string())
+            .collect::<Vec<_>>();
+        titles.sort();
+        let mut expected = vec![
+            "レイアウト".to_string(),
+            "ターミナル".to_string(),
+            "ブラウザ".to_string(),
+            "サービス".to_string(),
+            "ブックマーク".to_string(),
+            "編集".to_string(),
+        ];
+        expected.sort();
+        assert_eq!(titles, expected);
     }
 
     #[test]
@@ -724,6 +654,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
             .insert_resource(test_settings());
+        app.world_mut().run_schedule(PreStartup);
         let command = app
             .world_mut()
             .spawn(CommandDefinition::new(
@@ -733,7 +664,7 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().write_message(OsMenuSelection::new(command));
+        app.world_mut().write_message(Selection::new(command));
         app.world_mut().run_schedule(Update);
 
         let invocations = app
@@ -748,13 +679,62 @@ mod tests {
     }
 
     #[test]
+    fn startup_menu_bar_routes_command_events_and_wakes_job_wake() {
+        struct WakeCount(AtomicUsize);
+
+        impl std::task::Wake for WakeCount {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::AcqRel);
+            }
+
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.0.fetch_add(1, Ordering::AcqRel);
+            }
+        }
+
+        let mut app = App::new();
+        let wakes = Arc::new(WakeCount(AtomicUsize::new(0)));
+        app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .insert_resource(test_settings())
+            .insert_resource(vmux_ecs::JobWake(Waker::from(Arc::clone(&wakes))));
+        app.world_mut().run_schedule(PreStartup);
+        app.world_mut().spawn(CommandDefinition::new(
+            "terminal_next",
+            "Next Terminal",
+            "Terminal",
+        ));
+        app.world_mut().run_schedule(Startup);
+        app.world_mut().run_schedule(PreUpdate);
+        app.world_mut().run_schedule(PreUpdate);
+
+        let sender = app.world().resource::<EventSender>().clone();
+        sender.send("terminal_next");
+        assert_eq!(wakes.0.load(Ordering::Acquire), 1);
+
+        app.world_mut().run_schedule(Update);
+        let invocations = app
+            .world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            invocations,
+            vec![CommandInvocation::new(Entity::PLACEHOLDER, "terminal_next")]
+        );
+        let world = app.world_mut();
+        let state = world.query::<&OsMenuState>().single(world).unwrap();
+        assert!(state.last_menu_command_at.is_some());
+    }
+
+    #[test]
     fn close_menu_selection_emits_hide_windows_request() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
             .insert_resource(test_settings());
+        app.world_mut().run_schedule(PreStartup);
         let close = app.world_mut().spawn(HideWindowsMenuEntry).id();
 
-        app.world_mut().write_message(OsMenuSelection::new(close));
+        app.world_mut().write_message(Selection::new(close));
         app.world_mut().run_schedule(Update);
 
         let requests = app
@@ -884,13 +864,14 @@ mod tests {
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
         app.world_mut().run_schedule(PreStartup);
+        app.world_mut().run_schedule(Startup);
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut().run_schedule(Update);
         let enabled = {
             let world = app.world_mut();
-            let mut state = world.query::<&OsMenuState>();
-            state.single(world).unwrap().close_item_enabled
+            let mut entries = world.query_filtered::<&Entry, With<HideWindowsMenuEntry>>();
+            entries.single(world).unwrap().enabled()
         };
         assert!(enabled, "a visible window means Close is enabled");
 
@@ -898,8 +879,8 @@ mod tests {
         app.world_mut().run_schedule(Update);
         let enabled = {
             let world = app.world_mut();
-            let mut state = world.query::<&OsMenuState>();
-            state.single(world).unwrap().close_item_enabled
+            let mut entries = world.query_filtered::<&Entry, With<HideWindowsMenuEntry>>();
+            entries.single(world).unwrap().enabled()
         };
         assert!(!enabled, "all windows hidden means Close is disabled");
 
@@ -907,62 +888,9 @@ mod tests {
         app.world_mut().run_schedule(Update);
         let enabled = {
             let world = app.world_mut();
-            let mut state = world.query::<&OsMenuState>();
-            state.single(world).unwrap().close_item_enabled
+            let mut entries = world.query_filtered::<&Entry, With<HideWindowsMenuEntry>>();
+            entries.single(world).unwrap().enabled()
         };
         assert!(enabled, "showing a window re-enables Close");
-    }
-
-    #[test]
-    fn menu_channel_forwards_os_events_and_wakes_job_wake() {
-        struct WakeCount(AtomicUsize);
-
-        impl std::task::Wake for WakeCount {
-            fn wake(self: Arc<Self>) {
-                self.0.fetch_add(1, Ordering::AcqRel);
-            }
-
-            fn wake_by_ref(self: &Arc<Self>) {
-                self.0.fetch_add(1, Ordering::AcqRel);
-            }
-        }
-
-        let mut app = App::new();
-        let wakes = Arc::new(WakeCount(AtomicUsize::new(0)));
-        app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
-            .insert_resource(test_settings())
-            .insert_resource(vmux_ecs::JobWake(Waker::from(Arc::clone(&wakes))));
-        app.world_mut().run_schedule(PreStartup);
-
-        let entry = app
-            .world_mut()
-            .spawn((
-                CommandDefinition::new("terminal_next", "Next Terminal", "Terminal"),
-                OsMenuEntry::identified("terminal_next".to_string()),
-            ))
-            .id();
-
-        app.world_mut().run_schedule(PreUpdate);
-        let sender = app.world().resource::<MessageSender<OsMenuEvent>>().clone();
-        sender
-            .send(OsMenuEvent("terminal_next".to_string()))
-            .unwrap();
-        assert_eq!(wakes.0.load(Ordering::Acquire), 1);
-
-        app.world_mut().run_schedule(PreUpdate);
-        app.world_mut().run_schedule(Update);
-        let invocations = app
-            .world_mut()
-            .resource_mut::<Messages<CommandInvocation>>()
-            .drain()
-            .collect::<Vec<_>>();
-        assert_eq!(
-            invocations,
-            vec![CommandInvocation::new(Entity::PLACEHOLDER, "terminal_next")]
-        );
-        let world = app.world_mut();
-        let state = world.query::<&OsMenuState>().single(world).unwrap();
-        assert!(state.last_menu_command_at.is_some());
-        assert!(world.get::<OsMenuEntry>(entry).is_some());
     }
 }

@@ -26,6 +26,13 @@ pub use vmux_layout::{
 };
 #[cfg(feature = "lsp")]
 pub use vmux_lsp::LspPlugin;
+#[cfg(feature = "menu-native")]
+pub use vmux_menu::NativeMenuPlugin;
+#[cfg(feature = "menu")]
+pub use vmux_menu::{
+    Entry as MenuEntry, MenuAction, MenuActionPlugin, MenuBar, MenuPlugin, MenuSet,
+    Selected as MenuActionSelected, Selection as MenuSelection, Submenu,
+};
 #[cfg(feature = "project")]
 pub use vmux_project::ProjectPlugin;
 #[cfg(feature = "service")]
