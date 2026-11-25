@@ -30,6 +30,7 @@ fn development() {
         ("util", "vmux_api"),
         ("util", "vmux_channel"),
         ("util", "vmux_task"),
+        ("util", "vmux_time"),
         ("util", "vmux_macro"),
     ] {
         println!(

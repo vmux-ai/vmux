@@ -2989,6 +2989,7 @@ dependencies = [
  "vmux_channel",
  "vmux_macro",
  "vmux_task",
+ "vmux_time",
  "web-time",
 ]
 
@@ -3102,6 +3103,15 @@ dependencies = [
  "bevy_ecs",
  "bevy_tasks",
  "uuid",
+]
+
+[[package]]
+name = "vmux_time"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "web-time",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bevy_app::{App, Plugin as BevyPlugin, Startup, Update};
 use bevy_ecs::entity::Entity;
@@ -14,6 +14,7 @@ use vmux_api::session::{
     RemoteStatus, SessionId,
 };
 use vmux_api::{BinEvent, UiState, UiStateFrame};
+use vmux_ecs::time::Clock;
 use vmux_ecs::{OperationRetained, OperationState};
 use vmux_session::event::{ChatDraftChanged, ChatSubmit};
 use vmux_session::host::{
@@ -27,9 +28,8 @@ use vmux_ui::hooks::transport::HostBinding;
 use crate::MobileDomainPlugin;
 use crate::actions::MountInterestAdded;
 use crate::connection::{
-    ActiveScan, AuthStage, CancelScan, ConnectionNotice, ConnectionReachable,
-    CredentialPersistence, DisconnectRequest, PairRequest, RefreshDeadline, ScanCompleted,
-    ScanRequest, SourceEpoch,
+    ActiveScan, AuthStage, CancelScan, CatalogRefresh, ConnectionNotice, ConnectionReachable,
+    CredentialPersistence, DisconnectRequest, PairRequest, ScanCompleted, ScanRequest, SourceEpoch,
 };
 use crate::credentials::Credentials;
 use crate::host::{MobileHost, MountLease};
@@ -51,7 +51,9 @@ use crate::runtime::RuntimeHandle;
 use crate::session::{
     LeaveSession, OpenSession, RestartSession, SelectedSession, StartChatRequest, StreamConnected,
 };
-use crate::stream::{StreamReconnectDeadline, StreamSession, StreamTerminalRefusal};
+use crate::stream::{
+    StreamReconnect, StreamReconnectDeadline, StreamSession, StreamTerminalRefusal,
+};
 
 struct MobileChatSinkPlugin;
 
@@ -121,13 +123,15 @@ fn fold_chat_sink(
 
 struct MobileFixture {
     runtime: RuntimeHandle,
+    clock: Clock,
 }
 
 impl MobileFixture {
     fn start() -> Self {
         vmux_ui::i18n::Locale::from("en-US").make_current();
+        let clock = Clock::fake(1_000);
         let mut app = App::new();
-        app.add_plugins((
+        app.insert_resource(clock.clone()).add_plugins((
             vmux_app::VmuxMobilePlugin,
             MobileChatSinkPlugin,
             MobileDomainPlugin,
@@ -135,7 +139,11 @@ impl MobileFixture {
         let runtime = RuntimeHandle::from_app(app);
         runtime.report_lifecycle(AppLifecycle::Running);
         runtime.update();
-        Self { runtime }
+        Self { runtime, clock }
+    }
+
+    fn advance(&self, duration: Duration) {
+        self.clock.advance(duration);
     }
 
     fn mount(&self) -> (HostBinding, MountLease) {
@@ -503,10 +511,7 @@ fn restore_offline_retries_while_pair_error_stays_unpaired_and_unauthorized_clea
     assert_eq!(auth, AuthStage::Paired);
     assert!(!reachable);
 
-    fixture.runtime.with_world_mut(|world| {
-        let mut q = world.query::<&mut RefreshDeadline>();
-        q.single_mut(world).unwrap().0 = Instant::now() - Duration::from_secs(1);
-    });
+    fixture.advance(CatalogRefresh::INTERVAL);
     fixture.tick();
 
     let refresh_entity = fixture.pending_job::<ReadSessionsJob>().unwrap();
@@ -791,10 +796,7 @@ fn stream_reconnect_waits_two_second_ecs_deadline_and_refuses_terminal_errors() 
     });
     assert!(has_deadline);
 
-    fixture.runtime.with_world_mut(|world| {
-        let mut q = world.query::<&mut StreamReconnectDeadline>();
-        q.single_mut(world).unwrap().0 = Instant::now() - Duration::from_secs(1);
-    });
+    fixture.advance(StreamReconnect::DELAY);
     fixture.tick();
 
     let open_2 = fixture.pending_job::<OpenStreamJob>().unwrap();

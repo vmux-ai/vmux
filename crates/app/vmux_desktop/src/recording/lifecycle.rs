@@ -1,11 +1,12 @@
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
-use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::task::Waker;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
 use vmux_ecs::profile::{ActiveProfile, CurrentProfile, ProfileDirectories};
+use vmux_ecs::time::{Clock, Deadline, DeadlinePlugin, DeadlineReached, TimeWake};
 use vmux_input::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
 };
@@ -17,9 +18,13 @@ use crate::capture_output::{CaptureOutput, CaptureSize, CaptureSource, CropRect,
 
 pub(crate) struct RecordingPlugin;
 
+struct CaptureTimeout;
+
 impl Plugin for RecordingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<RecordStartRequest>()
+        app.add_plugins(DeadlinePlugin::<CaptureTimeout>::default())
+            .add_observer(on_timeout)
+            .add_message::<RecordStartRequest>()
             .add_message::<AppExit>()
             .add_message::<RecordStartResponse>()
             .add_message::<RecordStopRequest>()
@@ -32,6 +37,7 @@ impl Plugin for RecordingPlugin {
                 Update,
                 (
                     (
+                        sync_wake,
                         start,
                         ApplyDeferred,
                         open,
@@ -210,22 +216,10 @@ struct CleanupFailure(String);
 struct ExitRequested(AppExit);
 
 #[derive(Component)]
-struct Deadline {
-    at: Instant,
-    _timer: Option<bevy::tasks::Task<()>>,
-}
+struct TimedOut;
 
-impl Deadline {
-    fn at(at: Instant, wake: Option<&Waker>) -> Self {
-        let timer = wake.map(|wake| {
-            let wake = wake.clone();
-            bevy::tasks::IoTaskPool::get().spawn(async move {
-                async_io::Timer::at(at).await;
-                wake.wake();
-            })
-        });
-        Self { at, _timer: timer }
-    }
+fn on_timeout(reached: On<DeadlineReached<CaptureTimeout>>, mut commands: Commands) {
+    commands.entity(reached.entity).try_insert(TimedOut);
 }
 
 #[derive(Component)]
@@ -272,18 +266,37 @@ struct GifPublished;
 #[derive(Component)]
 struct TerminalResult(Result<RecordingInfo, String>);
 
-fn spawn(mut commands: Commands, proxy: Option<Res<EventLoopProxyWrapper>>) {
-    let wake = proxy.map(|proxy| {
-        let proxy = (**proxy).clone();
-        Arc::new(move || {
-            let _ = proxy.send_event(WinitUserEvent::WakeUp);
-        }) as super::WakeFn
+fn spawn(mut commands: Commands, wake: Option<Res<TimeWake>>) {
+    let wake = wake.map(|wake| {
+        let wake = wake.clone();
+        Arc::new(move || wake.wake()) as super::WakeFn
     });
     commands.spawn((
         Name::new("Recording capture"),
         CurrentAttempt::default(),
         CapturePorts::new(wake),
     ));
+}
+
+fn sync_wake(
+    wake: Option<Res<TimeWake>>,
+    runtime: Query<Entity, With<CapturePorts>>,
+    attempts: Query<(), With<Attempt>>,
+    mut commands: Commands,
+) {
+    let Some(wake) = wake else {
+        return;
+    };
+    if !wake.is_changed() || !attempts.is_empty() {
+        return;
+    }
+    let Ok(entity) = runtime.single() else {
+        return;
+    };
+    let wake = wake.clone();
+    commands
+        .entity(entity)
+        .insert(CapturePorts::new(Some(Arc::new(move || wake.wake()))));
 }
 
 fn start(
@@ -294,7 +307,7 @@ fn start(
     profile: CurrentProfile,
     source: CaptureSource,
     settings: Res<AppSettings>,
-    wake: Option<Res<vmux_ecs::JobWake>>,
+    clock: Res<Clock>,
     mut commands: Commands,
 ) {
     let Ok((mut current, exiting)) = runtime.single_mut() else {
@@ -352,10 +365,7 @@ fn start(
             Attempt(request.clone()),
             Source::new(capture, owner, identity.clone(), paths, output_directory),
             TemporaryOutputs::new(&paths.recording(), entity, request.gif),
-            Deadline::at(
-                Instant::now() + Duration::from_secs(8),
-                wake.as_ref().map(|wake| &wake.0),
-            ),
+            Deadline::<CaptureTimeout>::after(&clock, Duration::from_secs(8)),
         ));
         current.0 = Some(vmux_ecs::EntityTarget::new(entity));
     }
@@ -396,7 +406,7 @@ fn open(
                     Phase::Failed,
                     TerminalResult(Err(error)),
                 ))
-                .remove::<Deadline>();
+                .remove::<(Deadline<CaptureTimeout>, TimedOut)>();
             continue;
         }
         if let Err(error) = Filesystem::ensure(&source.temporary_root)
@@ -415,7 +425,7 @@ fn open(
                     Phase::Failed,
                     TerminalResult(Err(error.to_string())),
                 ))
-                .remove::<Deadline>();
+                .remove::<(Deadline<CaptureTimeout>, TimedOut)>();
             continue;
         }
         commands.entity(entity).insert(ReservedTemporaryDirectory);
@@ -446,7 +456,7 @@ fn open(
                 commands
                     .entity(entity)
                     .insert((StartResponded, Failure(error), Phase::Canceled))
-                    .remove::<Deadline>();
+                    .remove::<(Deadline<CaptureTimeout>, TimedOut)>();
             }
         }
     }
@@ -456,7 +466,6 @@ fn receive_opened(
     ports: Query<&CapturePorts>,
     mut attempts: Query<(&Attempt, &mut Phase, Option<&StartResponded>), With<Attempt>>,
     mut responses: MessageWriter<RecordStartResponse>,
-    wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,
 ) {
     for ports in &ports {
@@ -472,8 +481,7 @@ fn receive_opened(
             }
             commands
                 .entity(receipt.attempt)
-                .remove::<OpenSubmitted>()
-                .remove::<Deadline>();
+                .remove::<(OpenSubmitted, Deadline<CaptureTimeout>, TimedOut)>();
             if let Some(handle) = receipt.handle {
                 commands.entity(receipt.attempt).insert(handle);
             }
@@ -494,10 +502,11 @@ fn receive_opened(
             match receipt.result {
                 Ok(started) => {
                     *phase = Phase::Capturing;
-                    commands.entity(receipt.attempt).insert((Deadline::at(
-                        started + Duration::from_secs(u64::from(attempt.0.max_secs)),
-                        wake.as_ref().map(|wake| &wake.0),
-                    ),));
+                    commands
+                        .entity(receipt.attempt)
+                        .insert(Deadline::<CaptureTimeout>::at(
+                            started + Duration::from_secs(u64::from(attempt.0.max_secs)),
+                        ));
                 }
                 Err(error) => {
                     *phase = Phase::Canceled;
@@ -612,23 +621,25 @@ fn expire(
         &Attempt,
         &Source,
         &mut Phase,
-        Option<&Deadline>,
+        Option<&Deadline<CaptureTimeout>>,
+        Has<TimedOut>,
         Option<&StopIntent>,
         Option<&StartResponded>,
         &vmux_ecs::OperationState,
     )>,
+    clock: Res<Clock>,
     scope: Scope,
     mut responses: MessageWriter<RecordStartResponse>,
     mut commands: Commands,
 ) {
-    for (entity, attempt, source, mut phase, deadline, intent, responded, operation) in
+    for (entity, attempt, source, mut phase, deadline, timed_out, intent, responded, operation) in
         &mut attempts
     {
         if phase.settled() {
             continue;
         }
         let owner = scope.valid(source);
-        let expired = deadline.is_some_and(|deadline| Instant::now() >= deadline.at);
+        let expired = timed_out || deadline.is_some_and(|deadline| deadline.is_due(&clock));
         if !owner
             || *operation == vmux_ecs::OperationState::Canceled
             || expired && *phase == Phase::Preparing
@@ -651,12 +662,12 @@ fn expire(
             commands
                 .entity(entity)
                 .insert(Failure(error.into()))
-                .remove::<Deadline>();
+                .remove::<(Deadline<CaptureTimeout>, TimedOut)>();
         } else if expired && intent.is_none() {
             commands
                 .entity(entity)
                 .insert(StopIntent::automatic())
-                .remove::<Deadline>();
+                .remove::<(Deadline<CaptureTimeout>, TimedOut)>();
         }
     }
 }
@@ -680,7 +691,7 @@ fn finish(
             commands
                 .entity(entity)
                 .insert(FinishSubmitted)
-                .remove::<Deadline>();
+                .remove::<(Deadline<CaptureTimeout>, TimedOut)>();
         }
     }
 }
@@ -1020,7 +1031,7 @@ fn exit(
     runtime: Query<(Entity, &CapturePorts, Option<&ExitRequested>)>,
     mut attempts: Query<(Entity, &Attempt, &mut Phase, Has<StartResponded>), With<Attempt>>,
     mut starts: MessageWriter<RecordStartResponse>,
-    wake: Option<Res<vmux_ecs::JobWake>>,
+    wake: Option<Res<TimeWake>>,
     mut commands: Commands,
 ) {
     let Ok((runtime, ports, pending)) = runtime.single() else {
@@ -1046,7 +1057,7 @@ fn exit(
         commands
             .entity(entity)
             .insert(Failure(error.into()))
-            .remove::<Deadline>();
+            .remove::<(Deadline<CaptureTimeout>, TimedOut)>();
         if !responded {
             starts.write(RecordStartResponse {
                 request_id: attempt.0.request_id,
@@ -1059,7 +1070,7 @@ fn exit(
         commands.entity(runtime).insert(ExitRequested(requested));
         ports.wake();
         if let Some(wake) = wake {
-            wake.0.wake_by_ref();
+            wake.wake();
         }
     } else {
         commands.entity(runtime).remove::<ExitRequested>();
@@ -1425,7 +1436,9 @@ mod tests {
             .app
             .world_mut()
             .entity_mut(entity)
-            .insert(Deadline::at(Instant::now() - Duration::from_secs(1), None));
+            .insert(Deadline::<CaptureTimeout>::at(
+                Instant::now() - Duration::from_secs(1),
+            ));
         fixture.app.update();
         assert!(
             fixture
@@ -1577,7 +1590,9 @@ mod tests {
             .app
             .world_mut()
             .entity_mut(entity)
-            .insert(Deadline::at(Instant::now() - Duration::from_secs(1), None));
+            .insert(Deadline::<CaptureTimeout>::at(
+                Instant::now() - Duration::from_secs(1),
+            ));
         fixture.app.update();
         assert_eq!(
             fixture

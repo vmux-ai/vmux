@@ -1,8 +1,7 @@
-use super::super::deadline::DeadlineOwner;
 use super::{
     CleanupFinished, CleanupHold, Destination, Effects, Job, JournalPath, KeepCheckout,
     LeaseCheckout, Phase, Progress, RepositoryGuard, RepositoryIdentity, RequestedBranch,
-    RetainedReason, RetryDeadline, custody, io, lease,
+    RetainedReason, custody, io, lease,
 };
 use bevy::prelude::*;
 use std::os::fd::AsRawFd;
@@ -148,16 +147,7 @@ fn lock(
             }
             Ok(Ok(None)) => {
                 effects.finish(operation, job.0, Phase::CleanupLockPause);
-                let at = std::time::Instant::now() + std::time::Duration::from_millis(20);
-                let registration = effects.deadlines.register(
-                    DeadlineOwner::Checkout(operation),
-                    at,
-                    effects.proxy.as_deref(),
-                );
-                effects.commands.entity(operation).insert(RetryDeadline {
-                    at,
-                    _registration: registration,
-                });
+                effects.pause_retry(operation);
             }
             Ok(Err(error)) | Err(error) => effects.retain(operation, Some(job.0), error.clone()),
         }
@@ -616,20 +606,11 @@ fn review_references(
             );
             continue;
         }
-        let at = std::time::Instant::now() + std::time::Duration::from_millis(20);
-        let registration = effects.deadlines.register(
-            DeadlineOwner::Checkout(operation),
-            at,
-            effects.proxy.as_deref(),
-        );
         effects.commands.entity(operation).insert((
             ReferenceAttempts(attempts + 1),
-            RetryDeadline {
-                at,
-                _registration: registration,
-            },
             Progress(Phase::CleanupReferencePause),
         ));
+        effects.pause_retry(operation);
     }
 }
 

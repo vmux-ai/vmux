@@ -3,15 +3,19 @@ use bevy::prelude::*;
 use std::time::{Duration, Instant};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::store::WorkspaceRestore;
+use vmux_ecs::time::{Clock, Deadline, DeadlinePlugin};
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::space::Space;
 use vmux_layout::stack::Stack;
 
 pub(crate) struct BootStatusPlugin;
 
+struct SplashTimeout;
+
 impl Plugin for BootStatusPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn)
+        app.add_plugins(DeadlinePlugin::<SplashTimeout>::default())
+            .add_systems(Startup, spawn)
             .add_systems(Update, update.after(vmux_layout::stack::ComputeFocusSet))
             .add_systems(
                 Last,
@@ -116,11 +120,6 @@ pub(super) struct Dismissal;
 #[derive(Component)]
 pub(super) struct Closed;
 
-#[derive(Component)]
-struct Deadline {
-    _timer: bevy::tasks::Task<()>,
-}
-
 #[derive(Component, Default)]
 pub(super) struct PageCounts {
     ready: usize,
@@ -187,26 +186,18 @@ fn arm_deadline(
         (Entity, &PresentedAt),
         (
             With<SplashStatus>,
-            Without<Deadline>,
+            Without<Deadline<SplashTimeout>>,
             Without<Dismissal>,
             Without<Closed>,
         ),
     >,
-    wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,
 ) {
-    let Some(wake) = wake else {
-        return;
-    };
     for (owner, presented) in &panels {
         let deadline = presented.0 + Duration::from_secs(20);
-        let wake = wake.0.clone();
-        commands.entity(owner).insert(Deadline {
-            _timer: bevy::tasks::IoTaskPool::get().spawn(async move {
-                async_io::Timer::at(deadline).await;
-                wake.wake();
-            }),
-        });
+        commands
+            .entity(owner)
+            .insert(Deadline::<SplashTimeout>::at(deadline));
     }
 }
 
@@ -216,11 +207,12 @@ fn request_dismissal(
         (With<SplashStatus>, Without<Dismissal>, Without<Closed>),
     >,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    clock: Res<Clock>,
     mut commands: Commands,
 ) {
     let visible = windows.single().is_ok_and(|window| window.visible);
     for (owner, presented) in &panels {
-        let forced = !visible && presented.0.elapsed() >= Duration::from_secs(20);
+        let forced = !visible && clock.elapsed_since(presented.0) >= Duration::from_secs(20);
         if !visible && !forced {
             continue;
         }
@@ -230,7 +222,7 @@ fn request_dismissal(
         commands
             .entity(owner)
             .insert(Dismissal)
-            .remove::<Deadline>();
+            .remove::<Deadline<SplashTimeout>>();
     }
 }
 
@@ -260,7 +252,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins((bevy::app::TaskPoolPlugin::default(), BootStatusPlugin));
+            app.add_plugins(BootStatusPlugin);
             let (sender, wake) = mpsc::sync_channel(1);
             app.insert_resource(vmux_ecs::JobWake(Waker::from(Arc::new(WakeProbe(sender)))));
             let restore = app.world_mut().spawn(WorkspaceRestore::default()).id();
@@ -468,5 +460,25 @@ mod tests {
             .visible = true;
         fixture.app.update();
         assert!(!fixture.requested());
+    }
+
+    #[test]
+    fn fake_clock_triggers_forced_dismissal_at_twenty_seconds_without_sleeping() {
+        let clock = Clock::fake(1_000);
+        let mut fixture = Fixture::new();
+        fixture.app.insert_resource(clock.clone());
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.status)
+            .insert(PresentedAt(clock.now()));
+        fixture.app.update();
+        assert!(!fixture.requested());
+        clock.advance(Duration::from_secs(19));
+        fixture.app.update();
+        assert!(!fixture.requested());
+        clock.advance(Duration::from_secs(1));
+        fixture.app.update();
+        assert!(fixture.requested());
     }
 }

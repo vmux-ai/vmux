@@ -76,12 +76,16 @@ pub enum JobSet {
 }
 
 #[derive(Resource, Clone)]
-#[component(on_insert = sync_channel_wake)]
+#[component(on_insert = sync_wake)]
 pub struct JobWake(pub Waker);
 
-fn sync_channel_wake(mut world: DeferredWorld, context: HookContext) {
-    let waker = world.get::<JobWake>(context.entity).unwrap().0.clone();
-    world.commands().insert_resource(ChannelWake(waker));
+fn sync_wake(mut world: DeferredWorld, context: HookContext) {
+    let Some(wake) = world.get::<JobWake>(context.entity) else {
+        return;
+    };
+    let waker = wake.0.clone();
+    world.commands().insert_resource(ChannelWake(waker.clone()));
+    world.commands().insert_resource(vmux_time::TimeWake(waker));
 }
 
 #[derive(Component)]

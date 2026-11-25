@@ -4,16 +4,15 @@ use bevy::ecs::system::Commands;
 use bevy::prelude::Changed;
 use bevy::prelude::Component;
 use bevy::prelude::*;
-use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use vmux_ecs::launcher::{RestoreKeyboardToStack, StackInPaneChosen};
 use vmux_ecs::page::{HostsPage, PageReady};
+use vmux_ecs::time::{Clock, Deadline, DeadlinePlugin, TimeWake};
 use vmux_ecs::{Active, KeyboardOwner, PagePresented};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 use crate::PendingWebviewReveal;
 use crate::cef::Browser;
-use crate::host::deadline::{DeadlineOwner, DeadlineScheduler};
 use crate::hosted_page::{SurfaceHandoff, SurfacePresentationReady};
 use crate::stack::Stack;
 use crate::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
@@ -75,87 +74,92 @@ pub struct NativeSurfaceReused {
 #[derive(Message, Clone, Copy)]
 pub struct NativeSelectionCommitted;
 
+struct StackAnimation;
+struct PresentationTimeout;
+
 impl Plugin for PresentationPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DeadlineScheduler>()
-            .add_message::<bevy::window::WindowResized>()
-            .add_systems(
-                PostUpdate,
-                (animate_frames, bevy::ecs::schedule::ApplyDeferred)
-                    .chain()
-                    .in_set(StackMotionSet)
-                    .after(LayoutSystems::Layout),
+        app.add_plugins((
+            DeadlinePlugin::<StackAnimation>::default(),
+            DeadlinePlugin::<PresentationTimeout>::default(),
+        ))
+        .add_message::<bevy::window::WindowResized>()
+        .add_systems(
+            PostUpdate,
+            (animate_frames, bevy::ecs::schedule::ApplyDeferred)
+                .chain()
+                .in_set(StackMotionSet)
+                .after(LayoutSystems::Layout),
+        )
+        .add_message::<StackInPaneChosen>()
+        .add_message::<RestoreKeyboardToStack>()
+        .add_message::<FocusChanged>()
+        .add_message::<NativeSurfaceReused>()
+        .add_message::<NativeSelectionCommitted>()
+        .configure_sets(
+            PostUpdate,
+            (
+                NativePresentationSet::Place,
+                NativePresentationSet::Settle,
+                NativePresentationSet::Sync,
+                NativePresentationSet::Finalize,
             )
-            .add_message::<StackInPaneChosen>()
-            .add_message::<RestoreKeyboardToStack>()
-            .add_message::<FocusChanged>()
-            .add_message::<NativeSurfaceReused>()
-            .add_message::<NativeSelectionCommitted>()
-            .configure_sets(
-                PostUpdate,
-                (
-                    NativePresentationSet::Place,
-                    NativePresentationSet::Settle,
-                    NativePresentationSet::Sync,
-                    NativePresentationSet::Finalize,
-                )
-                    .chain(),
+                .chain(),
+        )
+        .add_observer(wake)
+        .add_systems(
+            First,
+            (expire, bevy::ecs::schedule::ApplyDeferred, retire).chain(),
+        )
+        .add_systems(
+            Update,
+            (focus_chosen_stack_in_pane, restore_keyboard_to_stack)
+                .before(crate::stack::ComputeFocusSet),
+        )
+        .add_systems(
+            Update,
+            retain_previous_focus.after(crate::stack::ComputeFocusSet),
+        )
+        .add_systems(Update, schedule_deadline_wake)
+        .add_systems(
+            PostUpdate,
+            settle
+                .in_set(PresentationSettleSet)
+                .after(crate::page_slot::PageSlotSet)
+                .after(crate::hosted_page::HandoffCommitSet)
+                .run_if(changed),
+        )
+        .add_systems(
+            PostUpdate,
+            bevy::ecs::schedule::ApplyDeferred
+                .in_set(PresentationFlushSet)
+                .after(PresentationSettleSet),
+        )
+        .add_systems(
+            PostUpdate,
+            visibility
+                .after(PresentationFlushSet)
+                .before(LayoutSystems::Layout)
+                .run_if(projection_changed),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                settle_native,
+                bevy::ecs::schedule::ApplyDeferred,
+                visibility,
+                bevy::ecs::schedule::ApplyDeferred,
             )
-            .add_observer(wake)
-            .add_systems(
-                First,
-                (expire, bevy::ecs::schedule::ApplyDeferred, retire).chain(),
-            )
-            .add_systems(
-                Update,
-                (focus_chosen_stack_in_pane, restore_keyboard_to_stack)
-                    .before(crate::stack::ComputeFocusSet),
-            )
-            .add_systems(
-                Update,
-                retain_previous_focus.after(crate::stack::ComputeFocusSet),
-            )
-            .add_systems(Update, schedule_deadline_wake)
-            .add_systems(
-                PostUpdate,
-                settle
-                    .in_set(PresentationSettleSet)
-                    .after(crate::page_slot::PageSlotSet)
-                    .after(crate::hosted_page::HandoffCommitSet)
-                    .run_if(changed),
-            )
-            .add_systems(
-                PostUpdate,
-                bevy::ecs::schedule::ApplyDeferred
-                    .in_set(PresentationFlushSet)
-                    .after(PresentationSettleSet),
-            )
-            .add_systems(
-                PostUpdate,
-                visibility
-                    .after(PresentationFlushSet)
-                    .before(LayoutSystems::Layout)
-                    .run_if(projection_changed),
-            )
-            .add_systems(
-                PostUpdate,
-                (
-                    settle_native,
-                    bevy::ecs::schedule::ApplyDeferred,
-                    visibility,
-                    bevy::ecs::schedule::ApplyDeferred,
-                )
-                    .chain()
-                    .in_set(NativePresentationSet::Settle)
-                    .run_if(on_message::<NativeSurfaceReused>),
-            );
+                .chain()
+                .in_set(NativePresentationSet::Settle)
+                .run_if(on_message::<NativeSurfaceReused>),
+        );
     }
 }
 
 fn animate_frames(
     time: Res<Time>,
-    scheduler: Res<DeadlineScheduler>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
+    clock: Res<Clock>,
     stacks: Query<
         (
             Entity,
@@ -184,7 +188,6 @@ fn animate_frames(
     let finished_tabs = finished_zooms.read().collect::<HashSet<_>>();
     for (stack, computed, parent, previous, running) in &stacks {
         let target = *panes.get(parent.parent()).unwrap_or(computed);
-        let owner = DeadlineOwner::StackAnimation(stack);
         if target.is_empty() {
             if previous.is_some_and(|previous| previous.0.is_empty()) && running.is_none() {
                 continue;
@@ -192,8 +195,7 @@ fn animate_frames(
             commands
                 .entity(stack)
                 .insert(StackRect(target))
-                .remove::<RectMotion>();
-            scheduler.cancel(owner);
+                .remove::<(RectMotion, Deadline<StackAnimation>)>();
             continue;
         }
         let window = hierarchy.get(stack);
@@ -210,8 +212,7 @@ fn animate_frames(
             commands
                 .entity(stack)
                 .insert(StackRect(target))
-                .remove::<RectMotion>();
-            scheduler.cancel(owner);
+                .remove::<(RectMotion, Deadline<StackAnimation>)>();
             continue;
         }
         let previous = previous.unwrap().0;
@@ -232,29 +233,28 @@ fn animate_frames(
                 window,
             },
             None => {
-                scheduler.cancel(owner);
+                commands.entity(stack).remove::<Deadline<StackAnimation>>();
                 continue;
             }
         };
         let (node, complete) = motion.value(time.elapsed());
         commands.entity(stack).insert(StackRect(node));
         if complete {
-            commands.entity(stack).remove::<RectMotion>();
-            scheduler.cancel(owner);
+            commands
+                .entity(stack)
+                .remove::<(RectMotion, Deadline<StackAnimation>)>();
         } else {
-            commands.entity(stack).insert(motion);
-            scheduler.schedule(
-                owner,
-                std::time::Instant::now() + std::time::Duration::from_millis(16),
-                proxy.as_deref(),
-            );
+            commands.entity(stack).insert((
+                motion,
+                Deadline::<StackAnimation>::after(&clock, std::time::Duration::from_millis(16)),
+            ));
         }
     }
 }
 
-fn wake(_: On<Add, Transition>, proxy: Option<Res<EventLoopProxyWrapper>>) {
-    if let Some(proxy) = proxy {
-        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+fn wake(_: On<Add, Transition>, wake: Option<Res<TimeWake>>) {
+    if let Some(wake) = wake {
+        wake.wake();
     }
 }
 
@@ -618,31 +618,19 @@ fn expire(
 }
 
 fn schedule_deadline_wake(
-    scheduler: Res<DeadlineScheduler>,
     changed: Query<(Entity, &Transition), Changed<Transition>>,
-    transitions: Query<(Entity, &Transition)>,
     mut removed: RemovedComponents<Transition>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
 ) {
     for entity in removed.read() {
-        scheduler.cancel(DeadlineOwner::Presentation(entity));
-    }
-    if proxy.as_ref().is_some_and(|proxy| proxy.is_added()) {
-        for (entity, transition) in &transitions {
-            scheduler.schedule(
-                DeadlineOwner::Presentation(entity),
-                transition.deadline,
-                proxy.as_deref(),
-            );
-        }
-        return;
+        commands
+            .entity(entity)
+            .try_remove::<Deadline<PresentationTimeout>>();
     }
     for (entity, transition) in &changed {
-        scheduler.schedule(
-            DeadlineOwner::Presentation(entity),
-            transition.deadline,
-            proxy.as_deref(),
-        );
+        commands
+            .entity(entity)
+            .try_insert(Deadline::<PresentationTimeout>::at(transition.deadline));
     }
 }
 
@@ -736,7 +724,7 @@ fn changed(mut changes: PresentationChanges) -> bool {
 fn settle(
     pending: Query<(Entity, &Transition, Has<Active>)>,
     readiness: PresentationReadiness,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
+    wake: Option<Res<TimeWake>>,
     mut commit: TransitionCommit,
 ) {
     if pending.is_empty() {
@@ -831,9 +819,9 @@ fn settle(
         }
     }
     if (!ready.is_empty() || !superseded.is_empty())
-        && let Some(proxy) = proxy
+        && let Some(wake) = wake
     {
-        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+        wake.wake();
     }
 }
 

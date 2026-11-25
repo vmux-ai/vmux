@@ -1,28 +1,25 @@
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::*;
-use bevy_ecs::relationship::Relationship;
 
 use crate::{
-    ActivateRequest, Active, ArchivedAt, Busy, Collapsed, CollectionView, ContentDigest, CreatedAt,
-    Cwd, Description, Disabled, Failure, FilePath, Icon, LastActivatedAt, LastVisitedAt, Loading,
-    Order, Pin, Progress, Ready, Retired, Uuid, WorkspaceKind,
+    Active, Busy, Collapsed, CollectionView, ContentDigest, Cwd, Description, Disabled, Failure,
+    FilePath, Icon, Loading, Order, Pin, Progress, Ready, Retired, TimestampPlugin, Uuid,
+    WorkspaceKind,
 };
 
 pub struct PrimitivesPlugin;
 
 impl Plugin for PrimitivesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ActivationClock>()
-            .register_type::<Cwd>()
+        if !app.is_plugin_added::<TimestampPlugin>() {
+            app.add_plugins(TimestampPlugin);
+        }
+        app.register_type::<Cwd>()
             .register_type::<FilePath>()
             .register_type::<ContentDigest>()
             .register_type::<Description>()
             .register_type::<Icon>()
             .register_type::<CollectionView>()
-            .register_type::<CreatedAt>()
-            .register_type::<LastActivatedAt>()
-            .register_type::<LastVisitedAt>()
-            .register_type::<ArchivedAt>()
             .register_type::<Order>()
             .register_type::<Active>()
             .register_type::<Pin>()
@@ -37,8 +34,7 @@ impl Plugin for PrimitivesPlugin {
             .register_type::<Uuid>()
             .register_type::<WorkspaceKind>()
             .register_type::<Children>()
-            .register_type::<ChildOf>()
-            .add_observer(activate);
+            .register_type::<ChildOf>();
         #[cfg(feature = "contracts")]
         app.register_type::<crate::PageMetadata>()
             .register_type::<vmux_api::PageIcon>()
@@ -46,47 +42,10 @@ impl Plugin for PrimitivesPlugin {
     }
 }
 
-#[derive(Resource, Default)]
-struct ActivationClock(i64);
-
-impl ActivationClock {
-    fn next(&mut self, after: i64) -> LastActivatedAt {
-        self.0 = LastActivatedAt::now()
-            .0
-            .max(self.0.saturating_add(1))
-            .max(after.saturating_add(1));
-        LastActivatedAt(self.0)
-    }
-}
-
-fn activate(
-    trigger: On<ActivateRequest>,
-    child_of: Query<&ChildOf>,
-    timestamps: Query<&LastActivatedAt>,
-    mut clock: ResMut<ActivationClock>,
-    mut commands: Commands,
-) {
-    let mut current = trigger.event_target();
-    let mut path = vec![current];
-    while let Ok(parent_rel) = child_of.get(current) {
-        current = parent_rel.get();
-        path.push(current);
-    }
-    let mut after = 0;
-    for entity in &path {
-        if let Ok(timestamp) = timestamps.get(*entity) {
-            after = after.max(timestamp.0);
-        }
-    }
-    let activated_at = clock.next(after);
-    for entity in path {
-        commands.entity(entity).insert(activated_at);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ActivateRequest, LastActivatedAt};
 
     #[test]
     fn activation_propagates_through_ancestors() {

@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bevy_app::{App, Plugin as BevyPlugin, PreUpdate};
 use bevy_ecs::component::Component;
@@ -7,8 +7,9 @@ use bevy_ecs::hierarchy::ChildOf;
 use bevy_ecs::message::MessageWriter;
 use bevy_ecs::query::With;
 use bevy_ecs::schedule::IntoScheduleConfigs;
-use bevy_ecs::system::{Commands, Query};
+use bevy_ecs::system::{Commands, Query, Res};
 use vmux_api::session::{RemoteEvent, SessionId};
+use vmux_ecs::time::{Clock, Deadline, DeadlinePlugin};
 use vmux_ecs::{Operation, OperationRetained, OperationState};
 use vmux_session::host::Reported;
 
@@ -28,7 +29,8 @@ pub(crate) struct MobileStreamPlugin;
 
 impl BevyPlugin for MobileStreamPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, cancel_stale.in_set(InvalidateSet))
+        app.add_plugins(DeadlinePlugin::<StreamReconnect>::default())
+            .add_systems(PreUpdate, cancel_stale.in_set(InvalidateSet))
             .add_systems(
                 PreUpdate,
                 (adopt_reset, adopt_open, adopt_read)
@@ -54,12 +56,13 @@ pub(crate) struct StreamSession {
 #[derive(Component, Default)]
 struct ActiveStreamHandle(Option<StreamHandle>);
 
-#[derive(Component)]
-pub(crate) struct StreamReconnectDeadline(pub(crate) Instant);
+pub(crate) struct StreamReconnect;
 
-impl StreamReconnectDeadline {
-    const DELAY: Duration = Duration::from_secs(2);
+impl StreamReconnect {
+    pub(crate) const DELAY: Duration = Duration::from_secs(2);
 }
+
+pub(crate) type StreamReconnectDeadline = Deadline<StreamReconnect>;
 
 #[derive(Component)]
 pub(crate) struct StreamTerminalRefusal;
@@ -189,9 +192,9 @@ fn advance(
     resets: Query<&StreamResetOp>,
     opens: Query<&StreamOpenOp>,
     reads: Query<&StreamReadOp>,
+    clock: Res<Clock>,
     mut commands: Commands,
 ) {
-    let now = Instant::now();
     for (owner, stream, mut handle, deadline, terminal) in &mut streams {
         if terminal.is_some() {
             continue;
@@ -249,7 +252,7 @@ fn advance(
             continue;
         }
         if let Some(wait_until) = deadline {
-            if now < wait_until.0 {
+            if !wait_until.is_due(&clock) {
                 continue;
             }
             commands.entity(owner).remove::<StreamReconnectDeadline>();
@@ -296,6 +299,7 @@ fn adopt_open(
     mut streams: Query<(&StreamSession, &mut ActiveStreamHandle)>,
     mut roots: Query<(&SessionGeneration, &mut StreamConnected), With<MobileRoot>>,
     sources: Query<&SourceEpoch, With<ConnectionSource>>,
+    clock: Res<Clock>,
     mut unauthorized: MessageWriter<SourceUnauthorized>,
     mut commands: Commands,
 ) {
@@ -355,9 +359,12 @@ fn adopt_open(
             }
             Err(_) => {
                 connected.0 = false;
-                commands.entity(op.owner).insert(StreamReconnectDeadline(
-                    Instant::now() + StreamReconnectDeadline::DELAY,
-                ));
+                commands
+                    .entity(op.owner)
+                    .insert(StreamReconnectDeadline::after(
+                        &clock,
+                        StreamReconnect::DELAY,
+                    ));
                 commands.entity(entity).insert(OperationState::Failed);
             }
         }
@@ -377,6 +384,7 @@ fn adopt_read(
         With<MobileRoot>,
     >,
     sources: Query<&SourceEpoch, With<ConnectionSource>>,
+    clock: Res<Clock>,
     mut reported: MessageWriter<Reported>,
     mut updates: MessageWriter<UpdateSessionItem>,
     mut unauthorized: MessageWriter<SourceUnauthorized>,
@@ -446,9 +454,12 @@ fn adopt_read(
                     handle.stop();
                 }
                 connected.0 = false;
-                commands.entity(op.owner).insert(StreamReconnectDeadline(
-                    Instant::now() + StreamReconnectDeadline::DELAY,
-                ));
+                commands
+                    .entity(op.owner)
+                    .insert(StreamReconnectDeadline::after(
+                        &clock,
+                        StreamReconnect::DELAY,
+                    ));
                 commands.entity(entity).insert(OperationState::Failed);
             }
             StreamReadOutcome::Refused(ApiError::Unauthorized) => {
