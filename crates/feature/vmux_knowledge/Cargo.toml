@@ -21,7 +21,6 @@ bevy = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 moonshine-save = { workspace = true }
-notify = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 vmux_git = { path = "../vmux_git" }

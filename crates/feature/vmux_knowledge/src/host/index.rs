@@ -1,16 +1,15 @@
-use std::path::Path;
-use std::sync::mpsc;
+use std::result::Result;
+
+use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use vmux_ecs::watch::{FileWatch, FileWatchEvent, FileWatchPlugin};
+use vmux_path::PathIdentity;
 
 use crate::{
     KnowledgeGraphPlugin, KnowledgeIndex, KnowledgeVault, LiveKnowledge, MaterializeKnowledge,
     RawSnapshot,
 };
-use bevy::prelude::*;
-use bevy::prelude::{App, Commands, Plugin};
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use std::result::Result;
 
 pub(super) struct KnowledgeIndexPlugin;
 
@@ -19,26 +18,24 @@ impl Plugin for KnowledgeIndexPlugin {
         if !app.is_plugin_added::<KnowledgeGraphPlugin>() {
             app.add_plugins(KnowledgeGraphPlugin);
         }
-        app.insert_non_send(KnowledgeWatch::default());
-        app.add_systems(Startup, initialize)
+        app.add_plugins(FileWatchPlugin)
+            .add_systems(Startup, initialize)
             .add_systems(Update, (drain_watch, start, finish).chain());
     }
 }
 
-fn initialize(
-    mut commands: Commands,
-    wake: Option<Res<EventLoopProxyWrapper>>,
-    mut watcher: NonSendMut<KnowledgeWatch>,
-) {
+fn initialize(mut commands: Commands) {
     let vault = KnowledgeVault::user();
-    commands.spawn((
-        Name::new("Knowledge index"),
-        KnowledgeIndex::default(),
-        LiveKnowledge,
-        KnowledgeIndexGeneration(1),
-        KnowledgeIndexDirty,
-        vault.clone(),
-    ));
+    let entity = commands
+        .spawn((
+            Name::new("Knowledge index"),
+            KnowledgeIndex::default(),
+            LiveKnowledge,
+            KnowledgeIndexGeneration(1),
+            KnowledgeIndexDirty,
+            vault.clone(),
+        ))
+        .id();
     if let Err(error) = vault.ensure() {
         warn!("knowledge vault initialization failed: {error}");
         return;
@@ -49,11 +46,9 @@ fn initialize(
     if let Err(error) = vault.sync_agent_configs() {
         warn!("external agent Knowledge sync failed: {error}");
     }
-    let wake = wake.map(|wrapper| (**wrapper).clone());
-    match watch(vault.root(), wake) {
-        Ok(knowledge_watcher) => watcher.0 = Some(knowledge_watcher),
-        Err(error) => warn!("knowledge watcher init failed: {error}"),
-    }
+    commands
+        .entity(entity)
+        .insert(FileWatch::recursive(vault.root().to_path_buf()));
 }
 
 #[derive(Component)]
@@ -62,49 +57,33 @@ struct KnowledgeIndexGeneration(u64);
 #[derive(Component)]
 struct KnowledgeIndexDirty;
 
-#[derive(Default)]
-struct KnowledgeWatch(Option<KnowledgeWatcher>);
-
-struct KnowledgeWatcher {
-    _watcher: RecommendedWatcher,
-    receiver: mpsc::Receiver<notify::Result<notify::Event>>,
-}
-
-fn watch(
-    root: &Path,
-    wake: Option<EventLoopProxy<WinitUserEvent>>,
-) -> notify::Result<KnowledgeWatcher> {
-    let (sender, receiver) = mpsc::channel();
-    let mut watcher = notify::recommended_watcher(move |result| {
-        if sender.send(result).is_ok()
-            && let Some(wake) = wake.as_ref()
-        {
-            let _ = wake.send_event(WinitUserEvent::WakeUp);
-        }
-    })?;
-    watcher.watch(root, RecursiveMode::Recursive)?;
-    Ok(KnowledgeWatcher {
-        _watcher: watcher,
-        receiver,
-    })
-}
-
 fn drain_watch(
-    watch: NonSend<KnowledgeWatch>,
-    mut indexes: Query<(Entity, &mut KnowledgeIndexGeneration), With<KnowledgeIndex>>,
+    mut events: MessageReader<FileWatchEvent>,
+    mut indexes: Query<
+        (Entity, &KnowledgeVault, &mut KnowledgeIndexGeneration),
+        With<KnowledgeIndex>,
+    >,
     mut commands: Commands,
 ) {
-    let Some(watch) = watch.0.as_ref() else {
+    let Ok((entity, vault, mut generation)) = indexes.single_mut() else {
+        events.clear();
         return;
     };
-    if watch
-        .receiver
-        .try_iter()
-        .any(|result| result.is_ok_and(|event| !matches!(event.kind, EventKind::Access(_))))
-    {
-        let Ok((entity, mut generation)) = indexes.single_mut() else {
-            return;
-        };
+    let root = PathIdentity::resolve(vault.root()).into_path_buf();
+    let mut dirty = false;
+    for event in events.read() {
+        if event.error.is_some() {
+            continue;
+        }
+        if event
+            .paths
+            .iter()
+            .any(|path| PathIdentity::resolve(path).as_path().starts_with(&root))
+        {
+            dirty = true;
+        }
+    }
+    if dirty {
         generation.0 = generation.0.wrapping_add(1);
         commands.entity(entity).insert(KnowledgeIndexDirty);
     }
@@ -186,10 +165,13 @@ fn finish(
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
+    use vmux_ecs::watch::FileWatchEventKind;
+
     use super::*;
     use crate::RawNote;
     use crate::graph::KnowledgeNote;
-    use std::time::{Duration, Instant};
 
     struct IndexFixture {
         directory: tempfile::TempDir,
@@ -309,6 +291,61 @@ mod tests {
                 .iter(fixture.app.world())
                 .count(),
             0
+        );
+    }
+
+    #[test]
+    fn watch_events_dirty_the_index_only_for_paths_inside_the_vault() {
+        let mut fixture = IndexFixture::new();
+        let outside = tempfile::tempdir().unwrap();
+        let root = fixture.directory.path().canonicalize().unwrap();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.owner)
+            .insert(KnowledgeVault::at(root.clone()));
+
+        fixture
+            .app
+            .world_mut()
+            .write_message(FileWatchEvent::changed(
+                vec![outside.path().join("other.md")],
+                FileWatchEventKind::Modified,
+            ));
+        fixture.app.world_mut().run_schedule(Update);
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<KnowledgeIndexGeneration>(fixture.owner)
+                .unwrap()
+                .0,
+            2
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<KnowledgeIndexDirty>(fixture.owner)
+                .is_none()
+        );
+
+        fixture
+            .app
+            .world_mut()
+            .write_message(FileWatchEvent::changed(
+                vec![root.join("notes/updated.md")],
+                FileWatchEventKind::Modified,
+            ));
+        fixture.app.world_mut().run_schedule(Update);
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<KnowledgeIndexGeneration>(fixture.owner)
+                .unwrap()
+                .0,
+            3
         );
     }
 }

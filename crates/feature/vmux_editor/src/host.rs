@@ -95,7 +95,6 @@ pub(crate) mod file_lifecycle;
 mod file_loading;
 mod file_loading_io;
 mod file_watch;
-mod file_watch_io;
 mod file_write_io;
 mod file_writes;
 pub(crate) mod history;

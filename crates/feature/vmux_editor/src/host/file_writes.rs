@@ -92,11 +92,11 @@ mod tests {
     use super::super::editing::{ClipboardHandle, EditExecutionPlugin, EditRequest};
     use super::super::editor::{Editor, FileView};
     use super::super::file_lifecycle::{FileLifecyclePlugin, FileLoadTask};
-    use super::super::file_watch::Observed;
     use super::super::viewport::FileViewport;
     use super::super::workspace_edit::WorkspaceEditPlugin;
     use super::*;
     use bevy_cef::prelude::Browsers;
+    use vmux_ecs::watch::{FileWatchEvent, FileWatchEventKind};
 
     #[test]
     fn lsp_edits_commit_with_the_file_watch_and_document_pipeline_installed() {
@@ -274,11 +274,10 @@ mod tests {
             .id();
         FileLoadTask::settle(&mut app, view);
         EditRequest::new(view, vec![EditCommand::Save]).emit_world(app.world_mut());
-        app.world_mut()
-            .write_message(Observed::from_notify(Ok(notify::Event::new(
-                notify::EventKind::Any,
-            )
-            .add_path(path.clone()))));
+        app.world_mut().write_message(FileWatchEvent::changed(
+            vec![path.clone()],
+            FileWatchEventKind::Modified,
+        ));
         app.update();
         assert!(app.world().get::<FileLoadTask>(view).is_none());
         assert!(Editor::read(app.world(), view).is_some());
@@ -291,11 +290,10 @@ mod tests {
         app.world_mut().get_mut::<WrittenAt>(receipts[0]).unwrap().0 =
             Instant::now() - Duration::from_secs(3);
         std::fs::write(&path, "external\n").unwrap();
-        app.world_mut()
-            .write_message(Observed::from_notify(Ok(notify::Event::new(
-                notify::EventKind::Any,
-            )
-            .add_path(path))));
+        app.world_mut().write_message(FileWatchEvent::changed(
+            vec![path],
+            FileWatchEventKind::Modified,
+        ));
         FileLoadTask::settle(&mut app, view);
         assert_eq!(
             Editor::read(app.world(), view).unwrap().core.buffer.text(),

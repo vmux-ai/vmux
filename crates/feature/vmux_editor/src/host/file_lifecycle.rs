@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use bevy::prelude::{App, Changed, Commands, Plugin};
 use bevy_cef::prelude::*;
 use vmux_ecs::event::*;
+use vmux_ecs::watch::{FileWatchEvent, FileWatchReconciled};
 
 use super::editor::FileView;
 use super::explorer::OutlineDirty;
@@ -15,7 +16,7 @@ use super::explorer::{
     ExplorerDirsChanged, ExplorerPanelSent, ExplorerTreeDirty, OpenEditorsDirty,
 };
 pub(super) use super::file_loading::FileLoadTask;
-use super::file_watch::{FileWatchPlugin, Observed, Reconciled};
+use super::file_watch::EditorFileWatchPlugin;
 pub(super) use super::file_write_io::SelfWrites;
 use super::file_writes::{FileWritesPlugin, WriteReceipts};
 use super::markdown::ParsedNote;
@@ -33,7 +34,7 @@ pub(super) struct FileChangesSet;
 impl Plugin for FileLifecyclePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            FileWatchPlugin,
+            EditorFileWatchPlugin,
             FileWritesPlugin,
             super::file_loading::FileLoadingPlugin,
         ))
@@ -171,8 +172,8 @@ fn reset_sent(
 }
 
 fn drain_file_changes(
-    mut observations: MessageReader<Observed>,
-    mut reconciled: MessageReader<Reconciled>,
+    mut observations: MessageReader<FileWatchEvent>,
+    mut reconciled: MessageReader<FileWatchReconciled>,
     self_writes: WriteReceipts,
     views: Query<(Entity, &FileView, Has<MissingFileView>)>,
     mut explorer_dirs: MessageWriter<ExplorerDirsChanged>,
@@ -190,7 +191,7 @@ fn drain_file_changes(
     }
     let mut reconciled_dirs = HashSet::new();
     for directory in reconciled.read() {
-        reconciled_dirs.insert(directory.0.clone());
+        reconciled_dirs.insert(directory.path.clone());
     }
     if changed.is_empty() && reconciled_dirs.is_empty() {
         return;
@@ -284,6 +285,8 @@ fn reload_changed_files(
 
 #[cfg(test)]
 mod tests {
+    use vmux_ecs::watch::FileWatchEventKind;
+
     use super::*;
     use crate::host::viewport::FileViewport;
 
@@ -332,11 +335,10 @@ mod tests {
 
         std::fs::create_dir(&parent).unwrap();
         std::fs::write(&path, "created\n").unwrap();
-        app.world_mut()
-            .write_message(Observed::from_notify(Ok(notify::Event::new(
-                notify::EventKind::Any,
-            )
-            .add_path(parent))));
+        app.world_mut().write_message(FileWatchEvent::changed(
+            vec![parent],
+            FileWatchEventKind::Other,
+        ));
         FileLoadTask::settle(&mut app, entity);
 
         assert_eq!(

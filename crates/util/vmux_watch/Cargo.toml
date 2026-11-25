@@ -1,0 +1,20 @@
+[package]
+name = "vmux_watch"
+description = "Entity-owned filesystem watching bridged through wake-driven async channels"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+notify = { workspace = true }
+tracing = "0.1"
+vmux_channel = { path = "../vmux_channel" }
+vmux_path = { path = "../vmux_path" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
