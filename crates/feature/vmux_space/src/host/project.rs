@@ -1602,7 +1602,7 @@ mod tests {
             .spawn((
                 vmux_ecs::profile::ProjectsRoot(directory.clone()),
                 vmux_project::Root(directory.path().to_path_buf()),
-                vmux_project::Loaded,
+                vmux_ecs::Ready,
             ))
             .id();
         fixture
@@ -1684,7 +1684,7 @@ mod tests {
             .spawn((
                 vmux_ecs::profile::ProjectsRoot(directory.clone()),
                 vmux_project::Root(directory.path().to_path_buf()),
-                vmux_project::Loaded,
+                vmux_ecs::Ready,
             ))
             .id();
         app.world_mut().spawn((
@@ -1882,7 +1882,7 @@ mod tests {
             .spawn((
                 vmux_ecs::profile::ProjectsRoot(directory.clone()),
                 vmux_project::Root(directory.path().to_path_buf()),
-                vmux_project::Loaded,
+                vmux_ecs::Ready,
             ))
             .id();
         let project = fixture

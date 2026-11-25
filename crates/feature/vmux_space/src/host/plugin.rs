@@ -8,8 +8,8 @@ use vmux_command::{
 use vmux_command::{CommandInvocation, CommandRuntimePlugin, ReadCommandRequests};
 use vmux_ecs::page::{PageReady, SpacesPageSpawnRequest, StartupPageUrl};
 use vmux_ecs::{
-    ActivateRequest, Active, EffectiveStartupUrl, Order, PageMetadata, PageOpenRequest,
-    PageOpenTarget,
+    ActivateRequest, Active, EffectiveStartupUrl, Order, OrderPlugin, PageMetadata,
+    PageOpenRequest, PageOpenTarget, RenamePlugin, RenameRequest,
 };
 use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
 use vmux_ecs::{UiStateWrite, store::WorkspaceRestore};
@@ -57,6 +57,12 @@ impl Plugin for SpacePlugin {
         app.add_plugins(crate::ui::SpacesPage::plugin());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
+        }
+        if !app.is_plugin_added::<RenamePlugin>() {
+            app.add_plugins(RenamePlugin);
+        }
+        if !app.is_plugin_added::<OrderPlugin>() {
+            app.add_plugins(OrderPlugin);
         }
         app.add_plugins((
             SpaceAgentPlugin,
@@ -870,22 +876,11 @@ impl SpaceWindow<'_, '_> {
 
 fn rename(trigger: On<UiInput<SpaceRenameRequest>>, graph: SpaceGraph, mut commands: Commands) {
     let request = &trigger.event().payload;
-    let name = request.name.trim();
-    if name.is_empty() {
-        return;
-    }
-    if !graph
-        .spaces
-        .iter()
-        .any(|(_, id, _, _, _)| id.0 == request.space_id)
-    {
-        return;
-    }
     for (entity, id, _, _, _) in &graph.spaces {
         if id.0 != request.space_id {
             continue;
         }
-        commands.entity(entity).insert(Name::new(name.to_string()));
+        commands.trigger(RenameRequest::new(entity, request.name.clone()));
     }
 }
 
@@ -1083,20 +1078,12 @@ fn create(
         requested_name.to_string()
     };
     let id = identity.unique(&name).0;
-    let order = graph
-        .spaces
-        .iter()
-        .filter(|(_, _, _, _, parent)| parent.parent() == main)
-        .filter_map(|(_, _, _, order, _)| order.map(|order| order.0))
-        .max()
-        .map(|max| max + 1)
-        .unwrap_or(0);
     graph.deactivate_in_main(main, &mut commands);
     let space = commands
         .spawn((
             SpaceId(id.clone()),
             Name::new(id.clone()),
-            Order(order),
+            Order::END,
             Active,
             LastActivatedAt::now(),
             Space::bundle(),
@@ -1134,20 +1121,12 @@ fn handle_open_in_new(
 
         let name = identity.suggested(&[]);
         let id = identity.unique(&name).0;
-        let order = graph
-            .spaces
-            .iter()
-            .filter(|(_, _, _, _, parent)| parent.parent() == main)
-            .filter_map(|(_, _, _, order, _)| order.map(|o| o.0))
-            .max()
-            .map(|max| max + 1)
-            .unwrap_or(0);
         graph.deactivate_in_main(main, &mut commands);
         let space = commands
             .spawn((
                 SpaceId(id.clone()),
                 Name::new(id.clone()),
-                Order(order),
+                Order::END,
                 Active,
                 LastActivatedAt::now(),
                 Space::bundle(),
@@ -2146,7 +2125,7 @@ mod tests {
     #[test]
     fn rename_preserves_space_identity_and_tab_membership() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, LayoutContractPlugin))
+        app.add_plugins((MinimalPlugins, LayoutContractPlugin, RenamePlugin))
             .add_message::<TabLayoutSpawnRequest>()
             .add_observer(rename);
         app.world_mut().spawn(bevy::window::PrimaryWindow);

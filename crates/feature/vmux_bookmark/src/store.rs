@@ -8,7 +8,10 @@ use vmux_api::bookmark::SmartBookmarkFolder;
 use vmux_ecs::profile::SessionEnvironment;
 use vmux_ecs::store::State;
 use vmux_ecs::store::{SchemaPlugin, Types};
-use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, EntityTarget, Folder, PageMetadata, Pin, Uuid};
+use vmux_ecs::{
+    Bookmark, BookmarkOrder, Collapsed, EntityTarget, Failure, Folder, Loading, PageMetadata, Pin,
+    Ready, StatusPlugin, Uuid,
+};
 use vmux_layout::LayoutStartupSet;
 #[cfg(test)]
 use vmux_setting::AppSettings;
@@ -20,6 +23,9 @@ pub(super) struct BookmarkStorePlugin;
 
 impl Plugin for BookmarkStorePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<StatusPlugin>() {
+            app.add_plugins(StatusPlugin);
+        }
         app.add_plugins(SchemaPlugin::<BookmarkStore>::default())
             .init_resource::<OfferedBookmarkDefaults>()
             .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
@@ -100,6 +106,7 @@ fn load_bookmarks_on_startup(
         return;
     }
     if !path.0.exists() {
+        commands.entity(*store).insert(Ready);
         commands.trigger(SeedBookmarkDefaults);
         return;
     }
@@ -107,18 +114,20 @@ fn load_bookmarks_on_startup(
         Ok(load) => load,
         Err(error) => {
             error!(path = %path.0.display(), %error, "bookmark load failed");
-            state.fail(error.to_string());
+            let message = error.to_string();
+            state.fail(message.clone());
+            commands.entity(*store).insert(Failure::new(message));
             return;
         }
     };
     state.materialize();
-    commands.entity(*store).insert(BookmarkLoadPending);
+    commands.entity(*store).insert(Loading);
     commands.trigger_load(load);
 }
 
 fn seed_defaults(
     _trigger: On<Loaded>,
-    pending: Option<Single<Entity, With<BookmarkLoadPending>>>,
+    pending: Option<Single<Entity, (With<BookmarkAutoSave>, With<Loading>)>>,
     mut state: Single<&mut State, With<BookmarkAutoSave>>,
     mut commands: Commands,
 ) {
@@ -126,15 +135,12 @@ fn seed_defaults(
         return;
     };
     state.ready();
+    commands.entity(*pending).insert(Ready);
     commands.trigger(SeedBookmarkDefaults);
-    commands.entity(*pending).remove::<BookmarkLoadPending>();
 }
 
 #[derive(Event)]
 struct SeedBookmarkDefaults;
-
-#[derive(Component)]
-struct BookmarkLoadPending;
 
 #[derive(Resource, Reflect, Default, Clone, Debug, PartialEq, Eq)]
 #[reflect(Resource)]
@@ -1283,9 +1289,7 @@ mod tests {
             },
         ];
         let mut load_app = App::new();
-        load_app
-            .world_mut()
-            .spawn((BookmarkAutoSave, BookmarkLoadPending));
+        let store = load_app.world_mut().spawn((BookmarkAutoSave, Loading)).id();
         load_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
@@ -1313,6 +1317,9 @@ mod tests {
             .trigger_load(LoadWorld::<BookmarkFilter>::from_file(path));
         load_app.update();
         load_app.update();
+
+        assert!(load_app.world().get::<Ready>(store).is_some());
+        assert!(load_app.world().get::<Loading>(store).is_none());
 
         let mut pins = load_app
             .world_mut()

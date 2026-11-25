@@ -6,8 +6,8 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::query::Changed as ComponentChanged;
 use bevy_ecs::system::{Commands as WorldCommands, SystemParam};
 use vmux_ecs::{
-    Cwd, EntityTarget, IdentityIndexPlugin, Operation, OperationCompleted, OperationPlugin,
-    OperationState, OperationTarget, Revision,
+    Cwd, EntityTarget, Failure, IdentityIndexPlugin, Loading, Operation, OperationCompleted,
+    OperationPlugin, OperationState, OperationTarget, Ready, Revision, StatusPlugin,
 };
 
 use crate::{ProjectId, Record, Snapshot};
@@ -18,6 +18,9 @@ impl Plugin for ProjectPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
+        }
+        if !app.is_plugin_added::<StatusPlugin>() {
+            app.add_plugins(StatusPlugin);
         }
         app.add_plugins(IdentityIndexPlugin::<ProjectId>::default())
             .init_resource::<Clock>()
@@ -69,9 +72,6 @@ pub struct Archived;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct Repository(pub Option<String>);
-
-#[derive(Component)]
-pub struct Loaded;
 
 #[derive(Component)]
 struct LoadedDirectory(PathBuf);
@@ -134,7 +134,7 @@ impl Clock {
 }
 
 #[derive(Component)]
-struct Loading(Ticket);
+struct LoadTicket(Ticket);
 
 #[derive(Component)]
 pub(super) struct Writing {
@@ -305,7 +305,7 @@ type RootStatus<'w, 's> = Query<
     (
         Entity,
         &'static Root,
-        Has<Loaded>,
+        Has<Ready>,
         Option<&'static LoadError>,
     ),
 >;
@@ -316,19 +316,24 @@ type ChangedRoots<'w, 's> = Query<
         Entity,
         &'static Root,
         Option<&'static LoadedDirectory>,
-        Option<&'static Loading>,
+        Option<&'static LoadTicket>,
         Option<&'static Writing>,
     ),
     ComponentChanged<Root>,
 >;
-type UnloadedRoots = (Without<Loaded>, Without<Loading>, Without<LoadError>);
+type UnloadedRoots = (
+    Without<Ready>,
+    Without<Loading>,
+    Without<LoadTicket>,
+    Without<LoadError>,
+);
 type IdleRoots<'w, 's> = Query<
     'w,
     's,
     (
         Entity,
         &'static Root,
-        Has<Loaded>,
+        Has<Ready>,
         Option<&'static LoadError>,
     ),
     Without<Writing>,
@@ -710,10 +715,12 @@ fn reset(
             continue;
         }
         commands.entity(entity).remove::<(
-            Loaded,
+            Ready,
+            Loading,
+            Failure,
             LoadedDirectory,
             LoadError,
-            Loading,
+            LoadTicket,
             Writing,
             Persisting,
         )>();
@@ -737,22 +744,24 @@ fn load(
             .iter()
             .any(|(other, directory)| other != owner && directory.0 == root.0)
         {
-            commands
-                .entity(owner)
-                .insert((LoadError(Error::Duplicate), LoadedDirectory(root.0.clone())));
+            commands.entity(owner).insert((
+                LoadError(Error::Duplicate),
+                Failure::new(Error::Duplicate.to_string()),
+                LoadedDirectory(root.0.clone()),
+            ));
             continue;
         }
         let ticket = clock.ticket(owner, &root.0);
         requests.write(LoadRequest {
             ticket: ticket.clone(),
         });
-        commands.entity(owner).insert(Loading(ticket));
+        commands.entity(owner).insert((Loading, LoadTicket(ticket)));
     }
 }
 
 fn restore(
     mut results: MessageReader<LoadCompleted>,
-    roots: Query<(&Root, &Loading)>,
+    roots: Query<(&Root, &LoadTicket)>,
     mut changed: MessageWriter<ProjectChanged>,
     mut commands: WorldCommands,
 ) {
@@ -763,13 +772,17 @@ fn restore(
         if pending.0 != completed.ticket || root.0 != completed.ticket.directory {
             continue;
         }
-        commands.entity(completed.ticket.owner).remove::<Loading>();
+        commands
+            .entity(completed.ticket.owner)
+            .remove::<LoadTicket>();
         let snapshot = match &completed.result {
             Ok(snapshot) => snapshot,
             Err(error) => {
-                commands
-                    .entity(completed.ticket.owner)
-                    .insert((LoadError(error.clone()), LoadedDirectory(root.0.clone())));
+                commands.entity(completed.ticket.owner).insert((
+                    LoadError(error.clone()),
+                    Failure::new(error.to_string()),
+                    LoadedDirectory(root.0.clone()),
+                ));
                 continue;
             }
         };
@@ -801,7 +814,7 @@ fn restore(
         }
         commands
             .entity(completed.ticket.owner)
-            .insert((Loaded, LoadedDirectory(root.0.clone())));
+            .insert((Ready, LoadedDirectory(root.0.clone())));
         changed.write(ProjectChanged {
             root: root.0.clone(),
         });
