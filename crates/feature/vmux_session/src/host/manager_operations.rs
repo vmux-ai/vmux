@@ -434,7 +434,21 @@ fn archive_local(
         return;
     };
     let current = snapshot.snapshot();
+    let current_archived = current
+        .sessions
+        .iter()
+        .map(|row| (row.id.as_str(), row.archived_at > 0))
+        .collect::<std::collections::HashMap<_, _>>();
+    let bulk = event.payload.ids.len() > 1;
+    let now = Instant::now();
+    let accepted_at = vmux_ecs::UnixMillis::now().0;
+    let deadline = if bulk {
+        now
+    } else {
+        now + Duration::from_millis(200)
+    };
     let mut seen = std::collections::HashSet::new();
+    let mut spawned = false;
     for id in &event.payload.ids {
         if !seen.insert(id) {
             continue;
@@ -445,14 +459,10 @@ fn archive_local(
         if !views.can_mutate(event.webview, Some(local.id), &local.cwd.0) {
             continue;
         }
-        let Some(row) = current.sessions.iter().find(|row| row.id == *id) else {
+        let Some(&archived) = current_archived.get(id.as_str()) else {
             continue;
         };
-        if pending
-            .requested(local.entity)
-            .unwrap_or(row.archived_at > 0)
-            == event.payload.archived
-        {
+        if pending.requested(local.entity).unwrap_or(archived) == event.payload.archived {
             continue;
         }
         let Some(order) = sequence.next() else {
@@ -462,12 +472,11 @@ fn archive_local(
             (Some(kind), Some(id)) => snapshot.native_archive(kind, id),
             _ => false,
         };
-        let delay = Duration::from_millis(200);
         let mut operation = commands.spawn((
             ArchiveOperation {
                 requester: event.webview,
                 archived: event.payload.archived,
-                accepted_at: vmux_ecs::UnixMillis::now().0,
+                accepted_at,
                 native,
             },
             Operation::bundle("session.archive").unwrap(),
@@ -478,11 +487,20 @@ fn archive_local(
             EntityTarget::<vmux_ecs::profile::ActiveProfile>::new(profile_entity),
             profile_id.clone(),
             context.clone(),
-            PresentationUntil(Instant::now() + delay),
+            PresentationUntil(deadline),
         ));
+        if bulk {
+            operation.insert(PresentationExpired);
+        }
         if let (Some(kind), Some(id)) = (local.kind, local.provider_id) {
             operation.insert((kind.clone(), id.clone()));
         }
+        spawned = true;
+    }
+    if spawned {
+        commands.trigger(super::manager::Project {
+            entity: event.webview,
+        });
     }
 }
 
@@ -499,7 +517,21 @@ fn archive_provider(
         return;
     };
     let current = snapshot.snapshot();
+    let current_archived = current
+        .sessions
+        .iter()
+        .map(|row| (row.id.as_str(), row.archived_at > 0))
+        .collect::<std::collections::HashMap<_, _>>();
+    let bulk = event.payload.ids.len() > 1;
+    let now = Instant::now();
+    let accepted_at = vmux_ecs::UnixMillis::now().0;
+    let deadline = if bulk {
+        now
+    } else {
+        now + Duration::from_millis(200)
+    };
     let mut seen = std::collections::HashSet::new();
+    let mut spawned = false;
     for id in &event.payload.ids {
         if !seen.insert(id) || entities.local(id).is_some() {
             continue;
@@ -510,25 +542,20 @@ fn archive_provider(
         if !views.can_mutate(event.webview, None, &provider.cwd.0) {
             continue;
         }
-        let Some(row) = current.sessions.iter().find(|row| row.id == *id) else {
+        let Some(&archived) = current_archived.get(id.as_str()) else {
             continue;
         };
-        if pending
-            .requested(provider.entity)
-            .unwrap_or(row.archived_at > 0)
-            == event.payload.archived
-        {
+        if pending.requested(provider.entity).unwrap_or(archived) == event.payload.archived {
             continue;
         }
         let Some(order) = sequence.next() else {
             continue;
         };
-        let delay = Duration::from_millis(200);
-        commands.spawn((
+        let mut operation = commands.spawn((
             ArchiveOperation {
                 requester: event.webview,
                 archived: event.payload.archived,
-                accepted_at: vmux_ecs::UnixMillis::now().0,
+                accepted_at,
                 native: provider.archive_observed_at.is_some(),
             },
             Operation::bundle("session.archive").unwrap(),
@@ -541,8 +568,17 @@ fn archive_provider(
             EntityTarget::<vmux_ecs::profile::ActiveProfile>::new(profile_entity),
             profile_id.clone(),
             context.clone(),
-            PresentationUntil(Instant::now() + delay),
+            PresentationUntil(deadline),
         ));
+        if bulk {
+            operation.insert(PresentationExpired);
+        }
+        spawned = true;
+    }
+    if spawned {
+        commands.trigger(super::manager::Project {
+            entity: event.webview,
+        });
     }
 }
 
@@ -1375,6 +1411,30 @@ mod tests {
                 .get::<OperationRetained>(operation)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn bulk_archive_removes_sessions_immediately_without_leaving_delay() {
+        let mut fixture = ManagerFixture::new();
+        let stale_at = vmux_ecs::UnixMillis::now().0 - 4 * 24 * 60 * 60 * 1_000;
+        fixture.session("stale-1", "Stale 1", stale_at);
+        fixture.session("stale-2", "Stale 2", stale_at);
+        fixture.provider("stale-provider", "Stale provider");
+        fixture.update();
+        fixture.input(SessionsArchive {
+            ids: vec![
+                "stale-1".into(),
+                "stale-2".into(),
+                "acp:codex:stale-provider".into(),
+            ],
+            archived: true,
+        });
+        let state = fixture.update();
+        assert!(state.leaving_ids.is_empty());
+        assert_eq!(state.archived_count, 3);
+        assert!(!state.visible_ids.contains("stale-1"));
+        assert!(!state.visible_ids.contains("stale-2"));
+        assert!(!state.visible_ids.contains("acp:codex:stale-provider"));
     }
 
     #[test]
