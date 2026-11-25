@@ -1,4 +1,4 @@
-use bevy_app::{App, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_app::VmuxPlugin;
 use vmux_app::menu::{About, EventSender, MenuAction, MenuActionPlugin, MenuSet, Selected};
@@ -16,6 +16,22 @@ enum AppMenu {
     Open,
 }
 
+struct ExampleMenuPlugin;
+
+impl Plugin for ExampleMenuPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            VmuxPlugin::builder().menu(true).build(),
+            MenuActionPlugin::<AppMenu>::default().with_about(About {
+                name: Some("Studio".into()),
+                version: Some("1.0.0".into()),
+                ..Default::default()
+            }),
+        ))
+        .add_systems(Update, handle_menu.in_set(MenuSet::Dispatch));
+    }
+}
+
 fn handle_menu(mut actions: MessageReader<Selected<AppMenu>>) {
     for Selected(action) in actions.read() {
         println!("menu selected: {action:?}");
@@ -24,15 +40,7 @@ fn handle_menu(mut actions: MessageReader<Selected<AppMenu>>) {
 
 fn main() {
     let mut app = App::new();
-    app.add_plugins((
-        VmuxPlugin::builder().menu(true).build(),
-        MenuActionPlugin::<AppMenu>::default().with_about(About {
-            name: Some("Studio".into()),
-            version: Some("1.0.0".into()),
-            ..Default::default()
-        }),
-    ))
-    .add_systems(Update, handle_menu.in_set(MenuSet::Dispatch));
+    app.add_plugins(ExampleMenuPlugin);
     app.update();
 
     let sender = app.world().resource::<EventSender>().clone();

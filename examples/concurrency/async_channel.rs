@@ -1,4 +1,4 @@
-use bevy_app::{App, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_app::VmuxPlugin;
 use vmux_app::ecs::channel::{
@@ -11,9 +11,30 @@ struct LogLine(String);
 #[derive(Component, Clone, Debug)]
 struct IncomingJob(u32);
 
+struct ExampleChannelPlugin;
+
+impl Plugin for ExampleChannelPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            VmuxPlugin::builder().jobs(true).build(),
+            AsyncChannelPlugin::message::<LogLine>().bounded(8),
+            AsyncChannelPlugin::spawn::<IncomingJob>(),
+            AsyncChannelPlugin::<String>::default(),
+        ))
+        .add_systems(Update, (print_logs, print_jobs))
+        .add_observer(print_chunks);
+    }
+}
+
 fn print_logs(mut reader: MessageReader<LogLine>) {
     for line in reader.read() {
         println!("message: {}", line.0);
+    }
+}
+
+fn print_jobs(jobs: Query<&IncomingJob, Added<IncomingJob>>) {
+    for job in &jobs {
+        println!("spawned job: {}", job.0);
     }
 }
 
@@ -26,14 +47,7 @@ fn print_chunks(mut trigger: On<ChannelReceived<String>>) {
 
 fn main() {
     let mut app = App::new();
-    app.add_plugins((
-        VmuxPlugin::builder().jobs(true).build(),
-        AsyncChannelPlugin::message::<LogLine>().bounded(8),
-        AsyncChannelPlugin::spawn::<IncomingJob>(),
-        AsyncChannelPlugin::<String>::default(),
-    ))
-    .add_systems(Update, print_logs)
-    .add_observer(print_chunks);
+    app.add_plugins(ExampleChannelPlugin);
     app.update();
 
     let logs = app.world().resource::<MessageSender<LogLine>>().clone();
@@ -51,14 +65,8 @@ fn main() {
     producer.join().unwrap();
 
     app.update();
-    let spawned: Vec<u32> = app
-        .world_mut()
-        .query::<&IncomingJob>()
-        .iter(app.world())
-        .map(|job| job.0)
-        .collect();
     println!(
-        "spawned={spawned:?} stream_closed={}",
+        "stream_closed={}",
         app.world().get::<ChannelClosed<String>>(worker).is_some(),
     );
 }
