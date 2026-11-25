@@ -20,7 +20,13 @@ impl Plugin for AcpInventoryPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(observe).add_systems(
             Update,
-            (directories, receipts, publish)
+            (
+                directories,
+                receipts,
+                publish_receipts,
+                ApplyDeferred,
+                publish,
+            )
                 .chain()
                 .in_set(vmux_tool::observation::ObservationSet),
         );
@@ -33,6 +39,8 @@ struct Listing;
 struct Reading;
 #[derive(Component)]
 struct ReadDone;
+#[derive(Component)]
+struct ReceiptsPublished;
 #[derive(Component)]
 struct Expected(PackageName);
 #[derive(Component)]
@@ -160,41 +168,10 @@ fn receipts(
     }
 }
 
-impl RegistryAgent {
-    fn display_name(&self) -> String {
-        if self.name.trim().is_empty() {
-            self.id.clone()
-        } else {
-            self.name.clone()
-        }
-    }
-
-    fn detail(&self) -> String {
-        self.description
-            .clone()
-            .unwrap_or_else(|| "ACP agent".into())
-    }
-
-    fn available_package(&self) -> ObservedPackage {
-        ObservedPackage::new(
-            ObservedTool::new(
-                self.id.clone(),
-                self.display_name(),
-                self.version.clone(),
-                self.icon.clone(),
-                self.detail(),
-                ToolStatus::Available,
-                Vec::new(),
-            ),
-            false,
-        )
-    }
-}
-
-fn publish(
+fn publish_receipts(
     observations: Query<
         (Entity, &OperationState, Option<&WaitingCatalog>),
-        (With<Reading>, Without<Finished>),
+        (With<Reading>, Without<ReceiptsPublished>, Without<Finished>),
     >,
     pending: Query<(&ChildOf, Has<ReadDone>), With<Expected>>,
     receipts: Query<(&Receipt, &ChildOf)>,
@@ -215,12 +192,10 @@ fn publish(
         {
             continue;
         }
-        let mut installed = BTreeSet::new();
         for (receipt, parent) in &receipts {
             if parent.parent() != entity {
                 continue;
             }
-            installed.insert(receipt.name.as_str());
             let agent = agents.iter().find_map(|(agent, owner)| {
                 (owner.is_none_or(|owner| owner.parent() == catalog_entity)
                     && agent.id == receipt.name.as_str())
@@ -235,18 +210,22 @@ fn publish(
             } else {
                 ToolStatus::Installed
             };
+            let name = agent
+                .map(|agent| agent.name.as_str())
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| receipt.name.as_str())
+                .to_string();
+            let detail = agent
+                .and_then(|agent| agent.description.clone())
+                .unwrap_or_else(|| "ACP agent".into());
             commands.spawn((
                 ObservedPackage::new(
                     ObservedTool::new(
                         receipt.name.as_str().to_string(),
-                        agent
-                            .map(RegistryAgent::display_name)
-                            .unwrap_or_else(|| receipt.name.as_str().to_string()),
+                        name,
                         receipt.version.clone(),
                         agent.and_then(|agent| agent.icon.clone()),
-                        agent
-                            .map(RegistryAgent::detail)
-                            .unwrap_or_else(|| "ACP agent".into()),
+                        detail,
                         status,
                         Vec::new(),
                     ),
@@ -254,6 +233,33 @@ fn publish(
                 ),
                 ChildOf(entity),
             ));
+        }
+        commands.entity(entity).insert(ReceiptsPublished);
+    }
+}
+
+fn publish(
+    observations: Query<
+        (Entity, &OperationState),
+        (With<Reading>, With<ReceiptsPublished>, Without<Finished>),
+    >,
+    receipts: Query<(&Receipt, &ChildOf)>,
+    catalogs: Query<(Entity, &Catalog)>,
+    agents: Query<(&RegistryAgent, Option<&ChildOf>)>,
+    mut commands: Commands,
+) {
+    let Ok((catalog_entity, _)) = catalogs.single() else {
+        return;
+    };
+    for (entity, state) in &observations {
+        if *state != OperationState::Running {
+            continue;
+        }
+        let mut installed = BTreeSet::new();
+        for (receipt, parent) in &receipts {
+            if parent.parent() == entity {
+                installed.insert(receipt.name.as_str());
+            }
         }
         for (agent, owner) in &agents {
             if owner.is_some_and(|owner| owner.parent() != catalog_entity)
@@ -263,7 +269,30 @@ fn publish(
             {
                 continue;
             }
-            commands.spawn((agent.available_package(), ChildOf(entity)));
+            let name = if agent.name.trim().is_empty() {
+                agent.id.clone()
+            } else {
+                agent.name.clone()
+            };
+            let detail = agent
+                .description
+                .clone()
+                .unwrap_or_else(|| "ACP agent".into());
+            commands.spawn((
+                ObservedPackage::new(
+                    ObservedTool::new(
+                        agent.id.clone(),
+                        name,
+                        agent.version.clone(),
+                        agent.icon.clone(),
+                        detail,
+                        ToolStatus::Available,
+                        Vec::new(),
+                    ),
+                    false,
+                ),
+                ChildOf(entity),
+            ));
         }
         commands.entity(entity).insert(Finished { error: None });
     }
