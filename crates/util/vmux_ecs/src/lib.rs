@@ -7,8 +7,11 @@ pub use vmux_channel as channel;
 #[cfg(feature = "store")]
 pub use vmux_macro::store;
 pub use vmux_task::{
-    AsyncTask, TaskApply, TaskFailure, TaskPlugin, TaskResult, TaskSet, TaskToken, TaskWaker,
+    AsyncTask, IoTask, IoTaskList, IoTaskPlugin, IoTaskSet, TaskApply, TaskError, TaskFailure,
+    TaskPlugin, TaskResult, TaskSet, TaskToken, TaskWake, TaskWaker,
 };
+#[cfg(feature = "host")]
+pub use vmux_task::{TokioTask, TokioTaskOutcome};
 pub use vmux_time as time;
 
 #[cfg(all(host, feature = "host"))]

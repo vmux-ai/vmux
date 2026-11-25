@@ -3,29 +3,23 @@ use super::{McpCatalogServer, McpCompletion, PendingMcpOperation};
 use crate::storage::{ReadRequest, ReadResult, StoreLease, WriteRequest, WriteResult};
 use crate::{ToolStore, ToolsManifest};
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task};
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use vmux_ecs::profile::McpCredentials;
-use vmux_ecs::{EntityTarget, OperationCompleted};
+use vmux_ecs::{EntityTarget, IoTask, IoTaskPlugin, IoTaskSet, OperationCompleted, TaskError};
 use vmux_profile::mcp_credentials::{McpCredentialTransaction, McpOauthCredentials};
 
 pub(super) struct RemovePlugin;
 
 impl Plugin for RemovePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, begin.before(RemoveSet))
-            .add_systems(
-                PostUpdate,
-                (
-                    poll::<StoreLease>,
-                    poll::<CredentialLease>,
-                    poll::<Credential>,
-                    poll::<CredentialRemoved>,
-                    poll::<CredentialRestored>,
-                ),
-            )
+        app.add_plugins(IoTaskPlugin::<(
+            StoreLease,
+            CredentialLease,
+            Credential,
+            CredentialRemoved,
+            CredentialRestored,
+        )>::default())
+            .configure_sets(Update, IoTaskSet::all().before(RemoveSet))
+            .add_systems(Update, begin.before(RemoveSet))
             .add_systems(
                 Update,
                 (
@@ -63,12 +57,13 @@ enum Phase {
     RestoreCredential,
     Complete,
 }
-#[derive(Component)]
-struct Busy;
-#[derive(Component)]
-struct IoTask<T: Component>(Task<Result<T, String>>);
-#[derive(Component)]
-struct Failed<T: Component>(String, std::marker::PhantomData<fn() -> T>);
+type Idle = (
+    Without<IoTask<StoreLease>>,
+    Without<IoTask<CredentialLease>>,
+    Without<IoTask<Credential>>,
+    Without<IoTask<CredentialRemoved>>,
+    Without<IoTask<CredentialRestored>>,
+);
 #[derive(Component)]
 struct Failure(String);
 #[derive(Component)]
@@ -83,35 +78,6 @@ struct Credential(Option<McpOauthCredentials>);
 struct CredentialRemoved;
 #[derive(Component)]
 struct CredentialRestored;
-
-fn poll<T: Component>(
-    mut tasks: Query<(Entity, &mut IoTask<T>)>,
-    wake: Option<Res<vmux_ecs::JobWake>>,
-    mut commands: Commands,
-) {
-    let waker = wake
-        .as_deref()
-        .map(|wake| &wake.0)
-        .unwrap_or(std::task::Waker::noop());
-    let mut context = Context::from_waker(waker);
-    for (entity, mut task) in &mut tasks {
-        let Poll::Ready(result) = Pin::new(&mut task.0).poll(&mut context) else {
-            continue;
-        };
-        waker.wake_by_ref();
-        commands.entity(entity).remove::<(IoTask<T>, Busy)>();
-        match result {
-            Ok(result) => {
-                commands.entity(entity).insert(result);
-            }
-            Err(error) => {
-                commands
-                    .entity(entity)
-                    .insert(Failed::<T>(error, std::marker::PhantomData));
-            }
-        }
-    }
-}
 
 type BeginRequests<'w, 's> = Query<
     'w,
@@ -196,9 +162,9 @@ type StoreLockRequests<'w, 's> = Query<
         &'static PhaseState,
         &'static ToolStore,
         Option<&'static StoreLease>,
-        Option<&'static Failed<StoreLease>>,
+        Option<&'static TaskError<StoreLease>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn store_lock(requests: StoreLockRequests<'_, '_>, mut commands: Commands) {
@@ -209,21 +175,18 @@ fn store_lock(requests: StoreLockRequests<'_, '_>, mut commands: Commands) {
         if let Some(error) = error {
             commands
                 .entity(entity)
-                .insert((Failure(error.0.clone()), PhaseState(Phase::Complete)));
+                .insert((Failure(error.to_string()), PhaseState(Phase::Complete)));
         } else if done.is_some() {
             commands
                 .entity(entity)
                 .insert(PhaseState(Phase::CredentialLock));
         } else {
             let store = store.clone();
-            commands.entity(entity).insert((
-                Busy,
-                IoTask(IoTaskPool::get().spawn(async move {
-                    Ok(StoreLease {
-                        _lease: store.lease_async().await,
-                    })
-                })),
-            ));
+            commands.entity(entity).insert(IoTask::spawn(async move {
+                Ok::<_, String>(StoreLease {
+                    _lease: store.lease_async().await,
+                })
+            }));
         }
     }
 }
@@ -236,9 +199,9 @@ type CredentialLockRequests<'w, 's> = Query<
         &'static PhaseState,
         &'static Credentials,
         Option<&'static CredentialLease>,
-        Option<&'static Failed<CredentialLease>>,
+        Option<&'static TaskError<CredentialLease>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn credential_lock(requests: CredentialLockRequests<'_, '_>, mut commands: Commands) {
@@ -249,20 +212,17 @@ fn credential_lock(requests: CredentialLockRequests<'_, '_>, mut commands: Comma
         if let Some(error) = error {
             commands
                 .entity(entity)
-                .insert((Failure(error.0.clone()), PhaseState(Phase::Complete)));
+                .insert((Failure(error.to_string()), PhaseState(Phase::Complete)));
         } else if done.is_some() {
             commands.entity(entity).insert(PhaseState(Phase::Manifest));
         } else {
             let access = credentials.0.access.clone();
-            commands.entity(entity).insert((
-                Busy,
-                IoTask(IoTaskPool::get().spawn(async move {
-                    access
-                        .transaction()
-                        .await
-                        .map(|lease| CredentialLease { _lease: lease })
-                })),
-            ));
+            commands.entity(entity).insert(IoTask::spawn(async move {
+                access
+                    .transaction()
+                    .await
+                    .map(|lease| CredentialLease { _lease: lease })
+            }));
         }
     }
 }
@@ -275,7 +235,7 @@ fn read_manifest(
             Option<&ReadResult>,
             Option<&ReadRequest>,
         ),
-        (With<Active>, Without<Busy>),
+        (With<Active>, Idle),
     >,
     mut commands: Commands,
 ) {
@@ -315,9 +275,9 @@ type ReadCredentialRequests<'w, 's> = Query<
         &'static Source,
         &'static Credentials,
         Option<&'static Credential>,
-        Option<&'static Failed<Credential>>,
+        Option<&'static TaskError<Credential>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn read_credential(requests: ReadCredentialRequests<'_, '_>, mut commands: Commands) {
@@ -328,16 +288,15 @@ fn read_credential(requests: ReadCredentialRequests<'_, '_>, mut commands: Comma
         if let Some(error) = error {
             commands
                 .entity(entity)
-                .insert((Failure(error.0.clone()), PhaseState(Phase::Complete)));
+                .insert((Failure(error.to_string()), PhaseState(Phase::Complete)));
         } else if done.is_some() {
             commands.entity(entity).insert(PhaseState(Phase::Prepare));
         } else {
             let id = source.id.clone();
             let storage = credentials.0.storage.clone();
-            commands.entity(entity).insert((
-                Busy,
-                IoTask(IoTaskPool::get().spawn(async move { storage.load(&id).map(Credential) })),
-            ));
+            commands.entity(entity).insert(IoTask::spawn(async move {
+                storage.load(&id).map(Credential)
+            }));
         }
     }
 }
@@ -352,7 +311,7 @@ type PrepareRequests<'w, 's> = Query<
         &'static McpCatalogServer,
         &'static Manifest,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn prepare(
@@ -399,7 +358,7 @@ fn write_manifest(
             Option<&WriteResult>,
             Option<&WriteRequest>,
         ),
-        (With<Active>, Without<Busy>),
+        (With<Active>, Idle),
     >,
     mut commands: Commands,
 ) {
@@ -441,9 +400,9 @@ type RemoveCredentialRequests<'w, 's> = Query<
         &'static Source,
         &'static Credentials,
         Option<&'static CredentialRemoved>,
-        Option<&'static Failed<CredentialRemoved>>,
+        Option<&'static TaskError<CredentialRemoved>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn delete(requests: RemoveCredentialRequests<'_, '_>, mut commands: Commands) {
@@ -452,21 +411,18 @@ fn delete(requests: RemoveCredentialRequests<'_, '_>, mut commands: Commands) {
             continue;
         }
         if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((Failure(error.0.clone()), PhaseState(Phase::RestoreManifest)));
+            commands.entity(entity).insert((
+                Failure(error.to_string()),
+                PhaseState(Phase::RestoreManifest),
+            ));
         } else if done.is_some() {
             commands.entity(entity).insert(PhaseState(Phase::Complete));
         } else {
             let id = source.id.clone();
             let storage = credentials.0.storage.clone();
-            commands.entity(entity).insert((
-                Busy,
-                IoTask(
-                    IoTaskPool::get()
-                        .spawn(async move { storage.remove(&id).map(|_| CredentialRemoved) }),
-                ),
-            ));
+            commands.entity(entity).insert(IoTask::spawn(async move {
+                storage.remove(&id).map(|_| CredentialRemoved)
+            }));
         }
     }
 }
@@ -483,9 +439,9 @@ fn rollback(
             Option<&WriteResult>,
             Option<&WriteRequest>,
             Option<&CredentialRestored>,
-            Option<&Failed<CredentialRestored>>,
+            Option<&TaskError<CredentialRestored>>,
         ),
-        (With<Active>, Without<Busy>),
+        (With<Active>, Idle),
     >,
     mut failures: Query<&mut Failure>,
     mut commands: Commands,
@@ -529,7 +485,7 @@ fn rollback(
                 {
                     failure
                         .0
-                        .push_str(&format!("; credential rollback failed: {}", error.0));
+                        .push_str(&format!("; credential rollback failed: {error}"));
                 }
                 commands.entity(entity).insert(PhaseState(Phase::Complete));
                 continue;
@@ -537,16 +493,13 @@ fn rollback(
             let id = source.id.clone();
             let storage = credentials.0.storage.clone();
             let old = old.0.clone();
-            commands.entity(entity).insert((
-                Busy,
-                IoTask(IoTaskPool::get().spawn(async move {
-                    let result = match old {
-                        Some(old) => storage.store(&id, &old),
-                        None => storage.remove(&id),
-                    };
-                    result.map(|_| CredentialRestored)
-                })),
-            ));
+            commands.entity(entity).insert(IoTask::spawn(async move {
+                let result = match old {
+                    Some(old) => storage.store(&id, &old),
+                    None => storage.remove(&id),
+                };
+                result.map(|_| CredentialRestored)
+            }));
         }
     }
 }
@@ -560,7 +513,7 @@ type FinishRequests<'w, 's> = Query<
         &'static Source,
         Option<&'static Failure>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn finish(requests: FinishRequests<'_, '_>, mut commands: Commands) {
@@ -592,7 +545,7 @@ fn finish(requests: FinishRequests<'_, '_>, mut commands: Commands) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::tasks::{TaskPoolBuilder, futures_lite::future};
+    use bevy::tasks::{IoTaskPool, TaskPoolBuilder, futures_lite::future};
     use std::time::{Duration, Instant};
     use vmux_ecs::profile::mcp_credentials::McpCredentialAccess;
     use vmux_ecs::{Operation, OperationError, OperationRetained, OperationState};
@@ -657,14 +610,8 @@ mod tests {
                 CredentialLease {
                     _lease: transaction,
                 },
-                Failed::<CredentialRemoved>(
-                    "mock removal failure".into(),
-                    std::marker::PhantomData,
-                ),
-                Failed::<CredentialRestored>(
-                    "mock credential rollback failure".into(),
-                    std::marker::PhantomData,
-                ),
+                TaskError::<CredentialRemoved>::failed("mock removal failure".into()),
+                TaskError::<CredentialRestored>::failed("mock credential rollback failure".into()),
             ))
             .id();
         let deadline = Instant::now() + Duration::from_secs(3);

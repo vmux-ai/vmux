@@ -1,8 +1,5 @@
 use bevy::prelude::*;
-use bevy::tasks::Task;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use vmux_ecs::{IoTask, IoTaskPlugin, IoTaskSet, JobWake};
 
 use crate::{ToolStore, ToolsManifest};
 pub(crate) use file::{FileReadRequest, FileReadResult};
@@ -25,30 +22,28 @@ impl Plugin for StoragePlugin {
             app.add_plugins(vmux_ecs::wake::WakePlugin);
         }
         app.add_plugins((
+            IoTaskPlugin::<(
+                StoreLease,
+                native::Probe,
+                native::Moved,
+                native::ManifestBytes,
+                native::Brewfile,
+                native::ManifestWritten,
+                native::BrewfileWritten,
+                file::FileBytes,
+            )>::default(),
             file::FileReadPlugin,
             migration::MigrationPlugin,
             read::ReadPlugin,
             write::WritePlugin,
         ))
+        .configure_sets(Update, IoTaskSet::all().before(admit))
         .configure_sets(
             Update,
             (read::ReadSet, write::WriteSet).after(crate::ToolTaskSet::Start),
         )
         .add_systems(Update, admit.before(read::ReadSet).before(write::WriteSet))
-        .add_systems(PostUpdate, wake)
-        .add_systems(
-            PostUpdate,
-            (
-                poll::<StoreLease>,
-                poll::<native::Probe>,
-                poll::<native::Moved>,
-                poll::<native::ManifestBytes>,
-                poll::<native::Brewfile>,
-                poll::<native::ManifestWritten>,
-                poll::<native::BrewfileWritten>,
-                poll::<file::FileBytes>,
-            ),
-        );
+        .add_systems(PostUpdate, wake);
     }
 }
 
@@ -69,14 +64,16 @@ struct Writing;
 #[derive(Component)]
 struct RetainedHere;
 
-#[derive(Component)]
-struct Busy;
-
-#[derive(Component)]
-struct IoTask<T: Component>(Task<Result<T, String>>);
-
-#[derive(Component)]
-struct Failed<T: Component>(String, std::marker::PhantomData<fn() -> T>);
+type Idle = (
+    Without<IoTask<StoreLease>>,
+    Without<IoTask<native::Probe>>,
+    Without<IoTask<native::Moved>>,
+    Without<IoTask<native::ManifestBytes>>,
+    Without<IoTask<native::Brewfile>>,
+    Without<IoTask<native::ManifestWritten>>,
+    Without<IoTask<native::BrewfileWritten>>,
+    Without<IoTask<file::FileBytes>>,
+);
 
 #[derive(Component)]
 struct Failure(String);
@@ -130,35 +127,6 @@ fn admit(
     }
 }
 
-fn poll<T: Component>(
-    mut tasks: Query<(Entity, &mut IoTask<T>)>,
-    wake: Option<Res<vmux_ecs::JobWake>>,
-    mut commands: Commands,
-) {
-    let waker = wake
-        .as_deref()
-        .map(|wake| &wake.0)
-        .unwrap_or(std::task::Waker::noop());
-    let mut context = Context::from_waker(waker);
-    for (entity, mut task) in &mut tasks {
-        let Poll::Ready(result) = Pin::new(&mut task.0).poll(&mut context) else {
-            continue;
-        };
-        waker.wake_by_ref();
-        commands.entity(entity).remove::<(IoTask<T>, Busy)>();
-        match result {
-            Ok(result) => {
-                commands.entity(entity).insert(result);
-            }
-            Err(error) => {
-                commands
-                    .entity(entity)
-                    .insert(Failed::<T>(error, std::marker::PhantomData));
-            }
-        }
-    }
-}
-
 fn wake(
     pending: Query<
         Entity,
@@ -172,10 +140,10 @@ fn wake(
                 Added<ReadResult>,
                 Added<WriteResult>,
             )>,
-            Without<Busy>,
+            Idle,
         ),
     >,
-    wake: Option<Res<vmux_ecs::JobWake>>,
+    wake: Option<Res<JobWake>>,
 ) {
     if !pending.is_empty()
         && let Some(wake) = wake
@@ -312,14 +280,26 @@ mod tests {
                     });
             }
             fixture.app.update();
-            assert!(fixture.app.world().get::<Busy>(entity).is_some());
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<IoTask<StoreLease>>(entity)
+                    .is_some()
+            );
             fixture
                 .app
                 .world_mut()
                 .entity_mut(entity)
                 .insert(vmux_ecs::OperationState::Canceled);
             fixture.app.update();
-            assert!(fixture.app.world().get::<Busy>(entity).is_some());
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<IoTask<StoreLease>>(entity)
+                    .is_some()
+            );
             assert!(
                 fixture
                     .app
@@ -362,7 +342,13 @@ mod tests {
                 std::fs::read_to_string(fixture.store.brewfile_path()).unwrap(),
                 "tap 'preserved'\n"
             );
-            assert!(fixture.app.world().get::<Busy>(entity).is_none());
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<IoTask<StoreLease>>(entity)
+                    .is_none()
+            );
             assert!(
                 fixture
                     .app
