@@ -12,6 +12,7 @@ pub struct Clock {
 struct FakeClock {
     monotonic: Instant,
     unix_millis: i64,
+    sub_millis_nanos: u32,
 }
 
 impl Clock {
@@ -28,6 +29,7 @@ impl Clock {
             fake: Some(Arc::new(Mutex::new(FakeClock {
                 monotonic,
                 unix_millis,
+                sub_millis_nanos: 0,
             }))),
         }
     }
@@ -80,8 +82,10 @@ impl Clock {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.monotonic += duration;
-        let delta = duration.as_millis().min(i64::MAX as u128) as i64;
-        state.unix_millis = state.unix_millis.saturating_add(delta);
+        let total_nanos = u128::from(state.sub_millis_nanos) + duration.as_nanos();
+        let whole_millis = (total_nanos / 1_000_000).min(i64::MAX as u128) as i64;
+        state.sub_millis_nanos = (total_nanos % 1_000_000) as u32;
+        state.unix_millis = state.unix_millis.saturating_add(whole_millis);
     }
 
     pub fn set_unix_millis(&self, unix_millis: i64) {
@@ -93,6 +97,7 @@ impl Clock {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.unix_millis = unix_millis;
+        state.sub_millis_nanos = 0;
     }
 
     pub fn set_now(&self, monotonic: Instant) {
@@ -124,6 +129,22 @@ mod tests {
         clock.set_unix_millis(1_800_000_000_000);
         assert_eq!(clock.unix_millis(), 1_800_000_000_000);
         assert_eq!(clock.elapsed_since(origin), Duration::from_millis(250));
+    }
+
+    #[test]
+    fn fake_clock_accumulates_fractional_millisecond_advances() {
+        let origin = Instant::now();
+        let clock = Clock::fake_at(origin, 1_000);
+        clock.advance(Duration::from_micros(500));
+        assert_eq!(clock.unix_millis(), 1_000);
+        assert_eq!(clock.elapsed_since(origin), Duration::from_micros(500));
+        clock.advance(Duration::from_micros(500));
+        assert_eq!(clock.unix_millis(), 1_001);
+        assert_eq!(clock.elapsed_since(origin), Duration::from_millis(1));
+        clock.advance(Duration::from_micros(700));
+        clock.set_unix_millis(2_000);
+        clock.advance(Duration::from_micros(500));
+        assert_eq!(clock.unix_millis(), 2_000);
     }
 
     #[test]

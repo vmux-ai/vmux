@@ -164,7 +164,6 @@ fn job_wake_automatically_wires_time_wake_for_coalesced_deadlines() {
         .spawn(Deadline::<Refresh>::after(&clock, Duration::from_secs(20)));
     app.world_mut()
         .spawn(Deadline::<Refresh>::after(&clock, Duration::from_millis(20)));
-    app.update();
 
     rx.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(count.load(Ordering::SeqCst), 1);

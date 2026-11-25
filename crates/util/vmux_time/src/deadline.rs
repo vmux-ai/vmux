@@ -927,12 +927,13 @@ mod tests {
                 notify: tx,
             }))));
 
+        app.update();
+
         let now = Instant::now();
         app.world_mut()
             .spawn(Deadline::<Alpha>::at(now + Duration::from_secs(30)));
         app.world_mut()
             .spawn(Deadline::<Alpha>::at(now + Duration::from_millis(20)));
-        app.update();
 
         rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 1);
