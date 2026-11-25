@@ -1360,7 +1360,7 @@ fn resolved_launch_cancellation_drains_a_tool_that_ignores_the_signal() {
     let fixture = Fixture::new();
     let app = fixture
         .target
-        .join("release/Vmux (fixture).app/Contents/MacOS");
+        .join("release/Vmux (9999999).app/Contents/MacOS");
     std::fs::create_dir_all(&app).unwrap();
     std::fs::write(app.join("vmux_desktop"), "fixture").unwrap();
     fixture.script(
@@ -1753,7 +1753,7 @@ fn native_launch_refusal_keeps_the_tool_diagnostic_and_exit_status() {
     let fixture = Fixture::new();
     let app = fixture
         .target
-        .join("release/Vmux (fixture).app/Contents/MacOS");
+        .join("release/Vmux (9999999).app/Contents/MacOS");
     std::fs::create_dir_all(&app).unwrap();
     std::fs::write(app.join("vmux_desktop"), "fixture").unwrap();
     fixture.script(
@@ -1778,7 +1778,7 @@ fn local_run_opens_the_newest_completed_product_bundle_and_forwards_test_environ
     let release = fixture.target.join("release");
     std::fs::create_dir_all(&release).unwrap();
     for (name, timestamp) in [
-        ("Vmux (older).app", 1),
+        ("Vmux (9999999).app", 1),
         ("Vmux (newer).app", 2),
         ("Vmux.app", 3),
         ("Other (newest).app", 4),
@@ -1831,7 +1831,7 @@ fn local_run_opens_the_newest_completed_product_bundle_and_forwards_test_environ
                 "--env".into(),
                 "VMUX_REMOTE_RELAY_URL=https://localhost:8787".into(),
                 release
-                    .join("Vmux (newer).app")
+                    .join("Vmux (9999999).app")
                     .canonicalize()
                     .unwrap()
                     .display()
@@ -2037,7 +2037,7 @@ fn no_build_fails_fast_with_resolved_branch_and_profile_or_launches_existing_art
 
     let app = fixture
         .target
-        .join("release/Vmux (existing).app/Contents/MacOS");
+        .join("release/Vmux (9999999).app/Contents/MacOS");
     std::fs::create_dir_all(&app).unwrap();
     std::fs::write(app.join("vmux_desktop"), "fixture").unwrap();
     fixture
@@ -2054,6 +2054,78 @@ fn no_build_fails_fast_with_resolved_branch_and_profile_or_launches_existing_art
         .assert()
         .failure()
         .stderr(predicate::str::contains("--no-build"));
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn stale_head_auto_rebuilds_local_and_dev_or_fails_fast_with_no_build() {
+    for (profile, first_suffix, second_suffix) in [
+        (
+            "local",
+            "release/Vmux (1111111).app",
+            "release/Vmux (2222222).app",
+        ),
+        ("dev", "debug/Vmux Dev.app", "debug/Vmux Dev.app"),
+    ] {
+        let fixture = Fixture::new();
+        let revision = fixture.root.join("head-rev");
+        std::fs::write(&revision, "1111111\n").unwrap();
+        fixture.script(
+            "git",
+            "#!/bin/sh\ncase \"$*\" in *'rev-parse --short=7 HEAD'*) cat \"$TEST_HEAD_REV\";; *) exec /usr/bin/git \"$@\";; esac\n",
+        );
+        fixture
+            .command()
+            .args(["desktop", "main", "-p", profile])
+            .env("TEST_HEAD_REV", &revision)
+            .assert()
+            .success();
+        let first_build = std::fs::read(fixture.root.join("build.log")).unwrap();
+        assert!(!first_build.is_empty());
+        let first_open = std::fs::read_to_string(fixture.root.join("open.log")).unwrap();
+        assert!(first_open.trim().ends_with(first_suffix), "{first_open}");
+
+        std::fs::write(&revision, "2222222\n").unwrap();
+        std::fs::remove_file(fixture.root.join("open.log")).unwrap();
+        fixture
+            .command()
+            .args(["desktop", "main", "-p", profile, "--no-build"])
+            .env("TEST_HEAD_REV", &revision)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("main"))
+            .stderr(predicate::str::contains("2222222"))
+            .stderr(predicate::str::contains(profile));
+        assert_eq!(
+            std::fs::read(fixture.root.join("build.log")).unwrap(),
+            first_build
+        );
+        assert!(!fixture.root.join("open.log").exists());
+
+        fixture
+            .command()
+            .args(["desktop", "main", "-p", profile])
+            .env("TEST_HEAD_REV", &revision)
+            .assert()
+            .success();
+        let second_build = std::fs::read(fixture.root.join("build.log")).unwrap();
+        assert!(second_build.len() > first_build.len());
+        let second_open = std::fs::read_to_string(fixture.root.join("open.log")).unwrap();
+        assert!(second_open.trim().ends_with(second_suffix), "{second_open}");
+
+        std::fs::remove_file(fixture.root.join("open.log")).unwrap();
+        fixture
+            .command()
+            .args(["desktop", "main", "-p", profile])
+            .env("TEST_HEAD_REV", &revision)
+            .assert()
+            .success();
+        assert_eq!(
+            std::fs::read(fixture.root.join("build.log")).unwrap(),
+            second_build
+        );
+        assert!(fixture.root.join("open.log").is_file());
+    }
 }
 
 #[test]
