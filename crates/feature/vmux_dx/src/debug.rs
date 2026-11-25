@@ -717,6 +717,9 @@ struct Binding {
 struct Target(PathBuf);
 
 #[derive(Component)]
+struct StaleArtifact;
+
+#[derive(Component)]
 struct File(PathBuf);
 
 #[derive(Component)]
@@ -3404,9 +3407,7 @@ fn read_development(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>,
         }
         let current_head = facts.command_output::<CommitSlot>(entity);
         if current_head.is_some() && recorded_head != current_head {
-            *phase = RunPhase::Missing;
-            wake.0.wake_by_ref();
-            continue;
+            io.commands.entity(entity).insert(StaleArtifact);
         }
         let mut failed = false;
         let mut count = 0;
@@ -3576,6 +3577,7 @@ fn verify_development(
     mut requests: RunRequests,
     facts: Facts,
     checks: Query<(Entity, &File, &Expected, &Order, &ChildOf)>,
+    stale: Query<(), With<StaleArtifact>>,
     wake: Res<JobWake>,
     mut io: IoWriter,
 ) {
@@ -3618,6 +3620,11 @@ fn verify_development(
             io.commands.entity(entity).insert(Failed(Failure::message(
                 "Development artifact is incomplete or has changed; run vmux build",
             )));
+            continue;
+        }
+        if stale.contains(entity) {
+            *phase = RunPhase::Missing;
+            wake.0.wake_by_ref();
             continue;
         }
         let path = if cfg!(target_os = "macos") {

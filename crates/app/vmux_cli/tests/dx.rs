@@ -2125,6 +2125,24 @@ fn stale_head_auto_rebuilds_local_and_dev_or_fails_fast_with_no_build() {
             second_build
         );
         assert!(fixture.root.join("open.log").is_file());
+
+        if profile == "dev" {
+            std::fs::write(&revision, "3333333\n").unwrap();
+            std::fs::write(fixture.target.join("debug/vmux_desktop"), "tampered").unwrap();
+            std::fs::remove_file(fixture.root.join("open.log")).unwrap();
+            fixture
+                .command()
+                .args(["desktop", "main", "-p", "dev"])
+                .env("TEST_HEAD_REV", &revision)
+                .assert()
+                .failure()
+                .stderr(predicate::str::contains("incomplete or has changed"));
+            assert_eq!(
+                std::fs::read(fixture.root.join("build.log")).unwrap(),
+                second_build
+            );
+            assert!(!fixture.root.join("open.log").exists());
+        }
     }
 }
 
