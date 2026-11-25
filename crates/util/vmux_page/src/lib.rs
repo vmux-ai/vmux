@@ -15,7 +15,6 @@ pub use webview::{
 mod event_request;
 mod history_swipe;
 mod instance;
-pub mod menu;
 mod page;
 mod page_dom;
 mod page_dom_converter;

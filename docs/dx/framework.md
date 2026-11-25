@@ -140,6 +140,7 @@ adds the native product adapter. Compiling an adapter does not install it in a c
 | `vmux_app::project` | `project` | Project registration, archive and persistence requests; optional filesystem adapter. |
 | `vmux_app::flex` | `flex` | Renderer-independent geometry; an explicit window viewport adapter. |
 | `vmux_app::layout` | `layout` | Owner-scoped pane topology and selection; native adapters require `layout-runtime`. |
+| `vmux_app::menu` | `menu`; optionally `menu-native` | Declarative ECS menu bars, submenus, entries and context menus; `menu-native` adds the OS menu adapter. |
 | `vmux_app::extension` | `extension-core` | Extension catalog and installation lifecycle; `extension` adds native product adapters. |
 | `vmux_app::lsp` | `lsp` | Shared server, document, request and diagnostics lifecycles; the application supplies transport. |
 | `vmux_app::host` | `host` | Compiled product identity and isolated data, credential and service paths. |

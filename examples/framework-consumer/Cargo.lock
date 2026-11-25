@@ -3049,6 +3049,7 @@ dependencies = [
  "vmux_layout",
  "vmux_lsp",
  "vmux_macro",
+ "vmux_menu",
  "vmux_project",
 ]
 
@@ -3169,6 +3170,15 @@ dependencies = [
  "ron",
  "serde",
  "syn",
+]
+
+[[package]]
+name = "vmux_menu"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "crossbeam-channel",
 ]
 
 [[package]]

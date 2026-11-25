@@ -10400,6 +10400,7 @@ dependencies = [
  "vmux_lsp",
  "vmux_macro",
  "vmux_mcp",
+ "vmux_menu",
  "vmux_profile",
  "vmux_project",
  "vmux_remote",
@@ -10433,6 +10434,7 @@ dependencies = [
  "vmux_ecs",
  "vmux_feature",
  "vmux_layout",
+ "vmux_menu",
  "vmux_page",
  "vmux_setting",
  "vmux_shortcut",
@@ -10535,7 +10537,6 @@ dependencies = [
  "dioxus",
  "ignore",
  "inventory",
- "muda 0.19.2",
  "rkyv",
  "serde",
  "serde_json",
@@ -10595,7 +10596,6 @@ dependencies = [
  "gif",
  "image",
  "libc",
- "muda 0.19.2",
  "notify 6.1.1",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -10637,6 +10637,7 @@ dependencies = [
  "vmux_input",
  "vmux_knowledge",
  "vmux_layout",
+ "vmux_menu",
  "vmux_page",
  "vmux_profile",
  "vmux_service",
@@ -11065,6 +11066,17 @@ dependencies = [
  "vmux_feature",
  "vmux_tool",
  "vmux_transport",
+]
+
+[[package]]
+name = "vmux_menu"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "crossbeam-channel",
+ "muda 0.19.2",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]
