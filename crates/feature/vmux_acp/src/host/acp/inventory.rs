@@ -256,7 +256,7 @@ fn publish(
             ));
         }
         for (agent, owner) in &agents {
-            if !owner.is_none_or(|owner| owner.parent() == catalog_entity)
+            if owner.is_some_and(|owner| owner.parent() != catalog_entity)
                 || installed.contains(agent.id.as_str())
                 || PackageName::parse(&agent.id).is_err()
                 || !agent.installable()
