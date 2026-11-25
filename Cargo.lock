@@ -10394,6 +10394,7 @@ dependencies = [
  "vmux_gallery",
  "vmux_git",
  "vmux_history",
+ "vmux_http",
  "vmux_input",
  "vmux_knowledge",
  "vmux_layout",
@@ -10932,6 +10933,27 @@ dependencies = [
  "vmux_feature",
  "vmux_page",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_http"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bytes",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "vmux_channel",
+ "vmux_ecs",
+ "vmux_runner",
+ "vmux_task",
 ]
 
 [[package]]

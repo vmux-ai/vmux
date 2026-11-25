@@ -19,6 +19,8 @@ pub use vmux_extension as extension;
 pub use vmux_feature::manifest;
 #[cfg(feature = "flex")]
 pub use vmux_flex as flex;
+#[cfg(feature = "http-server")]
+pub use vmux_http as http;
 #[cfg(feature = "layout")]
 pub use vmux_layout as layout;
 #[cfg(feature = "lsp")]
