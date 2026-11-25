@@ -1,16 +1,17 @@
 use std::any::Any;
 use std::marker::PhantomData;
-use std::task::Waker;
 
 use bevy_app::{App, Plugin, PostUpdate, Update};
-use bevy_ecs::lifecycle::HookContext;
 use bevy_ecs::prelude::*;
-use bevy_ecs::world::DeferredWorld;
-use vmux_task::TaskWake;
+use vmux_ecs::{Active, Operation, OperationPlugin, OperationState, OperationTarget};
 
-use crate::blocking::{BlockingRuntime, BlockingTask, Lane, SpawnError};
-use crate::channel::ChannelWake;
-use crate::{Active, Operation, OperationPlugin, OperationState, OperationTarget};
+pub use blocking::{
+    BlockingCancellation, BlockingPool, BlockingRuntime, BlockingTask, CancellationGroup,
+    CancellationParticipant, Lane, SpawnError,
+};
+pub use vmux_ecs::JobWake;
+
+pub mod blocking;
 
 pub struct JobsPlugin;
 
@@ -74,24 +75,6 @@ pub enum JobSet {
     Collect,
     Apply,
     Cleanup,
-}
-
-#[derive(Resource, Clone)]
-#[component(on_insert = sync_wake, on_remove = clear_task_wake)]
-pub struct JobWake(pub Waker);
-
-fn sync_wake(mut world: DeferredWorld, context: HookContext) {
-    let Some(wake) = world.get::<JobWake>(context.entity) else {
-        return;
-    };
-    let waker = wake.0.clone();
-    world.commands().insert_resource(ChannelWake(waker.clone()));
-    world.commands().insert_resource(TaskWake(waker.clone()));
-    world.commands().insert_resource(vmux_time::TimeWake(waker));
-}
-
-fn clear_task_wake(mut world: DeferredWorld, _context: HookContext) {
-    world.commands().remove_resource::<TaskWake>();
 }
 
 #[derive(Component)]
@@ -465,14 +448,15 @@ impl WorkerPanic {
 
 #[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
-    use super::*;
-    use crate::blocking::BlockingPool;
     use std::fs::File;
     use std::io::Write;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, mpsc};
+    use std::task::Waker;
     use std::time::{Duration, Instant};
+
+    use super::*;
 
     struct ChannelWake {
         output: mpsc::SyncSender<()>,
@@ -498,9 +482,9 @@ mod tests {
             let (native_wake, native_events) = mpsc::sync_channel(16);
             fixture
                 .app
-                .insert_resource(JobWake(std::task::Waker::from(Arc::new(ChannelWake {
+                .insert_resource(JobWake(Waker::from(Arc::new(ChannelWake {
                     output: native_wake,
-                    source: JobWake(std::task::Waker::noop().clone()),
+                    source: JobWake(Waker::noop().clone()),
                 }))));
             fixture.start();
             if canceled {
@@ -518,7 +502,7 @@ mod tests {
             let source = fixture.app.world().resource::<JobWake>().clone();
             fixture
                 .app
-                .insert_resource(JobWake(std::task::Waker::from(Arc::new(ChannelWake {
+                .insert_resource(JobWake(Waker::from(Arc::new(ChannelWake {
                     output: collection_wake,
                     source,
                 }))));
@@ -650,10 +634,8 @@ mod tests {
                 .unwrap()
                 .recv_timeout(Duration::from_secs(3))
                 .unwrap();
-            self.cancellation_seen.store(
-                crate::blocking::BlockingCancellation::canceled(),
-                Ordering::Release,
-            );
+            self.cancellation_seen
+                .store(BlockingCancellation::canceled(), Ordering::Release);
             let mut file = File::create(self.path).unwrap();
             file.write_all(b"native write").unwrap();
             Output {
@@ -744,9 +726,9 @@ mod tests {
         let (drain_wake, drained) = mpsc::sync_channel(16);
         fixture
             .app
-            .insert_resource(JobWake(std::task::Waker::from(Arc::new(ChannelWake {
+            .insert_resource(JobWake(Waker::from(Arc::new(ChannelWake {
                 output: drain_wake,
-                source: JobWake(std::task::Waker::noop().clone()),
+                source: JobWake(Waker::noop().clone()),
             }))));
         fixture.app.update();
         assert_eq!(
@@ -813,22 +795,6 @@ mod tests {
     }
 
     #[test]
-    fn inserting_job_wake_synchronizes_channel_wake() {
-        let mut app = App::new();
-        let (wake_tx, wake_rx) = mpsc::sync_channel(4);
-        app.insert_resource(JobWake(Waker::from(Arc::new(ChannelWake {
-            output: wake_tx,
-            source: JobWake(Waker::noop().clone()),
-        }))));
-        let channel_wake = app
-            .world()
-            .resource::<crate::channel::ChannelWake>()
-            .clone();
-        channel_wake.0.wake_by_ref();
-        assert!(wake_rx.try_recv().is_ok());
-    }
-
-    #[test]
     fn completed_native_result_remains_addressed_to_the_live_request() {
         let mut fixture = Fixture::new();
         fixture.start();
@@ -860,29 +826,5 @@ mod tests {
         fixture.app.update();
         assert!(fixture.cleaned.load(Ordering::Acquire));
         assert!(!fixture.running());
-    }
-
-    #[test]
-    fn job_wake_hooks_sync_and_clear_task_wake_resource() {
-        let mut app = App::new();
-        let (first_tx, first_rx) = mpsc::sync_channel(4);
-        app.insert_resource(JobWake(std::task::Waker::from(Arc::new(ChannelWake {
-            output: first_tx,
-            source: JobWake(std::task::Waker::noop().clone()),
-        }))));
-        app.world().resource::<TaskWake>().wake();
-        assert!(first_rx.try_recv().is_ok());
-
-        let (second_tx, second_rx) = mpsc::sync_channel(4);
-        app.insert_resource(JobWake(std::task::Waker::from(Arc::new(ChannelWake {
-            output: second_tx,
-            source: JobWake(std::task::Waker::noop().clone()),
-        }))));
-        app.world().resource::<TaskWake>().wake();
-        assert!(second_rx.try_recv().is_ok());
-        assert!(first_rx.try_recv().is_err());
-
-        app.world_mut().remove_resource::<JobWake>();
-        assert!(app.world().get_resource::<TaskWake>().is_none());
     }
 }

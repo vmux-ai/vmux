@@ -7,10 +7,8 @@ use std::task::Context;
 use std::time::Duration;
 
 use bevy::prelude::*;
-use vmux_ecs::{
-    EntityTarget, JobRequest, JobResult, Operation, OperationRetained, OperationState,
-    OperationTarget,
-};
+use vmux_ecs::{EntityTarget, Operation, OperationRetained, OperationState, OperationTarget};
+use vmux_job::{JobRequest, JobResult};
 
 use crate::dotfiles::{
     AdoptDotfile, AdoptedDotfile, AppliedEnabledDotfiles, ApplyEnabledDotfiles,
@@ -96,7 +94,7 @@ impl Plugin for DotfileOperationsPlugin {
         .add_systems(
             PostUpdate,
             (finish, finish_mutations, finish_available, finish_adoption)
-                .after(vmux_ecs::JobSet::Cleanup),
+                .after(vmux_job::JobSet::Cleanup),
         )
         .add_observer(cleanup_failed)
         .add_observer(config_failed);
@@ -796,7 +794,7 @@ fn relocated(
         ),
         With<MovingFile>,
     >,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
 ) {
     for (entity, owner, receipt, result, requested) in &files {
@@ -868,7 +866,7 @@ fn return_adopted(
             Without<JobRequest<CleanupPath>>,
         ),
     >,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
 ) {
     for (owner, saved, restored, config_failed) in &work {
@@ -1474,7 +1472,7 @@ fn mutate(
     }
 }
 
-fn effects<J: vmux_ecs::Job<Output = Result<crate::io::PathChanged, String>>, M: Component>(
+fn effects<J: vmux_job::Job<Output = Result<crate::io::PathChanged, String>>, M: Component>(
     files: Query<
         (
             Entity,
@@ -1486,7 +1484,7 @@ fn effects<J: vmux_ecs::Job<Output = Result<crate::io::PathChanged, String>>, M:
         (With<Changing>, With<M>),
     >,
     work: Query<Has<Failure>, With<Work>>,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
 ) {
     for (file, owner, receipt, result, requested) in &files {
@@ -1538,7 +1536,7 @@ fn save(
         ),
     >,
     files: Query<(&ChildOf, Has<EffectDone>), With<File>>,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
 ) {
     for (entity, names, before, state, enable, disable) in &work {
@@ -1606,7 +1604,7 @@ fn rollback(
         ),
         (With<Mutation>, With<Failure>, Without<CleanupFailed>),
     >,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     files: Query<(
         Entity,
         &ChildOf,
@@ -1731,7 +1729,7 @@ fn restored_config(
     }
 }
 
-fn reverted<J: vmux_ecs::Job<Output = Result<crate::io::PathChanged, String>>, M: Component>(
+fn reverted<J: vmux_job::Job<Output = Result<crate::io::PathChanged, String>>, M: Component>(
     files: Query<(Entity, &ChildOf, &JobResult<J>), (With<Reverting>, With<M>)>,
     mut commands: Commands,
 ) {
@@ -1766,7 +1764,7 @@ fn recover_paths(
         ),
         Without<CleaningPaths>,
     >,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
 ) {
     for (entity, failed, saved) in &work {
@@ -1828,7 +1826,7 @@ fn recovered_paths(
         ),
         With<CleaningPaths>,
     >,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
 ) {
     for (file, parent, result, requested, reverse) in &files {
@@ -1886,7 +1884,7 @@ fn mutation_completed(
         ),
         With<File>,
     >,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
 ) {
     for (entity, children, failed, started_save, restored, saved, reading, writing) in &work {
@@ -1940,7 +1938,7 @@ fn finish(
         ),
         Without<Mutation>,
     >,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     child_states: Query<&OperationState>,
     mut commands: Commands,
     wake: Option<Res<vmux_ecs::JobWake>>,
@@ -2090,7 +2088,7 @@ fn finish_adoption(
         ),
         With<File>,
     >,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
     wake: Option<Res<vmux_ecs::JobWake>>,
 ) {
@@ -3221,10 +3219,10 @@ mod tests {
             let before = std::fs::read(fixture.store.manifest_path()).unwrap();
             let sentinel = fixture.store.home().join("unrelated");
             std::fs::write(&sentinel, b"foreign content").unwrap();
-            fixture.app.insert_resource(vmux_ecs::BlockingRuntime::new(
-                vmux_ecs::blocking::BlockingPool::new("cleanup-pressure", 1, 8),
-                vmux_ecs::blocking::BlockingPool::new("unused", 0, 0),
-                vmux_ecs::blocking::BlockingPool::new("unused", 0, 0),
+            fixture.app.insert_resource(vmux_job::BlockingRuntime::new(
+                vmux_job::blocking::BlockingPool::new("cleanup-pressure", 1, 8),
+                vmux_job::blocking::BlockingPool::new("unused", 0, 0),
+                vmux_job::blocking::BlockingPool::new("unused", 0, 0),
             ));
             let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
             let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
@@ -3233,7 +3231,7 @@ mod tests {
             let captured = held.clone();
             fixture.app.add_observer(
                 move |_: On<Add, JobRequest<CleanupPath>>,
-                      runtime: Res<vmux_ecs::BlockingRuntime>| {
+                      runtime: Res<vmux_job::BlockingRuntime>| {
                     let Some(receiver) = receiver.lock().unwrap().take() else {
                         return;
                     };

@@ -6,7 +6,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 use bevy_ecs::prelude::Component;
-use vmux_ecs::{BlockingCancellation, Job};
+use vmux_job::{BlockingCancellation, Job};
 
 #[derive(Clone)]
 pub struct ReadFile {

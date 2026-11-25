@@ -3,7 +3,7 @@ use std::io::{Cursor, Read};
 
 use bevy::prelude::Component;
 use sha2::{Digest, Sha256};
-use vmux_ecs::{BlockingCancellation, Job};
+use vmux_job::{BlockingCancellation, Job};
 
 use super::package_path::Sha256Digest;
 

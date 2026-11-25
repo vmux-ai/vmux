@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use bevy_app::{App, PreUpdate, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
-use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake};
+use vmux_ecs::JobWake;
 use vmux_ecs::{Cwd, Operation, OperationState, Ready};
+use vmux_job::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 
 use crate::debug_io::{Flight, Task};
 use crate::environment::Environment;
@@ -113,15 +114,15 @@ struct Read {
     arguments: Vec<OsString>,
 }
 
-impl vmux_ecs::jobs::Job for Read {
+impl vmux_job::Job for Read {
     type Output = Result<ToolOutput, Failure>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Process
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Process
     }
 
     fn run(self) -> Self::Output {
-        vmux_ecs::jobs::Job::run(Capture {
+        vmux_job::Job::run(Capture {
             environment: self.environment,
             directory: self.directory,
             program: self.program,

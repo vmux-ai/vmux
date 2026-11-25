@@ -16,11 +16,14 @@ bevy_ecs = { workspace = true }
 bevy_tasks = { workspace = true, features = ["multi_threaded", "async_executor"] }
 tokio = { workspace = true }
 tracing = "0.1"
-vmux_ecs = { path = "../vmux_ecs", features = ["jobs"] }
+vmux_ecs = { path = "../vmux_ecs" }
 vmux_task = { path = "../vmux_task", features = ["tokio"] }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy_winit = { workspace = true, optional = true }
+
+[dev-dependencies]
+vmux_job = { path = "../vmux_job" }
 
 [lints]
 workspace = true

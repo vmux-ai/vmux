@@ -36,10 +36,10 @@ impl ArchiveEditorFixture {
             .add_message::<vmux_setting::ColorSchemeChanged>()
             .insert_resource(settings)
             .insert_non_send(Browsers::default())
-            .insert_resource(vmux_ecs::BlockingRuntime::new(
-                vmux_ecs::BlockingPool::new("archive-files", 1, 1),
-                vmux_ecs::BlockingPool::new("archive-long", 0, 0),
-                vmux_ecs::BlockingPool::new("archive-process", 0, 0),
+            .insert_resource(vmux_job::BlockingRuntime::new(
+                vmux_job::BlockingPool::new("archive-files", 1, 1),
+                vmux_job::BlockingPool::new("archive-long", 0, 0),
+                vmux_job::BlockingPool::new("archive-process", 0, 0),
             ))
             .add_plugins(vmux_layout::LayoutRuntimePlugin::manifest().plugin())
             .add_plugins(vmux_layout::tool::LayoutToolPlugin)

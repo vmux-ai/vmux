@@ -1,8 +1,8 @@
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
-use vmux_ecs::Job;
 use vmux_ecs::event::FileDirEntry;
+use vmux_job::Job;
 
 #[derive(Clone)]
 pub(super) struct Inspect {

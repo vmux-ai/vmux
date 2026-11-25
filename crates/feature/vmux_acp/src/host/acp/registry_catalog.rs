@@ -3,9 +3,8 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use vmux_ecs::profile::{ActiveProfile, ProfileDirectories, ProfilePaths};
-use vmux_ecs::{
-    JobRequest, JobResult, Operation, OperationRetained, OperationState, OperationTarget,
-};
+use vmux_ecs::{Operation, OperationRetained, OperationState, OperationTarget};
+use vmux_job::{JobRequest, JobResult};
 use vmux_tool::io::{Get, ReadFile, WriteFile};
 
 use super::registry::{Registry, RegistryAgent};
@@ -20,14 +19,14 @@ impl Plugin for RegistryPlugin {
         }
         app.add_message::<RefreshRequest>()
             .add_systems(PostUpdate, wake)
-            .add_systems(PostUpdate, restart.after(vmux_ecs::JobSet::Cleanup))
+            .add_systems(PostUpdate, restart.after(vmux_job::JobSet::Cleanup))
             .add_systems(Startup, spawn.after(PolicyLoaded))
             .add_systems(
                 Update,
                 (request, retire, start, downloaded, cached, written, publish)
                     .chain()
                     .after(vmux_tool::observation::ObservationSet)
-                    .before(vmux_ecs::JobSet::Submit),
+                    .before(vmux_job::JobSet::Submit),
             );
     }
 }
@@ -657,7 +656,7 @@ mod tests {
         let task = fixture
             .app
             .world()
-            .resource::<vmux_ecs::BlockingRuntime>()
+            .resource::<vmux_job::BlockingRuntime>()
             .spawn_process(None, move || {
                 started.send(()).unwrap();
                 wait.recv_timeout(std::time::Duration::from_secs(5))

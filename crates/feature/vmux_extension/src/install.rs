@@ -8,9 +8,9 @@ use bevy::tasks::{IoTaskPool, TaskPool};
 use crossbeam_channel::{Receiver, Sender};
 use vmux_api::extension::{ExtInstallPhase, ExtInstallProgress};
 use vmux_ecs::{
-    Job, JobPlugin, JobRequest, JobResult, JobSet, JobWake, Operation, OperationCompleted,
-    OperationError, OperationState, OperationTarget,
+    JobWake, Operation, OperationCompleted, OperationError, OperationState, OperationTarget,
 };
+use vmux_job::{Job, JobPlugin, JobRequest, JobResult, JobSet};
 
 #[cfg(test)]
 use crate::crx::ChromeExtensionId;
@@ -187,8 +187,8 @@ impl Job for DownloadJob {
         })
     }
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 }
 
@@ -452,7 +452,7 @@ fn unpack(
         commands.entity(entity).remove::<(
             DownloadProgressChannel,
             JobResult<DownloadJob>,
-            vmux_ecs::JobOwner<DownloadJob>,
+            vmux_job::JobOwner<DownloadJob>,
         )>();
         match &result.0 {
             Ok(Ok(downloaded)) => {
@@ -491,7 +491,7 @@ fn materialize(
     for (entity, install, result) in &unpacked {
         commands
             .entity(entity)
-            .remove::<(JobResult<UnpackJob>, vmux_ecs::JobOwner<UnpackJob>)>();
+            .remove::<(JobResult<UnpackJob>, vmux_job::JobOwner<UnpackJob>)>();
         match &result.0 {
             Ok(Ok(output)) => {
                 materialize.write(

@@ -11,9 +11,10 @@ use uuid::Uuid;
 use vmux_api::control::{
     ControlHello, CredentialOffer, CredentialOutcome, CredentialReply, CredentialWithdraw,
 };
-use vmux_ecs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake, Operation, Revision};
+use vmux_ecs::{JobWake, Operation, Revision};
 use vmux_feature::http::{Credential, CredentialSource, Endpoint};
 use vmux_feature::{InstallationScope, ReleaseProvider, Set};
+use vmux_job::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 use vmux_transport::service_peer::CodeRequirement;
 
 use super::control_delivery_io::{Connect, Connection, Hello, Offer, Withdraw};

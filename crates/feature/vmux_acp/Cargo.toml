@@ -8,9 +8,10 @@ publish = false
 
 [features]
 default = ["app"]
-approvals = ["dep:bevy_app", "dep:bevy_ecs", "dep:vmux_ecs", "dep:vmux_session", "vmux_ecs/jobs"]
+approvals = ["dep:bevy_app", "dep:bevy_ecs", "dep:vmux_ecs", "dep:vmux_job", "dep:vmux_session"]
 service = [
     "vmux_ecs/host",
+    "dep:vmux_job",
     "dep:vmux_spawn",
     "dep:agent-client-protocol",
     "dep:base64",
@@ -80,6 +81,7 @@ path = "src/lib.rs"
 vmux_feature = { path = "../vmux_feature", default-features = false, features = ["ecs"] }
 bevy_ecs = { workspace = true, optional = true }
 vmux_ecs = { path = "../../util/vmux_ecs", optional = true, default-features = false, features = ["contracts"] }
+vmux_job = { path = "../../util/vmux_job", optional = true }
 vmux_session = { path = "../vmux_session", default-features = false, optional = true }
 bevy_app = { workspace = true, optional = true }
 serde = { workspace = true }

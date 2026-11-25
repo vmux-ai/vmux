@@ -7,7 +7,7 @@ pub enum VmuxPlugin {
     #[plugin(feature = "ecs", desktop, daemon, cli, mcp)]
     Ecs(VmuxEcsPlugin),
     #[plugin(feature = "jobs", desktop, requires(ecs))]
-    Jobs(vmux_ecs::JobsPlugin),
+    Jobs(vmux_job::JobsPlugin),
     #[plugin(feature = "account", desktop, requires(ecs))]
     Account(vmux_account::AccountPlugin),
     #[plugin(feature = "account-local", desktop, requires(account))]

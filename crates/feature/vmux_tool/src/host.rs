@@ -90,7 +90,7 @@ impl Plugin for ToolHostPlugin {
                 .after(InventorySet)
                 .before(ProjectionSet),
         )
-        .add_systems(PostUpdate, start_operation.after(vmux_ecs::JobSet::Cleanup));
+        .add_systems(PostUpdate, start_operation.after(vmux_job::JobSet::Cleanup));
     }
 }
 

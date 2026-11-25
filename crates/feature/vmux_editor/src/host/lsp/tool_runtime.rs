@@ -54,7 +54,7 @@ impl Plugin for LspToolPlugin {
                 )
                     .chain()
                     .before(package::InstallSet)
-                    .before(vmux_ecs::JobSet::Submit),
+                    .before(vmux_job::JobSet::Submit),
             )
             .add_systems(
                 PostUpdate,
@@ -65,7 +65,7 @@ impl Plugin for LspToolPlugin {
                     orphaned,
                     wake,
                 )
-                    .after(vmux_ecs::JobSet::Cleanup),
+                    .after(vmux_job::JobSet::Cleanup),
             );
     }
 }
@@ -718,8 +718,9 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
+    use vmux_ecs::OperationState;
     use vmux_ecs::profile::{ActiveProfile, Profile, ProfileDirectories, ProfilePaths};
-    use vmux_ecs::{JobRequest, OperationState};
+    use vmux_job::JobRequest;
     use vmux_tool::io::Execute;
     use vmux_tool::state::ToolProvider;
 
@@ -1180,15 +1181,15 @@ binary.write_text("#!/bin/sh\nprintf language-ready")
     struct Invalidation(Entity);
 
     fn invalidate_after_backup(
-        trigger: On<Add, vmux_ecs::JobResult<super::super::activation_io::Backup>>,
-        receipts: Query<&vmux_ecs::JobResult<super::super::activation_io::Backup>>,
+        trigger: On<Add, vmux_job::JobResult<super::super::activation_io::Backup>>,
+        receipts: Query<&vmux_job::JobResult<super::super::activation_io::Backup>>,
         mut catalogs: Query<&mut Catalog>,
         invalidation: Option<Res<Invalidation>>,
     ) {
         let Some(invalidation) = invalidation else {
             return;
         };
-        if let Ok(vmux_ecs::JobResult(Ok(Ok(backup)))) = receipts.get(trigger.event_target())
+        if let Ok(vmux_job::JobResult(Ok(Ok(backup)))) = receipts.get(trigger.event_target())
             && backup.0
         {
             catalogs.get_mut(invalidation.0).unwrap().revision += 1;

@@ -4,10 +4,6 @@ pub use crate::{VmuxPlugin, VmuxPluginBuilder, VmuxPluginOptions};
 pub use vmux_acp::AcpPlugin;
 #[cfg(feature = "browser")]
 pub use vmux_browser::BrowserPlugin;
-#[cfg(feature = "jobs")]
-pub use vmux_ecs::{
-    Job, JobOwner, JobPlugin, JobReady, JobRequest, JobResult, JobSet, JobWake, JobsPlugin,
-};
 #[cfg(feature = "editor")]
 pub use vmux_editor::EditorPlugin;
 #[cfg(feature = "extension")]
@@ -18,6 +14,10 @@ pub use vmux_extension::ExtensionPlugin;
 pub use vmux_flex::{ComputedNode, FlexPlugin, FlexViewport, LayoutContext, Node, PrimaryViewport};
 #[cfg(feature = "git")]
 pub use vmux_git::GitPlugin;
+#[cfg(feature = "jobs")]
+pub use vmux_job::{
+    Job, JobOwner, JobPlugin, JobReady, JobRequest, JobResult, JobSet, JobWake, JobsPlugin,
+};
 #[cfg(feature = "layout")]
 pub use vmux_layout::{
     Hierarchy as PaneHierarchy, LayoutPlugin, Pane, PaneId, PaneSet, PaneSize, PaneSplit,

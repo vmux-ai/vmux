@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::process::Output;
 
 use bevy_ecs::prelude::Component;
-use vmux_ecs::blocking::Lane;
-use vmux_ecs::jobs::Job;
+use vmux_job::Job;
+use vmux_job::blocking::Lane;
 
 use crate::environment::Environment;
 use crate::execution::Execution;

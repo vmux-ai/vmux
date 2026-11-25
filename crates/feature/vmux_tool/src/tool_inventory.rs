@@ -1323,7 +1323,7 @@ mod tests {
         root: std::path::PathBuf,
     }
 
-    impl vmux_ecs::Job for ImportProcess {
+    impl vmux_job::Job for ImportProcess {
         type Output = Result<Option<crate::process::ProcessOutput>, String>;
 
         fn run(self) -> Self::Output {
@@ -1352,19 +1352,19 @@ mod tests {
 
     impl Plugin for ImportProcessPlugin {
         fn build(&self, app: &mut App) {
-            app.add_plugins(vmux_ecs::JobPlugin::<ImportProcess>::default())
+            app.add_plugins(vmux_job::JobPlugin::<ImportProcess>::default())
                 .add_systems(
                     Update,
                     intercept_import_process
                         .after(ToolTaskSet::Start)
-                        .before(vmux_ecs::JobSet::Submit),
+                        .before(vmux_job::JobSet::Submit),
                 )
                 .add_systems(Update, receive_import_process.before(ToolTaskSet::Start));
         }
     }
 
     fn intercept_import_process(
-        requests: Query<(Entity, &vmux_ecs::JobRequest<crate::io::Execute>)>,
+        requests: Query<(Entity, &vmux_job::JobRequest<crate::io::Execute>)>,
         process: Res<ImportProcess>,
         mut commands: Commands,
     ) {
@@ -1372,13 +1372,13 @@ mod tests {
             assert_eq!(request.0.program, "npm");
             commands
                 .entity(entity)
-                .remove::<vmux_ecs::JobRequest<crate::io::Execute>>()
-                .insert(vmux_ecs::JobRequest(process.clone()));
+                .remove::<vmux_job::JobRequest<crate::io::Execute>>()
+                .insert(vmux_job::JobRequest(process.clone()));
         }
     }
 
     fn receive_import_process(
-        mut results: Query<(Entity, &mut vmux_ecs::JobResult<ImportProcess>)>,
+        mut results: Query<(Entity, &mut vmux_job::JobResult<ImportProcess>)>,
         process: Res<ImportProcess>,
         mut commands: Commands,
     ) {
@@ -1386,8 +1386,8 @@ mod tests {
             let result = std::mem::replace(&mut result.0, Err("consumed".into()));
             let mut entity = commands.entity(entity);
             entity
-                .remove::<vmux_ecs::JobResult<ImportProcess>>()
-                .insert(vmux_ecs::JobResult::<crate::io::Execute>(result));
+                .remove::<vmux_job::JobResult<ImportProcess>>()
+                .insert(vmux_job::JobResult::<crate::io::Execute>(result));
             if process.root.join("diagnostic").exists() {
                 entity.insert(crate::observation::Diagnostics(vec![
                     "fixture observation was incomplete".into(),
@@ -1818,7 +1818,7 @@ mod tests {
         root: std::path::PathBuf,
     }
 
-    impl vmux_ecs::Job for FixtureRead {
+    impl vmux_job::Job for FixtureRead {
         type Output = Result<(), String>;
 
         fn run(self) -> Self::Output {
@@ -1842,7 +1842,7 @@ mod tests {
 
     impl Plugin for FixtureObservationPlugin {
         fn build(&self, app: &mut App) {
-            app.add_plugins(vmux_ecs::JobPlugin::<FixtureRead>::default())
+            app.add_plugins(vmux_job::JobPlugin::<FixtureRead>::default())
                 .add_observer(observe_fixture)
                 .add_systems(Update, receive_fixture.in_set(ToolTaskSet::Start));
         }
@@ -1864,7 +1864,7 @@ mod tests {
             .unwrap();
         commands.entity(request.observation).insert((
             crate::observation::Accepted,
-            vmux_ecs::JobRequest(FixtureRead { root: store.root() }),
+            vmux_job::JobRequest(FixtureRead { root: store.root() }),
         ));
     }
 
@@ -1872,7 +1872,7 @@ mod tests {
         results: Query<(
             Entity,
             &ScanProvider,
-            &vmux_ecs::JobResult<FixtureRead>,
+            &vmux_job::JobResult<FixtureRead>,
             &OperationState,
         )>,
         mut commands: Commands,
@@ -1883,7 +1883,7 @@ mod tests {
             }
             commands
                 .entity(entity)
-                .remove::<vmux_ecs::JobResult<FixtureRead>>();
+                .remove::<vmux_job::JobResult<FixtureRead>>();
             match &result.0 {
                 Err(error) | Ok(Err(error)) => {
                     commands

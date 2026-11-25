@@ -8,10 +8,11 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{
-    Cwd, JobRequest, JobResult, Operation, OperationError, OperationPlugin, OperationState,
-    OperationTarget, OperationTargetRevision, PageMetadata,
+    Cwd, Operation, OperationError, OperationPlugin, OperationState, OperationTarget,
+    OperationTargetRevision, PageMetadata,
 };
 use vmux_git::state::{GitPageContext, GitWorkspaceChanged};
+use vmux_job::{JobRequest, JobResult};
 
 use crate::presentation::Retiring;
 use crate::tab::{
@@ -232,7 +233,7 @@ struct ResolutionEffects<'w, 's> {
 }
 
 impl ResolutionEffects<'_, '_> {
-    fn request<J: vmux_ecs::Job>(&mut self, operation: Entity, request: J) -> Entity {
+    fn request<J: vmux_job::Job>(&mut self, operation: Entity, request: J) -> Entity {
         self.commands
             .spawn((
                 Name::new("Workspace resolution IO"),

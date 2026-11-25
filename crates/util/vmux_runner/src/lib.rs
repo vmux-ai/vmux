@@ -393,8 +393,8 @@ mod tests {
     use bevy_ecs::prelude::*;
     use vmux_ecs::channel::{AsyncChannelPlugin, MessageSender};
     use vmux_ecs::time::{Clock, Deadline, DeadlinePlugin, DeadlineReached};
-    use vmux_ecs::{IoTask, IoTaskPlugin, Job, JobPlugin, JobRequest, JobResult, ShutdownPhase};
-    use vmux_ecs::{Operation, ShutdownRequest};
+    use vmux_ecs::{IoTask, IoTaskPlugin, Operation, ShutdownPhase, ShutdownRequest};
+    use vmux_job::{Job, JobPlugin, JobRequest, JobResult};
 
     use super::*;
 

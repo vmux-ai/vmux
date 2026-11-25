@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use bevy_ecs::prelude::Component;
-use vmux_ecs::{BlockingCancellation, Job};
+use vmux_job::{BlockingCancellation, Job};
 
 use super::{PathChanged, PathReceipt};
 
@@ -166,8 +166,8 @@ pub struct CopyFile {
 impl Job for CopyFile {
     type Output = Result<BytesCopied, String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 
     fn run(self) -> Self::Output {
@@ -288,7 +288,7 @@ mod tests {
                         .unwrap()
                         .running(),
                     vmux_ecs::OperationRetained,
-                    vmux_ecs::JobRequest(job),
+                    vmux_job::JobRequest(job),
                 ))
                 .id();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -298,7 +298,7 @@ mod tests {
                     .app
                     .world_mut()
                     .entity_mut(entity)
-                    .take::<vmux_ecs::JobResult<J>>()
+                    .take::<vmux_job::JobResult<J>>()
                 {
                     self.app.world_mut().despawn(entity);
                     return result.0.unwrap();

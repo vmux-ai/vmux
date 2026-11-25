@@ -4,10 +4,8 @@ use std::path::{Path, PathBuf};
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::protocol::ManagedMcpServer;
-use vmux_ecs::{
-    BlockingCancellation, Job, JobPlugin, JobRequest, JobResult, JobSet, Operation,
-    OperationRetained,
-};
+use vmux_ecs::{Operation, OperationRetained};
+use vmux_job::{BlockingCancellation, Job, JobPlugin, JobRequest, JobResult, JobSet};
 
 use crate::io::{ObservationIoPlugin, ReadFile, WriteFile};
 use crate::mcp_config::{

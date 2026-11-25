@@ -6,10 +6,8 @@ use bevy::prelude::*;
 use bevy_app::{App, Plugin, Update};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::page::PageReady;
-use vmux_ecs::{
-    Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet, Operation, PageMetadata, Revision,
-    UiStatePlugin, UiStateWrite,
-};
+use vmux_ecs::{Operation, PageMetadata, Revision, UiStatePlugin, UiStateWrite};
+use vmux_job::{Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 
 use crate::administration::{Capabilities, Publication, Snapshot};
 use crate::flag::{Configuration, Value};

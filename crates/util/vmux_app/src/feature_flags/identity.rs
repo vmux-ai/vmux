@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use bevy_app::{App, Startup, Update};
 use bevy_ecs::prelude::*;
 use uuid::Uuid;
-use vmux_ecs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, Operation};
+use vmux_ecs::Operation;
 use vmux_feature::flag::{Attribute, Context, ContextFailure as Failure, Value};
 use vmux_feature::{InstallationScope, Set};
+use vmux_job::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 
 use super::identity_io::{Create, Read};
 

@@ -1,4 +1,4 @@
-use vmux_ecs::jobs::Job;
+use vmux_job::Job;
 
 use crate::execution::Failure;
 use crate::storage_io::StorageJob;
@@ -14,7 +14,7 @@ impl<J: StorageJob> Clone for Scoped<J> {
 impl<J: StorageJob> Job for Scoped<J> {
     type Output = Result<J::Data, Failure>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
+    fn lane(&self) -> vmux_job::blocking::Lane {
         self.0.lane()
     }
 

@@ -91,7 +91,7 @@ impl TargetLock {
 
     fn check() -> Result<()> {
         Signals::check()?;
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err("Target lock acquisition canceled".into());
         }
         Ok(())

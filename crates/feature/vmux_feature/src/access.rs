@@ -4,7 +4,8 @@ use bevy::prelude::*;
 use crate::http::{Credential, CredentialSource};
 use crate::native::Endpoint;
 use crate::runtime::Now;
-use vmux_ecs::{JobSet, Revision};
+use vmux_ecs::Revision;
+use vmux_job::JobSet;
 
 pub(crate) struct AdministrationAccessPlugin;
 

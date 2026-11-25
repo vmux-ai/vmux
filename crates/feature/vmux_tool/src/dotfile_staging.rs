@@ -5,10 +5,8 @@ use std::task::Context;
 use std::time::Duration;
 
 use bevy::prelude::*;
-use vmux_ecs::{
-    EntityTarget, JobRequest, JobResult, Operation, OperationRetained, OperationState,
-    OperationTarget,
-};
+use vmux_ecs::{EntityTarget, Operation, OperationRetained, OperationState, OperationTarget};
+use vmux_job::{JobRequest, JobResult};
 
 use crate::dotfiles::{ImportDotfiles, ImportedDotfiles};
 use crate::io::{
@@ -28,11 +26,11 @@ pub(crate) struct DotfileImportPlugin;
 
 impl Plugin for DotfileImportPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_ecs::JobPlugin<CreateTemporary>>() {
-            app.add_plugins(vmux_ecs::JobPlugin::<CreateTemporary>::default());
+        if !app.is_plugin_added::<vmux_job::JobPlugin<CreateTemporary>>() {
+            app.add_plugins(vmux_job::JobPlugin::<CreateTemporary>::default());
         }
-        if !app.is_plugin_added::<vmux_ecs::JobPlugin<CloseTemporary>>() {
-            app.add_plugins(vmux_ecs::JobPlugin::<CloseTemporary>::default());
+        if !app.is_plugin_added::<vmux_job::JobPlugin<CloseTemporary>>() {
+            app.add_plugins(vmux_job::JobPlugin::<CloseTemporary>::default());
         }
         app.add_systems(
             Update,
@@ -57,7 +55,7 @@ impl Plugin for DotfileImportPlugin {
                 .chain()
                 .in_set(crate::ToolTaskSet::Start),
         )
-        .add_systems(PostUpdate, finish.after(vmux_ecs::JobSet::Cleanup))
+        .add_systems(PostUpdate, finish.after(vmux_job::JobSet::Cleanup))
         .add_observer(cleanup_failed)
         .add_observer(configuration_failed);
     }
@@ -755,7 +753,7 @@ fn staging_created(
         ),
         With<CreatingStaging>,
     >,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
 ) {
     for (entity, transfer, result, requested) in &work {
@@ -1045,7 +1043,7 @@ fn activated(
         ),
         With<Activating>,
     >,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
 ) {
     for (entity, parent, receipt, result, requested) in &packages {
@@ -1148,7 +1146,7 @@ fn rollback(
         ),
         (With<Failure>, Without<CleanupFailed>),
     >,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
 ) {
     for (entity, before, children, started, restored, restoring, reading, writing, failed) in &work
@@ -1314,7 +1312,7 @@ fn close_staging(
         (Without<Closing>, Without<Done>, Without<CleanupFailed>),
     >,
     packages: Query<(&ChildOf, Has<Activated>, Has<Returned>), With<Package>>,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
 ) {
     for (entity, staging, children, committed, failed, restored, reading, writing, creating) in
@@ -1468,7 +1466,7 @@ fn finish(
         (With<Done>, Without<CleanupFailed>),
     >,
     packages: Query<&ChildOf, With<Package>>,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     mut commands: Commands,
     wake: Option<Res<vmux_ecs::JobWake>>,
 ) {

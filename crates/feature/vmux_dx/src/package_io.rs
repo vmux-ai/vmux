@@ -7,8 +7,8 @@ use std::process::Stdio;
 
 use bevy_ecs::prelude::Component;
 use sha2::{Digest, Sha256};
-use vmux_ecs::blocking::{BlockingCancellation, Lane};
-use vmux_ecs::jobs::Job;
+use vmux_job::Job;
+use vmux_job::blocking::{BlockingCancellation, Lane};
 
 use crate::environment::Environment;
 use crate::execution::Failure;

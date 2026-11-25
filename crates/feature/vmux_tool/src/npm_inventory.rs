@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use serde_json::Value;
-use vmux_ecs::{JobRequest, JobResult, OperationState};
+use vmux_ecs::OperationState;
+use vmux_job::{JobRequest, JobResult};
 
 use crate::ToolTaskSet;
 use crate::io::Execute;
@@ -210,14 +211,14 @@ mod tests {
 
     impl Plugin for ProcessFixturePlugin {
         fn build(&self, app: &mut App) {
-            if !app.is_plugin_added::<vmux_ecs::JobPlugin<Execute>>() {
-                app.add_plugins(vmux_ecs::JobPlugin::<Execute>::default());
+            if !app.is_plugin_added::<vmux_job::JobPlugin<Execute>>() {
+                app.add_plugins(vmux_job::JobPlugin::<Execute>::default());
             }
             app.add_systems(
                 Update,
                 output
                     .after(ToolTaskSet::Start)
-                    .before(vmux_ecs::JobSet::Submit),
+                    .before(vmux_job::JobSet::Submit),
             );
         }
     }

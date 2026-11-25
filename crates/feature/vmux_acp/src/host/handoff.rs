@@ -6,8 +6,8 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::AgentPromptEnvelope;
 use vmux_api::session::Message;
-use vmux_ecs::jobs::{Job, JobPlugin, JobRequest, JobResult, JobSet};
 use vmux_ecs::{EntityTarget, Operation};
+use vmux_job::{Job, JobPlugin, JobRequest, JobResult, JobSet};
 use vmux_session::host::{HandoffMessages, ImportedConversation};
 
 use crate::AcpSessionId;
@@ -111,7 +111,7 @@ impl Job for LoadHandoffJob {
     type Output = Option<HandoffRecord>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return None;
         }
         let source = std::fs::File::open(&self.0).ok()?;
@@ -137,7 +137,7 @@ impl Job for SaveHandoffJob {
     type Output = Result<(), String>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return Err("handoff write canceled".into());
         }
         let parent = self

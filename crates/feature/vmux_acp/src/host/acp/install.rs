@@ -259,7 +259,7 @@ fn environment(
         ),
         Without<Retiring>,
     >,
-    workers: Res<vmux_ecs::BlockingRuntime>,
+    workers: Res<vmux_job::BlockingRuntime>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -284,7 +284,7 @@ fn environment(
                 job.task = Some(task);
                 commands.entity(entity).remove::<AgentReady>();
             }
-            Err(vmux_ecs::blocking::SpawnError::Full) => {}
+            Err(vmux_job::blocking::SpawnError::Full) => {}
             Err(error) => {
                 job.outcome = Some(AcpInstallOutcome {
                     launch: Err(error.to_string()),

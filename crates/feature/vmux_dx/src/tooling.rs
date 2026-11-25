@@ -4,9 +4,10 @@ use std::sync::Arc;
 use bevy_app::{App, PreUpdate, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
+use vmux_ecs::JobWake;
 use vmux_ecs::cli::CliResult;
-use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake};
 use vmux_ecs::{Operation, OperationState};
+use vmux_job::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 
 use crate::debug_io::{Flight, Task};
 use crate::execution::Failure;

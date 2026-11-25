@@ -12002,7 +12002,11 @@ impl Inventory {
                 else {
                     continue;
                 };
-                if target.key == "crates/util/vmux_ecs/src/jobs.rs||trait:Job" {
+                if matches!(
+                    target.key.as_str(),
+                    "crates/util/vmux_job/src/lib.rs||trait:Job"
+                        | "crates/util/vmux_ecs/src/jobs.rs||trait:Job"
+                ) {
                     return true;
                 }
             }
@@ -12661,8 +12665,11 @@ impl Inventory {
     }
 
     fn indexed_result(&self, entry: &Declaration) -> bool {
-        if entry.key != "crates/util/vmux_ecs/src/jobs.rs||struct:JobResult"
-            || !entry.production
+        if !matches!(
+            entry.key.as_str(),
+            "crates/util/vmux_job/src/lib.rs||struct:JobResult"
+                | "crates/util/vmux_ecs/src/jobs.rs||struct:JobResult"
+        ) || !entry.production
             || !entry.ecs
             || entry.generic_parameters.len() != 1
             || entry.field_types.len() != 1
@@ -17108,25 +17115,26 @@ impl Inventory {
             return;
         }
         let mut jobs = BTreeSet::new();
-        if let Some(contexts) = self
-            .generic_usage
-            .owners
-            .get("crates/util/vmux_ecs/src/jobs.rs||struct:JobPlugin")
-        {
-            for (plugin_key, bindings) in contexts {
-                let Some(plugin) = self.entries.get(plugin_key) else {
-                    continue;
-                };
-                for (name, value) in bindings {
-                    if name != "J" {
-                        continue;
-                    }
-                    let Ok(syn::GenericArgument::Type(ty)) =
-                        syn::parse_str::<syn::GenericArgument>(value)
-                    else {
+        for job_plugin_key in [
+            "crates/util/vmux_job/src/lib.rs||struct:JobPlugin",
+            "crates/util/vmux_ecs/src/jobs.rs||struct:JobPlugin",
+        ] {
+            if let Some(contexts) = self.generic_usage.owners.get(job_plugin_key) {
+                for (plugin_key, bindings) in contexts {
+                    let Some(plugin) = self.entries.get(plugin_key) else {
                         continue;
                     };
-                    self.collect_registered_jobs(&plugin.namespace, &ty, &mut jobs);
+                    for (name, value) in bindings {
+                        if name != "J" {
+                            continue;
+                        }
+                        let Ok(syn::GenericArgument::Type(ty)) =
+                            syn::parse_str::<syn::GenericArgument>(value)
+                        else {
+                            continue;
+                        };
+                        self.collect_registered_jobs(&plugin.namespace, &ty, &mut jobs);
+                    }
                 }
             }
         }
@@ -17339,7 +17347,13 @@ impl Inventory {
             return false;
         };
         self.resolve(&implementation.namespace, interface, &mut BTreeSet::new())
-            .is_some_and(|target| target.key == "crates/util/vmux_ecs/src/jobs.rs||trait:Job")
+            .is_some_and(|target| {
+                matches!(
+                    target.key.as_str(),
+                    "crates/util/vmux_job/src/lib.rs||trait:Job"
+                        | "crates/util/vmux_ecs/src/jobs.rs||trait:Job"
+                )
+            })
             && implementation
                 .bodies
                 .iter()
@@ -17369,7 +17383,11 @@ impl Inventory {
             && trait_decl.reference_paths.iter().any(|path| {
                 self.resolve(&trait_decl.namespace, path, &mut BTreeSet::new())
                     .is_some_and(|target| {
-                        target.key == "crates/util/vmux_ecs/src/jobs.rs||trait:Job"
+                        matches!(
+                            target.key.as_str(),
+                            "crates/util/vmux_job/src/lib.rs||trait:Job"
+                                | "crates/util/vmux_ecs/src/jobs.rs||trait:Job"
+                        )
                     })
             })
     }
@@ -19288,6 +19306,7 @@ impl Inventory {
                 | "crates/util/vmux_store/src/schema.rs||struct:SchemaPlugin"
                 | "crates/util/vmux_ecs/src/store.rs||struct:SchemaPlugin"
                 | "crates/util/vmux_ecs/src/identity.rs||struct:IdentityIndexPlugin"
+                | "crates/util/vmux_job/src/lib.rs||struct:JobPlugin"
                 | "crates/util/vmux_ecs/src/jobs.rs||struct:JobPlugin"
                 | "crates/util/vmux_ecs/src/operation.rs||struct:OperationPlugin"
                 | "crates/util/vmux_runner/src/winit.rs||struct:WinitWakePlugin"
@@ -22736,7 +22755,11 @@ impl Inventory {
     fn job_output_components(&self, namespace: &str, parameter: &Type) -> BTreeSet<String> {
         let Some(result) = self
             .entries
-            .get("crates/util/vmux_ecs/src/jobs.rs||struct:JobResult")
+            .get("crates/util/vmux_job/src/lib.rs||struct:JobResult")
+            .or_else(|| {
+                self.entries
+                    .get("crates/util/vmux_ecs/src/jobs.rs||struct:JobResult")
+            })
         else {
             return BTreeSet::new();
         };
@@ -22789,7 +22812,11 @@ impl Inventory {
                     .is_some_and(|interface| {
                         self.resolve(&implementation.namespace, interface, &mut BTreeSet::new())
                             .is_some_and(|interface| {
-                                interface.key == "crates/util/vmux_ecs/src/jobs.rs||trait:Job"
+                                matches!(
+                                    interface.key.as_str(),
+                                    "crates/util/vmux_job/src/lib.rs||trait:Job"
+                                        | "crates/util/vmux_ecs/src/jobs.rs||trait:Job"
+                                )
                             })
                     })
             {
@@ -23454,7 +23481,11 @@ impl<'ast> Visit<'ast> for JobOutputs<'_> {
             .inventory
             .resolve(self.namespace, &name, &mut BTreeSet::new())
         {
-            if owner.key == "crates/util/vmux_ecs/src/jobs.rs||struct:JobResult" {
+            if matches!(
+                owner.key.as_str(),
+                "crates/util/vmux_job/src/lib.rs||struct:JobResult"
+                    | "crates/util/vmux_ecs/src/jobs.rs||struct:JobResult"
+            ) {
                 if !self.inside || !self.direct {
                     return;
                 }

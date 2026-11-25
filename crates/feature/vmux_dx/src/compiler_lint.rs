@@ -3,7 +3,7 @@ use std::ffi::{OsStr, OsString};
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
-use vmux_ecs::jobs::JobWake;
+use vmux_ecs::JobWake;
 use vmux_ecs::{OperationState, Order};
 
 use crate::Settings;

@@ -8,11 +8,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use vmux_ecs::time::{Clock, Deadline, DeadlinePlugin, DeadlineReached};
 use vmux_ecs::{
-    Cwd, JobRequest, JobResult, Operation, OperationPlugin, OperationState, OperationTarget,
-    OperationTargetRevision,
+    Cwd, Operation, OperationPlugin, OperationState, OperationTarget, OperationTargetRevision,
 };
 use vmux_git::state::CheckedOutBranch;
 use vmux_git::worktree::CheckoutInfo;
+use vmux_job::{JobRequest, JobResult};
 
 use crate::worktree::{TabWorktreeActivation, WorktreeName};
 
@@ -706,7 +706,7 @@ impl Effects<'_, '_> {
             .remove::<RetryReady>()
             .insert(deadline);
     }
-    fn request<J: vmux_ecs::Job>(&mut self, owner: Entity, request: J) -> Entity {
+    fn request<J: vmux_job::Job>(&mut self, owner: Entity, request: J) -> Entity {
         self.commands
             .spawn((
                 Name::new("Managed checkout IO"),
@@ -3576,8 +3576,8 @@ mod tests {
             let task = fixture
                 .app
                 .world()
-                .resource::<vmux_ecs::blocking::BlockingRuntime>()
-                .try_spawn(vmux_ecs::blocking::Lane::Long, None, move || {
+                .resource::<vmux_job::blocking::BlockingRuntime>()
+                .try_spawn(vmux_job::blocking::Lane::Long, None, move || {
                     entered.send(()).unwrap();
                     let _ = waiting.recv_timeout(Duration::from_secs(10));
                 })

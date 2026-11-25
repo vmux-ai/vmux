@@ -7,8 +7,8 @@ use std::process::Output;
 use std::sync::{Arc, Mutex};
 
 use bevy_ecs::prelude::Component;
-use vmux_ecs::blocking::Lane;
-use vmux_ecs::jobs::Job;
+use vmux_job::Job;
+use vmux_job::blocking::Lane;
 
 use crate::environment::Environment;
 use crate::execution::{Execution, Failure};
@@ -37,7 +37,7 @@ impl Job for Inspect {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Storage IO canceled"));
         }
         match fs::symlink_metadata(self.0) {
@@ -65,7 +65,7 @@ impl Job for Canonicalize {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Storage IO canceled"));
         }
         self.0
@@ -96,13 +96,13 @@ impl Job for ReadDirectory {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Storage IO canceled"));
         }
         let entries = fs::read_dir(&self.0).map_err(|error| Failure::message(error.to_string()))?;
         let mut observed = Vec::new();
         for entry in entries {
-            if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            if vmux_job::blocking::BlockingCancellation::canceled() {
                 return Err(Failure::message("Storage IO canceled"));
             }
             if observed.len() >= Self::MAX_ENTRIES {
@@ -149,7 +149,7 @@ impl Job for ReadDirectoryBatch {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Storage IO canceled"));
         }
         let cursor = match self.cursor {
@@ -173,7 +173,7 @@ impl Job for ReadDirectoryBatch {
                 });
             };
             while observed.len() < target {
-                if vmux_ecs::blocking::BlockingCancellation::canceled() {
+                if vmux_job::blocking::BlockingCancellation::canceled() {
                     *guard = None;
                     return Err(Failure::message("Storage IO canceled"));
                 }
@@ -226,7 +226,7 @@ impl Job for ReadFile {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Storage IO canceled"));
         }
         let file = OpenOptions::new()
@@ -269,7 +269,7 @@ impl Job for Open {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Storage IO canceled"));
         }
         let file = self
@@ -308,7 +308,7 @@ impl Job for Remove {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Storage IO canceled"));
         }
         let _lock = self.lock;
@@ -344,7 +344,7 @@ impl Job for Capture {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Storage IO canceled"));
         }
         let mut command = self.environment.command(self.program, &self.directory);

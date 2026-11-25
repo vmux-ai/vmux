@@ -11,9 +11,8 @@ use bevy_ecs::prelude::*;
 use reqwest::Url;
 use uuid::Uuid;
 use vmux_api::control::{ControlLease, ControlToken};
-use vmux_ecs::{
-    Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake, Operation, Revision,
-};
+use vmux_ecs::{JobWake, Operation, Revision};
+use vmux_job::{Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 use zeroize::Zeroizing;
 
 use crate::flag::Source;
@@ -227,8 +226,8 @@ impl Job for Fetch {
         (Entropy::sample(), self.get())
     }
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 }
 

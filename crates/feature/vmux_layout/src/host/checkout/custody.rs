@@ -6,8 +6,9 @@ use bevy::prelude::*;
 use std::fs::Metadata;
 use std::path::PathBuf;
 use std::sync::Arc;
-use vmux_ecs::{Cwd, JobResult};
+use vmux_ecs::Cwd;
 use vmux_git::worktree::WorktreeCommand;
+use vmux_job::JobResult;
 
 pub(super) struct CustodyPlugin;
 

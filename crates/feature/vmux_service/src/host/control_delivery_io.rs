@@ -6,7 +6,7 @@ use vmux_api::control::{
     ControlHello, ControlReady, CredentialOffer, CredentialReply, CredentialWithdraw,
 };
 use vmux_api::protocol::{ClientMessage, ServiceMessage};
-use vmux_ecs::{Job, blocking::Lane};
+use vmux_job::{Job, blocking::Lane};
 use vmux_transport::service::ServiceConnection;
 use vmux_transport::service_peer::CodeRequirement;
 

@@ -6,10 +6,10 @@ use std::fs::TryLockError;
 use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use vmux_ecs::jobs::{Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 use vmux_ecs::{
     Active, BaseRevision, EntityTarget, Operation, OperationError, OperationState, Revision,
 };
+use vmux_job::{Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 use vmux_path::AtomicFile;
 
 use crate::preferences::{
@@ -191,7 +191,7 @@ impl FileJob {
     }
 
     fn execute_until(&self, deadline: Instant) -> Result<Content, String> {
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return Err("preference IO canceled before dispatch".to_string());
         }
         let parent = self.path.parent().ok_or("preference file has no parent")?;
@@ -210,7 +210,7 @@ impl FileJob {
             .open(lock_path)
             .map_err(|error| error.to_string())?;
         self.acquire(&lock, deadline.min(Instant::now() + Self::LOCK_TIMEOUT))?;
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return Err("preference IO canceled before file access".to_string());
         }
         if let Some(bytes) = &self.bytes {
@@ -237,7 +237,7 @@ impl FileJob {
 
     fn acquire(&self, lock: &std::fs::File, deadline: Instant) -> Result<(), String> {
         loop {
-            if vmux_ecs::BlockingCancellation::canceled() {
+            if vmux_job::BlockingCancellation::canceled() {
                 return Err("preference IO canceled while waiting for the file lock".to_string());
             }
             if Instant::now() >= deadline {
@@ -324,7 +324,7 @@ fn write(
         ),
         With<Ready>,
     >,
-    wake: Option<Res<vmux_ecs::jobs::JobWake>>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,
 ) {
     let mut queued = false;

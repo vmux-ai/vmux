@@ -62,15 +62,15 @@ impl Execute {
     }
 }
 
-impl vmux_ecs::Job for Execute {
+impl vmux_job::Job for Execute {
     type Output = Result<Option<ProcessOutput>, String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Process
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Process
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return Err("process execution canceled".into());
         }
         let Some(program) = Self::find(&self.program) else {
@@ -137,7 +137,7 @@ impl Capture {
         let mut status = None;
         let mut drain_deadline = None;
         loop {
-            if vmux_ecs::BlockingCancellation::canceled() {
+            if vmux_job::BlockingCancellation::canceled() {
                 return Err("process execution canceled".into());
             }
             let now = std::time::Instant::now();
@@ -247,7 +247,7 @@ impl<R: std::io::Read + std::os::fd::AsRawFd> Pipe<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_ecs::Job;
+    use vmux_job::Job;
 
     struct EscapedPipe {
         directory: tempfile::TempDir,

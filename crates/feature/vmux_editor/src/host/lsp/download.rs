@@ -117,7 +117,7 @@ impl RemoteArtifact {
         max_bytes: u64,
         mut progress: impl FnMut(u64, Option<u64>),
     ) -> Result<(), String> {
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return Err("download canceled".into());
         }
         let url = Self::checked_url(&self.url)?;
@@ -142,7 +142,7 @@ impl RemoteArtifact {
         let mut downloaded = 0u64;
         let mut hasher = Sha256::new();
         loop {
-            if vmux_ecs::BlockingCancellation::canceled() {
+            if vmux_job::BlockingCancellation::canceled() {
                 return Err("download canceled".into());
             }
             let count = response
@@ -177,7 +177,7 @@ impl RemoteArtifact {
         file.as_file()
             .sync_all()
             .map_err(|error| error.to_string())?;
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return Err("download canceled".into());
         }
         file.persist(destination)

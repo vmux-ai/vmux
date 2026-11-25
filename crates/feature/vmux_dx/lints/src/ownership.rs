@@ -48,7 +48,7 @@ impl<'tcx> Ownership<'tcx> {
                 ("bevy_app", "PluginGroup") => "plugin_group",
                 ("bevy_reflect", "FromType") => "from_type",
                 ("bevy_reflect", "Reflect") => "reflect",
-                ("vmux_ecs", "Job") => "job",
+                ("vmux_job", "Job") => "job",
                 ("vmux_ecs" | "vmux_store", "Schema") => "schema",
                 ("vmux_page", "Page" | "PageComponent") => "page",
                 ("vmux_feature", "FeatureManifestSource") => "manifest",
@@ -1012,6 +1012,7 @@ impl<'tcx> Ownership<'tcx> {
             "async_channel",
             "vmux_channel",
             "vmux_http",
+            "vmux_job",
             "vmux_runner",
             "vmux_watch",
             "async_io",
@@ -1421,7 +1422,7 @@ impl<'tcx> ValueGraph<'tcx> {
             || package.as_str() == "tokio_util" && name.as_str() == "CancellationToken"
             || package.as_str() == "std" && Ownership::is_std_io_handle(name.as_str())
             || package.as_str() == "bevy_tasks" && name.as_str() == "Task"
-            || package.as_str() == "vmux_ecs" && name.as_str() == "BlockingTask"
+            || package.as_str() == "vmux_job" && name.as_str() == "BlockingTask"
             || package.as_str() == "vmux_git" && name.as_str() == "GitTask"
         {
             return true;

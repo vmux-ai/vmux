@@ -4,7 +4,7 @@ use std::time::Duration;
 use bevy_ecs::prelude::*;
 use reqwest::Url;
 use sha2::{Digest, Sha256};
-use vmux_ecs::Job;
+use vmux_job::Job;
 
 use crate::administration::{self, Snapshot};
 
@@ -163,8 +163,8 @@ pub(crate) struct Inspect {
 impl Job for Inspect {
     type Output = Result<crate::snapshot::Document, String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 
     fn run(self) -> Self::Output {
@@ -185,8 +185,8 @@ pub(crate) struct Load {
 impl Job for Load {
     type Output = Result<Snapshot, String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 
     fn run(self) -> Self::Output {
@@ -208,8 +208,8 @@ pub(crate) struct Save {
 impl Job for Save {
     type Output = Result<Snapshot, String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 
     fn run(self) -> Self::Output {
@@ -260,8 +260,8 @@ pub(crate) struct Review {
 impl Job for Review {
     type Output = Result<Snapshot, String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 
     fn run(self) -> Self::Output {
@@ -288,8 +288,8 @@ pub(crate) struct Publish {
 impl Job for Publish {
     type Output = Result<Snapshot, String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 
     fn run(self) -> Self::Output {
@@ -312,8 +312,8 @@ pub(crate) struct Discard {
 impl Job for Discard {
     type Output = Result<Snapshot, String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 
     fn run(self) -> Self::Output {
@@ -347,8 +347,8 @@ pub(crate) struct Audit {
 
 impl Job for Audit {
     type Output = Result<administration::AuditPage, String>;
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
     fn run(self) -> Self::Output {
         let mut path = self.endpoint.path("/v1/flags/audit", "/audit");
@@ -369,8 +369,8 @@ pub(crate) struct Rollback {
 
 impl Job for Rollback {
     type Output = Result<Snapshot, String>;
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
     fn run(self) -> Self::Output {
         let body = serde_json::to_vec(&self.request).map_err(|error| error.to_string())?;

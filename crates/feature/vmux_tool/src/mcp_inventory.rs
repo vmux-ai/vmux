@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_ecs::{EntityTarget, JobRequest, JobResult, Operation, OperationRetained, OperationState};
+use vmux_ecs::{EntityTarget, Operation, OperationRetained, OperationState};
+use vmux_job::{JobRequest, JobResult};
 
 use crate::io::ReadFile;
 use crate::mcp_config::{McpConfigFile, McpLayerInput, McpResolvedServer};

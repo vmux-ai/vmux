@@ -8,8 +8,8 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use vmux_ecs::jobs::{Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 use vmux_ecs::{Active, BaseRevision, Cwd, EntityTarget, Operation, OperationState, Revision};
+use vmux_job::{Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 
 use crate::approval::{File, Loaded, Reconcile, Records, Saved, ScopeRequest, Scoped};
 
@@ -115,7 +115,7 @@ impl FileJob {
     }
 
     fn execute(&self, deadline: Instant) -> Result<Content, String> {
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return Err("approval IO canceled before dispatch".into());
         }
         let parent = self.path.parent().ok_or("approval file has no parent")?;
@@ -134,7 +134,7 @@ impl FileJob {
             .map_err(|error| error.to_string())?;
         let deadline = deadline.min(Instant::now() + Duration::from_secs(2));
         loop {
-            if vmux_ecs::BlockingCancellation::canceled() {
+            if vmux_job::BlockingCancellation::canceled() {
                 return Err("approval lock canceled".into());
             }
             if Instant::now() >= deadline {
@@ -146,7 +146,7 @@ impl FileJob {
                 Err(TryLockError::Error(error)) => return Err(error.to_string()),
             }
         }
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return Err("approval IO canceled before file access".into());
         }
         let original = self.read_bytes()?;
@@ -206,7 +206,7 @@ struct ScopeJob(PathBuf);
 
 impl ScopeJob {
     fn execute(&self) -> Result<(Option<PathBuf>, Option<PathBuf>), String> {
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return Err("approval scope resolution canceled".into());
         }
         let repository = vmux_git::worktree::CheckoutInfo::try_from(self.0.as_path())

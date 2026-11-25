@@ -4,11 +4,10 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use sha2::{Digest, Sha256};
 use vmux_ecs::profile::CurrentProfile;
-use vmux_ecs::{
-    JobRequest, JobResult, Operation, OperationRetained, OperationState, OperationTarget,
-};
+use vmux_ecs::{Operation, OperationRetained, OperationState, OperationTarget};
 use vmux_editor::lsp::package_path::PackageName;
 use vmux_editor::lsp::store::{PackageStore, Receipt};
+use vmux_job::{JobRequest, JobResult};
 use vmux_tool::ToolInventoryChanged;
 use vmux_tool::io::ReadFile;
 
@@ -39,9 +38,9 @@ impl Plugin for InstalledPlugin {
                     .chain()
                     .in_set(InstalledSet)
                     .after(super::package::PreparationSet)
-                    .before(vmux_ecs::JobSet::Submit),
+                    .before(vmux_job::JobSet::Submit),
             )
-            .add_systems(PostUpdate, release.after(vmux_ecs::JobSet::Cleanup));
+            .add_systems(PostUpdate, release.after(vmux_job::JobSet::Cleanup));
     }
 }
 
@@ -611,7 +610,7 @@ fn publish(
 fn release(
     probes: Query<(Entity, &OperationState), With<Probe>>,
     files: Query<(Entity, &ChildOf, &OperationState), With<File>>,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,
 ) {
@@ -666,15 +665,15 @@ mod tests {
 
     struct ShortGate {
         release: std::sync::mpsc::Sender<()>,
-        task: vmux_ecs::BlockingTask<()>,
+        task: vmux_job::BlockingTask<()>,
     }
 
     impl ShortGate {
-        fn new(runtime: &vmux_ecs::BlockingRuntime) -> Self {
+        fn new(runtime: &vmux_job::BlockingRuntime) -> Self {
             let (started, entered) = std::sync::mpsc::channel();
             let (release, wait) = std::sync::mpsc::channel();
             let task = runtime
-                .try_spawn(vmux_ecs::blocking::Lane::Short, None, move || {
+                .try_spawn(vmux_job::blocking::Lane::Short, None, move || {
                     started.send(()).unwrap();
                     let _ = wait.recv_timeout(Duration::from_secs(10));
                 })
@@ -760,10 +759,10 @@ mod tests {
                 .unwrap();
             std::fs::write(agents.join("npmrc"), b"user configuration sentinel").unwrap();
             let runtime_name = directory.path().file_name().unwrap().to_string_lossy();
-            let runtime = vmux_ecs::BlockingRuntime::new(
-                vmux_ecs::blocking::BlockingPool::new(&format!("{runtime_name}-short"), 1, 16),
-                vmux_ecs::blocking::BlockingPool::new(&format!("{runtime_name}-long"), 1, 16),
-                vmux_ecs::blocking::BlockingPool::new(&format!("{runtime_name}-process"), 1, 16),
+            let runtime = vmux_job::BlockingRuntime::new(
+                vmux_job::blocking::BlockingPool::new(&format!("{runtime_name}-short"), 1, 16),
+                vmux_job::blocking::BlockingPool::new(&format!("{runtime_name}-long"), 1, 16),
+                vmux_job::blocking::BlockingPool::new(&format!("{runtime_name}-process"), 1, 16),
             );
             let mut app = App::new();
             app.insert_resource(runtime)
@@ -1080,7 +1079,7 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.checked();
         let (read, preparation) = fixture.launch();
-        let gate = ShortGate::new(fixture.app.world().resource::<vmux_ecs::BlockingRuntime>());
+        let gate = ShortGate::new(fixture.app.world().resource::<vmux_job::BlockingRuntime>());
         fixture.app.update();
         assert!(fixture.app.world().get::<Lease>(preparation).is_some());
         fixture
@@ -1320,7 +1319,7 @@ mod tests {
     #[test]
     fn probe_owner_despawn_preserves_lease_until_native_drain() {
         let mut fixture = Fixture::new();
-        let gate = ShortGate::new(fixture.app.world().resource::<vmux_ecs::BlockingRuntime>());
+        let gate = ShortGate::new(fixture.app.world().resource::<vmux_job::BlockingRuntime>());
         fixture.app.update();
         let probe = fixture
             .app
@@ -1349,7 +1348,7 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.checked();
         let (read, preparation) = fixture.launch();
-        let gate = ShortGate::new(fixture.app.world().resource::<vmux_ecs::BlockingRuntime>());
+        let gate = ShortGate::new(fixture.app.world().resource::<vmux_job::BlockingRuntime>());
         fixture.app.update();
         fixture.app.world_mut().entity_mut(read).despawn();
         fixture.app.update();
@@ -1376,7 +1375,7 @@ mod tests {
             } else {
                 None
             };
-            let gate = ShortGate::new(fixture.app.world().resource::<vmux_ecs::BlockingRuntime>());
+            let gate = ShortGate::new(fixture.app.world().resource::<vmux_job::BlockingRuntime>());
             let store = PackageStore::at(fixture.agents());
             let removal = fixture
                 .app

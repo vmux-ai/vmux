@@ -3,8 +3,9 @@ use std::ffi::{OsStr, OsString};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use bevy_app::{App, PreUpdate, Update};
 use bevy_ecs::prelude::*;
-use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake};
+use vmux_ecs::JobWake;
 use vmux_ecs::{Cwd, Operation, OperationState, Order, Ready};
+use vmux_job::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 
 use crate::cli_package_io::{Bytes, CreateTemporary, Directory, ReadArchive, Scoped, WriteArchive};
 use crate::debug_io::{Flight, Task};

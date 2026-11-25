@@ -4,8 +4,8 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use bevy_ecs::prelude::*;
-use vmux_ecs::blocking::{BlockingCancellation, Lane};
-use vmux_ecs::jobs::Job;
+use vmux_job::Job;
+use vmux_job::blocking::{BlockingCancellation, Lane};
 
 use crate::debug_io::{Done, FileBytes, IoJob};
 use crate::execution::Failure;

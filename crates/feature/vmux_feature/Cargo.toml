@@ -10,10 +10,10 @@ publish = false
 default = ["ecs"]
 manifest = ["dep:ron", "dep:vmux_api", "dep:inventory"]
 ecs = ["manifest", "dep:bevy_app", "dep:bevy_ecs", "dep:vmux_ecs"]
-cache = ["ecs", "vmux_ecs/jobs", "dep:uuid", "dep:async-io"]
+cache = ["ecs", "dep:vmux_job", "dep:uuid", "dep:async-io"]
 hosting = ["ecs", "dep:url"]
 page-binding = ["ecs", "dep:vmux_page", "vmux_ecs/host"]
-http = ["cache", "dep:reqwest", "dep:async-io", "dep:getrandom", "dep:zeroize", "vmux_ecs/jobs"]
+http = ["cache", "dep:reqwest", "dep:async-io", "dep:getrandom", "dep:zeroize"]
 page = ["page-binding", "http", "dep:bevy", "dep:bevy_cef", "dep:vmux_api", "dep:vmux_macro", "dep:vmux_ui", "dep:dioxus", "dep:inventory", "dep:uuid", "dep:rkyv"]
 
 [dependencies]
@@ -31,6 +31,7 @@ getrandom = { version = "0.4", optional = true }
 zeroize = { version = "1", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
 vmux_ecs = { path = "../../util/vmux_ecs", optional = true }
+vmux_job = { path = "../../util/vmux_job", optional = true }
 bevy = { workspace = true, optional = true }
 bevy_cef = { workspace = true, optional = true }
 dioxus = { workspace = true, optional = true }

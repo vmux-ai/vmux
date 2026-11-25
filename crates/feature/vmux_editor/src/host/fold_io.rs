@@ -5,8 +5,8 @@ use std::task::Waker;
 
 use bevy::app::{App, Plugin, Update};
 use bevy::ecs::prelude::*;
-use vmux_ecs::blocking::{BlockingRuntime, BlockingTask, Lane, SpawnError};
 use vmux_ecs::{Operation, OperationState};
+use vmux_job::blocking::{BlockingRuntime, BlockingTask, Lane, SpawnError};
 
 use crate::host::fold_preferences::{
     FileId, FoldSet, LoadCompleted, LoadRequest, Root, SaveCompleted, SaveRequest, Scope, Snapshot,
@@ -291,7 +291,7 @@ mod tests {
     use std::sync::{Arc, mpsc};
     use std::task::Wake;
     use std::time::Duration;
-    use vmux_ecs::blocking::BlockingPool;
+    use vmux_job::blocking::BlockingPool;
 
     use super::*;
     use crate::host::fold_preferences::{

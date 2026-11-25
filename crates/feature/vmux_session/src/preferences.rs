@@ -436,7 +436,7 @@ fn retry(
     mut requests: MessageReader<RetryPreferences>,
     preferences: AgentPreferences,
     mut files: Query<&mut File>,
-    wake: Option<Res<vmux_ecs::jobs::JobWake>>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
 ) {
     for request in requests.read() {
         let Some(file) = preferences.file(request.kind) else {
@@ -457,7 +457,7 @@ fn enqueue<T: Component + Message + Clone, const MODES: bool>(
     roots: Query<Entity, (With<Root>, With<Active>)>,
     mut files: Query<(Entity, &ChildOf, &Kind, &mut File, Has<Ready>)>,
     mut pending: Query<(Entity, &ChildOf, &mut Order), With<Queued>>,
-    wake: Option<Res<vmux_ecs::jobs::JobWake>>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,
 ) {
     let Ok(root) = roots.single() else {

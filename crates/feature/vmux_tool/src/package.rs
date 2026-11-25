@@ -1,9 +1,8 @@
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
-use vmux_ecs::{
-    JobRequest, JobResult, Operation, OperationRetained, OperationState, OperationTarget,
-};
+use vmux_ecs::{Operation, OperationRetained, OperationState, OperationTarget};
+use vmux_job::{JobRequest, JobResult};
 
 use crate::io::Execute;
 use crate::state::{
@@ -815,8 +814,8 @@ mod tests {
         command: Execute,
     }
 
-    impl vmux_ecs::Job for Probe {
-        type Output = <Execute as vmux_ecs::Job>::Output;
+    impl vmux_job::Job for Probe {
+        type Output = <Execute as vmux_job::Job>::Output;
 
         fn run(self) -> Self::Output {
             let invocation =
@@ -847,12 +846,12 @@ mod tests {
 
     impl Plugin for ProbePlugin {
         fn build(&self, app: &mut App) {
-            app.add_plugins(vmux_ecs::JobPlugin::<Probe>::default())
+            app.add_plugins(vmux_job::JobPlugin::<Probe>::default())
                 .add_systems(
                     Update,
                     capture
                         .after(ToolTaskSet::Start)
-                        .before(vmux_ecs::JobSet::Submit),
+                        .before(vmux_job::JobSet::Submit),
                 )
                 .add_systems(Update, receive.before(ToolTaskSet::Start));
         }

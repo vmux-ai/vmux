@@ -2,13 +2,12 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use sha2::{Digest, Sha256};
-use vmux_ecs::{
-    JobPlugin, JobRequest, JobResult, Operation, OperationRetained, OperationState, OperationTarget,
-};
+use vmux_ecs::{Operation, OperationRetained, OperationState, OperationTarget};
 use vmux_editor::lsp::archive::ArchiveKind;
 use vmux_editor::lsp::download::RemoteArtifact;
 use vmux_editor::lsp::package_path::{PackageName, PackagePath, Sha256Digest};
 use vmux_editor::lsp::store::{PackageStore, Receipt};
+use vmux_job::{JobPlugin, JobRequest, JobResult};
 use vmux_tool::io::{Get, InspectLink, ReadFile, WriteFile};
 
 use super::InstallState;
@@ -97,13 +96,13 @@ impl Plugin for PackagePreparationPlugin {
                     .chain()
                     .in_set(PreparationSet)
                     .before(activation::ActivationSet)
-                    .before(vmux_ecs::JobSet::Submit),
+                    .before(vmux_job::JobSet::Submit),
             )
             .add_systems(
                 PostUpdate,
                 (adopt, retire_staging, close_staging, closed, release)
                     .chain()
-                    .after(vmux_ecs::JobSet::Cleanup),
+                    .after(vmux_job::JobSet::Cleanup),
             );
     }
 }
@@ -287,7 +286,7 @@ fn retire(
 
 fn adopt(
     transfers: Query<(Entity, &StagingTransfer, Has<JobRequest<CreateStaging>>)>,
-    captured: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captured: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,
 ) {
@@ -1812,7 +1811,7 @@ fn release(
     >,
     inputs: Query<(Option<&Request>, Option<&RemoveRequest>, Option<&Scopes>)>,
     mut inspections: MessageWriter<InspectRequest>,
-    captured: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captured: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     staging: Query<&StagingFor>,
     wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,
@@ -1958,7 +1957,7 @@ mod tests {
         staging: Staging,
     }
 
-    impl vmux_ecs::Job for Held {
+    impl vmux_job::Job for Held {
         type Output = ();
 
         fn run(self) -> Self::Output {
@@ -2045,8 +2044,8 @@ mod tests {
 
     impl Plugin for RestoreFaultPlugin {
         fn build(&self, app: &mut App) {
-            if !app.is_plugin_added::<vmux_ecs::JobPlugin<Restore>>() {
-                app.add_plugins(vmux_ecs::JobPlugin::<Restore>::default());
+            if !app.is_plugin_added::<vmux_job::JobPlugin<Restore>>() {
+                app.add_plugins(vmux_job::JobPlugin::<Restore>::default());
             }
             app.add_observer(obstruct_restore);
         }
@@ -2134,8 +2133,8 @@ mod tests {
 
     impl Plugin for ChecksumFixturePlugin {
         fn build(&self, app: &mut App) {
-            if !app.is_plugin_added::<vmux_ecs::JobPlugin<Get>>() {
-                app.add_plugins(vmux_ecs::JobPlugin::<Get>::default());
+            if !app.is_plugin_added::<vmux_job::JobPlugin<Get>>() {
+                app.add_plugins(vmux_job::JobPlugin::<Get>::default());
             }
             app.add_observer(unexpected_checksum);
         }
@@ -2371,17 +2370,17 @@ mod tests {
         let previous = fixture.directory.path().join("packages/agent");
         std::fs::create_dir_all(&previous).unwrap();
         std::fs::write(previous.join("old"), b"previous package").unwrap();
-        fixture.app.insert_resource(vmux_ecs::BlockingRuntime::new(
-            vmux_ecs::blocking::BlockingPool::new("cleanup-short", 1, 32),
-            vmux_ecs::blocking::BlockingPool::new("cleanup-long", 1, 8),
-            vmux_ecs::blocking::BlockingPool::new("cleanup-process", 2, 16),
+        fixture.app.insert_resource(vmux_job::BlockingRuntime::new(
+            vmux_job::blocking::BlockingPool::new("cleanup-short", 1, 32),
+            vmux_job::blocking::BlockingPool::new("cleanup-long", 1, 8),
+            vmux_job::blocking::BlockingPool::new("cleanup-process", 2, 16),
         ));
         let (entered, started) = std::sync::mpsc::channel();
         let (release, wait) = std::sync::mpsc::channel();
         let blocker = fixture
             .app
             .world()
-            .resource::<vmux_ecs::BlockingRuntime>()
+            .resource::<vmux_job::BlockingRuntime>()
             .spawn_long(None, move || {
                 entered.send(()).unwrap();
                 wait.recv_timeout(std::time::Duration::from_secs(10))
@@ -2452,7 +2451,7 @@ mod tests {
         let probe = fixture
             .app
             .world()
-            .resource::<vmux_ecs::BlockingRuntime>()
+            .resource::<vmux_job::BlockingRuntime>()
             .spawn(None, move || std::fs::write(output, b"available").unwrap())
             .unwrap();
         while !probe.is_finished() {
@@ -2487,17 +2486,17 @@ mod tests {
             stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 14\r\nConnection: close\r\n\r\nhello vmux lsp").unwrap();
         });
         let mut fixture = Fixture::binary(format!("http://{address}/agent"));
-        fixture.app.insert_resource(vmux_ecs::BlockingRuntime::new(
-            vmux_ecs::blocking::BlockingPool::new("failure-short", 1, 32),
-            vmux_ecs::blocking::BlockingPool::new("failure-long", 1, 8),
-            vmux_ecs::blocking::BlockingPool::new("failure-process", 2, 16),
+        fixture.app.insert_resource(vmux_job::BlockingRuntime::new(
+            vmux_job::blocking::BlockingPool::new("failure-short", 1, 32),
+            vmux_job::blocking::BlockingPool::new("failure-long", 1, 8),
+            vmux_job::blocking::BlockingPool::new("failure-process", 2, 16),
         ));
         let (entered, started) = std::sync::mpsc::channel();
         let (release, wait) = std::sync::mpsc::channel();
         let blocker = fixture
             .app
             .world()
-            .resource::<vmux_ecs::BlockingRuntime>()
+            .resource::<vmux_job::BlockingRuntime>()
             .spawn_long(None, move || {
                 entered.send(()).unwrap();
                 wait.recv_timeout(std::time::Duration::from_secs(10))
@@ -2607,16 +2606,16 @@ mod tests {
         let root = directory.path().join("staging");
         let mut app = App::new();
         app.add_plugins(PackagePreparationPlugin)
-            .insert_resource(vmux_ecs::BlockingRuntime::new(
-                vmux_ecs::blocking::BlockingPool::new("creation-short", 1, 8),
-                vmux_ecs::blocking::BlockingPool::new("creation-long", 1, 8),
-                vmux_ecs::blocking::BlockingPool::new("creation-process", 1, 8),
+            .insert_resource(vmux_job::BlockingRuntime::new(
+                vmux_job::blocking::BlockingPool::new("creation-short", 1, 8),
+                vmux_job::blocking::BlockingPool::new("creation-long", 1, 8),
+                vmux_job::blocking::BlockingPool::new("creation-process", 1, 8),
             ));
         let (short_release, short_wait) = std::sync::mpsc::channel();
         let (short_started, short_entered) = std::sync::mpsc::channel();
         let short = app
             .world()
-            .resource::<vmux_ecs::BlockingRuntime>()
+            .resource::<vmux_job::BlockingRuntime>()
             .spawn(None, move || {
                 short_started.send(()).unwrap();
                 short_wait
@@ -2631,7 +2630,7 @@ mod tests {
         let (long_started, long_entered) = std::sync::mpsc::channel();
         let long = app
             .world()
-            .resource::<vmux_ecs::BlockingRuntime>()
+            .resource::<vmux_job::BlockingRuntime>()
             .spawn_long(None, move || {
                 long_started.send(()).unwrap();
                 long_wait
@@ -2661,7 +2660,7 @@ mod tests {
         let (finished, finished_wait) = std::sync::mpsc::channel();
         let barrier = app
             .world()
-            .resource::<vmux_ecs::BlockingRuntime>()
+            .resource::<vmux_job::BlockingRuntime>()
             .spawn(None, move || finished.send(()).unwrap())
             .unwrap();
         short_release.send(()).unwrap();

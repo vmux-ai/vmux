@@ -1,6 +1,6 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::schedule::IntoScheduleConfigs;
-use vmux_ecs::{JobPlugin, JobSet};
+use vmux_job::{JobPlugin, JobSet};
 
 pub use crate::process::Execute;
 pub use files::{

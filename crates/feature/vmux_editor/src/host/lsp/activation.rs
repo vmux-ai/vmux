@@ -3,7 +3,8 @@ use super::package_path::PackageName;
 use super::store::PackageStore;
 use bevy::prelude::*;
 use std::path::PathBuf;
-use vmux_ecs::{JobPlugin, JobRequest, JobResult, OperationState};
+use vmux_ecs::OperationState;
+use vmux_job::{JobPlugin, JobRequest, JobResult};
 use vmux_tool::io::TemporaryDirectory as Staging;
 
 pub struct PackageActivationPlugin;
@@ -28,7 +29,7 @@ impl Plugin for PackageActivationPlugin {
             )
                 .chain()
                 .in_set(ActivationSet)
-                .before(vmux_ecs::JobSet::Submit),
+                .before(vmux_job::JobSet::Submit),
         )
         .add_systems(PostUpdate, wake);
     }

@@ -11,7 +11,8 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
-use vmux_ecs::{Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet, Operation, Revision};
+use vmux_ecs::{Operation, Revision};
+use vmux_job::{Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 
 use crate::cache_document::{ClearJournal, Envelope, OffRecord, SavedSnapshot};
 use crate::cache_io::{Cleanup, Confirm, Open, Stage, Write, Writer, Written};

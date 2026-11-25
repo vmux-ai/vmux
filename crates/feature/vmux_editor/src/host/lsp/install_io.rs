@@ -5,7 +5,7 @@ use super::store::{PackageStore, Receipt};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use vmux_ecs::{BlockingCancellation, Job};
+use vmux_job::{BlockingCancellation, Job};
 use vmux_tool::io::TemporaryDirectory;
 
 #[derive(Clone)]
@@ -42,8 +42,8 @@ pub(super) struct Transferred {
 impl Job for Download {
     type Output = Result<(), String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Process
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Process
     }
 
     fn run(self) -> Self::Output {
@@ -76,8 +76,8 @@ pub(super) struct Extract {
 impl Job for Extract {
     type Output = Result<(), String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Process
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Process
     }
 
     fn run(self) -> Self::Output {
@@ -184,8 +184,8 @@ pub struct Remove {
 impl Job for Remove {
     type Output = Result<(), String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 
     fn run(self) -> Self::Output {

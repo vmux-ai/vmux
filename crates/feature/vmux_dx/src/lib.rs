@@ -307,12 +307,12 @@ impl DxPlugin {
     fn runtime(app: &mut App) {
         if !app
             .world()
-            .contains_resource::<vmux_ecs::blocking::BlockingRuntime>()
+            .contains_resource::<vmux_job::blocking::BlockingRuntime>()
         {
-            app.insert_resource(vmux_ecs::blocking::BlockingRuntime::new(
-                vmux_ecs::blocking::BlockingPool::new("vmux-dx-short", 1, 16),
-                vmux_ecs::blocking::BlockingPool::new("vmux-dx-long", 0, 0),
-                vmux_ecs::blocking::BlockingPool::new("vmux-dx-process", 1, 16),
+            app.insert_resource(vmux_job::blocking::BlockingRuntime::new(
+                vmux_job::blocking::BlockingPool::new("vmux-dx-short", 1, 16),
+                vmux_job::blocking::BlockingPool::new("vmux-dx-long", 0, 0),
+                vmux_job::blocking::BlockingPool::new("vmux-dx-process", 1, 16),
             ));
         }
     }

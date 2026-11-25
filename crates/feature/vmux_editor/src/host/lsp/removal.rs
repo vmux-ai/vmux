@@ -4,9 +4,8 @@ use super::package_path::PackageName;
 use super::store::{PackageStore, Receipt};
 use bevy::prelude::*;
 use std::collections::HashSet;
-use vmux_ecs::{
-    JobPlugin, JobRequest, JobResult, Operation, OperationRetained, OperationState, OperationTarget,
-};
+use vmux_ecs::{Operation, OperationRetained, OperationState, OperationTarget};
+use vmux_job::{JobPlugin, JobRequest, JobResult};
 use vmux_tool::io::ReadFile;
 
 pub(super) struct RemovePlugin;
@@ -27,11 +26,11 @@ impl Plugin for RemovePlugin {
             (cancel, begin, read, unlinked, removed)
                 .chain()
                 .after(super::install_runtime::InstallSet)
-                .before(vmux_ecs::JobSet::Submit),
+                .before(vmux_job::JobSet::Submit),
         )
         .add_systems(
             PostUpdate,
-            (drain, wake).chain().after(vmux_ecs::JobSet::Cleanup),
+            (drain, wake).chain().after(vmux_job::JobSet::Cleanup),
         );
     }
 }
@@ -248,7 +247,7 @@ type DrainRequests<'w, 's> = Query<
 
 fn drain(
     requests: DrainRequests<'_, '_>,
-    captured: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captured: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     links: Query<(Entity, &UnlinkFor)>,
     mut commands: Commands,
 ) {
@@ -427,18 +426,18 @@ mod tests {
     fn canceled_queued_removal_never_deletes_the_package_after_the_lane_opens() {
         let mut fixture = Fixture::new();
         fixture.receipt("server", &[]);
-        fixture.app.insert_resource(vmux_ecs::BlockingRuntime::new(
-            vmux_ecs::blocking::BlockingPool::new("removal-short", 1, 4),
-            vmux_ecs::blocking::BlockingPool::new("removal-long", 1, 4),
-            vmux_ecs::blocking::BlockingPool::new("removal-process", 1, 4),
+        fixture.app.insert_resource(vmux_job::BlockingRuntime::new(
+            vmux_job::blocking::BlockingPool::new("removal-short", 1, 4),
+            vmux_job::blocking::BlockingPool::new("removal-long", 1, 4),
+            vmux_job::blocking::BlockingPool::new("removal-process", 1, 4),
         ));
         let (release, wait) = std::sync::mpsc::channel();
         let (started, entered) = std::sync::mpsc::sync_channel(1);
         let held = fixture
             .app
             .world()
-            .resource::<vmux_ecs::BlockingRuntime>()
-            .try_spawn(vmux_ecs::blocking::Lane::Long, None, move || {
+            .resource::<vmux_job::BlockingRuntime>()
+            .try_spawn(vmux_job::blocking::Lane::Long, None, move || {
                 started.send(()).unwrap();
                 wait.recv_timeout(Duration::from_secs(5)).unwrap();
             })

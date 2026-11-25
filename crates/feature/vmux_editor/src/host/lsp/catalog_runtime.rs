@@ -4,9 +4,8 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use serde_json::Value;
 use vmux_ecs::profile::{ActiveProfile, ProfileDirectories, ProfilePaths};
-use vmux_ecs::{
-    JobPlugin, JobRequest, JobResult, Operation, OperationRetained, OperationState, OperationTarget,
-};
+use vmux_ecs::{Operation, OperationRetained, OperationState, OperationTarget};
+use vmux_job::{JobPlugin, JobRequest, JobResult};
 use vmux_tool::io::{Authorization, Get, ReadFile, WriteFile};
 use vmux_tool::observation::ObservationSet;
 
@@ -24,7 +23,7 @@ impl Plugin for CatalogRuntimePlugin {
         app.add_plugins(JobPlugin::<DecodeArchive>::default())
             .add_message::<RefreshRequest>()
             .add_systems(Startup, spawn)
-            .add_systems(PostUpdate, (wake, restart.after(vmux_ecs::JobSet::Cleanup)))
+            .add_systems(PostUpdate, (wake, restart.after(vmux_job::JobSet::Cleanup)))
             .add_systems(
                 Update,
                 (
@@ -32,7 +31,7 @@ impl Plugin for CatalogRuntimePlugin {
                 )
                     .chain()
                     .after(ObservationSet)
-                    .before(vmux_ecs::JobSet::Submit),
+                    .before(vmux_job::JobSet::Submit),
             );
     }
 }
@@ -490,8 +489,8 @@ mod tests {
 
     impl Plugin for OfflineFixturePlugin {
         fn build(&self, app: &mut App) {
-            if !app.is_plugin_added::<vmux_ecs::JobPlugin<Get>>() {
-                app.add_plugins(vmux_ecs::JobPlugin::<Get>::default());
+            if !app.is_plugin_added::<vmux_job::JobPlugin<Get>>() {
+                app.add_plugins(vmux_job::JobPlugin::<Get>::default());
             }
             app.add_observer(refuse_network);
         }

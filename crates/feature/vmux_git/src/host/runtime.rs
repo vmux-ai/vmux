@@ -1,10 +1,10 @@
 use bevy::prelude::Resource;
 use bevy::winit::{EventLoopProxy, WinitUserEvent};
-use vmux_ecs::blocking::{BlockingCancellation, BlockingPool};
+use vmux_job::blocking::{BlockingCancellation, BlockingPool};
 
-pub use vmux_ecs::blocking::BlockingTask as GitTask;
+pub use vmux_job::blocking::BlockingTask as GitTask;
 #[cfg(test)]
-use vmux_ecs::blocking::CancellationGroup as GitCancellationGroup;
+use vmux_job::blocking::CancellationGroup as GitCancellationGroup;
 
 #[derive(Resource)]
 pub struct GitRuntime {

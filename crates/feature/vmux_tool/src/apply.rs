@@ -23,7 +23,7 @@ impl Plugin for ApplyPlugin {
                     .chain()
                     .after(ToolTaskSet::Apply),
             )
-            .add_systems(PostUpdate, release.after(vmux_ecs::JobSet::Cleanup));
+            .add_systems(PostUpdate, release.after(vmux_job::JobSet::Cleanup));
     }
 }
 
@@ -339,7 +339,7 @@ fn finish(
 
 fn release(
     parents: Query<(Entity, &Apply, &OperationState, Option<&Children>)>,
-    native: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    native: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     hierarchy: Query<(&ChildOf, Option<&OperationTarget>)>,
     targets: Query<&OperationTarget>,
     stores: Query<&ToolStore>,

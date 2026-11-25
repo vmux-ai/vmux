@@ -9,7 +9,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 
 use bevy_ecs::prelude::Component as EcsComponent;
-use vmux_ecs::{BlockingCancellation, Job};
+use vmux_job::{BlockingCancellation, Job};
 
 #[derive(EcsComponent, Clone, Default)]
 pub struct PathReceipt(Arc<Mutex<Receipt>>);

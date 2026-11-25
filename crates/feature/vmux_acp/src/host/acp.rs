@@ -70,7 +70,7 @@ pub(crate) struct AcpPackageChanged {
 #[derive(Component)]
 struct AcpInstallJob {
     package: Option<Entity>,
-    task: Option<vmux_ecs::BlockingTask<AcpInstallResult>>,
+    task: Option<vmux_job::BlockingTask<AcpInstallResult>>,
     outcome: Option<AcpInstallOutcome>,
 }
 

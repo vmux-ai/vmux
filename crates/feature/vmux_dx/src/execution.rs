@@ -92,7 +92,7 @@ impl Execution {
             if let Some(status) = child.try_wait()? {
                 return Ok(status);
             }
-            if Signals::check().is_err() || vmux_ecs::blocking::BlockingCancellation::canceled() {
+            if Signals::check().is_err() || vmux_job::blocking::BlockingCancellation::canceled() {
                 Signals::terminate_group(child.id());
                 return child.wait();
             }

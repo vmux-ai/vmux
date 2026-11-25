@@ -2,9 +2,8 @@ use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use ring::rand::SecureRandom;
 use uuid::Uuid;
-use vmux_ecs::{
-    BlockingCancellation, Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake,
-};
+use vmux_ecs::JobWake;
+use vmux_job::{BlockingCancellation, Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 use zeroize::Zeroizing;
 
 use crate::availability::SecureCredentials;
