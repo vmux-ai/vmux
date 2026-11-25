@@ -391,15 +391,17 @@ fn adopt_read(
     mut commands: Commands,
 ) {
     for (entity, op, mut receipt) in &mut ops {
-        commands
-            .entity(entity)
-            .remove::<ReadStreamEventReceipt>()
-            .remove::<StreamReadOp>()
-            .remove::<StreamCancel>()
-            .remove::<OperationRetained>();
+        commands.entity(entity).remove::<(
+            ReadStreamEventReceipt,
+            StreamReadOp,
+            StreamCancel,
+            OperationRetained,
+        )>();
         let returned_stream = receipt.stream.take();
         let outcome = std::mem::replace(&mut receipt.outcome, StreamReadOutcome::Canceled);
-        let Ok((stream, mut active_handle)) = streams.get_mut(op.owner) else {
+        let (Ok((stream, mut active_handle)), Ok((generation, selected, mut connected))) =
+            (streams.get_mut(op.owner), roots.single_mut())
+        else {
             if let Some(mut handle) = returned_stream {
                 handle.stop();
             }
@@ -409,13 +411,6 @@ fn adopt_read(
         let valid_source = sources
             .get(stream.source)
             .is_ok_and(|epoch| epoch.0 == op.source_epoch);
-        let Ok((generation, selected, mut connected)) = roots.single_mut() else {
-            if let Some(mut handle) = returned_stream {
-                handle.stop();
-            }
-            commands.entity(entity).insert(OperationState::Canceled);
-            continue;
-        };
         let matches_selection = selected.is_some_and(|sel| sel.session_id == stream.session_id)
             && valid_source
             && generation.0 == op.generation
