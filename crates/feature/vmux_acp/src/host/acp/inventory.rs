@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use bevy::prelude::*;
 use vmux_ecs::profile::{CurrentProfile, ProfilePaths};
 use vmux_ecs::{EntityTarget, JobRequest, JobResult, Operation, OperationRetained, OperationState};
@@ -158,6 +160,37 @@ fn receipts(
     }
 }
 
+impl RegistryAgent {
+    fn display_name(&self) -> String {
+        if self.name.trim().is_empty() {
+            self.id.clone()
+        } else {
+            self.name.clone()
+        }
+    }
+
+    fn detail(&self) -> String {
+        self.description
+            .clone()
+            .unwrap_or_else(|| "ACP agent".into())
+    }
+
+    fn available_package(&self) -> ObservedPackage {
+        ObservedPackage::new(
+            ObservedTool::new(
+                self.id.clone(),
+                self.display_name(),
+                self.version.clone(),
+                self.icon.clone(),
+                self.detail(),
+                ToolStatus::Available,
+                Vec::new(),
+            ),
+            false,
+        )
+    }
+}
+
 fn publish(
     observations: Query<
         (Entity, &OperationState, Option<&WaitingCatalog>),
@@ -165,11 +198,11 @@ fn publish(
     >,
     pending: Query<(&ChildOf, Has<ReadDone>), With<Expected>>,
     receipts: Query<(&Receipt, &ChildOf)>,
-    catalogs: Query<&Catalog>,
-    agents: Query<&RegistryAgent>,
+    catalogs: Query<(Entity, &Catalog)>,
+    agents: Query<(&RegistryAgent, Option<&ChildOf>)>,
     mut commands: Commands,
 ) {
-    let Ok(catalog) = catalogs.single() else {
+    let Ok((catalog_entity, catalog)) = catalogs.single() else {
         return;
     };
     for (entity, state, waiting) in &observations {
@@ -182,13 +215,17 @@ fn publish(
         {
             continue;
         }
+        let mut installed = BTreeSet::new();
         for (receipt, parent) in &receipts {
             if parent.parent() != entity {
                 continue;
             }
-            let agent = agents
-                .iter()
-                .find(|agent| agent.id == receipt.name.as_str());
+            installed.insert(receipt.name.as_str());
+            let agent = agents.iter().find_map(|(agent, owner)| {
+                (owner.is_none_or(|owner| owner.parent() == catalog_entity)
+                    && agent.id == receipt.name.as_str())
+                .then_some(agent)
+            });
             let latest = agent.and_then(|agent| agent.version.as_ref());
             let status = if receipt.version.is_some()
                 && latest.is_some()
@@ -203,12 +240,12 @@ fn publish(
                     ObservedTool::new(
                         receipt.name.as_str().to_string(),
                         agent
-                            .map(|agent| agent.name.clone())
+                            .map(RegistryAgent::display_name)
                             .unwrap_or_else(|| receipt.name.as_str().to_string()),
                         receipt.version.clone(),
                         agent.and_then(|agent| agent.icon.clone()),
                         agent
-                            .and_then(|agent| agent.description.clone())
+                            .map(RegistryAgent::detail)
                             .unwrap_or_else(|| "ACP agent".into()),
                         status,
                         Vec::new(),
@@ -218,6 +255,230 @@ fn publish(
                 ChildOf(entity),
             ));
         }
+        for (agent, owner) in &agents {
+            if !owner.is_none_or(|owner| owner.parent() == catalog_entity)
+                || installed.contains(agent.id.as_str())
+                || PackageName::parse(&agent.id).is_err()
+                || !agent.installable()
+            {
+                continue;
+            }
+            commands.spawn((agent.available_package(), ChildOf(entity)));
+        }
         commands.entity(entity).insert(Finished { error: None });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::acp::registry::{Distribution, PackageDist};
+    use vmux_tool::io::{DirectoryEntries, DirectoryEntry, FileBytes};
+    use vmux_tool::observation::{Detail, Icon, Id, Item, Removable, Status, Version};
+    use vmux_tool::state::ToolProvider;
+
+    #[derive(Resource)]
+    struct FixtureInputs {
+        directory: tempfile::TempDir,
+    }
+
+    struct FixtureIoPlugin;
+
+    impl Plugin for FixtureIoPlugin {
+        fn build(&self, app: &mut App) {
+            app.add_observer(fake_directories).add_observer(fake_files);
+        }
+    }
+
+    fn fake_directories(
+        trigger: On<Add, JobRequest<ReadDirectory>>,
+        requests: Query<Entity, With<JobRequest<ReadDirectory>>>,
+        inputs: Res<FixtureInputs>,
+        mut commands: Commands,
+    ) {
+        let entity = trigger.event_target();
+        if !requests.contains(entity) {
+            return;
+        }
+        let entry = DirectoryEntry {
+            name: "gemini".into(),
+            path: inputs.directory.path().join("gemini"),
+            file_type: inputs.directory.path().metadata().unwrap().file_type(),
+        };
+        commands
+            .entity(entity)
+            .remove::<JobRequest<ReadDirectory>>()
+            .insert(JobResult::<ReadDirectory>(Ok(Ok(DirectoryEntries {
+                exists: true,
+                is_directory: true,
+                entries: vec![entry],
+            }))));
+    }
+
+    fn fake_files(
+        trigger: On<Add, JobRequest<ReadFile>>,
+        requests: Query<&JobRequest<ReadFile>>,
+        mut commands: Commands,
+    ) {
+        let entity = trigger.event_target();
+        let Ok(request) = requests.get(entity) else {
+            return;
+        };
+        let bytes = request
+            .0
+            .path
+            .file_name()
+            .is_some_and(|name| name == "vmux-receipt.json")
+            .then(|| {
+                br#"{"name":"gemini","version":"0.63.0","source_id":"acp:gemini","bin":{}}"#
+                    .to_vec()
+            });
+        commands
+            .entity(entity)
+            .remove::<JobRequest<ReadFile>>()
+            .insert(JobResult::<ReadFile>(Ok(Ok(FileBytes(bytes)))));
+    }
+
+    #[test]
+    fn observation_publishes_installed_receipts_and_available_registry_agents() {
+        let mut app = App::new();
+        app.insert_resource(FixtureInputs {
+            directory: tempfile::tempdir().unwrap(),
+        })
+        .add_plugins((AcpInventoryPlugin, FixtureIoPlugin))
+        .add_message::<RefreshRequest>();
+
+        let mut catalog = Catalog::new();
+        catalog.ready = true;
+        catalog.revision = 1;
+        let catalog_entity = app.world_mut().spawn(catalog).id();
+        app.world_mut().spawn((
+            RegistryAgent {
+                id: "gemini".into(),
+                name: "Gemini CLI".into(),
+                version: Some("0.71.1".into()),
+                description: Some("Google's official CLI for Gemini".into()),
+                icon: Some("https://cdn.example/gemini.svg".into()),
+                distribution: Distribution {
+                    npx: Some(PackageDist {
+                        package: "@google/gemini-cli@0.71.1".into(),
+                        args: vec!["--acp".into()],
+                        env: Default::default(),
+                    }),
+                    ..Default::default()
+                },
+            },
+            ChildOf(catalog_entity),
+        ));
+        app.world_mut().spawn((
+            RegistryAgent {
+                id: "goose".into(),
+                name: "Goose".into(),
+                version: Some("1.2.0".into()),
+                description: Some("Open-source coding agent".into()),
+                icon: Some("https://cdn.example/goose.svg".into()),
+                distribution: Distribution {
+                    npx: Some(PackageDist {
+                        package: "goose-acp@1.2.0".into(),
+                        args: Vec::new(),
+                        env: Default::default(),
+                    }),
+                    ..Default::default()
+                },
+            },
+            ChildOf(catalog_entity),
+        ));
+        app.world_mut().spawn((
+            RegistryAgent {
+                id: "unsupported".into(),
+                name: "Unsupported".into(),
+                version: Some("0.1.0".into()),
+                description: Some("No host distribution".into()),
+                icon: None,
+                distribution: Distribution::default(),
+            },
+            ChildOf(catalog_entity),
+        ));
+
+        let provider = app
+            .world_mut()
+            .spawn(ToolProviderId(ToolProvider::new("acp")))
+            .id();
+        let observation = app
+            .world_mut()
+            .spawn((
+                Observation,
+                Operation::bundle("tool.provider.observe")
+                    .unwrap()
+                    .running(),
+            ))
+            .id();
+        app.world_mut().trigger(ObserveProviderRequest {
+            entity: provider,
+            observation,
+            refresh_catalogs: false,
+        });
+
+        for _ in 0..8 {
+            if app.world().get::<Finished>(observation).is_some() {
+                break;
+            }
+            app.update();
+        }
+
+        assert_eq!(
+            app.world().get::<Finished>(observation).unwrap().error,
+            None
+        );
+        let mut observed = app
+            .world_mut()
+            .query_filtered::<(
+                &ChildOf,
+                &Id,
+                &Name,
+                &Version,
+                &Icon,
+                &Detail,
+                &Status,
+                &Removable,
+            ), With<Item>>()
+            .iter(app.world())
+            .filter(|(parent, ..)| parent.parent() == observation)
+            .map(|(_, id, name, version, icon, detail, status, removable)| {
+                (
+                    id.0.clone(),
+                    name.as_str().to_string(),
+                    version.0.clone(),
+                    icon.0.clone(),
+                    detail.0.clone(),
+                    status.0,
+                    removable.0,
+                )
+            })
+            .collect::<Vec<_>>();
+        observed.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(
+            observed,
+            vec![
+                (
+                    "gemini".to_string(),
+                    "Gemini CLI".to_string(),
+                    Some("0.63.0".to_string()),
+                    Some("https://cdn.example/gemini.svg".to_string()),
+                    "Google's official CLI for Gemini".to_string(),
+                    ToolStatus::Outdated,
+                    true,
+                ),
+                (
+                    "goose".to_string(),
+                    "Goose".to_string(),
+                    Some("1.2.0".to_string()),
+                    Some("https://cdn.example/goose.svg".to_string()),
+                    "Open-source coding agent".to_string(),
+                    ToolStatus::Available,
+                    false,
+                ),
+            ]
+        );
     }
 }
