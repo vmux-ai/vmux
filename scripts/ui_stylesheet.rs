@@ -26,7 +26,6 @@ impl Bundle {
         println!("cargo:rerun-if-changed=assets/theme.css");
         println!("cargo:rerun-if-changed=assets/favicons");
         println!("cargo:rerun-if-changed=assets/agent-logos");
-        println!("cargo:rerun-if-changed=assets/tool-logos");
         println!("cargo:rerun-if-changed=../../feature/vmux_terminal/assets/fonts");
         for scanned in Self::SCANNED {
             println!(
@@ -52,10 +51,6 @@ impl Bundle {
         Self::copy_dir(
             &manifest_dir.join("assets/agent-logos"),
             &assets.join("agent-logos"),
-        );
-        Self::copy_dir(
-            &manifest_dir.join("assets/tool-logos"),
-            &assets.join("tool-logos"),
         );
         Self::copy_dir(
             &manifest_dir.join("../../feature/vmux_terminal/assets/fonts"),
