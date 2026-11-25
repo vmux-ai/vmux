@@ -28,6 +28,12 @@ impl RegistryAgent {
         self.distribution.binary.as_ref()?.get(Self::host_target()?)
     }
 
+    pub fn installable(&self) -> bool {
+        self.binary_for_host().is_some()
+            || self.distribution.npx.is_some()
+            || self.distribution.uvx.is_some()
+    }
+
     pub fn preferred_runtime(&self) -> Runtime {
         if self.binary_for_host().is_some() {
             Runtime::None
