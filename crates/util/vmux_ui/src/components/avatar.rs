@@ -1,3 +1,4 @@
+use crate::agent_icon::{AgentIcon, AgentIconVariant, AgentIconView};
 use crate::cn::cn;
 use crate::favicon::FaviconSource;
 use dioxus::prelude::*;
@@ -5,6 +6,7 @@ use vmux_api::avatar::IdenticonSpec;
 
 const AVATAR: &str = "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--avatar-background)] font-semibold text-white";
 const AGENT_THUMBNAIL: &str = "[&_img]:size-3/4 [&_img]:object-contain";
+const AGENT_MONOCHROME_REGISTRY: &str = "[&_img]:dark:invert";
 const GENERATED_AVATAR_COLORS: [&str; 6] = [
     "#fda4af", "#fdba74", "#fde68a", "#86efac", "#67e8f9", "#c4b5fd",
 ];
@@ -90,9 +92,35 @@ pub fn AgentThumbnail(
     #[props(default)] alt: String,
     #[props(default)] class: String,
 ) -> Element {
+    if let Some(icon) = AgentIcon::from_id(&seed) {
+        let class = cn([
+            "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full text-foreground",
+            class.as_str(),
+        ]);
+        return rsx! {
+            div { class,
+                AgentIconView {
+                    icon,
+                    variant: AgentIconVariant::Color,
+                    class: "size-3/4".to_string(),
+                }
+            }
+        };
+    }
     let src = AgentThumbnailSource::resolve(src, &seed);
     let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
-    let class = cn([AGENT_THUMBNAIL, class.as_str()]);
+    let monochrome = src
+        .as_deref()
+        .is_some_and(AgentThumbnailSource::is_monochrome_registry_svg);
+    let class = cn([
+        AGENT_THUMBNAIL,
+        if monochrome {
+            AGENT_MONOCHROME_REGISTRY
+        } else {
+            ""
+        },
+        class.as_str(),
+    ]);
     rsx! {
         Avatar { src, seed, background, alt, class }
     }
@@ -103,6 +131,10 @@ struct AgentThumbnailSource;
 impl AgentThumbnailSource {
     fn resolve(src: Option<String>, seed: &str) -> Option<String> {
         FaviconSource::agent(seed).or(src)
+    }
+
+    fn is_monochrome_registry_svg(src: &str) -> bool {
+        src.starts_with("https://cdn.agentclientprotocol.com/registry/") && src.ends_with(".svg")
     }
 }
 
@@ -270,7 +302,11 @@ impl AvatarRandom {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentThumbnailBackground, AgentThumbnailSource, GeneratedAvatar};
+    use super::{
+        AgentIcon, AgentIconVariant, AgentThumbnail, AgentThumbnailBackground,
+        AgentThumbnailSource, GeneratedAvatar,
+    };
+    use dioxus::prelude::*;
 
     #[test]
     fn known_agent_brand_overrides_a_generic_profile_icon() {
@@ -279,11 +315,45 @@ mod tests {
                 Some("vmux://acp/assets/favicons/acp.svg".into()),
                 "codex"
             ),
-            Some("assets/agent-logos/codex.png".into())
+            Some(AgentIcon::Codex.data_uri(AgentIconVariant::Color))
         );
         assert_eq!(
             AgentThumbnailSource::resolve(Some("custom.svg".into()), "custom-agent"),
             Some("custom.svg".into())
+        );
+    }
+
+    #[test]
+    fn agent_thumbnail_renders_inline_component_icons_and_inverts_unlisted_registry_svgs() {
+        let gemini_html = dioxus_ssr::render_element(rsx! {
+            AgentThumbnail {
+                src: Some("https://cdn.agentclientprotocol.com/registry/v1/latest/gemini.svg".into()),
+                seed: "gemini".to_string(),
+                background: String::new(),
+                alt: "Gemini CLI".to_string(),
+                class: "size-7".to_string(),
+            }
+        });
+        assert!(gemini_html.contains("<svg"), "{gemini_html}");
+        assert!(gemini_html.contains("Gemini"), "{gemini_html}");
+        assert!(
+            !gemini_html.contains("cdn.agentclientprotocol.com"),
+            "{gemini_html}"
+        );
+
+        let unlisted_html = dioxus_ssr::render_element(rsx! {
+            AgentThumbnail {
+                src: Some("https://cdn.agentclientprotocol.com/registry/v1/latest/agoragentic-acp.svg".into()),
+                seed: "agoragentic-acp".to_string(),
+                background: String::new(),
+                alt: "Agoragentic".to_string(),
+                class: "size-7".to_string(),
+            }
+        });
+        assert!(unlisted_html.contains("dark:invert"), "{unlisted_html}");
+        assert!(
+            unlisted_html.contains("agoragentic-acp.svg"),
+            "{unlisted_html}"
         );
     }
 

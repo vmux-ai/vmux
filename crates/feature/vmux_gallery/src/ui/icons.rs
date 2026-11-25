@@ -7,7 +7,8 @@ use vmux_ui::favicon::Favicon;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{
-    BuiltinIconView, GitIconView, GitSymbol, GitSymbolView, LineIcon, LineIconView,
+    AgentIcon, AgentIconVariant, AgentIconView, BuiltinIconView, GitIconView, GitSymbol,
+    GitSymbolView, LineIcon, LineIconView,
 };
 
 #[component]
@@ -156,12 +157,12 @@ pub(crate) fn IconLibrary(state: GalleryUiState) -> Element {
         }
     }
     let mut agents = Vec::new();
-    for name in ["claude", "codex", "vibe"] {
-        if format!("Agent {name}")
+    for &name in AgentIcon::VARIANT_NAMES {
+        if format!("AgentIcon::{name}")
             .to_ascii_lowercase()
             .contains(&query)
         {
-            agents.push(name);
+            agents.push((name, AgentIcon::parse(name).expect("declared agent icon")));
         }
     }
     let total = lines.len()
@@ -170,7 +171,7 @@ pub(crate) fn IconLibrary(state: GalleryUiState) -> Element {
         + usize::from(git_logo)
         + files.len()
         + assets.len()
-        + agents.len();
+        + agents.len() * 2;
     let icon_class = "size-[var(--gallery-icon-size)] shrink-0";
     rsx! {
         div { class: "space-y-8", style: "--gallery-icon-size:{size()}px;",
@@ -215,8 +216,21 @@ pub(crate) fn IconLibrary(state: GalleryUiState) -> Element {
                     }
                 }
                 if !agents.is_empty() {
-                    IconFamily { title: "AgentThumbnail", count: agents.len(),
-                        for name in agents { IconTile { name: name.to_string(), Favicon { favicon_url: format!("assets/agent-logos/{name}.png"), url: "", class: icon_class } } }
+                    IconFamily { title: "AgentIcon", count: agents.len(),
+                        for (name, icon) in agents.iter().copied() {
+                            IconTile {
+                                name: name.to_string(),
+                                AgentIconView { icon, variant: AgentIconVariant::Color, class: icon_class }
+                            }
+                        }
+                    }
+                    IconFamily { title: "AgentIcon (Mono)", count: agents.len(),
+                        for (name, icon) in agents {
+                            IconTile {
+                                name: name.to_string(),
+                                AgentIconView { icon, variant: AgentIconVariant::Mono, class: icon_class }
+                            }
+                        }
                     }
                 }
             }
@@ -262,6 +276,9 @@ mod tests {
         }
         for &name in GitSymbol::VARIANT_NAMES {
             ron::from_str::<GitSymbol>(name).expect(name);
+        }
+        for &name in AgentIcon::VARIANT_NAMES {
+            assert!(AgentIcon::parse(name).is_some(), "AgentIcon::{name}");
         }
     }
 }
