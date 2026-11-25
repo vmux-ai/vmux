@@ -1951,6 +1951,63 @@ fn desktop_and_run_auto_build_missing_artifacts_and_reuse_existing_ones() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
+fn desktop_launch_refuses_silently_focusing_a_different_running_bundle_of_the_same_profile() {
+    let fixture = Fixture::new();
+    fixture.command().args(["build", "main"]).assert().success();
+    let other_app = "/tmp/other-worktree/target/debug/Vmux Dev.app";
+    fixture.script(
+        "ps",
+        &format!("#!/bin/sh\nprintf '4242 {other_app}/Contents/MacOS/vmux_desktop\\n'\n"),
+    );
+    let output = fixture
+        .command()
+        .args(["desktop", "main"])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&output.get_output().stderr);
+    assert!(
+        stderr.contains(other_app) && stderr.contains("4242"),
+        "expected conflicting running app details in stderr, got: {stderr}"
+    );
+    assert!(!fixture.root.join("open.log").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn cache_clean_summarizes_removed_deps_files_instead_of_logging_each_file() {
+    let fixture = Fixture::new();
+    let deps = fixture.target.join("debug/deps");
+    std::fs::create_dir_all(&deps).unwrap();
+    std::fs::write(
+        fixture.target.join("CACHEDIR.TAG"),
+        "Signature: 8a477f597d28d172789f06886806bc55\n",
+    )
+    .unwrap();
+    for index in 0..5 {
+        std::fs::write(
+            deps.join(format!("vmux_sample-{index:016x}.rcgu.o")),
+            b"object",
+        )
+        .unwrap();
+    }
+    let output = fixture
+        .command()
+        .args(["cache", "clean", "--apply"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(
+        stdout.contains("Build storage: removed 5 cached files from "),
+        "expected single summary line for deps cleanup, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains(".rcgu.o"),
+        "deps cleanup must not log individual .rcgu.o files:\n{stdout}"
+    );
+}
+
+#[test]
 #[cfg(unix)]
 fn no_build_fails_fast_with_resolved_branch_and_profile_or_launches_existing_artifact() {
     let fixture = Fixture::new();

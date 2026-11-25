@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions, TryLockError};
 use std::os::unix::fs::OpenOptionsExt;
@@ -268,6 +269,9 @@ struct Incremental;
 struct Deps;
 
 #[derive(Component)]
+struct DepFile;
+
+#[derive(Component)]
 struct Increment;
 
 #[derive(Component)]
@@ -517,6 +521,7 @@ type SelectedRows<'w, 's> = Query<
         &'static Metadata,
         Has<Seed>,
         Has<Artifact>,
+        Has<DepFile>,
     ),
     (
         With<Selected>,
@@ -528,6 +533,9 @@ type SelectedRows<'w, 's> = Query<
 
 type MeasuredRows<'w, 's> =
     Query<'w, 's, (Entity, &'static Root), Or<(With<Cache>, With<Increment>)>>;
+
+type QueuedDepFiles<'w, 's> =
+    Query<'w, 's, (&'static Root, &'static ChildOf), (With<DepFile>, With<Queued>)>;
 
 type MeasurementRows<'w, 's> = Query<
     'w,
@@ -619,7 +627,7 @@ struct Candidates<'w, 's> {
 impl Candidates<'_, '_> {
     fn next(&self, root: Entity) -> Option<Entity> {
         let mut chosen = None;
-        for (entity, owner, _, _, seed, _) in &self.selected {
+        for (entity, owner, _, _, seed, _, _) in &self.selected {
             if owner.0 != root {
                 continue;
             }
@@ -1870,6 +1878,7 @@ fn collect_deps(
                 for (path, metadata) in storage.policy().prunable_deps(&batch.entries) {
                     io.commands.spawn((
                         Selected,
+                        DepFile,
                         Root(entity),
                         Cwd(path),
                         Metadata(metadata),
@@ -1906,6 +1915,7 @@ fn collect_deps(
                     for (path, metadata) in stale {
                         io.commands.spawn((
                             Selected,
+                            DepFile,
                             Root(entity),
                             Cwd(path),
                             Metadata(metadata),
@@ -2168,7 +2178,8 @@ fn remove(
             };
             continue;
         };
-        let Ok((_, _, path, metadata, seed, artifact)) = candidates.selected.get(target) else {
+        let Ok((_, _, path, metadata, seed, artifact, dep_file)) = candidates.selected.get(target)
+        else {
             continue;
         };
         if !path.0.starts_with(&checkout.target) || path.0 == checkout.target {
@@ -2207,13 +2218,15 @@ fn remove(
             }
         }
         if !apply {
-            println!("Build storage: would remove {}", path.0.display());
+            if !dep_file {
+                println!("Build storage: would remove {}", path.0.display());
+            }
             io.commands.entity(target).insert(Queued);
             continue;
         }
         if artifact {
             println!("Build storage: removing old local app {}", path.0.display());
-        } else {
+        } else if !dep_file {
             println!("Build storage: removing {}", path.0.display());
         }
         io.commands.entity(target).insert(Queued);
@@ -2234,6 +2247,8 @@ fn report(
     facts: Facts,
     capacities: Query<&Capacity>,
     usages: Query<&Usage>,
+    dep_files: QueuedDepFiles,
+    paths: Query<&Cwd>,
     mut commands: Commands,
 ) {
     for (entity, request, captured, phase) in &requests {
@@ -2246,6 +2261,29 @@ fn report(
         let Ok(capacity) = capacities.get(entity) else {
             continue;
         };
+        let apply =
+            matches!(request.kind, RequestKind::Preflight | RequestKind::Finish) || request.apply;
+        let mut deps = BTreeMap::<&std::path::Path, usize>::new();
+        for (root, parent) in &dep_files {
+            if root.0 == entity
+                && let Ok(directory) = paths.get(parent.parent())
+            {
+                *deps.entry(directory.0.as_path()).or_insert(0) += 1;
+            }
+        }
+        for (directory, count) in deps {
+            if apply {
+                println!(
+                    "Build storage: removed {count} cached files from {}",
+                    directory.display()
+                );
+            } else {
+                println!(
+                    "Build storage: would remove {count} cached files in {}",
+                    directory.display()
+                );
+            }
+        }
         let policy = storage.policy();
         match request.kind {
             RequestKind::Preflight => {
