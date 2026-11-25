@@ -52,9 +52,10 @@ pub use lease::{LeaseGranted, LeaseMode, LeasePlugin, LeaseRequest, LeaseSet};
 #[cfg(all(host, feature = "host"))]
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 pub use operation::{
-    Operation, OperationBundle, OperationCompleted, OperationError, OperationKind, OperationPlugin,
-    OperationRetained, OperationState, OperationTarget, OperationTargetRevision,
-    TargetedOperations,
+    Operation, OperationAdmitted, OperationBundle, OperationCompleted, OperationError,
+    OperationKind, OperationPlugin, OperationPolicy, OperationRetained, OperationRetry,
+    OperationRetryRequested, OperationRetryWaiting, OperationSet, OperationState, OperationTarget,
+    OperationTargetRevision, OperationTimeout, TargetedOperations,
 };
 pub use order::{Order, OrderPlugin, OrderPosition, OrderSet, ReorderRequest, Reordered};
 #[cfg(all(host, feature = "host"))]

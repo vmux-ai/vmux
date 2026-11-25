@@ -6,7 +6,8 @@ use bevy_app::{App, Plugin, Update};
 use bevy_cef::prelude::UiInput;
 use bevy_ecs::prelude::*;
 use vmux_ecs::{
-    EntityTarget, Operation, OperationRetained, OperationState, OperationTarget, ProfileId, Uuid,
+    EntityTarget, Operation, OperationPlugin, OperationPolicy, OperationRetained, OperationState,
+    OperationTarget, ProfileId, Uuid,
 };
 
 use crate::event::{SessionsArchive, SessionsCleanup, SessionsRestoreDeleted, SessionsStageChange};
@@ -21,6 +22,9 @@ pub(super) struct ManagerOperationsPlugin;
 
 impl Plugin for ManagerOperationsPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<OperationPlugin>() {
+            app.add_plugins(OperationPlugin);
+        }
         app.init_resource::<Sequence>()
             .add_observer(stage_local)
             .add_observer(stage_provider)
@@ -404,6 +408,7 @@ fn stage_provider(
             source_updated_at: provider.source_updated_at(),
         },
         Operation::bundle("session.stage").unwrap(),
+        OperationPolicy::SupersedePrevious,
         OperationRetained,
         order,
         OperationTarget::new(provider.entity),
@@ -734,6 +739,7 @@ type PendingStage<'w, 's> = Query<
     (
         Entity,
         &'static StageOperation,
+        &'static OperationState,
         &'static Uuid,
         &'static EntityTarget<vmux_ecs::profile::ActiveProfile>,
         &'static ProfileId,
@@ -755,22 +761,15 @@ fn dispatch_stage(
     mut commands: Commands,
 ) {
     let mut ordered = operations.iter().collect::<Vec<_>>();
-    ordered.sort_by_key(|(entity, _, _, _, _, order, ..)| (order.0, *entity));
-    let mut latest = std::collections::HashMap::new();
-    for (_, _, _, _, _, order, target, id, ..) in &ordered {
-        if id.is_none()
-            && let Some(target) = target
-        {
-            latest.insert(target.entity(), order.0);
-        }
-    }
+    ordered.sort_by_key(|(entity, _, _, _, _, _, order, ..)| (order.0, *entity));
     for (
         entity,
         operation,
+        state,
         uuid,
         profile,
         profile_id,
-        order,
+        _order,
         target,
         id,
         source,
@@ -778,6 +777,13 @@ fn dispatch_stage(
         provider_id,
     ) in ordered
     {
+        if *state != OperationState::Pending {
+            commands
+                .entity(entity)
+                .insert(Dispatched)
+                .remove::<OperationRetained>();
+            continue;
+        }
         let Some(target) = target else {
             commands
                 .entity(entity)
@@ -785,13 +791,6 @@ fn dispatch_stage(
                 .remove::<OperationRetained>();
             continue;
         };
-        if id.is_none() && latest.get(&target.entity()) != Some(&order.0) {
-            commands
-                .entity(entity)
-                .insert((Dispatched, OperationState::Canceled))
-                .remove::<OperationRetained>();
-            continue;
-        }
         if !accepted.profile(entity, profile, profile_id) {
             commands
                 .entity(entity)
@@ -1114,7 +1113,7 @@ fn finish_stage(
     mut commands: Commands,
 ) {
     for (entity, operation, state, committed, kind, id) in &operations {
-        if *state == OperationState::Failed {
+        if matches!(state, OperationState::Failed | OperationState::Canceled) {
             commands.entity(entity).remove::<OperationRetained>();
             continue;
         }
