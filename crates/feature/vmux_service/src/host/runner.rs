@@ -1,112 +1,38 @@
-use std::time::Duration;
-
 use bevy_app::prelude::*;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ParkOutcome {
-    Woken,
-    TimedOut,
-    Shutdown,
-}
+use vmux_runner::HeadlessTokioRunner;
 
 pub struct WakeDrivenRunner {
-    runtime: Handle,
-    wake_rx: mpsc::UnboundedReceiver<()>,
-    signal_rx: mpsc::Receiver<()>,
+    inner: HeadlessTokioRunner,
 }
 
 impl WakeDrivenRunner {
-    const HOUSEKEEPING_FLOOR: Duration = Duration::from_secs(1);
-
     pub fn new(
         runtime: Handle,
         wake_rx: mpsc::UnboundedReceiver<()>,
         signal_rx: mpsc::Receiver<()>,
     ) -> Self {
         Self {
-            runtime,
-            wake_rx,
-            signal_rx,
+            inner: HeadlessTokioRunner::new(runtime)
+                .with_wake_channel(wake_rx)
+                .with_shutdown_channel(signal_rx),
         }
     }
 
-    pub fn into_runner(mut self) -> impl FnOnce(App) -> AppExit {
-        move |mut app: App| self.run(&mut app)
-    }
-
-    fn run(&mut self, app: &mut App) -> AppExit {
-        while app.plugins_state() == bevy_app::PluginsState::Adding {
-            bevy::tasks::tick_global_task_pools_on_main_thread();
-        }
-        if app.plugins_state() == bevy_app::PluginsState::Ready {
-            app.finish();
-        }
-        if app.plugins_state() == bevy_app::PluginsState::Finished {
-            app.cleanup();
-        }
-        loop {
-            app.update();
-            if let Some(exit) = app.should_exit() {
-                return self.finish(app, exit);
-            }
-            if self.park(Self::HOUSEKEEPING_FLOOR) == ParkOutcome::Shutdown {
-                return self.finish(app, AppExit::Success);
-            }
-        }
-    }
-
-    fn finish(&self, app: &mut App, exit: AppExit) -> AppExit {
-        if let Err(error) = app
-            .world_mut()
-            .try_run_schedule(vmux_ecs::service::Shutdown)
-        {
-            tracing::debug!(%error, "no additional service shutdown participants");
-        }
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
-        loop {
-            let world = app.world_mut();
-            let pending = world
-                .query_filtered::<&vmux_ecs::service::AbortTask, bevy_ecs::prelude::With<vmux_ecs::service::ShutdownPending>>()
-                .iter(world)
-                .any(|task| !task.0.is_finished());
-            if !pending || std::time::Instant::now() >= deadline {
-                break;
-            }
-            app.update();
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        if let Err(error) = app
-            .world_mut()
-            .try_run_schedule(vmux_ecs::service::ShutdownComplete)
-        {
-            tracing::debug!(%error, "no final service shutdown participants");
-        }
-        exit
-    }
-
-    fn park(&mut self, floor: Duration) -> ParkOutcome {
-        let outcome = self.runtime.block_on(async {
-            tokio::select! {
-                wake = self.wake_rx.recv() => match wake {
-                    Some(_) => ParkOutcome::Woken,
-                    None => ParkOutcome::Shutdown,
-                },
-                _ = self.signal_rx.recv() => ParkOutcome::Shutdown,
-                _ = tokio::time::sleep(floor) => ParkOutcome::TimedOut,
-            }
-        });
-
-        if outcome == ParkOutcome::Woken {
-            while self.wake_rx.try_recv().is_ok() {}
-        }
-        outcome
+    pub fn into_runner(self) -> impl FnOnce(App) -> AppExit {
+        self.inner.into_runner()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    use vmux_runner::ParkOutcome;
+
     use super::*;
 
     #[derive(bevy_ecs::prelude::Resource)]
@@ -125,13 +51,13 @@ mod tests {
         let (signal_tx, signal_rx) = mpsc::channel(1);
         signal_tx.try_send(()).unwrap();
         let (processes, inboxes) = vmux_process::ProcessRuntime::new(wake_tx);
-        let finalized = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let finalized = Arc::new(AtomicBool::new(false));
         let done = finalized.clone();
         let (begin, started) = tokio::sync::oneshot::channel();
         let task = rt.spawn(async move {
             started.await.unwrap();
             assert!(processes.list().await.unwrap().is_empty());
-            done.store(true, std::sync::atomic::Ordering::SeqCst);
+            done.store(true, Ordering::SeqCst);
         });
         let mut app = App::new();
         app.add_plugins(vmux_process::ProcessPlugin)
@@ -146,15 +72,15 @@ mod tests {
             vmux_ecs::service::ShutdownPending,
         ));
         assert_eq!(app.run(), AppExit::Success);
-        assert!(finalized.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(finalized.load(Ordering::SeqCst));
     }
 
     #[derive(bevy_ecs::prelude::Resource)]
-    struct Finalized(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    struct Finalized(Arc<AtomicBool>);
 
     impl Finalized {
         fn finish(state: bevy_ecs::prelude::Res<Self>) {
-            state.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            state.0.store(true, Ordering::SeqCst);
         }
     }
 
@@ -164,7 +90,7 @@ mod tests {
         let (_wake_tx, wake_rx) = mpsc::unbounded_channel();
         let (signal_tx, signal_rx) = mpsc::channel(1);
         signal_tx.try_send(()).unwrap();
-        let finalized = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let finalized = Arc::new(AtomicBool::new(false));
         let mut app = App::new();
         app.insert_resource(Finalized(finalized.clone()))
             .add_systems(vmux_ecs::service::Shutdown, Finalized::finish)
@@ -172,7 +98,7 @@ mod tests {
                 WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx).into_runner(),
             );
         assert_eq!(app.run(), AppExit::Success);
-        assert!(finalized.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(finalized.load(Ordering::SeqCst));
     }
 
     struct Feature;
@@ -183,7 +109,7 @@ mod tests {
     }
 
     #[derive(bevy_ecs::prelude::Resource)]
-    struct Frozen(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    struct Frozen(Arc<AtomicBool>);
 
     impl Frozen {
         fn check(
@@ -192,7 +118,7 @@ mod tests {
             mut exits: bevy_ecs::prelude::MessageWriter<AppExit>,
         ) {
             assert!(registry.is_some_and(|registry| registry.manifest::<Feature>().is_some()));
-            frozen.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            frozen.0.store(true, Ordering::SeqCst);
             exits.write(AppExit::Success);
         }
     }
@@ -202,16 +128,16 @@ mod tests {
         let rt = WakeDrivenRunner::test_runtime();
         let (_wake_tx, wake_rx) = mpsc::unbounded_channel();
         let (_signal_tx, signal_rx) = mpsc::channel(1);
-        let frozen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let frozen = Arc::new(AtomicBool::new(false));
         let mut app = App::new();
         app.add_plugins(vmux_feature::manifest::FeaturePlugin::<Feature>::default())
             .insert_resource(Frozen(frozen.clone()))
-            .add_systems(bevy_app::Update, Frozen::check)
+            .add_systems(Update, Frozen::check)
             .set_runner(
                 WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx).into_runner(),
             );
         assert_eq!(app.run(), AppExit::Success);
-        assert!(frozen.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(frozen.load(Ordering::SeqCst));
     }
 
     impl WakeDrivenRunner {
@@ -234,11 +160,11 @@ mod tests {
         }
 
         let mut runner = WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx);
-        let outcome = runner.park(Duration::from_secs(30));
+        let outcome = runner.inner.park(Duration::from_secs(30));
 
         assert_eq!(outcome, ParkOutcome::Woken);
         assert!(
-            runner.wake_rx.try_recv().is_err(),
+            !runner.inner.try_recv_wake(),
             "the other four wakes should have been coalesced into this update"
         );
     }
@@ -250,7 +176,7 @@ mod tests {
         let (_signal_tx, signal_rx) = mpsc::channel(1);
 
         let mut runner = WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx);
-        let outcome = runner.park(Duration::from_millis(10));
+        let outcome = runner.inner.park(Duration::from_millis(10));
 
         assert_eq!(outcome, ParkOutcome::TimedOut);
     }
@@ -263,7 +189,7 @@ mod tests {
         signal_tx.try_send(()).unwrap();
 
         let mut runner = WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx);
-        let outcome = runner.park(Duration::from_secs(30));
+        let outcome = runner.inner.park(Duration::from_secs(30));
 
         assert_eq!(outcome, ParkOutcome::Shutdown);
     }
@@ -276,7 +202,7 @@ mod tests {
         drop(wake_tx);
 
         let mut runner = WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx);
-        let outcome = runner.park(Duration::from_secs(30));
+        let outcome = runner.inner.park(Duration::from_secs(30));
 
         assert_eq!(outcome, ParkOutcome::Shutdown);
     }

@@ -15,7 +15,7 @@ bevy_math = { version = "0.19", default-features = false, features = ["std"] }
 bevy_asset = "0.19"
 bevy_reflect = "0.19"
 moonshine-save = "0.7"
-vmux_app = { path = "../../crates/util/vmux_app", features = ["contracts", "manifest", "hosting", "project", "jobs", "watch", "flex", "layout", "menu", "extension-core", "lsp"] }
+vmux_app = { path = "../../crates/util/vmux_app", features = ["contracts", "manifest", "hosting", "project", "jobs", "watch", "runner", "flex", "layout", "menu", "extension-core", "lsp"] }
 vmux_ecs = { path = "../../crates/util/vmux_ecs", features = ["store", "jobs", "watch"] }
 vmux_layout = { path = "../../crates/feature/vmux_layout", features = ["store"] }
 
@@ -27,3 +27,4 @@ tempfile = "3"
 crossbeam-channel = "0.5"
 lsp-types = "0.97"
 serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }

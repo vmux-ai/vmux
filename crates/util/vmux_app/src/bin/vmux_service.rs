@@ -1,10 +1,10 @@
 use bevy_app::prelude::*;
 use tokio::sync::mpsc;
 use tracing_subscriber::{EnvFilter, fmt};
+use vmux_app::runner::HeadlessTokioRunner;
 use vmux_ecs::service::{Executor, Wake};
 use vmux_profile::ServicePaths;
 use vmux_service::DaemonBinary;
-use vmux_service::runner::WakeDrivenRunner;
 use vmux_service::server::{Daemon, ExitSignal, SocketListener};
 
 fn main() {
@@ -26,7 +26,12 @@ fn main() {
     let handle = runtime.handle().clone();
     let mut app = App::new();
     app.add_plugins(vmux_app::VmuxPlugin::builder().daemon().build())
-        .set_runner(WakeDrivenRunner::new(handle, wake_rx, signal_rx).into_runner());
+        .set_runner(
+            HeadlessTokioRunner::new(handle)
+                .with_wake_channel(wake_rx)
+                .with_shutdown_channel(signal_rx)
+                .into_runner(),
+        );
     app.world_mut().spawn((
         Daemon,
         SocketListener(Some(listener)),

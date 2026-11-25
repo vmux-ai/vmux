@@ -10404,6 +10404,7 @@ dependencies = [
  "vmux_profile",
  "vmux_project",
  "vmux_remote",
+ "vmux_runner",
  "vmux_service",
  "vmux_session",
  "vmux_setting",
@@ -11233,6 +11234,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_runner"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_tasks",
+ "tokio",
+ "tracing",
+ "vmux_ecs",
+ "vmux_task",
+]
+
+[[package]]
 name = "vmux_service"
 version = "0.0.35"
 dependencies = [
@@ -11269,6 +11283,7 @@ dependencies = [
  "vmux_path",
  "vmux_process",
  "vmux_profile",
+ "vmux_runner",
  "vmux_spawn",
  "vmux_transport",
 ]
