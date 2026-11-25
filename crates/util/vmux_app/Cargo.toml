@@ -98,6 +98,7 @@ account-local = ["account", "vmux_account/local"]
 account-cloud = ["account-local", "vmux_account/cloud", "vmux_account/profile-sync", "release-flags", "vmux_team?/profile-sync"]
 profile-account = ["account-local", "runtime"]
 jobs = ["ecs", "vmux_ecs/jobs"]
+http-server = ["ecs", "dep:vmux_http"]
 runner = ["ecs", "dep:vmux_runner"]
 watch = ["ecs", "vmux_ecs/watch"]
 flex = ["ecs", "dep:vmux_flex"]
@@ -160,6 +161,7 @@ vmux_flex = { path = "../vmux_flex", optional = true }
 vmux_git = { path = "../../feature/vmux_git", optional = true }
 vmux_gallery = { path = "../../feature/vmux_gallery", optional = true }
 vmux_history = { path = "../../feature/vmux_history", optional = true }
+vmux_http = { path = "../vmux_http", optional = true }
 vmux_input = { path = "../../feature/vmux_input", optional = true }
 vmux_knowledge = { path = "../../feature/vmux_knowledge", optional = true }
 vmux_layout = { path = "../../feature/vmux_layout", optional = true }

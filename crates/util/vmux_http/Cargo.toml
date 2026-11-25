@@ -1,0 +1,28 @@
+[package]
+name = "vmux_http"
+description = "ECS-native HTTP server plugin bridged through wake-driven async channels"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bytes = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = "0.1"
+vmux_channel = { path = "../vmux_channel" }
+vmux_ecs = { path = "../vmux_ecs" }
+vmux_task = { path = "../vmux_task", features = ["tokio"] }
+
+[dev-dependencies]
+vmux_runner = { path = "../vmux_runner" }
+
+[lints]
+workspace = true
