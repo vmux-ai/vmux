@@ -136,6 +136,8 @@ mod tests {
     use super::*;
     #[cfg(feature = "layout-runtime")]
     use bevy_ecs::prelude::{ChildOf, Name};
+    #[cfg(all(feature = "acp", feature = "tool"))]
+    use bevy_ecs::schedule::ScheduleLabel;
     #[cfg(feature = "layout-runtime")]
     use vmux_layout::{Pane, SelectRequest};
 
@@ -218,6 +220,74 @@ mod tests {
         assert!(app.is_plugin_added::<vmux_acp::AcpPlugin>());
         assert!(app.is_plugin_added::<vmux_tool::ToolPlugin>());
         assert!(app.is_plugin_added::<vmux_tool::McpRegistryPlugin>());
+        let mut schedules = app
+            .world_mut()
+            .remove_resource::<bevy_ecs::schedule::Schedules>()
+            .unwrap();
+        for label in [
+            bevy_app::PreStartup.intern(),
+            bevy_app::Startup.intern(),
+            bevy_app::First.intern(),
+            bevy_app::PreUpdate.intern(),
+            bevy_app::Update.intern(),
+            bevy_app::PostUpdate.intern(),
+            bevy_app::Last.intern(),
+        ] {
+            if let Some(mut schedule) = schedules.remove(label) {
+                let initialized = schedule.initialize(app.world_mut());
+                assert!(
+                    initialized.is_ok(),
+                    "schedule {label:?} must initialize cleanly: {:?}",
+                    initialized.err()
+                );
+            }
+        }
+    }
+
+    #[cfg(all(feature = "cli", feature = "account-local", feature = "jobs"))]
+    #[test]
+    fn compiled_feature_suite_composes_without_duplicate_plugin_or_schedule_panics() {
+        let mut app = App::new();
+        app.add_plugins((
+            bevy_app::TaskPoolPlugin::default(),
+            VmuxPlugin::builder()
+                .account_local(true)
+                .jobs(true)
+                .acp(true)
+                .bookmark(true)
+                .input(true)
+                .editor(true)
+                .knowledge(true)
+                .simulator(true)
+                .space(true)
+                .team(true)
+                .terminal(true)
+                .tool(true)
+                .vault(true)
+                .build(),
+        ));
+        let mut schedules = app
+            .world_mut()
+            .remove_resource::<bevy_ecs::schedule::Schedules>()
+            .unwrap();
+        for label in [
+            bevy_app::PreStartup.intern(),
+            bevy_app::Startup.intern(),
+            bevy_app::First.intern(),
+            bevy_app::PreUpdate.intern(),
+            bevy_app::Update.intern(),
+            bevy_app::PostUpdate.intern(),
+            bevy_app::Last.intern(),
+        ] {
+            if let Some(mut schedule) = schedules.remove(label) {
+                let initialized = schedule.initialize(app.world_mut());
+                assert!(
+                    initialized.is_ok(),
+                    "feature suite schedule {label:?} must initialize cleanly: {:?}",
+                    initialized.err()
+                );
+            }
+        }
     }
 }
 
