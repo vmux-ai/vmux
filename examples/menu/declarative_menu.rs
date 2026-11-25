@@ -32,9 +32,10 @@ impl Plugin for ExampleMenuPlugin {
     }
 }
 
-fn handle_menu(mut actions: MessageReader<Selected<AppMenu>>) {
+fn handle_menu(mut actions: MessageReader<Selected<AppMenu>>, items: Query<&AppMenu>) {
+    let total = items.iter().count();
     for Selected(action) in actions.read() {
-        println!("menu selected: {action:?}");
+        println!("menu selected: {action:?} (registered items: {total})");
     }
 }
 
