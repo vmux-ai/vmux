@@ -2,14 +2,19 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage};
-use vmux_ecs::ProcessAnchor;
 use vmux_ecs::service::ServiceRequest;
+use vmux_ecs::{
+    AtGeneration, Generation, GenerationPlugin, GenerationSet, OperationTarget, ProcessAnchor,
+    Stale,
+};
 use vmux_feature::manifest::FeaturePlugin;
 use vmux_layout::AgentOpenBeside;
 use vmux_tool::{
     AddedTool, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
     ToolQueryRouteSet,
 };
+
+use crate::host::key::VaultNamespace;
 
 #[vmux_api::agent(Copy, Eq)]
 struct AgentVaultStatus;
@@ -30,6 +35,9 @@ pub(super) struct VaultAgentPlugin;
 
 impl Plugin for VaultAgentPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<GenerationPlugin<VaultNamespace>>() {
+            app.add_plugins(GenerationPlugin::<VaultNamespace>::default());
+        }
         app.add_plugins(VaultToolPlugin)
             .add_message::<VaultStatusRequest>()
             .add_systems(Update, route_queries.in_set(ToolQueryRouteSet))
@@ -38,7 +46,8 @@ impl Plugin for VaultAgentPlugin {
                 (collect_queries, answer_queries)
                     .chain()
                     .after(ToolQueryRouteSet)
-                    .after(crate::host::RuntimeSet),
+                    .after(crate::host::RuntimeSet)
+                    .after(GenerationSet::of::<VaultNamespace>()),
             );
     }
 }
@@ -142,10 +151,7 @@ struct PendingVaultStatus(AgentRequestId);
 
 fn collect_queries(
     mut requests: MessageReader<VaultStatusRequest>,
-    registry: Query<
-        (Entity, &crate::host::key::NamespaceGeneration),
-        With<crate::host::VaultRegistry>,
-    >,
+    registry: Query<(Entity, &Generation<VaultNamespace>), With<crate::host::VaultRegistry>>,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut commands: Commands,
 ) {
@@ -161,8 +167,8 @@ fn collect_queries(
         };
         commands.spawn((
             PendingVaultStatus(request.request_id),
-            vmux_ecs::OperationTargetRevision(generation.0),
-            vmux_ecs::EntityTarget::<crate::host::VaultRegistry>::new(namespace),
+            OperationTarget::new(namespace),
+            generation.snapshot(),
         ));
     }
 }
@@ -171,27 +177,32 @@ fn answer_queries(
     requests: Query<(
         Entity,
         &PendingVaultStatus,
-        &vmux_ecs::EntityTarget<crate::host::VaultRegistry>,
-        &vmux_ecs::OperationTargetRevision,
+        &OperationTarget,
+        &AtGeneration<VaultNamespace>,
+        Has<Stale<VaultNamespace>>,
     )>,
     registry: Query<(
         &crate::host::VaultRegistry,
         Option<&crate::host::VaultStatusProjection>,
-        &crate::host::key::NamespaceGeneration,
+        &Generation<VaultNamespace>,
     )>,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut commands: Commands,
 ) {
-    for (entity, request, target, accepted) in &requests {
-        let result = match registry.get(target.entity()) {
-            Ok((_, _, generation)) if accepted.0 != generation.0 => {
-                Err("Vault status owner replaced".to_string())
+    for (entity, request, target, accepted, stale) in &requests {
+        let result = if stale {
+            Err("Vault status owner replaced".to_string())
+        } else {
+            match registry.get(target.entity()) {
+                Ok((_, _, generation)) if accepted.is_stale(*generation) => {
+                    Err("Vault status owner replaced".to_string())
+                }
+                Ok((state, Some(status), _)) if state.current() => {
+                    serde_json::to_string_pretty(&status.0).map_err(|error| error.to_string())
+                }
+                Ok(_) => continue,
+                Err(_) => Err("Vault status owner retired".to_string()),
             }
-            Ok((state, Some(status), _)) if state.current() => {
-                serde_json::to_string_pretty(&status.0).map_err(|error| error.to_string())
-            }
-            Ok(_) => continue,
-            Err(_) => Err("Vault status owner retired".to_string()),
         };
         service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
             AgentQueryResult::text(request.0, result),
@@ -203,7 +214,6 @@ fn answer_queries(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::key::NamespaceGeneration;
     use crate::host::{VaultRegistry, VaultStatusProjection};
     use bevy::ecs::message::Messages;
 
@@ -218,7 +228,10 @@ mod tests {
             app.add_plugins(VaultAgentPlugin);
             let namespace = app
                 .world_mut()
-                .spawn((VaultRegistry::default(), NamespaceGeneration(0)))
+                .spawn((
+                    VaultRegistry::default(),
+                    Generation::<VaultNamespace>::default(),
+                ))
                 .id();
             Self { app, namespace }
         }
@@ -296,9 +309,9 @@ mod tests {
         scenario
             .app
             .world_mut()
-            .get_mut::<NamespaceGeneration>(scenario.namespace)
+            .get_mut::<Generation<VaultNamespace>>(scenario.namespace)
             .unwrap()
-            .0 += 1;
+            .advance();
         scenario.publish();
         scenario.app.update();
         let replies = scenario.replies();

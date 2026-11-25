@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use vmux_ecs::{Generation, GenerationPlugin};
 use vmux_transport::DeviceId;
 
 pub(crate) use super::authorization_driver::RemoteAuthorizations;
@@ -19,27 +20,27 @@ pub struct RemoteAuthorizationPlugin;
 
 impl Plugin for RemoteAuthorizationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                receive_requests,
-                ApplyDeferred,
-                sync_authority,
-                ApplyDeferred,
-                process_authentications,
-                ApplyDeferred,
-                process_revalidations,
-                process_mutations,
-            )
-                .chain(),
-        );
+        app.add_plugins(GenerationPlugin::<AuthorizationAuthority>::default())
+            .add_systems(
+                Update,
+                (
+                    receive_requests,
+                    ApplyDeferred,
+                    sync_authority,
+                    ApplyDeferred,
+                    process_authentications,
+                    ApplyDeferred,
+                    process_revalidations,
+                    process_mutations,
+                )
+                    .chain(),
+            );
     }
 }
 
 #[derive(Component, Debug)]
 pub(super) struct AuthorizationAuthority {
     path: PathBuf,
-    generation: u64,
     disk_fingerprint: Option<u64>,
     initialized: bool,
     last_sync_error: Option<String>,
@@ -49,16 +50,10 @@ impl AuthorizationAuthority {
     pub(super) fn new(path: PathBuf) -> Self {
         Self {
             path,
-            generation: 0,
             disk_fingerprint: None,
             initialized: false,
             last_sync_error: None,
         }
-    }
-
-    #[cfg(test)]
-    pub(super) fn generation(&self) -> u64 {
-        self.generation
     }
 }
 
@@ -143,6 +138,7 @@ impl AuthorizedDevices<'_, '_> {
         &mut self,
         authority_entity: Entity,
         authority: &mut AuthorizationAuthority,
+        generation: &mut Generation<AuthorizationAuthority>,
         pairing: &mut PairingCredential,
         client_id: &DeviceId,
     ) -> std::io::Result<Option<AuthorizationOutcome>> {
@@ -194,7 +190,7 @@ impl AuthorizedDevices<'_, '_> {
         }
         pairing.0 = next_pairing_token;
         authority.disk_fingerprint = Some(fingerprint);
-        authority.generation = authority.generation.saturating_add(1);
+        generation.advance();
         Ok(Some(AuthorizationOutcome::Paired { device_token }))
     }
 
@@ -202,6 +198,7 @@ impl AuthorizedDevices<'_, '_> {
         &mut self,
         authority_entity: Entity,
         authority: &mut AuthorizationAuthority,
+        generation: &mut Generation<AuthorizationAuthority>,
         pairing: &PairingCredential,
         client_id: &DeviceId,
     ) -> std::io::Result<bool> {
@@ -233,7 +230,7 @@ impl AuthorizedDevices<'_, '_> {
         let fingerprint = AuthorizationFile::write(&authority.path, &stored)?;
         self.commands.entity(target).despawn();
         authority.disk_fingerprint = Some(fingerprint);
-        authority.generation = authority.generation.saturating_add(1);
+        generation.advance();
         Ok(true)
     }
 
@@ -241,6 +238,7 @@ impl AuthorizedDevices<'_, '_> {
         &mut self,
         authority_entity: Entity,
         authority: &mut AuthorizationAuthority,
+        generation: &mut Generation<AuthorizationAuthority>,
         pairing: &mut PairingCredential,
     ) -> std::io::Result<()> {
         AuthorizationFile::remove(&authority.path)?;
@@ -252,7 +250,7 @@ impl AuthorizedDevices<'_, '_> {
         pairing.0.clear();
         authority.disk_fingerprint = None;
         authority.initialized = false;
-        authority.generation = authority.generation.saturating_add(1);
+        generation.advance();
         Ok(())
     }
 }
@@ -276,7 +274,12 @@ fn receive_requests(mut inbox: Single<&mut AuthorizationInbox>, mut commands: Co
 }
 
 fn sync_authority(
-    mut authorities: Query<(Entity, &mut AuthorizationAuthority, &mut PairingCredential)>,
+    mut authorities: Query<(
+        Entity,
+        &mut AuthorizationAuthority,
+        &mut Generation<AuthorizationAuthority>,
+        &mut PairingCredential,
+    )>,
     mut devices: AuthorizedDevices,
     pending_auth: Query<(), With<AuthenticateDevice>>,
     pending_pair: Query<(), With<PairDevice>>,
@@ -289,7 +292,7 @@ fn sync_authority(
         || !pending_reval.is_empty()
         || !pending_revoke.is_empty()
         || !pending_reset.is_empty();
-    for (authority_entity, mut authority, mut pairing) in &mut authorities {
+    for (authority_entity, mut authority, mut generation, mut pairing) in &mut authorities {
         if authority.initialized && !has_pending {
             continue;
         }
@@ -321,18 +324,23 @@ fn sync_authority(
         devices.reconcile(authority_entity, stored.devices);
         authority.disk_fingerprint = Some(fingerprint);
         authority.initialized = true;
-        authority.generation = authority.generation.saturating_add(1);
+        generation.advance();
     }
 }
 
 fn process_authentications(
-    mut authorities: Single<(Entity, &mut AuthorizationAuthority, &mut PairingCredential)>,
+    mut authorities: Single<(
+        Entity,
+        &mut AuthorizationAuthority,
+        &mut Generation<AuthorizationAuthority>,
+        &mut PairingCredential,
+    )>,
     mut devices: AuthorizedDevices,
     mut device_auths: Query<(Entity, &mut AuthenticateDevice)>,
     mut pairings: Query<(Entity, &mut PairDevice)>,
     mut commands: Commands,
 ) {
-    let (authority_entity, authority, pairing) = &mut *authorities;
+    let (authority_entity, authority, generation, pairing) = &mut *authorities;
     for (request_entity, mut request) in &mut device_auths {
         let outcome = if let Some(error) = &authority.last_sync_error {
             Err(std::io::Error::other(error.clone()))
@@ -352,7 +360,13 @@ fn process_authentications(
         } else if !pairing.matches(&request.pairing_token) {
             Ok(None)
         } else {
-            devices.pair(*authority_entity, authority, pairing, &request.client_id)
+            devices.pair(
+                *authority_entity,
+                authority,
+                generation,
+                pairing,
+                &request.client_id,
+            )
         };
         if let Some(response) = request.response.take() {
             let _ = response.send(outcome);
@@ -382,18 +396,29 @@ fn process_revalidations(
 }
 
 fn process_mutations(
-    mut authorities: Single<(Entity, &mut AuthorizationAuthority, &mut PairingCredential)>,
+    mut authorities: Single<(
+        Entity,
+        &mut AuthorizationAuthority,
+        &mut Generation<AuthorizationAuthority>,
+        &mut PairingCredential,
+    )>,
     mut devices: AuthorizedDevices,
     mut revokes: Query<(Entity, &mut RevokeAuthorization)>,
     mut resets: Query<(Entity, &mut ResetAuthorization)>,
     mut commands: Commands,
 ) {
-    let (authority_entity, authority, pairing) = &mut *authorities;
+    let (authority_entity, authority, generation, pairing) = &mut *authorities;
     for (request_entity, mut request) in &mut revokes {
         let outcome = if let Some(error) = &authority.last_sync_error {
             Err(std::io::Error::other(error.clone()))
         } else {
-            devices.revoke(*authority_entity, authority, pairing, &request.client_id)
+            devices.revoke(
+                *authority_entity,
+                authority,
+                generation,
+                pairing,
+                &request.client_id,
+            )
         };
         if let Some(response) = request.response.take() {
             let _ = response.send(outcome);
@@ -401,7 +426,7 @@ fn process_mutations(
         commands.entity(request_entity).despawn();
     }
     for (request_entity, mut request) in &mut resets {
-        let outcome = devices.reset(*authority_entity, authority, pairing);
+        let outcome = devices.reset(*authority_entity, authority, generation, pairing);
         if let Some(response) = request.response.take() {
             let _ = response.send(outcome);
         }
@@ -452,9 +477,9 @@ mod tests {
         fn generation(&self) -> u64 {
             self.app
                 .world()
-                .get::<AuthorizationAuthority>(self.authority)
+                .get::<Generation<AuthorizationAuthority>>(self.authority)
                 .unwrap()
-                .generation()
+                .value()
         }
 
         fn device_ids(&mut self) -> Vec<DeviceId> {

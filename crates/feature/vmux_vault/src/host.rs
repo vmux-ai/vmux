@@ -90,16 +90,8 @@ struct VaultScanTask {
     task: Task<(VaultSnapshot, crate::storage::VaultStatus)>,
 }
 
-#[derive(Component, Default)]
-struct VaultOperationSequence(u64);
-
-impl VaultOperationSequence {
-    fn next(&mut self) -> u64 {
-        let sequence = self.0;
-        self.0 = self.0.wrapping_add(1);
-        sequence
-    }
-}
+#[derive(Clone, Copy)]
+struct VaultOperationTag;
 
 #[derive(Component, Default)]
 #[require(UiState<VaultUiState>, VaultWorkflow)]

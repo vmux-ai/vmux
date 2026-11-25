@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{Task, futures_lite::future};
-use vmux_ecs::{Operation, OperationRetained, OperationTarget, OperationTargetRevision};
+use vmux_ecs::{
+    Generation, Operation, OperationRetained, OperationTarget, OperationTargetRevision,
+};
 use zeroize::Zeroizing;
 
 use crate::state::{VaultSyncRequest, VaultUnlockRecoveryKeyRequest};
@@ -17,9 +19,9 @@ use crate::storage::{
 };
 
 use super::key::{
-    AcceptedStorage, EcsKeyRequest, KeyAdmission, KeyAuthoritySet, KeyCanceled, KeyGeneration,
-    KeyNamespace, KeyOutcome, KeyPermissions, KeyPort, KeyRequester, LoadKey, NamespaceGeneration,
-    StoreKey, StoreRequest, VaultId, VaultKey,
+    AcceptedStorage, EcsKeyRequest, KeyAdmission, KeyAuthoritySet, KeyCanceled, KeyNamespace,
+    KeyOutcome, KeyPermissions, KeyPort, KeyRequester, LoadKey, StoreKey, StoreRequest, VaultId,
+    VaultKey, VaultNamespace,
 };
 use super::reconcile::{
     ReconcileCounts, ReconcileDone, ReconcileInputs, ReconcileLauncher, ReconcilePlugin,
@@ -321,8 +323,8 @@ impl LocalStateWriteTask {
 
 #[derive(SystemParam)]
 struct SyncValidity<'w, 's> {
-    namespaces: Query<'w, 's, &'static NamespaceGeneration, With<KeyNamespace>>,
-    keys: Query<'w, 's, &'static KeyGeneration, With<VaultKey>>,
+    namespaces: Query<'w, 's, &'static Generation<VaultNamespace>, With<KeyNamespace>>,
+    keys: Query<'w, 's, &'static Generation<VaultKey>, With<VaultKey>>,
 }
 
 impl SyncValidity<'_, '_> {
@@ -339,7 +341,7 @@ impl SyncValidity<'_, '_> {
         let Ok(generation) = self.namespaces.get(target.entity()) else {
             return false;
         };
-        if generation.0 != accepted.0 {
+        if generation.value() != accepted.0 {
             return false;
         }
         if let Some(loan) = loan
@@ -347,7 +349,7 @@ impl SyncValidity<'_, '_> {
             && !self
                 .keys
                 .get(owner)
-                .is_ok_and(|current| current.0 == expected)
+                .is_ok_and(|current| current.value() == expected)
         {
             return false;
         }
@@ -367,7 +369,7 @@ fn admit(
         (
             Entity,
             &KeyNamespace,
-            &NamespaceGeneration,
+            &Generation<VaultNamespace>,
             &mut KeyAdmission,
             &AcceptedStorage,
         ),
@@ -385,7 +387,7 @@ fn admit(
         let storage = captured.0.clone();
         let (keys, ingress) = access.port(
             namespace,
-            generation.0,
+            generation.value(),
             &mut admission,
             entity,
             wake.0.clone(),
@@ -399,7 +401,7 @@ fn admit(
                 Operation::bundle("vault.sync").unwrap().running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.value()),
                 ActiveVaultOperation,
                 SyncActive,
                 AcceptedStorage(storage),
@@ -431,7 +433,7 @@ fn admit_recovery_unlock(
         (
             Entity,
             &KeyNamespace,
-            &NamespaceGeneration,
+            &Generation<VaultNamespace>,
             &mut KeyAdmission,
             &AcceptedStorage,
         ),
@@ -449,7 +451,7 @@ fn admit_recovery_unlock(
         let storage = captured.0.clone();
         let (keys, ingress) = access.port(
             namespace,
-            generation.0,
+            generation.value(),
             &mut admission,
             entity,
             wake.0.clone(),
@@ -464,7 +466,7 @@ fn admit_recovery_unlock(
                     .running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.value()),
                 ActiveVaultOperation,
                 SyncActive,
                 AcceptedStorage(storage),
@@ -2349,7 +2351,7 @@ mod tests {
                         key_dir.path().to_path_buf(),
                         fixture,
                     )),
-                    NamespaceGeneration::default(),
+                    Generation::<VaultNamespace>::default(),
                     KeyAdmission::default(),
                 ))
                 .id();
@@ -2378,10 +2380,13 @@ mod tests {
                 ))
                 .id();
             let world = self.app.world_mut();
-            let mut query =
-                world.query::<(&KeyNamespace, &NamespaceGeneration, &mut KeyAdmission)>();
+            let mut query = world.query::<(
+                &KeyNamespace,
+                &Generation<VaultNamespace>,
+                &mut KeyAdmission,
+            )>();
             let (access, generation, mut admission) = query.get_mut(world, self.namespace).unwrap();
-            let gen_value = generation.0;
+            let gen_value = generation.value();
             let (port, ingress) = access.port(self.namespace, gen_value, &mut admission, op, None);
             world
                 .entity_mut(op)

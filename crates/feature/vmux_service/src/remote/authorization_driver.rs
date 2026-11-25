@@ -7,6 +7,7 @@ use bevy::prelude::{Bundle, Component};
 use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
+use vmux_ecs::Generation;
 use vmux_transport::{ClientCredential, DeviceId};
 
 use super::authorization::{AuthorizationAuthority, PairingCredential};
@@ -166,6 +167,7 @@ impl RemoteAuthorizations {
             },
             (
                 AuthorizationAuthority::new(store.path),
+                Generation::<AuthorizationAuthority>::default(),
                 PairingCredential::default(),
                 AuthorizationInbox(AuthorizationReceivers {
                     authenticate_device: authenticate_device_inbox,

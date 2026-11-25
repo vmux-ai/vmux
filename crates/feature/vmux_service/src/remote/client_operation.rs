@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use vmux_api::session::ClientOpId;
+use vmux_ecs::SequenceCounter;
 
 pub(crate) use super::client_operation_driver::ClientOperations;
 use super::client_operation_driver::{
@@ -34,16 +35,8 @@ impl ClientOperationId {
 #[derive(Component, Clone, Copy)]
 struct ClientOperationSequence(u64);
 
-#[derive(Component, Default)]
-pub(super) struct ClientOperationCounter(u64);
-
-impl ClientOperationCounter {
-    fn next(&mut self) -> u64 {
-        let order = self.0;
-        self.0 = order.wrapping_add(1);
-        order
-    }
-}
+#[derive(Clone, Copy)]
+pub(super) struct ClientOperationOrder;
 
 fn receive_requests(mut inbox: Single<&mut ClientOperationInbox>, mut commands: Commands) {
     while let Ok(request) = inbox.0.releases.try_recv() {
@@ -77,7 +70,7 @@ fn release_client_operations(
 
 fn claim_client_operations(
     operations: Query<(Entity, &ClientOperationId, &ClientOperationSequence)>,
-    mut counter: Single<&mut ClientOperationCounter>,
+    mut counter: Single<&mut SequenceCounter<ClientOperationOrder>>,
     mut requests: Query<(Entity, &mut ClaimClientOperation)>,
     mut commands: Commands,
 ) {

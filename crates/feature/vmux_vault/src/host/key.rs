@@ -6,7 +6,10 @@ use std::sync::mpsc;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use vmux_ecs::{Cwd, EntityTarget, Operation, OperationRetained, OperationTarget};
+use vmux_ecs::{
+    AtGeneration, Cwd, EntityTarget, Generation, GenerationPlugin, Operation, OperationRetained,
+    OperationTarget,
+};
 use zeroize::Zeroizing;
 
 use crate::storage::VaultStorage;
@@ -23,6 +26,12 @@ pub(super) struct KeyAuthoritySet;
 
 impl Plugin for KeyAuthorityPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<GenerationPlugin<VaultNamespace>>() {
+            app.add_plugins(GenerationPlugin::<VaultNamespace>::default());
+        }
+        if !app.is_plugin_added::<GenerationPlugin<VaultKey>>() {
+            app.add_plugins(GenerationPlugin::<VaultKey>::default());
+        }
         app.add_message::<LockVault>().add_systems(
             Update,
             (
@@ -86,8 +95,8 @@ impl KeyNamespace {
     }
 }
 
-#[derive(Component, Default)]
-pub(crate) struct NamespaceGeneration(pub(crate) u64);
+#[derive(Clone, Copy)]
+pub(crate) struct VaultNamespace;
 
 #[derive(Component, Default)]
 pub(super) struct KeyAdmission(pub(super) u64);
@@ -117,12 +126,6 @@ pub(super) struct VaultKey;
 
 #[derive(Component)]
 pub(super) struct VaultId(pub(super) String);
-
-#[derive(Component)]
-pub(super) struct KeyGeneration(pub(super) u64);
-
-#[derive(Component)]
-struct AcceptedNamespaceGeneration(u64);
 
 #[derive(Component)]
 struct UnlockedKey(Zeroizing<Vec<u8>>);
@@ -228,13 +231,13 @@ struct KeyAuthority<'w, 's> {
             Option<&'static KeyCanceled>,
         ),
     >,
-    namespaces: Query<'w, 's, (&'static KeyNamespace, &'static NamespaceGeneration)>,
+    namespaces: Query<'w, 's, (&'static KeyNamespace, &'static Generation<VaultNamespace>)>,
     owners: Query<
         'w,
         's,
         (
             &'static VaultId,
-            &'static KeyGeneration,
+            &'static Generation<VaultKey>,
             Option<&'static LockCutoff>,
         ),
         With<VaultKey>,
@@ -266,7 +269,7 @@ impl KeyAuthority<'_, '_> {
         }
         self.namespaces
             .get(origin.namespace)
-            .is_ok_and(|(_, generation)| generation.0 == origin.generation)
+            .is_ok_and(|(_, generation)| generation.value() == origin.generation)
     }
 
     fn request_valid(&self, request: Entity) -> bool {
@@ -302,11 +305,11 @@ impl KeyAuthority<'_, '_> {
     fn io_current(&self, io: &KeyIo) -> bool {
         self.namespaces
             .get(io.namespace)
-            .is_ok_and(|(_, generation)| generation.0 == io.namespace_generation)
+            .is_ok_and(|(_, generation)| generation.value() == io.namespace_generation)
             && self
                 .owners
                 .get(io.owner)
-                .is_ok_and(|(_, generation, _)| generation.0 == io.generation)
+                .is_ok_and(|(_, generation, _)| generation.value() == io.generation)
     }
 
     fn io_accepted(&self, io: &KeyIo, job: Entity) -> bool {
@@ -346,7 +349,7 @@ impl KeyAuthority<'_, '_> {
             namespace: origin.namespace,
             namespace_generation: origin.generation,
             owner,
-            generation: generation.0,
+            generation: generation.value(),
             path: access.0.path(&vault_id.0),
             vault_id: vault_id.0.clone(),
             access: access.0.clone(),
@@ -364,7 +367,7 @@ fn lock(
     mut owners: Query<
         (
             &EntityTarget<KeyNamespace>,
-            &mut KeyGeneration,
+            &mut Generation<VaultKey>,
             Option<&LockCutoff>,
         ),
         With<VaultKey>,
@@ -389,7 +392,7 @@ fn lock(
             0
         };
         let cutoff = existing_cutoff.map_or(admission, |existing| existing.0.max(admission));
-        generation.0 = generation.0.wrapping_add(1);
+        generation.advance();
         commands
             .entity(*owner)
             .remove::<UnlockedKey>()
@@ -398,14 +401,14 @@ fn lock(
 }
 
 fn retire_namespaces(
-    mut namespaces: Query<(Entity, Ref<KeyNamespace>, &mut NamespaceGeneration)>,
+    mut namespaces: Query<(Entity, Ref<KeyNamespace>, &mut Generation<VaultNamespace>)>,
     manifests: Query<(Entity, Ref<KeyManifest>)>,
     keys: Query<
         (
             Entity,
             &EntityTarget<KeyNamespace>,
             &VaultId,
-            &AcceptedNamespaceGeneration,
+            &AtGeneration<VaultNamespace>,
         ),
         With<VaultKey>,
     >,
@@ -413,7 +416,7 @@ fn retire_namespaces(
 ) {
     for (_, access, mut generation) in &mut namespaces {
         if access.is_changed() && !access.is_added() {
-            generation.0 = generation.0.wrapping_add(1);
+            generation.advance();
         }
     }
     for (namespace, manifest) in &manifests {
@@ -429,7 +432,7 @@ fn retire_namespaces(
     for (entity, target, _, accepted) in &keys {
         let alive = namespaces
             .get(target.entity())
-            .is_ok_and(|(_, _, generation)| generation.0 == accepted.0);
+            .is_ok_and(|(_, _, generation)| accepted.matches(*generation));
         if !alive {
             commands.entity(entity).despawn();
         }
@@ -540,8 +543,8 @@ fn materialize(
                                 Cwd(cwd),
                                 RepositoryDirectory(repository),
                                 EntityTarget::<KeyNamespace>::new(origin.namespace),
-                                AcceptedNamespaceGeneration(origin.generation),
-                                KeyGeneration(0),
+                                AtGeneration::<VaultNamespace>::new(origin.generation),
+                                Generation::<VaultKey>::default(),
                             ))
                             .id();
                         created.insert(key, owner);
@@ -675,11 +678,11 @@ fn admit_creates(
             continue;
         }
         claimed_paths.insert(io.path.clone());
-        io.generation = io.generation.wrapping_add(1);
+        io.generation = io.generation.saturating_add(1);
         commands
             .entity(owner)
             .remove::<UnlockedKey>()
-            .insert(KeyGeneration(io.generation));
+            .insert(Generation::<VaultKey>::new(io.generation));
         let job = commands
             .spawn((
                 Operation::bundle("vault.key.generate").unwrap().running(),
@@ -713,11 +716,11 @@ fn admit_stores(
             continue;
         }
         claimed_paths.insert(io.path.clone());
-        io.generation = io.generation.wrapping_add(1);
+        io.generation = io.generation.saturating_add(1);
         commands
             .entity(owner)
             .remove::<UnlockedKey>()
-            .insert(KeyGeneration(io.generation));
+            .insert(Generation::<VaultKey>::new(io.generation));
         let job = commands
             .spawn((
                 Operation::bundle("vault.key.write").unwrap().running(),
@@ -984,7 +987,8 @@ fn deliver_replies(
             commands.entity(entity).despawn();
         } else if ecs_request {
             let owner = target.map(|t| t.entity());
-            let generation = owner.and_then(|o| authority.owners.get(o).ok().map(|(_, g, _)| g.0));
+            let generation =
+                owner.and_then(|o| authority.owners.get(o).ok().map(|(_, g, _)| g.value()));
             commands
                 .entity(entity)
                 .remove::<KeyResult>()
@@ -1118,7 +1122,7 @@ mod tests {
                     Cwd(temp.path().to_path_buf()),
                     RepositoryDirectory(temp.path().join("repository")),
                     KeyNamespace(NativeKeyAccess::fixture(files.directory.clone(), files)),
-                    NamespaceGeneration::default(),
+                    Generation::<VaultNamespace>::default(),
                     KeyAdmission::default(),
                 ))
                 .id();
@@ -1147,12 +1151,15 @@ mod tests {
                 ))
                 .id();
             let world = self.app.world_mut();
-            let mut query =
-                world.query::<(&KeyNamespace, &NamespaceGeneration, &mut KeyAdmission)>();
+            let mut query = world.query::<(
+                &KeyNamespace,
+                &Generation<VaultNamespace>,
+                &mut KeyAdmission,
+            )>();
             let (access, generation, mut admission) = query.get_mut(world, self.namespace).unwrap();
             let (port, ingress) = access.port(
                 self.namespace,
-                generation.0,
+                generation.value(),
                 &mut admission,
                 operation,
                 None,
@@ -1429,9 +1436,9 @@ mod tests {
         scenario
             .app
             .world_mut()
-            .get_mut::<NamespaceGeneration>(scenario.namespace)
+            .get_mut::<Generation<VaultNamespace>>(scenario.namespace)
             .unwrap()
-            .0 += 1;
+            .advance();
         let port = scenario.caller();
         let replacement = scenario.request(port, |p| p.load("vault"));
         assert!(scenario.result(&first).is_err());

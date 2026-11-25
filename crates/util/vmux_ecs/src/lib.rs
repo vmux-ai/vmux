@@ -25,11 +25,16 @@ pub use component::{
 };
 #[cfg(feature = "contracts")]
 pub use component::{PendingPrompt, PendingPromptAttachments, ProcessAnchor};
+pub use dirty::{Dirty, DirtyPlugin, DirtySet};
 pub use external_identity::{
     ExternalIdentity, ExternalIdentityIndex, ExternalIdentityIndexPlugin, ExternalIdentityIndexSet,
 };
 #[cfg(all(host, feature = "host"))]
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
+pub use generation::{
+    AtGeneration, Generation, GenerationPlugin, GenerationSet, GlobalSequence, SequenceCounter,
+    Stale,
+};
 pub use identity::{
     IdentityIndex, IdentityIndexPlugin, IdentityIndexSet, IdentityIndexWriter, IdentityLookupError,
 };
@@ -43,6 +48,7 @@ pub use launcher::{
     ContributedCommandChosen, HostsLauncher, InlineTransitionRequested, LauncherDismissRequest,
     RendersLauncherPanel, RestoreKeyboardToStack, StackInPaneChosen,
 };
+pub use lease::{LeaseGranted, LeaseMode, LeasePlugin, LeaseRequest, LeaseSet};
 #[cfg(all(host, feature = "host"))]
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 pub use operation::{
@@ -69,6 +75,7 @@ pub use profile_identity::{ProfileId, ProfileLabel};
 pub use rename::{Icon, RenamePlugin, RenameRequest, Renamed};
 pub use resource_path::{ContentDigest, FilePath};
 pub use revision::{BaseRevision, Revision};
+pub use selection::{SelectRequest, Selected, SelectionPlugin, SelectionSet};
 pub use status::{Busy, Failure, Loading, Progress, Ready, Retired, StatusPlugin};
 pub use toggle::{Disabled, Toggle, TogglePlugin, Toggled, TogglesPlugin};
 #[cfg(all(host, feature = "host"))]
@@ -90,11 +97,13 @@ pub mod browser;
 #[cfg(feature = "cli")]
 pub mod cli;
 mod component;
+mod dirty;
 #[cfg(feature = "contracts")]
 pub mod event;
 mod external_identity;
 #[cfg(all(host, feature = "host"))]
 mod file_ui_state;
+mod generation;
 #[cfg(all(host, feature = "host"))]
 pub mod host_spawn;
 mod identity;
@@ -102,6 +111,7 @@ mod identity;
 pub mod jobs;
 #[cfg(all(host, feature = "host"))]
 pub mod launcher;
+mod lease;
 #[cfg(all(host, feature = "host"))]
 pub mod notify;
 mod operation;
@@ -132,6 +142,7 @@ pub mod revision;
 pub mod scroll;
 #[cfg(all(host, feature = "host"))]
 pub mod search;
+mod selection;
 #[cfg(all(host, feature = "host"))]
 pub mod service;
 mod status;
