@@ -2,9 +2,9 @@ use bevy_ecs::reflect::ReflectComponent;
 
 pub use registration::{
     AliasCompleted, AliasRequest, ArchiveProjectRequest, Archived, Error, Hidden, LoadCompleted,
-    LoadError, LoadRequest, Loaded, Project, ProjectChanged, ProjectPlugin, ProjectSaved,
-    Registered, Registrations, RemoveProjectRequest, Repository, Root, SaveProjectRequest,
-    StoreSet, Ticket, WriteCompleted, WriteResult, WriteTaskRequest,
+    LoadError, LoadRequest, Project, ProjectChanged, ProjectPlugin, ProjectSaved, Registered,
+    Registrations, RemoveProjectRequest, Repository, Root, SaveProjectRequest, StoreSet, Ticket,
+    WriteCompleted, WriteResult, WriteTaskRequest,
 };
 pub use route::ProjectRoute;
 pub use snapshot::{Record, Snapshot};

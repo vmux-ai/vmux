@@ -3,8 +3,9 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::relationship::Relationship;
 
 use crate::{
-    ActivateRequest, Active, ArchivedAt, CollectionView, CreatedAt, Cwd, Description,
-    LastActivatedAt, LastVisitedAt, Order, Uuid, WorkspaceKind,
+    ActivateRequest, Active, ArchivedAt, Busy, Collapsed, CollectionView, ContentDigest, CreatedAt,
+    Cwd, Description, Disabled, Failure, FilePath, Icon, LastActivatedAt, LastVisitedAt, Loading,
+    Order, Pin, Progress, Ready, Retired, Uuid, WorkspaceKind,
 };
 
 pub struct PrimitivesPlugin;
@@ -13,7 +14,10 @@ impl Plugin for PrimitivesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActivationClock>()
             .register_type::<Cwd>()
+            .register_type::<FilePath>()
+            .register_type::<ContentDigest>()
             .register_type::<Description>()
+            .register_type::<Icon>()
             .register_type::<CollectionView>()
             .register_type::<CreatedAt>()
             .register_type::<LastActivatedAt>()
@@ -21,6 +25,15 @@ impl Plugin for PrimitivesPlugin {
             .register_type::<ArchivedAt>()
             .register_type::<Order>()
             .register_type::<Active>()
+            .register_type::<Pin>()
+            .register_type::<Collapsed>()
+            .register_type::<Disabled>()
+            .register_type::<Loading>()
+            .register_type::<Ready>()
+            .register_type::<Busy>()
+            .register_type::<Failure>()
+            .register_type::<Progress>()
+            .register_type::<Retired>()
             .register_type::<Uuid>()
             .register_type::<WorkspaceKind>()
             .register_type::<Children>()

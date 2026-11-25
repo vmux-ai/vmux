@@ -494,9 +494,10 @@ mod tests {
     use super::*;
     use crate::Repository;
     use crate::{
-        ArchiveProjectRequest, LoadError, Loaded, ProjectId, ProjectSaved, Registered,
-        Registrations, RemoveProjectRequest, Revision, SaveProjectRequest, WriteCompleted,
+        ArchiveProjectRequest, LoadError, ProjectId, ProjectSaved, Registered, Registrations,
+        RemoveProjectRequest, Revision, SaveProjectRequest, WriteCompleted,
     };
+    use vmux_ecs::Ready;
 
     struct Store {
         app: App,
@@ -615,7 +616,7 @@ mod tests {
             },
         ));
         app.update();
-        assert!(app.world().get::<Loaded>(owner).is_some());
+        assert!(app.world().get::<Ready>(owner).is_some());
         let project = app
             .world_mut()
             .query_filtered::<Entity, With<Registered>>()
@@ -865,11 +866,11 @@ mod tests {
             store.app.update();
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        let waited = store.app.world().get::<Loaded>(replacement).is_none();
+        let waited = store.app.world().get::<Ready>(replacement).is_none();
         released.release();
         assert!(waited);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while store.app.world().get::<Loaded>(replacement).is_none() {
+        while store.app.world().get::<Ready>(replacement).is_none() {
             store.app.update();
             assert!(std::time::Instant::now() < deadline);
             std::thread::yield_now();
@@ -940,7 +941,7 @@ mod tests {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
             loop {
                 store.app.update();
-                if store.app.world().get::<Loaded>(owner).is_some()
+                if store.app.world().get::<Ready>(owner).is_some()
                     || store.app.world().get::<LoadError>(owner).is_some()
                 {
                     return store;
@@ -1361,7 +1362,7 @@ mod tests {
         store.root = alias.clone();
         store.owner = store.app.world_mut().spawn(Root(alias)).id();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while store.app.world().get::<Loaded>(store.owner).is_none() {
+        while store.app.world().get::<Ready>(store.owner).is_none() {
             store.app.update();
             assert!(std::time::Instant::now() < deadline);
             std::thread::yield_now();
@@ -1470,7 +1471,7 @@ mod tests {
         std::fs::write(&file, "invalid").unwrap();
         let store = Store::at(root.path());
         assert!(store.app.world().get::<LoadError>(store.owner).is_some());
-        assert!(store.app.world().get::<Loaded>(store.owner).is_none());
+        assert!(store.app.world().get::<Ready>(store.owner).is_none());
         assert_eq!(std::fs::read_to_string(file).unwrap(), "invalid");
     }
 }

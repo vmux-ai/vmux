@@ -17,7 +17,7 @@ pub use blocking::{BlockingCancellation, BlockingPool, BlockingRuntime, Blocking
 pub use component::{
     ActivateRequest, Active, ArchivedAt, Bookmark, BookmarkOrder, Collapsed, CollectionView,
     CreatedAt, Cwd, Description, EffectiveStartupUrl, EntityTarget, Folder, HostShell,
-    JsonArguments, KeyboardOwner, LastActivatedAt, LastVisitedAt, Order, PagePresented, Pin, Ready,
+    JsonArguments, KeyboardOwner, LastActivatedAt, LastVisitedAt, PagePresented, Pin,
     RegistrationOrder, Terminal, TransitionType, UnixMillis, Url, Uuid, Visit, VisitCount,
     VisitedUrl, WindowFullscreen, WindowFullscreenSet,
 };
@@ -48,6 +48,7 @@ pub use operation::{
     OperationRetained, OperationState, OperationTarget, OperationTargetRevision,
     TargetedOperations,
 };
+pub use order::{Order, OrderPlugin, OrderPosition, OrderSet, ReorderRequest, Reordered};
 #[cfg(all(host, feature = "host"))]
 pub use overlay::{Overlay, OverlayShownInline, OverlayState, WindowOverlay};
 #[cfg(feature = "contracts")]
@@ -63,7 +64,11 @@ pub use process_id::ProcessId;
 #[cfg(all(host, feature = "host"))]
 pub use process_id::ProcessPresentationRequest;
 pub use profile_identity::{ProfileId, ProfileLabel};
+pub use rename::{Icon, RenamePlugin, RenameRequest, Renamed};
+pub use resource_path::{ContentDigest, FilePath};
 pub use revision::{BaseRevision, Revision};
+pub use status::{Busy, Failure, Loading, Progress, Ready, Retired, StatusPlugin};
+pub use toggle::{Disabled, Toggle, TogglePlugin, Toggled, TogglesPlugin};
 #[cfg(all(host, feature = "host"))]
 pub use ui_state::{UiState, UiStateFlushSet, UiStatePlugin, UiStateWrite, UiStateWriter};
 pub use workspace::WorkspaceKind;
@@ -98,6 +103,7 @@ pub mod launcher;
 #[cfg(all(host, feature = "host"))]
 pub mod notify;
 mod operation;
+mod order;
 #[cfg(all(host, feature = "host"))]
 pub mod overlay;
 #[cfg(all(host, feature = "host"))]
@@ -118,18 +124,22 @@ pub mod profile;
 mod profile_identity;
 #[cfg(feature = "records")]
 pub mod record;
+mod rename;
+mod resource_path;
 pub mod revision;
 pub mod scroll;
 #[cfg(all(host, feature = "host"))]
 pub mod search;
 #[cfg(all(host, feature = "host"))]
 pub mod service;
+mod status;
 #[cfg(feature = "store")]
 pub mod store;
 #[cfg(feature = "contracts")]
 pub mod team;
 #[cfg(all(host, feature = "host"))]
 pub mod terminal;
+mod toggle;
 pub mod types;
 #[cfg(all(host, feature = "host"))]
 mod ui_state;

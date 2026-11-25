@@ -181,9 +181,6 @@ pub struct ActivateRequest {
 #[type_path = "vmux_history"]
 pub struct Visit;
 
-#[derive(Component, Clone, Copy, Debug, Default)]
-pub struct Ready;
-
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component, Default)]
 #[type_path = "vmux_history"]
@@ -198,11 +195,6 @@ pub struct VisitCount(pub u32);
 #[reflect(Component, Default)]
 #[type_path = "vmux_history"]
 pub struct LastVisitedAt(pub i64);
-
-#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
-#[reflect(Component, Default)]
-#[type_path = "vmux_ecs"]
-pub struct Order(pub u32);
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
