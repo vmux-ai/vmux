@@ -13,6 +13,14 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::world::DeferredWorld;
 use bevy_tasks::Task;
 
+pub use io::{IoTask, IoTaskList, IoTaskPlugin, IoTaskSet, TaskError, TaskWake};
+#[cfg(feature = "tokio")]
+pub use tokio_task::{TokioTask, TokioTaskOutcome};
+
+mod io;
+#[cfg(feature = "tokio")]
+mod tokio_task;
+
 pub struct TaskPlugin<T: Send + Sync + 'static>(PhantomData<fn() -> T>);
 
 impl<T: Send + Sync + 'static> Default for TaskPlugin<T> {

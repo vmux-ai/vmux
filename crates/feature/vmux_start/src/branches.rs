@@ -1,13 +1,19 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
 use std::time::Instant;
 
 use bevy::prelude::*;
-use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{CommandBarUiState, StartBranchesRequest, StartProjectBranches};
 use vmux_api::space::ProjectBranch;
-use vmux_ecs::{Operation, OperationRetained, OperationState, OperationTarget, PageMetadata};
+use vmux_ecs::{
+    IoTask, IoTaskPlugin, IoTaskSet, Operation, OperationRetained, OperationState, OperationTarget,
+    PageMetadata, TaskError,
+};
 use vmux_git::worktree::{CheckoutInfo, WorktreeRegistration};
 use vmux_git::{GitRuntime, GitTask, RepositorySource};
 
@@ -18,16 +24,19 @@ impl Plugin for BranchesPlugin {
         if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
             app.add_plugins(vmux_ecs::OperationPlugin);
         }
+        if !app.is_plugin_added::<vmux_ecs::wake::WakePlugin>() {
+            app.add_plugins(vmux_ecs::wake::WakePlugin);
+        }
         app.init_resource::<GitRuntime>()
-            .add_plugins(UiEventPlugin::<(StartBranchesRequest,)>::default())
+            .add_plugins((
+                UiEventPlugin::<(StartBranchesRequest,)>::default(),
+                IoTaskPlugin::<(DiscoveryOutput, RefsOutput, RegistrationsOutput)>::default(),
+            ))
             .add_observer(request)
             .add_systems(
                 Update,
                 (
                     retire,
-                    poll::<DiscoveryOutput>,
-                    poll::<RefsOutput>,
-                    poll::<RegistrationsOutput>,
                     discover,
                     materialize_refs,
                     materialize_registrations,
@@ -37,7 +46,8 @@ impl Plugin for BranchesPlugin {
                     read_registrations,
                     start,
                 )
-                    .chain(),
+                    .chain()
+                    .after(IoTaskSet::all()),
             );
     }
 }
@@ -87,11 +97,121 @@ struct ReadRetired;
 #[derive(Component)]
 struct LookupFailure(String);
 
-#[derive(Component)]
-struct NativeTask<T: Component>(GitTask<T>);
+#[derive(Component, Default)]
+struct CancelWork {
+    discovery: Option<Arc<Mutex<GitTask<()>>>>,
+    refs: Option<Arc<Mutex<GitTask<()>>>>,
+    registrations: Option<Arc<Mutex<GitTask<()>>>>,
+}
+
+impl CancelWork {
+    fn cancel(&self) {
+        for task in [&self.discovery, &self.refs, &self.registrations] {
+            if let Some(task) = task
+                && let Ok(mut task) = task.lock()
+            {
+                task.cancel();
+            }
+        }
+    }
+}
+
+struct BridgeState<T> {
+    result: Option<Result<T, String>>,
+    finished: bool,
+    waker: Option<Waker>,
+}
+
+struct BridgeSignal<T>(Arc<Mutex<BridgeState<T>>>);
+
+impl<T> BridgeSignal<T> {
+    fn complete(self, outcome: Result<T, String>) {
+        let waker = if let Ok(mut state) = self.0.lock() {
+            state.result = Some(outcome);
+            state.finished = true;
+            state.waker.take()
+        } else {
+            None
+        };
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
+}
+
+impl<T> Drop for BridgeSignal<T> {
+    fn drop(&mut self) {
+        let waker = if let Ok(mut state) = self.0.lock()
+            && !state.finished
+        {
+            state.finished = true;
+            state.waker.take()
+        } else {
+            None
+        };
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
+}
+
+struct GitBridge<T> {
+    state: Arc<Mutex<BridgeState<T>>>,
+    _task: Arc<Mutex<GitTask<()>>>,
+}
+
+impl<T: Component> GitBridge<T> {
+    fn spawn(
+        runtime: &GitRuntime,
+        run: impl FnOnce() -> Result<T, String> + Send + 'static,
+    ) -> Option<(IoTask<T>, Arc<Mutex<GitTask<()>>>)> {
+        let state = Arc::new(Mutex::new(BridgeState {
+            result: None,
+            finished: false,
+            waker: None,
+        }));
+        let signal = BridgeSignal(Arc::clone(&state));
+        let task = runtime.spawn_background(None, move || {
+            let signal = signal;
+            let outcome = run();
+            signal.complete(outcome);
+        })?;
+        let handle = Arc::new(Mutex::new(task));
+        let bridge = Self {
+            state,
+            _task: Arc::clone(&handle),
+        };
+        Some((IoTask::spawn(bridge), handle))
+    }
+}
+
+impl<T> Unpin for GitBridge<T> {}
+
+impl<T> Future for GitBridge<T> {
+    type Output = Result<T, String>;
+
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let Ok(mut state) = self.state.lock() else {
+            return Poll::Ready(Err("Start branch lookup worker failed".into()));
+        };
+        if state.finished {
+            return Poll::Ready(
+                state
+                    .result
+                    .take()
+                    .unwrap_or_else(|| Err("Start branch lookup worker failed".into())),
+            );
+        }
+        state.waker = Some(context.waker().clone());
+        Poll::Pending
+    }
+}
 
 #[derive(Component)]
-struct DiscoveryOutput(Result<(CheckoutInfo, RepositorySource), String>);
+struct DiscoveryOutput {
+    checkout: CheckoutInfo,
+    source: RepositorySource,
+}
 
 #[derive(Component)]
 struct Discovered {
@@ -100,10 +220,10 @@ struct Discovered {
 }
 
 #[derive(Component)]
-struct RefsOutput(Result<Vec<String>, String>);
+struct RefsOutput(Vec<String>);
 
 #[derive(Component)]
-struct RegistrationsOutput(Result<Vec<WorktreeRegistration>, String>);
+struct RegistrationsOutput(Vec<WorktreeRegistration>);
 
 #[derive(Component)]
 struct RefsComplete;
@@ -167,7 +287,15 @@ fn request(
 fn retire(
     requests: Query<(Entity, &BranchRequest), Without<RequestRetired>>,
     current: Query<(&CurrentRequest, Option<&PageMetadata>)>,
-    reads: Query<(Entity, &BranchRead, Option<&Discovered>), Without<ReadRetired>>,
+    reads: Query<
+        (
+            Entity,
+            &BranchRead,
+            Option<&Discovered>,
+            Option<&CancelWork>,
+        ),
+        Without<ReadRetired>,
+    >,
     subscribers: Query<(&BranchSubscriber, Has<RequestRetired>, Has<RequestRefused>)>,
     mut commands: Commands,
 ) {
@@ -183,11 +311,14 @@ fn retire(
             commands.entity(entity).insert(RequestRefused);
         }
     }
-    for (entity, read, discovered) in &reads {
+    for (entity, read, discovered, work) in &reads {
         if !read.source.matches(read.source.path())
             || discovered
                 .is_some_and(|discovered| !discovered.source.matches(discovered.source.path()))
         {
+            if let Some(work) = work {
+                work.cancel();
+            }
             commands.entity(entity).insert((
                 ReadRetired,
                 LookupFailure("Git repository source changed".into()),
@@ -196,120 +327,152 @@ fn retire(
             .iter()
             .any(|(subscriber, retired, refused)| !retired && !refused && subscriber.0 == entity)
         {
+            if let Some(work) = work {
+                work.cancel();
+            }
             commands.entity(entity).insert(ReadRetired);
         }
     }
 }
 
-fn poll<T: Component>(
-    mut tasks: Query<(Entity, &mut NativeTask<T>, Has<ReadRetired>)>,
-    mut commands: Commands,
-) {
-    for (entity, mut task, retired) in &mut tasks {
-        if retired {
-            task.0.cancel();
-        }
-        if !task.0.is_finished() {
-            continue;
-        }
-        let mut entity = commands.entity(entity);
-        entity.remove::<NativeTask<T>>();
-        if retired {
-            continue;
-        }
-        match task.0.poll() {
-            Some(Ok(output)) => {
-                entity.insert(output);
-            }
-            _ => {
-                entity.insert((
-                    ReadRetired,
-                    LookupFailure("Start branch lookup worker failed".into()),
-                ));
-            }
-        }
-    }
-}
+type DiscoveryResults<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static BranchRead,
+        Option<&'static DiscoveryOutput>,
+        Option<&'static TaskError<DiscoveryOutput>>,
+        Has<ReadRetired>,
+        Option<&'static CancelWork>,
+    ),
+    Or<(With<DiscoveryOutput>, With<TaskError<DiscoveryOutput>>)>,
+>;
 
-fn discover(outputs: Query<(Entity, &BranchRead, &DiscoveryOutput)>, mut commands: Commands) {
-    for (entity, read, output) in &outputs {
-        commands.entity(entity).remove::<DiscoveryOutput>();
-        match &output.0 {
-            Ok((checkout, source))
-                if read.source.matches(read.source.path()) && source.matches(source.path()) =>
+fn discover(outputs: DiscoveryResults, mut commands: Commands) {
+    for (entity, read, output, error, retired, work) in &outputs {
+        commands
+            .entity(entity)
+            .remove::<(DiscoveryOutput, TaskError<DiscoveryOutput>)>();
+        if retired {
+            continue;
+        }
+        if let Some(error) = error {
+            if let Some(work) = work {
+                work.cancel();
+            }
+            commands
+                .entity(entity)
+                .insert((ReadRetired, LookupFailure(error.to_string())));
+        } else if let Some(output) = output {
+            if read.source.matches(read.source.path())
+                && output.source.matches(output.source.path())
             {
                 commands.entity(entity).insert(Discovered {
-                    checkout: checkout.clone(),
-                    source: source.clone(),
+                    checkout: output.checkout.clone(),
+                    source: output.source.clone(),
                 });
-            }
-            Ok(_) => {
+            } else {
+                if let Some(work) = work {
+                    work.cancel();
+                }
                 commands.entity(entity).insert((
                     ReadRetired,
                     LookupFailure("Git repository source changed".into()),
                 ));
             }
-            Err(error) => {
-                commands
-                    .entity(entity)
-                    .insert((ReadRetired, LookupFailure(error.clone())));
-            }
         }
     }
 }
 
-fn materialize_refs(outputs: Query<(Entity, &RefsOutput)>, mut commands: Commands) {
-    for (read, output) in &outputs {
-        commands.entity(read).remove::<RefsOutput>();
-        match &output.0 {
-            Ok(branches) => {
-                for (index, branch) in branches.iter().enumerate() {
-                    commands.spawn((
-                        Name::new(branch.clone()),
-                        vmux_ecs::Order(index as u32),
-                        Observation(read),
-                        BranchRef,
-                    ));
-                }
-                commands.entity(read).insert(RefsComplete);
+type RefsResults<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Option<&'static RefsOutput>,
+        Option<&'static TaskError<RefsOutput>>,
+        Has<ReadRetired>,
+        Option<&'static CancelWork>,
+    ),
+    Or<(With<RefsOutput>, With<TaskError<RefsOutput>>)>,
+>;
+
+fn materialize_refs(outputs: RefsResults, mut commands: Commands) {
+    for (read, output, error, retired, work) in &outputs {
+        commands
+            .entity(read)
+            .remove::<(RefsOutput, TaskError<RefsOutput>)>();
+        if retired {
+            continue;
+        }
+        if let Some(error) = error {
+            if let Some(work) = work {
+                work.cancel();
             }
-            Err(error) => {
-                commands
-                    .entity(read)
-                    .insert((ReadRetired, LookupFailure(error.clone())));
+            commands
+                .entity(read)
+                .insert((ReadRetired, LookupFailure(error.to_string())));
+        } else if let Some(output) = output {
+            for (index, branch) in output.0.iter().enumerate() {
+                commands.spawn((
+                    Name::new(branch.clone()),
+                    vmux_ecs::Order(index as u32),
+                    Observation(read),
+                    BranchRef,
+                ));
             }
+            commands.entity(read).insert(RefsComplete);
         }
     }
 }
 
-fn materialize_registrations(
-    outputs: Query<(Entity, &RegistrationsOutput)>,
-    mut commands: Commands,
-) {
-    for (read, output) in &outputs {
-        commands.entity(read).remove::<RegistrationsOutput>();
-        match &output.0 {
-            Ok(registrations) => {
-                for (index, registration) in registrations.iter().enumerate() {
-                    commands.spawn((
-                        Name::new("start.branch.registration"),
-                        vmux_ecs::Order(index as u32),
-                        Observation(read),
-                        Registration {
-                            path: registration.path.clone(),
-                            branch: registration.branch.clone(),
-                            prunable: registration.prunable,
-                            directory: registration.path.is_dir(),
-                        },
-                    ));
-                }
-                commands.entity(read).insert(RegistrationsComplete);
+type RegistrationsResults<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Option<&'static RegistrationsOutput>,
+        Option<&'static TaskError<RegistrationsOutput>>,
+        Has<ReadRetired>,
+        Option<&'static CancelWork>,
+    ),
+    Or<(
+        With<RegistrationsOutput>,
+        With<TaskError<RegistrationsOutput>>,
+    )>,
+>;
+
+fn materialize_registrations(outputs: RegistrationsResults, mut commands: Commands) {
+    for (read, output, error, retired, work) in &outputs {
+        commands
+            .entity(read)
+            .remove::<(RegistrationsOutput, TaskError<RegistrationsOutput>)>();
+        if retired {
+            continue;
+        }
+        if let Some(error) = error {
+            if let Some(work) = work {
+                work.cancel();
             }
-            Err(error) => {
-                commands
-                    .entity(read)
-                    .insert((ReadRetired, LookupFailure(error.clone())));
+            commands
+                .entity(read)
+                .insert((ReadRetired, LookupFailure(error.to_string())));
+        } else if let Some(output) = output {
+            for (index, registration) in output.0.iter().enumerate() {
+                commands.spawn((
+                    Name::new("start.branch.registration"),
+                    vmux_ecs::Order(index as u32),
+                    Observation(read),
+                    Registration {
+                        path: registration.path.clone(),
+                        branch: registration.branch.clone(),
+                        prunable: registration.prunable,
+                        directory: registration.path.is_dir(),
+                    },
+                ));
             }
+            commands.entity(read).insert(RegistrationsComplete);
         }
     }
 }
@@ -326,9 +489,9 @@ type FinishedReads<'w, 's> = Query<
     ),
     (
         With<BranchRead>,
-        Without<NativeTask<DiscoveryOutput>>,
-        Without<NativeTask<RefsOutput>>,
-        Without<NativeTask<RegistrationsOutput>>,
+        Without<IoTask<DiscoveryOutput>>,
+        Without<IoTask<RefsOutput>>,
+        Without<IoTask<RegistrationsOutput>>,
         Or<(
             With<ReadRetired>,
             (With<RefsComplete>, With<RegistrationsComplete>),
@@ -455,9 +618,9 @@ fn cleanup(
     reads: Query<
         (
             Entity,
-            Has<NativeTask<DiscoveryOutput>>,
-            Has<NativeTask<RefsOutput>>,
-            Has<NativeTask<RegistrationsOutput>>,
+            Has<IoTask<DiscoveryOutput>>,
+            Has<IoTask<RefsOutput>>,
+            Has<IoTask<RegistrationsOutput>>,
         ),
         With<BranchRead>,
     >,
@@ -500,56 +663,60 @@ fn cleanup(
 }
 
 fn read_refs(
-    reads: Query<
-        (Entity, &Discovered),
+    mut reads: Query<
+        (Entity, &Discovered, &mut CancelWork),
         (
             Without<ReadRetired>,
             Without<RefsComplete>,
             Without<RefsOutput>,
-            Without<NativeTask<RefsOutput>>,
+            Without<TaskError<RefsOutput>>,
+            Without<IoTask<RefsOutput>>,
         ),
     >,
     runtime: Res<GitRuntime>,
-    wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (entity, discovered) in &reads {
+    for (entity, discovered, mut work) in &mut reads {
         let checkout = discovered.checkout.clone();
-        let Some(task) = runtime
-            .spawn_background(wake.as_deref().map(|wake| (**wake).clone()), move || {
-                RefsOutput(checkout.local_branches().map_err(|error| error.0))
-            })
-        else {
+        let Some((task, handle)) = GitBridge::spawn(&runtime, move || {
+            checkout
+                .local_branches()
+                .map(RefsOutput)
+                .map_err(|error| error.0)
+        }) else {
             continue;
         };
-        commands.entity(entity).insert(NativeTask(task));
+        work.refs = Some(handle);
+        commands.entity(entity).insert(task);
     }
 }
 
 fn read_registrations(
-    reads: Query<
-        (Entity, &Discovered),
+    mut reads: Query<
+        (Entity, &Discovered, &mut CancelWork),
         (
             Without<ReadRetired>,
             Without<RegistrationsComplete>,
             Without<RegistrationsOutput>,
-            Without<NativeTask<RegistrationsOutput>>,
+            Without<TaskError<RegistrationsOutput>>,
+            Without<IoTask<RegistrationsOutput>>,
         ),
     >,
     runtime: Res<GitRuntime>,
-    wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (entity, discovered) in &reads {
+    for (entity, discovered, mut work) in &mut reads {
         let checkout = discovered.checkout.clone();
-        let Some(task) = runtime
-            .spawn_background(wake.as_deref().map(|wake| (**wake).clone()), move || {
-                RegistrationsOutput(checkout.worktree_registrations().map_err(|error| error.0))
-            })
-        else {
+        let Some((task, handle)) = GitBridge::spawn(&runtime, move || {
+            checkout
+                .worktree_registrations()
+                .map(RegistrationsOutput)
+                .map_err(|error| error.0)
+        }) else {
             continue;
         };
-        commands.entity(entity).insert(NativeTask(task));
+        work.registrations = Some(handle);
+        commands.entity(entity).insert(task);
     }
 }
 
@@ -563,7 +730,6 @@ fn start(
         Has<RegistrationsComplete>,
     )>,
     runtime: Res<GitRuntime>,
-    wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let mut admitted = Vec::new();
@@ -614,18 +780,17 @@ fn start(
         let source = request.source.clone();
         let path = source.path().to_path_buf();
         let started = Instant::now();
-        let Some(task) =
-            runtime.spawn_background(wake.as_deref().map(|wake| (**wake).clone()), move || {
-                DiscoveryOutput(
-                    CheckoutInfo::try_from(path.as_path())
-                        .map(|checkout| {
-                            let observed = RepositorySource::capture(&checkout.root);
-                            (checkout, observed)
-                        })
-                        .map_err(|error| error.0),
-                )
-            })
-        else {
+        let Some((task, handle)) = GitBridge::spawn(&runtime, move || {
+            CheckoutInfo::try_from(path.as_path())
+                .map(|checkout| {
+                    let observed = RepositorySource::capture(&checkout.root);
+                    DiscoveryOutput {
+                        checkout,
+                        source: observed,
+                    }
+                })
+                .map_err(|error| error.0)
+        }) else {
             continue;
         };
         let read = commands
@@ -635,7 +800,12 @@ fn start(
                     source: source.clone(),
                     started,
                 },
-                NativeTask(task),
+                CancelWork {
+                    discovery: Some(handle),
+                    refs: None,
+                    registrations: None,
+                },
+                task,
             ))
             .id();
         admitted.push((read, source, started));

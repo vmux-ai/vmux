@@ -1,11 +1,10 @@
 use bevy::prelude::*;
-use bevy::tasks::IoTaskPool;
+use vmux_ecs::{IoTask, TaskError};
 
 use super::migration::{MigrationRequest, MigrationResult};
 use super::native::{Brewfile, BrewfileWritten, ManifestBytes, Paths};
 use super::{
-    AcquiredLease, Busy, Failed, Failure, IoTask, Reading, RetainedHere, StoreLease, ToolStore,
-    ToolsManifest,
+    AcquiredLease, Failure, Idle, Reading, RetainedHere, StoreLease, ToolStore, ToolsManifest,
 };
 
 pub(super) struct ReadPlugin;
@@ -54,7 +53,7 @@ struct Manifest(ToolsManifest);
 fn cancel(
     requests: Query<
         (Entity, &vmux_ecs::OperationState, Has<Active>),
-        (With<ReadRequest>, Without<Busy>, Without<MigrationRequest>),
+        (With<ReadRequest>, Idle, Without<MigrationRequest>),
     >,
     mut commands: Commands,
 ) {
@@ -108,9 +107,9 @@ fn lease(
             Entity,
             Option<&ToolStore>,
             Option<&StoreLease>,
-            Option<&Failed<StoreLease>>,
+            Option<&TaskError<StoreLease>>,
         ),
-        (With<Active>, With<Acquire>, Without<Busy>),
+        (With<Active>, With<Acquire>, Idle),
     >,
     mut commands: Commands,
 ) {
@@ -126,7 +125,7 @@ fn lease(
             commands
                 .entity(entity)
                 .remove::<Acquire>()
-                .insert((Failure(error.0.clone()), Done));
+                .insert((Failure(error.to_string()), Done));
         } else if guard.is_some() {
             commands
                 .entity(entity)
@@ -136,19 +135,18 @@ fn lease(
             let store = store.clone();
             commands.entity(entity).insert((
                 AcquiredLease,
-                Busy,
-                IoTask(IoTaskPool::get().spawn(async move {
-                    Ok(StoreLease {
+                IoTask::spawn(async move {
+                    Ok::<_, String>(StoreLease {
                         _lease: store.lease_async().await,
                     })
-                })),
+                }),
             ));
         }
     }
 }
 
 fn migrate(
-    requests: Query<(Entity, &MigrationResult), (With<Active>, With<Migrate>, Without<Busy>)>,
+    requests: Query<(Entity, &MigrationResult), (With<Active>, With<Migrate>, Idle)>,
     mut commands: Commands,
 ) {
     for (entity, result) in &requests {
@@ -174,19 +172,18 @@ fn read(
         (
             With<Active>,
             With<Read>,
-            Without<Busy>,
+            Idle,
             Without<ManifestBytes>,
-            Without<Failed<ManifestBytes>>,
+            Without<TaskError<ManifestBytes>>,
         ),
     >,
     mut commands: Commands,
 ) {
     for (entity, paths) in &requests {
         let paths = paths.clone();
-        commands.entity(entity).insert((
-            Busy,
-            IoTask(IoTaskPool::get().spawn(async move { paths.read_manifest() })),
-        ));
+        commands
+            .entity(entity)
+            .insert(IoTask::spawn(async move { paths.read_manifest() }));
     }
 }
 
@@ -195,15 +192,15 @@ fn decode(
         (
             Entity,
             Option<&ManifestBytes>,
-            Option<&Failed<ManifestBytes>>,
+            Option<&TaskError<ManifestBytes>>,
         ),
-        (With<Active>, With<Read>, Without<Busy>),
+        (With<Active>, With<Read>, Idle),
     >,
     mut commands: Commands,
 ) {
     for (entity, bytes, failure) in &requests {
         let result = match (bytes, failure) {
-            (_, Some(failure)) => Err(failure.0.clone()),
+            (_, Some(failure)) => Err(failure.to_string()),
             (Some(bytes), _) => match &bytes.0 {
                 Some(bytes) => {
                     toml::from_str::<ToolsManifest>(bytes).map_err(|error| error.to_string())
@@ -214,7 +211,7 @@ fn decode(
         };
         commands
             .entity(entity)
-            .remove::<(Read, ManifestBytes, Failed<ManifestBytes>)>();
+            .remove::<(Read, ManifestBytes, TaskError<ManifestBytes>)>();
         match result {
             Ok(mut manifest) => {
                 if manifest.version != ToolsManifest::default().version {
@@ -240,30 +237,21 @@ fn decode(
 }
 
 fn brewfile(
-    requests: Query<
-        (Entity, &Paths),
-        (
-            With<Active>,
-            With<ReadBrewfile>,
-            Without<Busy>,
-            Without<Brewfile>,
-        ),
-    >,
+    requests: Query<(Entity, &Paths), (With<Active>, With<ReadBrewfile>, Idle, Without<Brewfile>)>,
     mut commands: Commands,
 ) {
     for (entity, paths) in &requests {
         let paths = paths.clone();
-        commands.entity(entity).insert((
-            Busy,
-            IoTask(IoTaskPool::get().spawn(async move { paths.read_brewfile() })),
-        ));
+        commands
+            .entity(entity)
+            .insert(IoTask::spawn(async move { paths.read_brewfile() }));
     }
 }
 
 fn reconcile(
     mut requests: Query<
         (Entity, &Brewfile, &mut Manifest),
-        (With<Active>, With<ReadBrewfile>, Without<Busy>),
+        (With<Active>, With<ReadBrewfile>, Idle),
     >,
     mut commands: Commands,
 ) {
@@ -306,9 +294,9 @@ fn write(
             &Manifest,
             &Brewfile,
             Option<&BrewfileWritten>,
-            Option<&Failed<BrewfileWritten>>,
+            Option<&TaskError<BrewfileWritten>>,
         ),
-        (With<Active>, With<WriteBrewfile>, Without<Busy>),
+        (With<Active>, With<WriteBrewfile>, Idle),
     >,
     mut commands: Commands,
 ) {
@@ -316,7 +304,7 @@ fn write(
         if let Some(failure) = failure {
             commands
                 .entity(entity)
-                .insert((Failure(failure.0.clone()), Done))
+                .insert((Failure(failure.to_string()), Done))
                 .remove::<WriteBrewfile>();
             continue;
         }
@@ -338,10 +326,9 @@ fn write(
         } else {
             let source = brewfile.merge(&formulae, &casks);
             let paths = paths.clone();
-            commands.entity(entity).insert((
-                Busy,
-                IoTask(IoTaskPool::get().spawn(async move { paths.write_brewfile(source) })),
-            ));
+            commands
+                .entity(entity)
+                .insert(IoTask::spawn(async move { paths.write_brewfile(source) }));
         }
     }
 }
@@ -355,7 +342,7 @@ fn finish(
             Option<&Failure>,
             Has<AcquiredLease>,
         ),
-        (With<Active>, With<Done>, Without<Busy>),
+        (With<Active>, With<Done>, Idle),
     >,
     mut commands: Commands,
     retained: Query<(), With<RetainedHere>>,
@@ -388,8 +375,10 @@ fn finish(
                 MigrationResult,
                 Failure,
             )>();
-        commands
-            .entity(entity)
-            .remove::<(BrewfileWritten, Failed<BrewfileWritten>, Failed<StoreLease>)>();
+        commands.entity(entity).remove::<(
+            BrewfileWritten,
+            TaskError<BrewfileWritten>,
+            TaskError<StoreLease>,
+        )>();
     }
 }

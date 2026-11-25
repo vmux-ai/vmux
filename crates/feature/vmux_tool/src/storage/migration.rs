@@ -1,8 +1,8 @@
 use bevy::prelude::*;
-use bevy::tasks::IoTaskPool;
+use vmux_ecs::{IoTask, TaskError};
 
 use super::native::{MovePaths, Moved, Paths, Probe};
-use super::{Busy, Failed, IoTask, StoreLease};
+use super::{Idle, StoreLease};
 
 pub(super) struct MigrationPlugin;
 
@@ -41,7 +41,7 @@ struct Rename;
 struct Done;
 
 fn cancel(
-    requests: Query<(Entity, &vmux_ecs::OperationState), (With<MigrationRequest>, Without<Busy>)>,
+    requests: Query<(Entity, &vmux_ecs::OperationState), (With<MigrationRequest>, Idle)>,
     mut commands: Commands,
 ) {
     for (entity, state) in &requests {
@@ -63,8 +63,8 @@ fn cancel(
                 Moved,
                 Directory,
                 Done,
-                Failed<Moved>,
-                Failed<Probe>,
+                TaskError<Moved>,
+                TaskError<Probe>,
             )>()
             .insert(MigrationResult(Err(
                 "tool storage migration canceled".into()
@@ -91,25 +91,21 @@ fn begin(
 }
 
 fn probe(
-    requests: Query<
-        (Entity, &MovePaths),
-        (With<Active>, With<Inspect>, Without<Probe>, Without<Busy>),
-    >,
+    requests: Query<(Entity, &MovePaths), (With<Active>, With<Inspect>, Without<Probe>, Idle)>,
     mut commands: Commands,
 ) {
     for (entity, paths) in &requests {
         let paths = paths.clone();
-        commands.entity(entity).insert((
-            Busy,
-            IoTask(IoTaskPool::get().spawn(async move { paths.probe() })),
-        ));
+        commands
+            .entity(entity)
+            .insert(IoTask::spawn(async move { paths.probe() }));
     }
 }
 
 fn decide(
     requests: Query<
-        (Entity, &MovePaths, &Probe, Option<&Failed<Moved>>),
-        (With<Active>, With<Inspect>, Without<Busy>),
+        (Entity, &MovePaths, &Probe, Option<&TaskError<Moved>>),
+        (With<Active>, With<Inspect>, Idle),
     >,
     mut commands: Commands,
 ) {
@@ -120,7 +116,7 @@ fn decide(
             } else {
                 commands
                     .entity(entity)
-                    .insert(MigrationResult(Err(failure.0.clone())))
+                    .insert(MigrationResult(Err(failure.to_string())))
                     .remove::<(
                         Active,
                         MigrationRequest,
@@ -128,7 +124,7 @@ fn decide(
                         MovePaths,
                         Probe,
                         Directory,
-                        Failed<Moved>,
+                        TaskError<Moved>,
                     )>();
             }
         } else if probe.source && probe.destination {
@@ -160,8 +156,13 @@ fn decide(
 
 fn rename(
     requests: Query<
-        (Entity, &MovePaths, Option<&Moved>, Option<&Failed<Moved>>),
-        (With<Active>, With<Rename>, Without<Busy>),
+        (
+            Entity,
+            &MovePaths,
+            Option<&Moved>,
+            Option<&TaskError<Moved>>,
+        ),
+        (With<Active>, With<Rename>, Idle),
     >,
     mut commands: Commands,
 ) {
@@ -175,16 +176,15 @@ fn rename(
                 .remove::<(Rename, Probe)>();
         } else {
             let paths = paths.clone();
-            commands.entity(entity).insert((
-                Busy,
-                IoTask(IoTaskPool::get().spawn(async move { paths.rename() })),
-            ));
+            commands
+                .entity(entity)
+                .insert(IoTask::spawn(async move { paths.rename() }));
         }
     }
 }
 
 fn advance(
-    requests: Query<(Entity, &Paths, Has<Directory>), (With<Active>, With<Done>, Without<Busy>)>,
+    requests: Query<(Entity, &Paths, Has<Directory>), (With<Active>, With<Done>, Idle)>,
     mut commands: Commands,
 ) {
     for (entity, paths, directory) in &requests {
@@ -192,7 +192,7 @@ fn advance(
             Done,
             Moved,
             Probe,
-            Failed<Moved>,
+            TaskError<Moved>,
             Inspect,
             Rename,
             Directory,

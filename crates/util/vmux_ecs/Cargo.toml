@@ -19,6 +19,7 @@ host = [
     "contracts",
     "store",
     "dep:tokio",
+    "vmux_task/tokio",
     "dep:vmux_path",
     "dep:vmux_profile",
     "dep:vmux_transport",

@@ -1,15 +1,14 @@
 use bevy::prelude::*;
-use bevy::tasks::IoTaskPool;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use vmux_ecs::{IoTask, TaskError};
 
 use super::migration::{MigrationRequest, MigrationResult};
 use super::native::{Brewfile, BrewfileWritten, ManifestWritten, Paths};
 use super::{
-    AcquiredLease, Busy, Failed, Failure, IoTask, RetainedHere, StoreLease, ToolStore,
-    ToolsManifest, Writing,
+    AcquiredLease, Failure, Idle, RetainedHere, StoreLease, ToolStore, ToolsManifest, Writing,
 };
 
 pub(super) struct WritePlugin;
@@ -75,7 +74,7 @@ struct Done;
 fn cancel(
     requests: Query<
         (Entity, &vmux_ecs::OperationState, Has<Active>),
-        (With<WriteRequest>, Without<Busy>, Without<MigrationRequest>),
+        (With<WriteRequest>, Idle, Without<MigrationRequest>),
     >,
     mut commands: Commands,
 ) {
@@ -135,9 +134,9 @@ fn lease(
             Entity,
             Option<&ToolStore>,
             Option<&StoreLease>,
-            Option<&Failed<StoreLease>>,
+            Option<&TaskError<StoreLease>>,
         ),
-        (With<Active>, With<Acquire>, Without<Busy>),
+        (With<Active>, With<Acquire>, Idle),
     >,
     mut commands: Commands,
 ) {
@@ -153,7 +152,7 @@ fn lease(
             commands
                 .entity(entity)
                 .remove::<Acquire>()
-                .insert((Failure(error.0.clone()), Done));
+                .insert((Failure(error.to_string()), Done));
         } else if guard.is_some() {
             commands
                 .entity(entity)
@@ -163,19 +162,18 @@ fn lease(
             let store = store.clone();
             commands.entity(entity).insert((
                 AcquiredLease,
-                Busy,
-                IoTask(IoTaskPool::get().spawn(async move {
-                    Ok(StoreLease {
+                IoTask::spawn(async move {
+                    Ok::<_, String>(StoreLease {
                         _lease: store.lease_async().await,
                     })
-                })),
+                }),
             ));
         }
     }
 }
 
 fn migrate(
-    requests: Query<(Entity, &MigrationResult), (With<Active>, With<Migrate>, Without<Busy>)>,
+    requests: Query<(Entity, &MigrationResult), (With<Active>, With<Migrate>, Idle)>,
     mut commands: Commands,
 ) {
     for (entity, result) in &requests {
@@ -204,9 +202,9 @@ fn manifest(
             &ManifestReceipt,
             Has<ManifestOnly>,
             Option<&ManifestWritten>,
-            Option<&Failed<ManifestWritten>>,
+            Option<&TaskError<ManifestWritten>>,
         ),
-        (With<Active>, With<WriteManifest>, Without<Busy>),
+        (With<Active>, With<WriteManifest>, Idle),
     >,
     mut commands: Commands,
 ) {
@@ -215,7 +213,7 @@ fn manifest(
             commands
                 .entity(entity)
                 .remove::<WriteManifest>()
-                .insert((Failure(failure.0.clone()), Done));
+                .insert((Failure(failure.to_string()), Done));
         } else if written.is_some() {
             let mut entity = commands.entity(entity);
             entity.remove::<WriteManifest>();
@@ -240,34 +238,22 @@ fn manifest(
             };
             let paths = paths.clone();
             let receipt = receipt.clone();
-            commands.entity(entity).insert((
-                Busy,
-                IoTask(
-                    IoTaskPool::get().spawn(async move { paths.write_manifest(source, receipt) }),
-                ),
-            ));
+            commands.entity(entity).insert(IoTask::spawn(async move {
+                paths.write_manifest(source, receipt)
+            }));
         }
     }
 }
 
 fn brewfile(
-    requests: Query<
-        (Entity, &Paths),
-        (
-            With<Active>,
-            With<ReadBrewfile>,
-            Without<Busy>,
-            Without<Brewfile>,
-        ),
-    >,
+    requests: Query<(Entity, &Paths), (With<Active>, With<ReadBrewfile>, Idle, Without<Brewfile>)>,
     mut commands: Commands,
 ) {
     for (entity, paths) in &requests {
         let paths = paths.clone();
-        commands.entity(entity).insert((
-            Busy,
-            IoTask(IoTaskPool::get().spawn(async move { paths.read_brewfile() })),
-        ));
+        commands
+            .entity(entity)
+            .insert(IoTask::spawn(async move { paths.read_brewfile() }));
     }
 }
 
@@ -279,12 +265,12 @@ fn write(
             &WriteRequest,
             &Brewfile,
             Option<&BrewfileWritten>,
-            Option<&Failed<BrewfileWritten>>,
+            Option<&TaskError<BrewfileWritten>>,
             Option<&BrewfileTemplate>,
         ),
         (
             With<Active>,
-            Without<Busy>,
+            Idle,
             Or<(With<ReadBrewfile>, With<WriteBrewfile>)>,
         ),
     >,
@@ -296,7 +282,7 @@ fn write(
             commands
                 .entity(entity)
                 .remove::<WriteBrewfile>()
-                .insert((Failure(failure.0.clone()), Done));
+                .insert((Failure(failure.to_string()), Done));
             continue;
         }
         let formulae = request
@@ -328,8 +314,7 @@ fn write(
             let paths = paths.clone();
             commands.entity(entity).insert((
                 WriteBrewfile,
-                Busy,
-                IoTask(IoTaskPool::get().spawn(async move { paths.write_brewfile(source) })),
+                IoTask::spawn(async move { paths.write_brewfile(source) }),
             ));
         }
     }
@@ -338,7 +323,7 @@ fn write(
 fn finish(
     requests: Query<
         (Entity, &WriteRequest, Option<&Failure>, Has<AcquiredLease>),
-        (With<Active>, With<Done>, Without<Busy>),
+        (With<Active>, With<Done>, Idle),
     >,
     mut commands: Commands,
     retained: Query<(), With<RetainedHere>>,
@@ -374,9 +359,9 @@ fn finish(
         commands.entity(entity).remove::<(
             BrewfileWritten,
             ManifestWritten,
-            Failed<BrewfileWritten>,
-            Failed<ManifestWritten>,
-            Failed<StoreLease>,
+            TaskError<BrewfileWritten>,
+            TaskError<ManifestWritten>,
+            TaskError<StoreLease>,
         )>();
     }
 }

@@ -5,10 +5,15 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
+[features]
+default = []
+tokio = ["dep:tokio"]
+
 [dependencies]
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_tasks = { workspace = true, features = ["multi_threaded", "async_executor"] }
+tokio = { workspace = true, optional = true }
 uuid = { workspace = true }
 
 [lints]

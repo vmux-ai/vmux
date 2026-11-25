@@ -1,8 +1,6 @@
 use bevy::prelude::*;
-use bevy::tasks::IoTaskPool;
 use std::path::PathBuf;
-
-use super::{Busy, Failed, IoTask};
+use vmux_ecs::{IoTask, TaskError};
 
 pub(super) struct FileReadPlugin;
 
@@ -27,9 +25,9 @@ fn read(
             Entity,
             &FileReadRequest,
             Option<&FileBytes>,
-            Option<&Failed<FileBytes>>,
+            Option<&TaskError<FileBytes>>,
         ),
-        Without<Busy>,
+        Without<IoTask<FileBytes>>,
     >,
     mut commands: Commands,
 ) {
@@ -42,18 +40,15 @@ fn read(
         } else if let Some(error) = error {
             commands
                 .entity(entity)
-                .insert(FileReadResult(Err(error.0.clone())))
-                .remove::<(FileReadRequest, Failed<FileBytes>)>();
+                .insert(FileReadResult(Err(error.to_string())))
+                .remove::<(FileReadRequest, TaskError<FileBytes>)>();
         } else {
             let path = request.0.clone();
-            commands.entity(entity).insert((
-                Busy,
-                IoTask(IoTaskPool::get().spawn(async move {
-                    std::fs::read_to_string(path)
-                        .map(FileBytes)
-                        .map_err(|error| error.to_string())
-                })),
-            ));
+            commands.entity(entity).insert(IoTask::spawn(async move {
+                std::fs::read_to_string(path)
+                    .map(FileBytes)
+                    .map_err(|error| error.to_string())
+            }));
         }
     }
 }

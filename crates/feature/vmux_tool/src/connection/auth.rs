@@ -6,38 +6,32 @@ use super::{McpAuthorizationUrl, McpCatalogServer, McpCompletion, PendingMcpOper
 use crate::storage::{ReadRequest, ReadResult, StoreLease, WriteRequest, WriteResult};
 use crate::{ToolStore, ToolsManifest};
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task};
 use ring::digest::{SHA256, digest};
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use vmux_ecs::profile::McpCredentials;
-use vmux_ecs::{EntityTarget, OperationCompleted};
+use vmux_ecs::{EntityTarget, IoTask, IoTaskPlugin, IoTaskSet, OperationCompleted, TaskError};
 use vmux_profile::mcp_credentials::{McpCredentialTransaction, McpOauthCredentials};
 
 pub(super) struct AuthPlugin;
 
 impl Plugin for AuthPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, begin.before(AuthSet))
-            .add_systems(
-                PostUpdate,
-                (
-                    poll::<CallbackListener>,
-                    poll::<Http>,
-                    poll::<ProtectedResource>,
-                    poll::<AuthorizationServer>,
-                    poll::<ClientRegistration>,
-                    poll::<Code>,
-                    poll::<TokenResponse>,
-                    poll::<StoreLease>,
-                    poll::<CredentialLease>,
-                    poll::<OriginalCredential>,
-                    poll::<CredentialWritten>,
-                    poll::<CredentialRestored>,
-                ),
-            )
+        app.add_plugins(IoTaskPlugin::<(
+            StoreLease,
+            CallbackListener,
+            Http,
+            ProtectedResource,
+            AuthorizationServer,
+            ClientRegistration,
+            Code,
+            TokenResponse,
+            CredentialLease,
+            OriginalCredential,
+            CredentialWritten,
+            CredentialRestored,
+        )>::default())
+            .configure_sets(Update, IoTaskSet::all().before(AuthSet))
+            .add_systems(Update, begin.before(AuthSet))
             .add_systems(
                 Update,
                 (
@@ -108,46 +102,27 @@ enum Phase {
     Complete,
 }
 
-#[derive(Component)]
-struct Busy;
-
-#[derive(Component)]
-struct IoTask<T: Component>(Task<Result<T, String>>);
-
-#[derive(Component)]
-struct Failed<T: Component>(String, std::marker::PhantomData<fn() -> T>);
+type Idle = (
+    (
+        Without<IoTask<CallbackListener>>,
+        Without<IoTask<Http>>,
+        Without<IoTask<ProtectedResource>>,
+        Without<IoTask<AuthorizationServer>>,
+        Without<IoTask<ClientRegistration>>,
+        Without<IoTask<Code>>,
+    ),
+    (
+        Without<IoTask<TokenResponse>>,
+        Without<IoTask<StoreLease>>,
+        Without<IoTask<CredentialLease>>,
+        Without<IoTask<OriginalCredential>>,
+        Without<IoTask<CredentialWritten>>,
+        Without<IoTask<CredentialRestored>>,
+    ),
+);
 
 #[derive(Component)]
 struct PrimaryFailure(String);
-
-fn poll<T: Component>(
-    mut tasks: Query<(Entity, &mut IoTask<T>)>,
-    wake: Option<Res<vmux_ecs::JobWake>>,
-    mut commands: Commands,
-) {
-    let waker = wake
-        .as_deref()
-        .map(|wake| &wake.0)
-        .unwrap_or(std::task::Waker::noop());
-    let mut context = Context::from_waker(waker);
-    for (entity, mut task) in &mut tasks {
-        let Poll::Ready(result) = Pin::new(&mut task.0).poll(&mut context) else {
-            continue;
-        };
-        waker.wake_by_ref();
-        commands.entity(entity).remove::<(IoTask<T>, Busy)>();
-        match result {
-            Ok(result) => {
-                commands.entity(entity).insert(result);
-            }
-            Err(error) => {
-                commands
-                    .entity(entity)
-                    .insert(Failed::<T>(error, std::marker::PhantomData));
-            }
-        }
-    }
-}
 
 type BeginRequests<'w, 's> = Query<
     'w,
@@ -233,7 +208,7 @@ fn inspect(
             Option<&ReadResult>,
             Option<&ReadRequest>,
         ),
-        (With<Active>, Without<Busy>),
+        (With<Active>, Idle),
     >,
     mut commands: Commands,
 ) {
@@ -281,9 +256,9 @@ type BindRequests<'w, 's> = Query<
         Entity,
         &'static PhaseState,
         Option<&'static CallbackListener>,
-        Option<&'static Failed<CallbackListener>>,
+        Option<&'static TaskError<CallbackListener>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn bind(requests: BindRequests<'_, '_>, mut commands: Commands) {
@@ -292,14 +267,16 @@ fn bind(requests: BindRequests<'_, '_>, mut commands: Commands) {
             continue;
         }
         if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
+            commands.entity(entity).insert((
+                PrimaryFailure(error.to_string()),
+                PhaseState(Phase::Complete),
+            ));
         } else if result.is_some() {
             commands.entity(entity).insert(PhaseState(Phase::Client));
         } else {
-            let task = IoTaskPool::get().spawn(async { CallbackListener::bind() });
-            commands.entity(entity).insert((Busy, IoTask(task)));
+            commands
+                .entity(entity)
+                .insert(IoTask::spawn(async { CallbackListener::bind() }));
         }
     }
 }
@@ -311,9 +288,9 @@ type ClientRequests<'w, 's> = Query<
         Entity,
         &'static PhaseState,
         Option<&'static Http>,
-        Option<&'static Failed<Http>>,
+        Option<&'static TaskError<Http>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn client(requests: ClientRequests<'_, '_>, mut commands: Commands) {
@@ -322,14 +299,16 @@ fn client(requests: ClientRequests<'_, '_>, mut commands: Commands) {
             continue;
         }
         if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
+            commands.entity(entity).insert((
+                PrimaryFailure(error.to_string()),
+                PhaseState(Phase::Complete),
+            ));
         } else if result.is_some() {
             commands.entity(entity).insert(PhaseState(Phase::Protected));
         } else {
-            let task = IoTaskPool::get().spawn(async { Http::new() });
-            commands.entity(entity).insert((Busy, IoTask(task)));
+            commands
+                .entity(entity)
+                .insert(IoTask::spawn(async { Http::new() }));
         }
     }
 }
@@ -343,9 +322,9 @@ type ProtectedRequests<'w, 's> = Query<
         &'static Http,
         &'static McpCatalogServer,
         Option<&'static ProtectedResource>,
-        Option<&'static Failed<ProtectedResource>>,
+        Option<&'static TaskError<ProtectedResource>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn protected(requests: ProtectedRequests<'_, '_>, mut commands: Commands) {
@@ -354,9 +333,10 @@ fn protected(requests: ProtectedRequests<'_, '_>, mut commands: Commands) {
             continue;
         }
         if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
+            commands.entity(entity).insert((
+                PrimaryFailure(error.to_string()),
+                PhaseState(Phase::Complete),
+            ));
         } else if result.is_some() {
             commands
                 .entity(entity)
@@ -364,8 +344,9 @@ fn protected(requests: ProtectedRequests<'_, '_>, mut commands: Commands) {
         } else {
             let http = http.clone();
             let resource = server.url.clone();
-            let task = IoTaskPool::get().spawn(async move { http.protected_metadata(&resource) });
-            commands.entity(entity).insert((Busy, IoTask(task)));
+            commands.entity(entity).insert(IoTask::spawn(async move {
+                http.protected_metadata(&resource)
+            }));
         }
     }
 }
@@ -379,9 +360,9 @@ type AuthorizationRequests<'w, 's> = Query<
         &'static Http,
         &'static ProtectedResource,
         Option<&'static AuthorizationServer>,
-        Option<&'static Failed<AuthorizationServer>>,
+        Option<&'static TaskError<AuthorizationServer>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn authorization(requests: AuthorizationRequests<'_, '_>, mut commands: Commands) {
@@ -390,9 +371,10 @@ fn authorization(requests: AuthorizationRequests<'_, '_>, mut commands: Commands
             continue;
         }
         if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
+            commands.entity(entity).insert((
+                PrimaryFailure(error.to_string()),
+                PhaseState(Phase::Complete),
+            ));
             continue;
         }
         if result.is_some() {
@@ -408,8 +390,9 @@ fn authorization(requests: AuthorizationRequests<'_, '_>, mut commands: Commands
         };
         let issuer = issuer.clone();
         let http = http.clone();
-        let task = IoTaskPool::get().spawn(async move { http.authorization_metadata(&issuer) });
-        commands.entity(entity).insert((Busy, IoTask(task)));
+        commands.entity(entity).insert(IoTask::spawn(async move {
+            http.authorization_metadata(&issuer)
+        }));
     }
 }
 
@@ -423,9 +406,9 @@ type RegisterRequests<'w, 's> = Query<
         &'static AuthorizationServer,
         &'static CallbackListener,
         Option<&'static ClientRegistration>,
-        Option<&'static Failed<ClientRegistration>>,
+        Option<&'static TaskError<ClientRegistration>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn register(requests: RegisterRequests<'_, '_>, mut commands: Commands) {
@@ -434,18 +417,19 @@ fn register(requests: RegisterRequests<'_, '_>, mut commands: Commands) {
             continue;
         }
         if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
+            commands.entity(entity).insert((
+                PrimaryFailure(error.to_string()),
+                PhaseState(Phase::Complete),
+            ));
         } else if result.is_some() {
             commands.entity(entity).insert(PhaseState(Phase::Consent));
         } else {
             let http = http.clone();
             let authorization = authorization.clone();
             let redirect = callback.redirect.clone();
-            let task =
-                IoTaskPool::get().spawn(async move { http.register(&authorization, &redirect) });
-            commands.entity(entity).insert((Busy, IoTask(task)));
+            commands.entity(entity).insert(IoTask::spawn(async move {
+                http.register(&authorization, &redirect)
+            }));
         }
     }
 }
@@ -492,7 +476,7 @@ type ConsentRequests<'w, 's> = Query<
         &'static ClientRegistration,
         &'static CallbackListener,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn consent(requests: ConsentRequests<'_, '_>, mut commands: Commands) {
@@ -556,9 +540,9 @@ type CallbackRequests<'w, 's> = Query<
         &'static Pkce,
         &'static CallbackState,
         Option<&'static Code>,
-        Option<&'static Failed<Code>>,
+        Option<&'static TaskError<Code>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn callback(requests: CallbackRequests<'_, '_>, mut commands: Commands) {
@@ -574,9 +558,10 @@ fn callback(requests: CallbackRequests<'_, '_>, mut commands: Commands) {
             continue;
         }
         if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
+            commands.entity(entity).insert((
+                PrimaryFailure(error.to_string()),
+                PhaseState(Phase::Complete),
+            ));
         } else if result.is_some_and(|result| result.0.is_some()) {
             commands.entity(entity).insert(PhaseState(Phase::Exchange));
         } else {
@@ -596,14 +581,13 @@ fn callback(requests: CallbackRequests<'_, '_>, mut commands: Commands) {
                 }
             };
             let state = state.clone();
-            let task = IoTaskPool::get().spawn(async move {
-                std::thread::sleep(delay);
-                listener.receive_once(&state).map(Code)
-            });
             commands
                 .entity(entity)
                 .remove::<Code>()
-                .insert((Busy, IoTask(task)));
+                .insert(IoTask::spawn(async move {
+                    std::thread::sleep(delay);
+                    listener.receive_once(&state).map(Code)
+                }));
         }
     }
 }
@@ -622,9 +606,9 @@ type ExchangeRequests<'w, 's> = Query<
         &'static Code,
         &'static McpCatalogServer,
         Option<&'static TokenResponse>,
-        Option<&'static Failed<TokenResponse>>,
+        Option<&'static TaskError<TokenResponse>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn exchange(requests: ExchangeRequests<'_, '_>, mut commands: Commands) {
@@ -646,9 +630,10 @@ fn exchange(requests: ExchangeRequests<'_, '_>, mut commands: Commands) {
             continue;
         }
         if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
+            commands.entity(entity).insert((
+                PrimaryFailure(error.to_string()),
+                PhaseState(Phase::Complete),
+            ));
         } else if result.is_some() {
             commands.entity(entity).insert(PhaseState(Phase::StoreLock));
         } else {
@@ -659,7 +644,7 @@ fn exchange(requests: ExchangeRequests<'_, '_>, mut commands: Commands) {
             let verifier = pkce.verifier.clone();
             let code = code.0.as_ref().unwrap().clone();
             let resource = server.url.clone();
-            let task = IoTaskPool::get().spawn(async move {
+            commands.entity(entity).insert(IoTask::spawn(async move {
                 http.exchange(
                     &authorization.token_endpoint,
                     &registration,
@@ -668,8 +653,7 @@ fn exchange(requests: ExchangeRequests<'_, '_>, mut commands: Commands) {
                     &redirect,
                     &resource,
                 )
-            });
-            commands.entity(entity).insert((Busy, IoTask(task)));
+            }));
         }
     }
 }
@@ -698,9 +682,9 @@ type StoreLockRequests<'w, 's> = Query<
         &'static PhaseState,
         &'static ToolStore,
         Option<&'static StoreLease>,
-        Option<&'static Failed<StoreLease>>,
+        Option<&'static TaskError<StoreLease>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn store_lock(requests: StoreLockRequests<'_, '_>, mut commands: Commands) {
@@ -709,21 +693,21 @@ fn store_lock(requests: StoreLockRequests<'_, '_>, mut commands: Commands) {
             continue;
         }
         if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
+            commands.entity(entity).insert((
+                PrimaryFailure(error.to_string()),
+                PhaseState(Phase::Complete),
+            ));
         } else if result.is_some() {
             commands
                 .entity(entity)
                 .insert(PhaseState(Phase::CredentialLock));
         } else {
             let store = store.clone();
-            let task = IoTaskPool::get().spawn(async move {
-                Ok(StoreLease {
+            commands.entity(entity).insert(IoTask::spawn(async move {
+                Ok::<_, String>(StoreLease {
                     _lease: store.lease_async().await,
                 })
-            });
-            commands.entity(entity).insert((Busy, IoTask(task)));
+            }));
         }
     }
 }
@@ -736,9 +720,9 @@ type CredentialLockRequests<'w, 's> = Query<
         &'static PhaseState,
         &'static Credentials,
         Option<&'static CredentialLease>,
-        Option<&'static Failed<CredentialLease>>,
+        Option<&'static TaskError<CredentialLease>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn credential_lock(requests: CredentialLockRequests<'_, '_>, mut commands: Commands) {
@@ -747,22 +731,22 @@ fn credential_lock(requests: CredentialLockRequests<'_, '_>, mut commands: Comma
             continue;
         }
         if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
+            commands.entity(entity).insert((
+                PrimaryFailure(error.to_string()),
+                PhaseState(Phase::Complete),
+            ));
         } else if result.is_some() {
             commands
                 .entity(entity)
                 .insert(PhaseState(Phase::OriginalManifest));
         } else {
             let access = credentials.0.access.clone();
-            let task = IoTaskPool::get().spawn(async move {
+            commands.entity(entity).insert(IoTask::spawn(async move {
                 access
                     .transaction()
                     .await
                     .map(|lease| CredentialLease { _lease: lease })
-            });
-            commands.entity(entity).insert((Busy, IoTask(task)));
+            }));
         }
     }
 }
@@ -775,7 +759,7 @@ fn original_manifest(
             Option<&ReadResult>,
             Option<&ReadRequest>,
         ),
-        (With<Active>, Without<Busy>),
+        (With<Active>, Idle),
     >,
     mut commands: Commands,
 ) {
@@ -815,9 +799,9 @@ type OriginalCredentialRequests<'w, 's> = Query<
         &'static Source,
         &'static Credentials,
         Option<&'static OriginalCredential>,
-        Option<&'static Failed<OriginalCredential>>,
+        Option<&'static TaskError<OriginalCredential>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn original_credential(requests: OriginalCredentialRequests<'_, '_>, mut commands: Commands) {
@@ -826,17 +810,18 @@ fn original_credential(requests: OriginalCredentialRequests<'_, '_>, mut command
             continue;
         }
         if let Some(error) = error {
-            commands
-                .entity(entity)
-                .insert((PrimaryFailure(error.0.clone()), PhaseState(Phase::Complete)));
+            commands.entity(entity).insert((
+                PrimaryFailure(error.to_string()),
+                PhaseState(Phase::Complete),
+            ));
         } else if result.is_some() {
             commands.entity(entity).insert(PhaseState(Phase::Prepare));
         } else {
             let id = source.id.clone();
             let storage = credentials.0.storage.clone();
-            let task =
-                IoTaskPool::get().spawn(async move { storage.load(&id).map(OriginalCredential) });
-            commands.entity(entity).insert((Busy, IoTask(task)));
+            commands.entity(entity).insert(IoTask::spawn(async move {
+                storage.load(&id).map(OriginalCredential)
+            }));
         }
     }
 }
@@ -854,7 +839,7 @@ type PrepareCommitRequests<'w, 's> = Query<
         Option<&'static ClientRegistration>,
         Option<&'static TokenResponse>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn prepare_commit(
@@ -923,9 +908,9 @@ type CredentialWriteRequests<'w, 's> = Query<
         &'static Credentials,
         &'static ProposedCredential,
         Option<&'static CredentialWritten>,
-        Option<&'static Failed<CredentialWritten>>,
+        Option<&'static TaskError<CredentialWritten>>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn credential_write(requests: CredentialWriteRequests<'_, '_>, mut commands: Commands) {
@@ -935,7 +920,7 @@ fn credential_write(requests: CredentialWriteRequests<'_, '_>, mut commands: Com
         }
         if let Some(error) = error {
             commands.entity(entity).insert((
-                PrimaryFailure(error.0.clone()),
+                PrimaryFailure(error.to_string()),
                 PhaseState(Phase::CredentialRollback),
             ));
         } else if result.is_some() {
@@ -946,9 +931,9 @@ fn credential_write(requests: CredentialWriteRequests<'_, '_>, mut commands: Com
             let id = source.id.clone();
             let storage = credentials.0.storage.clone();
             let proposed = proposed.0.clone();
-            let task = IoTaskPool::get()
-                .spawn(async move { storage.store(&id, &proposed).map(|_| CredentialWritten) });
-            commands.entity(entity).insert((Busy, IoTask(task)));
+            commands.entity(entity).insert(IoTask::spawn(async move {
+                storage.store(&id, &proposed).map(|_| CredentialWritten)
+            }));
         }
     }
 }
@@ -964,7 +949,7 @@ fn manifest_write(
             Option<&WriteResult>,
             Option<&WriteRequest>,
         ),
-        (With<Active>, Without<Busy>),
+        (With<Active>, Idle),
     >,
     mut commands: Commands,
 ) {
@@ -1011,9 +996,9 @@ fn rollback(
             Option<&WriteResult>,
             Option<&WriteRequest>,
             Option<&CredentialRestored>,
-            Option<&Failed<CredentialRestored>>,
+            Option<&TaskError<CredentialRestored>>,
         ),
-        (With<Active>, Without<Busy>),
+        (With<Active>, Idle),
     >,
     mut failures: Query<&mut PrimaryFailure>,
     mut commands: Commands,
@@ -1057,7 +1042,7 @@ fn rollback(
                 {
                     failure
                         .0
-                        .push_str(&format!("; credential rollback failed: {}", error.0));
+                        .push_str(&format!("; credential rollback failed: {error}"));
                 }
                 commands.entity(entity).insert(PhaseState(Phase::Complete));
                 continue;
@@ -1065,14 +1050,13 @@ fn rollback(
             let id = source.id.clone();
             let storage = credentials.0.storage.clone();
             let old = old.0.clone();
-            let task = IoTaskPool::get().spawn(async move {
+            commands.entity(entity).insert(IoTask::spawn(async move {
                 let result = match old {
                     Some(old) => storage.store(&id, &old),
                     None => storage.remove(&id),
                 };
                 result.map(|_| CredentialRestored)
-            });
-            commands.entity(entity).insert((Busy, IoTask(task)));
+            }));
         }
     }
 }
@@ -1086,7 +1070,7 @@ type FinishRequests<'w, 's> = Query<
         &'static Source,
         Option<&'static PrimaryFailure>,
     ),
-    (With<Active>, Without<Busy>),
+    (With<Active>, Idle),
 >;
 
 fn finish(requests: FinishRequests<'_, '_>, mut commands: Commands) {
@@ -1139,7 +1123,7 @@ fn finish(requests: FinishRequests<'_, '_>, mut commands: Commands) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::tasks::{TaskPoolBuilder, futures_lite::future};
+    use bevy::tasks::{IoTaskPool, TaskPoolBuilder, futures_lite::future};
     use std::io::{Read, Write};
     use vmux_ecs::profile::mcp_credentials::McpCredentialAccess;
     use vmux_ecs::{Operation, OperationRetained, OperationState, OperationTarget};
@@ -1177,14 +1161,14 @@ mod tests {
         let (release, wait) = std::sync::mpsc::channel();
         let operation = app
             .world_mut()
-            .spawn((
-                Busy,
-                IoTask(IoTaskPool::get().spawn(async move {
-                    wait.recv().unwrap();
-                    Ok(CredentialWritten)
-                })),
-            ))
+            .spawn(IoTask::spawn(async move {
+                wait.recv().unwrap();
+                Ok::<_, String>(CredentialWritten)
+            }))
             .id();
+        notified
+            .recv_timeout(Duration::from_secs(3))
+            .expect("registered IO did not wake the idle host");
         app.update();
         assert!(notified.try_recv().is_err());
         release.send(()).unwrap();
@@ -1193,7 +1177,11 @@ mod tests {
             .expect("completed IO did not wake the idle host");
         app.update();
         assert!(app.world().get::<CredentialWritten>(operation).is_some());
-        assert!(app.world().get::<Busy>(operation).is_none());
+        assert!(
+            app.world()
+                .get::<IoTask<CredentialWritten>>(operation)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1459,11 +1447,10 @@ mod tests {
                 CredentialLease {
                     _lease: transaction,
                 },
-                Busy,
-                IoTask(IoTaskPool::get().spawn(async move {
+                IoTask::spawn(async move {
                     wait.recv().unwrap();
-                    Ok(CredentialWritten)
-                })),
+                    Ok::<_, String>(CredentialWritten)
+                }),
             ))
             .id();
         app.world_mut()
