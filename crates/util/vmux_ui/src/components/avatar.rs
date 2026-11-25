@@ -6,7 +6,7 @@ use vmux_api::avatar::IdenticonSpec;
 
 const AVATAR: &str = "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--avatar-background)] font-semibold text-white";
 const AGENT_THUMBNAIL: &str = "[&_img]:size-3/4 [&_img]:object-contain";
-const AGENT_MONOCHROME_REGISTRY: &str = "[&_img]:dark:invert";
+const AGENT_MONO_REGISTRY: &str = "[&_img]:dark:invert";
 const GENERATED_AVATAR_COLORS: [&str; 6] = [
     "#fda4af", "#fdba74", "#fde68a", "#86efac", "#67e8f9", "#c4b5fd",
 ];
@@ -109,16 +109,12 @@ pub fn AgentThumbnail(
     }
     let src = AgentThumbnailSource::resolve(src, &seed);
     let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
-    let monochrome = src
+    let mono = src
         .as_deref()
-        .is_some_and(AgentThumbnailSource::is_monochrome_registry_svg);
+        .is_some_and(AgentThumbnailSource::is_mono_registry_svg);
     let class = cn([
         AGENT_THUMBNAIL,
-        if monochrome {
-            AGENT_MONOCHROME_REGISTRY
-        } else {
-            ""
-        },
+        if mono { AGENT_MONO_REGISTRY } else { "" },
         class.as_str(),
     ]);
     rsx! {
@@ -133,7 +129,7 @@ impl AgentThumbnailSource {
         FaviconSource::agent(seed).or(src)
     }
 
-    fn is_monochrome_registry_svg(src: &str) -> bool {
+    fn is_mono_registry_svg(src: &str) -> bool {
         src.starts_with("https://cdn.agentclientprotocol.com/registry/") && src.ends_with(".svg")
     }
 }
