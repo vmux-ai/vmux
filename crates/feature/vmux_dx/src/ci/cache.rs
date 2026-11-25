@@ -502,12 +502,7 @@ mod tests {
             .set("GITHUB_SHA", fixture.git(&["rev-parse", "HEAD"]));
         let output = Fixture::outputs(&fixture.run("cache-inputs", &[]).unwrap());
         fixture.write(&output["snapshot"], "snapshot");
-        for consumer in [
-            "framework-consumer",
-            "host-consumer",
-            "framework-git-consumer",
-            "host-git-consumer",
-        ] {
+        for consumer in ["sdk-core", "sdk-host", "sdk-core-git", "sdk-host-git"] {
             fixture.write(
                 &format!("target/{consumer}/debug/deps/libdependency.rlib"),
                 "consumer dependency",
@@ -519,12 +514,7 @@ mod tests {
         }
         fixture.run("cache-stage", &["framework"]).unwrap();
         let staging = fixture.root().join(&output["paths"]);
-        for consumer in [
-            "framework-consumer",
-            "host-consumer",
-            "framework-git-consumer",
-            "host-git-consumer",
-        ] {
+        for consumer in ["sdk-core", "sdk-host", "sdk-core-git", "sdk-host-git"] {
             assert!(
                 !staging
                     .join(format!("target/{consumer}/debug/deps/libdependency.rlib"))

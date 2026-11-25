@@ -1,5 +1,5 @@
 [package]
-name = "framework-consumer"
+name = "sdk-core"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -15,13 +15,13 @@ bevy_math = { version = "0.19", default-features = false, features = ["std"] }
 bevy_asset = "0.19"
 bevy_reflect = "0.19"
 moonshine-save = "0.7"
-vmux_app = { path = "../../crates/util/vmux_app", features = ["contracts", "manifest", "hosting", "project", "jobs", "watch", "runner", "http-server", "store", "flex", "layout", "menu", "extension-core", "lsp"] }
-vmux_ecs = { path = "../../crates/util/vmux_ecs", features = ["store", "watch"] }
-vmux_layout = { path = "../../crates/feature/vmux_layout", features = ["store"] }
-vmux_store = { path = "../../crates/util/vmux_store" }
+vmux_app = { path = "../../../crates/util/vmux_app", features = ["contracts", "manifest", "hosting", "project", "jobs", "watch", "runner", "http-server", "store", "flex", "layout", "menu", "extension-core", "lsp"] }
+vmux_ecs = { path = "../../../crates/util/vmux_ecs", features = ["store", "watch"] }
+vmux_layout = { path = "../../../crates/feature/vmux_layout", features = ["store"] }
+vmux_store = { path = "../../../crates/util/vmux_store" }
 
-vmux_extension = { path = "../../crates/feature/vmux_extension" }
-vmux_api = { path = "../../crates/util/vmux_api" }
+vmux_extension = { path = "../../../crates/feature/vmux_extension" }
+vmux_api = { path = "../../../crates/util/vmux_api" }
 
 [dev-dependencies]
 tempfile = "3"

@@ -154,8 +154,8 @@ jobs:
               - 'website/Cargo.toml'
               - 'website/Cargo.lock'
               - 'crates/**'
-              - 'examples/framework-consumer/**'
-              - 'examples/host-consumer/**'
+              - 'tests/sdk/core/**'
+              - 'tests/sdk/host/**'
               - 'cef/**'
               - 'patches/**'
               - 'Cargo.toml'
@@ -538,8 +538,8 @@ jobs:
           VMUX_HOST_NAME: Vmux
           VMUX_HOST_NAMESPACE: ai.vmux
         run: |
-          VMUX_SKIP_DX_BUILD=1 vmux internal --root .vmux/compiler-checkout ecs-lint -- --locked --manifest-path examples/framework-consumer/Cargo.toml --all-targets
-          VMUX_SKIP_DX_BUILD=1 vmux internal --root .vmux/compiler-checkout ecs-lint -- --locked --manifest-path examples/host-consumer/Cargo.toml --all-targets
+          VMUX_SKIP_DX_BUILD=1 vmux internal --root .vmux/compiler-checkout ecs-lint -- --locked --manifest-path tests/sdk/core/Cargo.toml --all-targets
+          VMUX_SKIP_DX_BUILD=1 vmux internal --root .vmux/compiler-checkout ecs-lint -- --locked --manifest-path tests/sdk/host/Cargo.toml --all-targets
       - uses: ./.github/actions/save-sources
         if: github.ref == 'refs/heads/main'
         with:

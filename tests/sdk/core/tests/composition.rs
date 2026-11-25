@@ -1,6 +1,6 @@
 use bevy_app::App;
 use bevy_ecs::prelude::*;
-use framework_consumer::{Document, DocumentId, DocumentsPlugin, RenameRequest};
+use sdk_core::{Document, DocumentId, DocumentsPlugin, RenameRequest};
 use vmux_app::ecs::{Operation, OperationState, Revision};
 use vmux_app::manifest::{
     CompositionPlugin, FeatureManifest, FeatureManifestSource, FeaturePlugin, Profile, Registry,

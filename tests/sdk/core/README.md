@@ -1,4 +1,4 @@
-# Framework consumer
+# SDK core compatibility tests
 
 This independent Cargo workspace exercises the public Vmux SDK without the Vmux renderer,
 Profile, or the repository's Cargo patches. It uses real ECS operations with controllable
@@ -40,4 +40,4 @@ Editor with a controllable transport. The local SDK command and CI also run `vmu
 library tests with default features disabled. Protocol diagnostics without a document version
 cannot identify which edit produced them.
 
-The supported surface and compatibility rules are in the [framework guide](../../docs/dx/framework.md).
+The supported surface and compatibility rules are in the [framework guide](../../../docs/dx/framework.md).

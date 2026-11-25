@@ -147,18 +147,18 @@ fn configure_core(mut requests: ConfigureRequests<'_, '_>, mut io: Io) {
 fn configure_consumer(mut requests: ConfigureRequests<'_, '_>, mut io: Io) {
     for (entity, context, settings, mut sdk) in &mut requests {
         for (suite, name, host) in [
-            ("test-sdk-framework", "framework-consumer", false),
-            ("test-sdk-host", "host-consumer", true),
+            ("test-sdk-framework", "core", false),
+            ("test-sdk-host", "host", true),
         ] {
             if sdk.suite != "test-framework" && sdk.suite != suite {
                 continue;
             }
-            let manifest = format!("examples/{name}/Cargo.toml");
+            let manifest = format!("tests/sdk/{name}/Cargo.toml");
             let target = match settings.0.get("CARGO_TARGET_DIR") {
                 Some(value) => std::path::PathBuf::from(value),
                 None => context.root.join("target"),
             };
-            let target = target.join(name);
+            let target = target.join(format!("sdk-{name}"));
             let Some(target) = target.to_str() else {
                 io.fail(entity, "SDK target must be UTF-8");
                 break;
@@ -321,7 +321,7 @@ mod tests {
         fn new(tree: &str, failure: &str) -> Self {
             let mut fixture = Fixture::new();
             fixture.write("sdk-tree", tree);
-            fixture.write("bin/cargo", format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> cargo-calls\nprintf '%s|%s|%s|%s\\n' \"${{VMUX_HOST_NAME-}}\" \"${{VMUX_HOST_NAMESPACE-}}\" \"${{VMUX_DATA_DIR-unset}}\" \"${{VMUX_TEST-unset}}\" >> environments\n{failure}\nif [ \"$1\" = tree ]; then case \"$*\" in *examples/host-consumer/Cargo.toml*) if [ -f sdk-host-tree ]; then cat sdk-host-tree; else cat sdk-tree; fi ;; *) cat sdk-tree ;; esac; fi\n"));
+            fixture.write("bin/cargo", format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> cargo-calls\nprintf '%s|%s|%s|%s\\n' \"${{VMUX_HOST_NAME-}}\" \"${{VMUX_HOST_NAMESPACE-}}\" \"${{VMUX_DATA_DIR-unset}}\" \"${{VMUX_TEST-unset}}\" >> environments\n{failure}\nif [ \"$1\" = tree ]; then case \"$*\" in *tests/sdk/host/Cargo.toml*) if [ -f sdk-host-tree ]; then cat sdk-host-tree; else cat sdk-tree; fi ;; *) cat sdk-tree ;; esac; fi\n"));
             std::fs::set_permissions(
                 fixture.root().join("bin/cargo"),
                 std::fs::Permissions::from_mode(0o755),
@@ -387,12 +387,12 @@ mod tests {
         assert_eq!(
             consumers,
             [
-                "test --locked --manifest-path examples/framework-consumer/Cargo.toml",
-                "tree --locked --prefix none --format {p} --manifest-path examples/framework-consumer/Cargo.toml",
-                "test --locked --manifest-path examples/host-consumer/Cargo.toml",
-                "test --locked --manifest-path examples/host-consumer/Cargo.toml",
-                "test --locked --manifest-path examples/host-consumer/Cargo.toml",
-                "tree --locked --prefix none --format {p} --manifest-path examples/host-consumer/Cargo.toml",
+                "test --locked --manifest-path tests/sdk/core/Cargo.toml",
+                "tree --locked --prefix none --format {p} --manifest-path tests/sdk/core/Cargo.toml",
+                "test --locked --manifest-path tests/sdk/host/Cargo.toml",
+                "test --locked --manifest-path tests/sdk/host/Cargo.toml",
+                "test --locked --manifest-path tests/sdk/host/Cargo.toml",
+                "tree --locked --prefix none --format {p} --manifest-path tests/sdk/host/Cargo.toml",
             ]
         );
         let failed = SdkFixture::new(

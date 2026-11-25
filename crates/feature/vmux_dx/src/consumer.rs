@@ -43,15 +43,11 @@ impl Consumer {
             return Err("usage: dx test sdk [--host] [--git]".into());
         }
         if host && !git {
-            return self.host(&self.root.join("examples/host-consumer"), None);
+            return self.host(&self.root.join("tests/sdk/host"), None);
         }
         if !git {
             self.core()?;
-            return self.workspace(
-                &self.root.join("examples/framework-consumer"),
-                "framework-consumer",
-                None,
-            );
+            return self.workspace(&self.root.join("tests/sdk/core"), "sdk-core", None);
         }
         let revision = self
             .environment
@@ -68,9 +64,9 @@ impl Consumer {
         };
         let temporary = Temporary::create(&std::env::temp_dir(), "vmux-git-consumer")?;
         let source = self.root.join(if host {
-            "examples/host-consumer"
+            "tests/sdk/host"
         } else {
-            "examples/framework-consumer"
+            "tests/sdk/core"
         });
         if !host {
             Directory::copy(&source.join("src"), &temporary.path().join("src"))?;
@@ -94,15 +90,15 @@ impl Consumer {
         if host {
             return self.host(temporary.path(), Some(&revision));
         }
-        self.workspace(temporary.path(), "framework-git-consumer", Some(&revision))
+        self.workspace(temporary.path(), "sdk-core-git", Some(&revision))
     }
 
     fn host(&self, directory: &Path, revision: Option<&str>) -> Result<()> {
         let manifest = directory.join("Cargo.toml");
         let target = self.target.join(if revision.is_some() {
-            "host-git-consumer"
+            "sdk-host-git"
         } else {
-            "host-consumer"
+            "sdk-host"
         });
         for (name, namespace) in [
             ("Vmux", "ai.vmux"),

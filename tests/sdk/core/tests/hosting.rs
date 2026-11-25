@@ -1,7 +1,7 @@
 use bevy_app::App;
 use bevy_ecs::message::MessageCursor;
 use bevy_ecs::prelude::*;
-use framework_consumer::counter::{Count, CountRequest, NativePlugin};
+use sdk_core::counter::{Count, CountRequest, NativePlugin};
 use vmux_app::VmuxPlugin;
 use vmux_app::ecs::{EffectiveStartupUrl, Ready};
 use vmux_app::manifest::hosting::{
