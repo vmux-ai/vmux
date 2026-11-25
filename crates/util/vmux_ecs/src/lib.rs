@@ -5,7 +5,7 @@ pub use vmux_macro::types;
 
 pub use vmux_channel as channel;
 #[cfg(feature = "store")]
-pub use vmux_macro::store;
+pub use vmux_macro::ecs_store as store;
 pub use vmux_task::{
     AsyncTask, IoTask, IoTaskList, IoTaskPlugin, IoTaskSet, TaskApply, TaskError, TaskFailure,
     TaskPlugin, TaskResult, TaskSet, TaskToken, TaskWake, TaskWaker,
@@ -167,7 +167,19 @@ pub mod service;
 mod shutdown;
 mod status;
 #[cfg(feature = "store")]
-pub mod store;
+pub mod store {
+    pub use crate::workspace_store::{
+        PageRestore, StoreAppExt, StoreDirty, WorkspaceCommitCompleted, WorkspaceCommitRequest,
+        WorkspaceRestore, WorkspaceRestoreValidator, WorkspaceSaveRequest, WorkspaceStore,
+        WorkspaceStoreValidator, WorkspaceStoreValidators, WorkspaceStored,
+    };
+    pub use vmux_store::{
+        App, AutoSave, AutoSavePaused, AutoSavePlugin, AutoSavePolicy, AutoSaveSet, Dirty, Phase,
+        RestoreValidator, Save, Schema, SchemaPlugin, State, StoreDomain, StorePath,
+        StoreValidator, StoreValidators, StoreWriteRequest, StoreWriteResult, TypeRegistry, Types,
+        With, WorldFilter,
+    };
+}
 #[cfg(feature = "contracts")]
 pub mod team;
 #[cfg(all(host, feature = "host"))]
@@ -180,3 +192,5 @@ mod ui_state;
 #[cfg(all(host, feature = "host"))]
 pub mod wake;
 pub mod workspace;
+#[cfg(feature = "store")]
+mod workspace_store;

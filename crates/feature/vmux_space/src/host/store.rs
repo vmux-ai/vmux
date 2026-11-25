@@ -23,7 +23,7 @@ use vmux_ecs::{CreatedAt, EntityTarget, PageMetadata};
 use vmux_ecs::profile::ProfilePaths;
 use vmux_ecs::profile::{ActiveProfile, CurrentProfile, SessionEnvironment};
 use vmux_ecs::store::{
-    AutoSave, AutoSavePaused, AutoSavePlugin, AutoSavePolicy, AutoSaveSet, Phase, State,
+    AutoSave, AutoSavePaused, AutoSavePlugin, AutoSavePolicy, AutoSaveSet, Dirty, Phase, State,
     StoreAppExt, StoreDirty, StorePath, StoreWriteRequest, StoreWriteResult,
     WorkspaceCommitCompleted, WorkspaceCommitRequest, WorkspaceRestore, WorkspaceRestoreValidator,
     WorkspaceSaveRequest, WorkspaceStore, WorkspaceStoreValidators, WorkspaceStored,
@@ -74,6 +74,7 @@ impl Plugin for WorkspaceStorePlugin {
             .add_observer(decoded_snapshot)
             .add_observer(materialized)
             .add_observer(write_autosave)
+            .add_observer(forward_dirty)
             .add_systems(
                 Update,
                 complete_restore
@@ -87,6 +88,10 @@ impl Plugin for WorkspaceStorePlugin {
             .add_systems(Update, track_hierarchy)
             .add_systems(PostUpdate, sync_gate.before(AutoSaveSet::Apply));
     }
+}
+
+fn forward_dirty(_: On<StoreDirty>, mut commands: Commands) {
+    commands.trigger(Dirty::<WorkspaceStore>::new());
 }
 
 struct WorkspacePersistencePlugin;

@@ -32,9 +32,9 @@ mod tests {
     use bevy_ecs::reflect::ReflectComponent;
     use bevy_reflect::Reflect;
     use bevy_reflect::tuple_struct::DynamicTupleStruct;
-    #[cfg(feature = "store")]
-    use moonshine_save::prelude::Save;
     use std::any::TypeId;
+    #[cfg(feature = "store")]
+    use vmux_store::Save;
 
     use super::*;
 

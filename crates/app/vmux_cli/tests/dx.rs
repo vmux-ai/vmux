@@ -1014,6 +1014,7 @@ done
             ("util", "vmux_ecs"),
             ("util", "vmux_api"),
             ("util", "vmux_channel"),
+            ("util", "vmux_store"),
             ("util", "vmux_watch"),
             ("util", "vmux_task"),
             ("util", "vmux_time"),

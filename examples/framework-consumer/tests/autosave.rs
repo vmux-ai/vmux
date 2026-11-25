@@ -219,3 +219,62 @@ fn autosave_backs_off_exponentially_and_recovers_when_storage_succeeds() {
     assert!(state.error().is_none());
     assert!(state.loaded().is_some());
 }
+
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+struct StandaloneItem(String);
+
+#[vmux_store::store(filter = With<StandaloneItem>, track; StandaloneItem)]
+struct StandaloneStore;
+
+#[derive(Resource, Default)]
+struct StandaloneWrites(Vec<(Entity, PathBuf, u64, bool)>);
+
+fn handle_standalone_write(
+    request: On<vmux_app::store::StoreWriteRequest<StandaloneStore>>,
+    mut writes: ResMut<StandaloneWrites>,
+    mut commands: Commands,
+) {
+    writes.0.push((
+        request.entity,
+        request.path.clone(),
+        request.revision,
+        request.flush,
+    ));
+    commands.trigger(vmux_app::store::StoreWriteResult::<StandaloneStore>::ok(
+        request.entity,
+        request.revision,
+    ));
+}
+
+#[test]
+fn standalone_vmux_store_macro_and_autosave_work_without_vmux_ecs_store() {
+    let clock = Clock::fake(1_700_000_000_000);
+    let mut app = App::new();
+    app.insert_resource(clock.clone())
+        .init_resource::<StandaloneWrites>()
+        .add_plugins((
+            vmux_app::store::SchemaPlugin::<StandaloneStore>::default(),
+            vmux_app::store::AutoSavePlugin::<StandaloneStore>::default(),
+        ))
+        .add_observer(handle_standalone_write);
+
+    let store = app
+        .world_mut()
+        .spawn((
+            vmux_app::store::AutoSave::<StandaloneStore>::default(),
+            vmux_app::store::StorePath::new("/tmp/standalone.ron"),
+            vmux_app::store::AutoSavePolicy::immediate(),
+        ))
+        .id();
+
+    app.world_mut().spawn(StandaloneItem("alpha".into()));
+    app.update();
+
+    let writes = &app.world().resource::<StandaloneWrites>().0;
+    assert_eq!(writes.len(), 1);
+    assert_eq!(writes[0].0, store);
+    assert_eq!(writes[0].1, PathBuf::from("/tmp/standalone.ron"));
+    assert!(!writes[0].3);
+    assert!(!app.world().get::<vmux_app::store::State>(store).unwrap().is_dirty());
+}

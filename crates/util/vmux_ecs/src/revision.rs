@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 #[cfg(feature = "store")]
-use moonshine_save::prelude::Save;
+use vmux_store::Save;
 
 #[cfg(feature = "store")]
 use crate::{CreatedAt, Uuid};

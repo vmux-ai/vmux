@@ -1300,6 +1300,7 @@ dependencies = [
  "vmux_ecs",
  "vmux_extension",
  "vmux_layout",
+ "vmux_store",
 ]
 
 [[package]]
@@ -3201,6 +3202,7 @@ dependencies = [
  "vmux_menu",
  "vmux_project",
  "vmux_runner",
+ "vmux_store",
 ]
 
 [[package]]
@@ -3219,16 +3221,14 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_reflect",
- "bevy_world_serialization",
- "moonshine-save",
  "rkyv",
- "ron",
  "serde",
  "serde_json",
  "uuid",
  "vmux_api",
  "vmux_channel",
  "vmux_macro",
+ "vmux_store",
  "vmux_task",
  "vmux_time",
  "vmux_watch",
@@ -3387,6 +3387,20 @@ dependencies = [
  "tracing",
  "vmux_ecs",
  "vmux_task",
+]
+
+[[package]]
+name = "vmux_store"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_reflect",
+ "bevy_world_serialization",
+ "moonshine-save",
+ "vmux_macro",
+ "vmux_time",
+ "web-time",
 ]
 
 [[package]]
