@@ -138,38 +138,20 @@ pub(crate) enum RequestKind {
 }
 
 #[derive(Component)]
-#[require(Phase, ScanBudget)]
+#[require(Phase, ScanBatch)]
 pub(crate) struct Captured {
     pub root: Entity,
     pub attempt: u64,
 }
 
 #[derive(Component, Clone, Copy)]
-struct ScanBudget {
-    batch: usize,
-    limit: usize,
-}
+struct ScanBatch(usize);
 
-impl Default for ScanBudget {
+impl Default for ScanBatch {
     fn default() -> Self {
-        Self {
-            batch: ReadDirectoryBatch::DEFAULT_BATCH,
-            limit: ReadDirectoryBatch::DEFAULT_LIMIT,
-        }
+        Self(ReadDirectoryBatch::DEFAULT_BATCH)
     }
 }
-
-impl ScanBudget {
-    fn next_batch(&self, total: usize) -> Option<usize> {
-        self.limit
-            .checked_sub(total)
-            .filter(|remaining| *remaining > 0)
-            .map(|remaining| remaining.min(self.batch))
-    }
-}
-
-#[derive(Component, Default)]
-struct ScannedEntries(usize);
 
 #[derive(Component, Default)]
 struct DepsBuffer(Vec<(PathBuf, std::fs::Metadata)>);
@@ -384,7 +366,7 @@ impl IoWriter<'_, '_> {
         &mut self,
         path: PathBuf,
         cursor: Option<DirectoryCursor>,
-        limit: usize,
+        batch: usize,
         root: Entity,
         purpose: Purpose,
     ) {
@@ -392,7 +374,7 @@ impl IoWriter<'_, '_> {
             ReadDirectoryBatch {
                 path,
                 cursor,
-                limit,
+                batch,
             },
             root,
             purpose,
@@ -587,23 +569,16 @@ struct Scan<'w, 's> {
 
 #[derive(SystemParam)]
 struct DirectoryScans<'w, 's> {
-    budgets: Query<'w, 's, &'static ScanBudget>,
-    scanned: Query<'w, 's, &'static mut ScannedEntries>,
+    batches: Query<'w, 's, &'static ScanBatch>,
     deps: Query<'w, 's, &'static mut DepsBuffer>,
 }
 
 impl DirectoryScans<'_, '_> {
-    fn budget(&self, request: Entity) -> ScanBudget {
-        self.budgets.get(request).copied().unwrap_or_default()
-    }
-
-    fn record(&mut self, target: Entity, count: usize) -> usize {
-        if let Ok(mut scanned) = self.scanned.get_mut(target) {
-            scanned.0 = scanned.0.saturating_add(count);
-            scanned.0
-        } else {
-            count
-        }
+    fn batch(&self, request: Entity) -> usize {
+        self.batches
+            .get(request)
+            .map(|batch| batch.0)
+            .unwrap_or(ReadDirectoryBatch::DEFAULT_BATCH)
     }
 }
 
@@ -1106,7 +1081,7 @@ fn scan_roots(
     facts: Facts,
     receipts: Receipts,
     scan: Scan,
-    mut directories: DirectoryScans,
+    directories: DirectoryScans,
     mut io: IoWriter,
 ) {
     for (entity, _request, captured, mut phase) in &mut requests {
@@ -1121,7 +1096,7 @@ fn scan_roots(
             *phase = Phase::Usage;
             continue;
         }
-        let budget = directories.budget(entity);
+        let batch_size = directories.batch(entity);
         let mut received = false;
         for (receipt, root, purpose, batch) in &receipts.entries {
             if root.0 != entity || !purpose.is(PurposeKind::Roots) {
@@ -1140,24 +1115,14 @@ fn scan_roots(
                     ));
                 }
             }
-            let total = directories.record(entity, batch.entries.len());
             if let Some(next) = &batch.next {
-                if let Some(limit) = budget.next_batch(total) {
-                    io.request_batch(
-                        batch.path.clone(),
-                        Some(next.clone()),
-                        limit,
-                        entity,
-                        Purpose::new(PurposeKind::Roots),
-                    );
-                } else {
-                    eprintln!(
-                        "Build storage: stopped scanning {} after {} entries",
-                        batch.path.display(),
-                        total
-                    );
-                    *phase = Phase::Profiles;
-                }
+                io.request_batch(
+                    batch.path.clone(),
+                    Some(next.clone()),
+                    batch_size,
+                    entity,
+                    Purpose::new(PurposeKind::Roots),
+                );
             } else {
                 *phase = Phase::Profiles;
             }
@@ -1173,18 +1138,13 @@ fn scan_roots(
                 Cwd(checkout.target.clone()),
                 ChildOf(entity),
             ));
-            io.commands.entity(entity).insert(ScannedEntries::default());
-            if let Some(limit) = budget.next_batch(0) {
-                io.request_batch(
-                    checkout.target.clone(),
-                    None,
-                    limit,
-                    entity,
-                    Purpose::new(PurposeKind::Roots),
-                );
-            } else {
-                *phase = Phase::Profiles;
-            }
+            io.request_batch(
+                checkout.target.clone(),
+                None,
+                batch_size,
+                entity,
+                Purpose::new(PurposeKind::Roots),
+            );
         }
     }
 }
@@ -1269,7 +1229,7 @@ fn scan_caches(
         if *phase != Phase::Caches {
             continue;
         }
-        let budget = directories.budget(entity);
+        let batch_size = directories.batch(entity);
 
         let mut _planned = false;
         for (profile, root, path) in &scan.profiles {
@@ -1296,18 +1256,13 @@ fn scan_caches(
                 );
             }
             if path.0.file_name() == Some(OsStr::new("release")) {
-                io.commands
-                    .entity(profile)
-                    .insert(ScannedEntries::default());
-                if let Some(limit) = budget.next_batch(0) {
-                    io.request_batch(
-                        path.0.clone(),
-                        None,
-                        limit,
-                        entity,
-                        Purpose::targeted(PurposeKind::CacheEntries, profile),
-                    );
-                }
+                io.request_batch(
+                    path.0.clone(),
+                    None,
+                    batch_size,
+                    entity,
+                    Purpose::targeted(PurposeKind::CacheEntries, profile),
+                );
             }
             io.commands.entity(profile).insert(Expanded);
         }
@@ -1327,18 +1282,14 @@ fn scan_caches(
                         .remove::<Candidate>();
                     if let Ok(path) = scan.paths.get(*candidate) {
                         if path.0.file_name() == Some(OsStr::new("incremental")) {
-                            io.commands
-                                .entity(*candidate)
-                                .insert((Incremental, ScannedEntries::default()));
-                            if let Some(limit) = budget.next_batch(0) {
-                                io.request_batch(
-                                    path.0.clone(),
-                                    None,
-                                    limit,
-                                    entity,
-                                    Purpose::targeted(PurposeKind::Increments, *candidate),
-                                );
-                            }
+                            io.commands.entity(*candidate).insert(Incremental);
+                            io.request_batch(
+                                path.0.clone(),
+                                None,
+                                batch_size,
+                                entity,
+                                Purpose::targeted(PurposeKind::Increments, *candidate),
+                            );
                         } else if path.0.file_name() == Some(OsStr::new("deps")) {
                             io.commands.entity(*candidate).insert(Deps);
                         }
@@ -1357,7 +1308,7 @@ fn collect_caches(
     mut requests: Requests,
     facts: Facts,
     receipts: Receipts,
-    mut directories: DirectoryScans,
+    directories: DirectoryScans,
     mut io: IoWriter,
 ) {
     for (entity, _request, captured, mut phase) in &mut requests {
@@ -1367,13 +1318,13 @@ fn collect_caches(
         if *phase != Phase::Caches {
             continue;
         }
-        let budget = directories.budget(entity);
+        let batch_size = directories.batch(entity);
         let mut continued = false;
         for (receipt, root, purpose, batch) in &receipts.entries {
             if root.0 != entity {
                 continue;
             }
-            let target = match purpose {
+            match purpose {
                 Purpose {
                     kind: PurposeKind::Increments,
                     entity: Some(cache),
@@ -1390,7 +1341,6 @@ fn collect_caches(
                             ChildOf(*cache),
                         ));
                     }
-                    *cache
                 }
                 Purpose {
                     kind: PurposeKind::CacheEntries,
@@ -1425,28 +1375,18 @@ fn collect_caches(
                             ChildOf(*profile),
                         ));
                     }
-                    *profile
                 }
                 _ => continue,
-            };
-            let total = directories.record(target, batch.entries.len());
+            }
             if let Some(next) = &batch.next {
-                if let Some(limit) = budget.next_batch(total) {
-                    continued = true;
-                    io.request_batch(
-                        batch.path.clone(),
-                        Some(next.clone()),
-                        limit,
-                        entity,
-                        *purpose,
-                    );
-                } else {
-                    eprintln!(
-                        "Build storage: stopped scanning {} after {} entries",
-                        batch.path.display(),
-                        total
-                    );
-                }
+                continued = true;
+                io.request_batch(
+                    batch.path.clone(),
+                    Some(next.clone()),
+                    batch_size,
+                    entity,
+                    *purpose,
+                );
             }
             io.commands.entity(receipt).despawn();
         }
@@ -1907,7 +1847,7 @@ fn collect_deps(
         let Ok((_checkout, _settings, storage, _)) = facts.get(captured.root) else {
             continue;
         };
-        let budget = directories.budget(entity);
+        let batch_size = directories.batch(entity);
         for (receipt, root, purpose, batch) in &receipts.entries {
             if root.0 != entity {
                 continue;
@@ -1915,7 +1855,6 @@ fn collect_deps(
             let Some(cache) = purpose.target(PurposeKind::CacheEntries) else {
                 continue;
             };
-            let total = directories.record(*cache, batch.entries.len());
             if retention.pruning.contains(entity) {
                 for (path, metadata) in storage.policy().prunable_deps(&batch.entries) {
                     io.commands.spawn((
@@ -1927,21 +1866,13 @@ fn collect_deps(
                     ));
                 }
                 if let Some(next) = &batch.next {
-                    if let Some(limit) = budget.next_batch(total) {
-                        io.request_batch(
-                            batch.path.clone(),
-                            Some(next.clone()),
-                            limit,
-                            entity,
-                            *purpose,
-                        );
-                    } else {
-                        eprintln!(
-                            "Build storage: stopped scanning {} after {} entries; remaining entries deferred",
-                            batch.path.display(),
-                            total
-                        );
-                    }
+                    io.request_batch(
+                        batch.path.clone(),
+                        Some(next.clone()),
+                        batch_size,
+                        entity,
+                        *purpose,
+                    );
                 }
             } else if let Ok(mut buffer) = directories.deps.get_mut(*cache) {
                 for (path, metadata) in &batch.entries {
@@ -1950,22 +1881,13 @@ fn collect_deps(
                     }
                 }
                 if let Some(next) = &batch.next {
-                    if let Some(limit) = budget.next_batch(total) {
-                        io.request_batch(
-                            batch.path.clone(),
-                            Some(next.clone()),
-                            limit,
-                            entity,
-                            *purpose,
-                        );
-                    } else {
-                        eprintln!(
-                            "Build storage: skipping stale deps pruning for {} after {} entries",
-                            batch.path.display(),
-                            total
-                        );
-                        buffer.0.clear();
-                    }
+                    io.request_batch(
+                        batch.path.clone(),
+                        Some(next.clone()),
+                        batch_size,
+                        entity,
+                        *purpose,
+                    );
                 } else {
                     let current = retention.deps.get(entity).map(|usage| usage.0).unwrap_or(0);
                     let (stale, remaining) = storage.policy().stale_deps(&buffer.0, current);
@@ -2003,7 +1925,7 @@ fn select_caches(
         let Ok((_checkout, _settings, storage, _)) = facts.get(captured.root) else {
             continue;
         };
-        let budget = directories.budget(entity);
+        let batch_size = directories.batch(entity);
         if retention.pruning.contains(entity) {
             for (cache, root, path, parent) in &candidates.caches {
                 if root.0 != entity {
@@ -2019,16 +1941,13 @@ fn select_caches(
                     continue;
                 }
                 if path.0.file_name() == Some(OsStr::new("deps")) {
-                    io.commands.entity(cache).insert(ScannedEntries::default());
-                    if let Some(limit) = budget.next_batch(0) {
-                        io.request_batch(
-                            path.0.clone(),
-                            None,
-                            limit,
-                            entity,
-                            Purpose::targeted(PurposeKind::CacheEntries, cache),
-                        );
-                    }
+                    io.request_batch(
+                        path.0.clone(),
+                        None,
+                        batch_size,
+                        entity,
+                        Purpose::targeted(PurposeKind::CacheEntries, cache),
+                    );
                 } else {
                     io.commands.entity(cache).insert(Selected);
                 }
@@ -2046,18 +1965,14 @@ fn select_caches(
                 if profiles.locks.get(parent.parent()).is_err() || profiles.active.contains(cache) {
                     continue;
                 }
-                io.commands
-                    .entity(cache)
-                    .insert((ScannedEntries::default(), DepsBuffer::default()));
-                if let Some(limit) = budget.next_batch(0) {
-                    io.request_batch(
-                        path.0.clone(),
-                        None,
-                        limit,
-                        entity,
-                        Purpose::targeted(PurposeKind::CacheEntries, cache),
-                    );
-                }
+                io.commands.entity(cache).insert(DepsBuffer::default());
+                io.request_batch(
+                    path.0.clone(),
+                    None,
+                    batch_size,
+                    entity,
+                    Purpose::targeted(PurposeKind::CacheEntries, cache),
+                );
             }
         }
     }
@@ -2611,10 +2526,10 @@ mod tests {
         }
 
         fn run(&self, request: Request) -> u8 {
-            self.run_with_budget(request, ScanBudget::default())
+            self.run_with_batch(request, ScanBatch::default())
         }
 
-        fn run_with_budget(&self, request: Request, budget: ScanBudget) -> u8 {
+        fn run_with_batch(&self, request: Request, batch: ScanBatch) -> u8 {
             let mut environment = crate::environment::Environment::current();
             let path = format!(
                 "{}:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -2642,7 +2557,7 @@ mod tests {
                     ChildOf(operation),
                     crate::Attempt(1),
                     OperationState::Pending,
-                    budget,
+                    batch,
                 ))
                 .id();
             match request.kind {
@@ -3205,13 +3120,7 @@ mod tests {
             latest.push(current);
         }
         assert_eq!(
-            fixture.run_with_budget(
-                Request::new(RequestKind::Preflight),
-                ScanBudget {
-                    batch: 2,
-                    limit: 64
-                }
-            ),
+            fixture.run_with_batch(Request::new(RequestKind::Preflight), ScanBatch(2)),
             0
         );
         for path in stale {
@@ -3223,49 +3132,24 @@ mod tests {
     }
 
     #[test]
-    fn oversized_deps_directory_stops_at_scan_budget_without_failing_preflight_or_clean() {
-        let mut fixture = Fixture::new();
-        fixture.storage.policy.deps_limit = 1;
+    fn clean_prunes_all_deps_entries_across_multiple_directory_batches() {
+        let fixture = Fixture::new();
         let deps = fixture.checkout.target.join("debug/deps");
         fs::create_dir_all(&deps).unwrap();
         let mut paths = Vec::new();
-        for index in 0..6usize {
-            let old = deps.join(format!("crate_{index}-0000000000000001"));
-            let current = deps.join(format!("crate_{index}-0000000000000002"));
-            for (path, timestamp) in [(&old, 1u64), (&current, 2)] {
-                fs::write(path, vec![b'x'; 64 * 1024]).unwrap();
-                File::open(path)
-                    .unwrap()
-                    .set_times(
-                        FileTimes::new()
-                            .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(timestamp)),
-                    )
-                    .unwrap();
-                paths.push(path.clone());
-            }
+        for index in 0..10usize {
+            let path = deps.join(format!("crate_{index}-0000000000000001"));
+            fs::write(&path, vec![b'x'; 1024]).unwrap();
+            paths.push(path);
         }
         assert_eq!(
-            fixture.run_with_budget(
-                Request::new(RequestKind::Preflight),
-                ScanBudget { batch: 2, limit: 4 }
-            ),
+            fixture.run_with_batch(Request::clean(true), ScanBatch(2)),
             0
         );
         assert_eq!(
-            paths.iter().filter(|path| path.is_file()).count(),
-            paths.len(),
-            "truncated stale-deps scan must skip pruning rather than failing or deleting incomplete pairs"
-        );
-
-        assert_eq!(
-            fixture.run_with_budget(Request::clean(true), ScanBudget { batch: 2, limit: 3 }),
-            0
-        );
-        let remaining = paths.iter().filter(|path| path.is_file()).count();
-        assert_eq!(
-            remaining,
-            paths.len() - 3,
-            "bounded clean pass should cap continuation batches at the remaining scan budget"
+            paths.iter().filter(|path| path.exists()).count(),
+            0,
+            "batched clean must drain the directory to EOF without an arbitrary total limit"
         );
     }
 }

@@ -130,12 +130,11 @@ pub(crate) type DirectoryCursor = Arc<Mutex<Option<fs::ReadDir>>>;
 pub(crate) struct ReadDirectoryBatch {
     pub path: PathBuf,
     pub cursor: Option<DirectoryCursor>,
-    pub limit: usize,
+    pub batch: usize,
 }
 
 impl ReadDirectoryBatch {
     pub(crate) const DEFAULT_BATCH: usize = 512;
-    pub(crate) const DEFAULT_LIMIT: usize = 65_536;
 }
 
 impl StorageJob for ReadDirectoryBatch {
@@ -161,7 +160,8 @@ impl Job for ReadDirectoryBatch {
                 Arc::new(Mutex::new(Some(reader)))
             }
         };
-        let mut observed = Vec::with_capacity(self.limit.min(Self::DEFAULT_BATCH));
+        let target = self.batch.max(1);
+        let mut observed = Vec::with_capacity(target.min(Self::DEFAULT_BATCH));
         let mut eof = false;
         {
             let mut guard = cursor.lock().unwrap();
@@ -172,7 +172,7 @@ impl Job for ReadDirectoryBatch {
                     next: None,
                 });
             };
-            while observed.len() < self.limit {
+            while observed.len() < target {
                 if vmux_ecs::blocking::BlockingCancellation::canceled() {
                     *guard = None;
                     return Err(Failure::message("Storage IO canceled"));
@@ -409,7 +409,7 @@ mod tests {
             let batch = ReadDirectoryBatch {
                 path: directory.path().to_path_buf(),
                 cursor,
-                limit: ReadDirectoryBatch::DEFAULT_BATCH,
+                batch: ReadDirectoryBatch::DEFAULT_BATCH,
             }
             .run()
             .unwrap();
