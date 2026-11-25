@@ -12,13 +12,14 @@ use vmux_ecs::{Cwd, Operation as WorkOperation, OperationState};
 
 use crate::debug_io::{Flight, Task};
 use crate::execution::Failure;
-use crate::policy::GIB;
+use crate::policy::{GIB, Policy};
 use crate::repository::Checkout;
 use crate::signals::Signals;
 use crate::storage::Storage;
 use crate::storage_io::{
-    CanonicalPath, Canonicalize, Capture, DirectoryEntries, Done, FileBytes, Inspect, Io, Open,
-    OpenedFile, PathMetadata, ReadDirectory, ReadFile, Remove, StorageJob, ToolOutput,
+    CanonicalPath, Canonicalize, Capture, DirectoryBatch, DirectoryCursor, Done, FileBytes,
+    Inspect, Io, Open, OpenedFile, PathMetadata, ReadDirectoryBatch, ReadFile, Remove, StorageJob,
+    ToolOutput,
 };
 use crate::{Completion, Settings};
 
@@ -29,7 +30,7 @@ impl bevy_app::Plugin for StorageRuntimePlugin {
         app.add_plugins((
             IoPlugin::<Inspect>::default(),
             IoPlugin::<Canonicalize>::default(),
-            IoPlugin::<ReadDirectory>::default(),
+            IoPlugin::<ReadDirectoryBatch>::default(),
             IoPlugin::<ReadFile>::default(),
             IoPlugin::<Open>::default(),
             IoPlugin::<Remove>::default(),
@@ -70,7 +71,7 @@ impl bevy_app::Plugin for StorageRuntimePlugin {
                 protect,
                 locks,
                 evict,
-                (select, select_caches, retain_apps).chain(),
+                (select, collect_deps, select_caches, retain_apps).chain(),
                 (collect_removals, remove).chain(),
                 report,
                 wake,
@@ -137,11 +138,23 @@ pub(crate) enum RequestKind {
 }
 
 #[derive(Component)]
-#[require(Phase)]
+#[require(Phase, ScanBatch)]
 pub(crate) struct Captured {
     pub root: Entity,
     pub attempt: u64,
 }
+
+#[derive(Component, Clone, Copy)]
+struct ScanBatch(usize);
+
+impl Default for ScanBatch {
+    fn default() -> Self {
+        Self(ReadDirectoryBatch::DEFAULT_BATCH)
+    }
+}
+
+#[derive(Component, Default)]
+struct DepsBuffer(Vec<(PathBuf, std::fs::Metadata)>);
 
 #[derive(Component)]
 pub(crate) struct Loan(pub Option<Arc<crate::target_lock::TargetLock>>);
@@ -348,6 +361,25 @@ impl IoWriter<'_, '_> {
             ChildOf(root),
         ));
     }
+
+    fn request_batch(
+        &mut self,
+        path: PathBuf,
+        cursor: Option<DirectoryCursor>,
+        batch: usize,
+        root: Entity,
+        purpose: Purpose,
+    ) {
+        self.request(
+            ReadDirectoryBatch {
+                path,
+                cursor,
+                batch,
+            },
+            root,
+            purpose,
+        );
+    }
 }
 
 type MetadataReplies<'w, 's> = Query<
@@ -382,7 +414,7 @@ type EntryReplies<'w, 's> = Query<
         Entity,
         &'static Root,
         &'static Purpose,
-        &'static DirectoryEntries,
+        &'static DirectoryBatch,
     ),
 >;
 
@@ -533,6 +565,21 @@ struct Scan<'w, 's> {
     profiles: UnexpandedProfiles<'w, 's>,
     missing: MissingRoots<'w, 's>,
     paths: Paths<'w, 's>,
+}
+
+#[derive(SystemParam)]
+struct DirectoryScans<'w, 's> {
+    batches: Query<'w, 's, &'static ScanBatch>,
+    deps: Query<'w, 's, &'static mut DepsBuffer>,
+}
+
+impl DirectoryScans<'_, '_> {
+    fn batch(&self, request: Entity) -> usize {
+        self.batches
+            .get(request)
+            .map(|batch| batch.0)
+            .unwrap_or(ReadDirectoryBatch::DEFAULT_BATCH)
+    }
 }
 
 #[derive(SystemParam)]
@@ -1034,52 +1081,70 @@ fn scan_roots(
     facts: Facts,
     receipts: Receipts,
     scan: Scan,
+    directories: DirectoryScans,
     mut io: IoWriter,
 ) {
     for (entity, _request, captured, mut phase) in &mut requests {
         let Ok((checkout, _, _, _)) = facts.get(captured.root) else {
             continue;
         };
-        if *phase == Phase::Roots {
-            if scan.missing.contains(entity) {
-                io.commands.entity(entity).insert(Usage(0));
-                *phase = Phase::Usage;
+        if *phase != Phase::Roots {
+            continue;
+        }
+        if scan.missing.contains(entity) {
+            io.commands.entity(entity).insert(Usage(0));
+            *phase = Phase::Usage;
+            continue;
+        }
+        let batch_size = directories.batch(entity);
+        let mut received = false;
+        for (receipt, root, purpose, batch) in &receipts.entries {
+            if root.0 != entity || !purpose.is(PurposeKind::Roots) {
                 continue;
             }
-            let mut received = false;
-            for (receipt, root, purpose, DirectoryEntries(entries)) in &receipts.entries {
-                if root.0 != entity || !purpose.is(PurposeKind::Roots) {
-                    continue;
+            received = true;
+            for (path, metadata) in &batch.entries {
+                if metadata.is_dir() {
+                    io.commands.spawn((
+                        Search,
+                        Root(entity),
+                        Cwd(path.clone()),
+                        Name::new(path.file_name().unwrap().to_string_lossy().into_owned()),
+                        Metadata(metadata.clone()),
+                        ChildOf(entity),
+                    ));
                 }
-                received = true;
-                io.commands.spawn((
-                    Search,
-                    Root(entity),
-                    Cwd(checkout.target.clone()),
-                    ChildOf(entity),
-                ));
-                for (path, metadata) in entries {
-                    if metadata.is_dir() {
-                        io.commands.spawn((
-                            Search,
-                            Root(entity),
-                            Cwd(path.clone()),
-                            Name::new(path.file_name().unwrap().to_string_lossy().into_owned()),
-                            Metadata(metadata.clone()),
-                            ChildOf(entity),
-                        ));
-                    }
-                }
-                io.commands.entity(receipt).despawn();
-                *phase = Phase::Profiles;
             }
-            if !received && !receipts.pending.iter().any(|(root, _)| root.0 == entity) {
-                io.request(
-                    ReadDirectory(checkout.target.clone()),
+            if let Some(next) = &batch.next {
+                io.request_batch(
+                    batch.path.clone(),
+                    Some(next.clone()),
+                    batch_size,
                     entity,
                     Purpose::new(PurposeKind::Roots),
                 );
+            } else {
+                *phase = Phase::Profiles;
             }
+            io.commands.entity(receipt).despawn();
+        }
+        if !received
+            && !receipts.pending.iter().any(|(root, _)| root.0 == entity)
+            && !scan.searches.iter().any(|(_, root, _)| root.0 == entity)
+        {
+            io.commands.spawn((
+                Search,
+                Root(entity),
+                Cwd(checkout.target.clone()),
+                ChildOf(entity),
+            ));
+            io.request_batch(
+                checkout.target.clone(),
+                None,
+                batch_size,
+                entity,
+                Purpose::new(PurposeKind::Roots),
+            );
         }
     }
 }
@@ -1154,6 +1219,7 @@ fn scan_caches(
     facts: Facts,
     receipts: Receipts,
     scan: Scan,
+    directories: DirectoryScans,
     mut io: IoWriter,
 ) {
     for (entity, _request, captured, phase) in &mut requests {
@@ -1163,6 +1229,7 @@ fn scan_caches(
         if *phase != Phase::Caches {
             continue;
         }
+        let batch_size = directories.batch(entity);
 
         let mut _planned = false;
         for (profile, root, path) in &scan.profiles {
@@ -1189,8 +1256,10 @@ fn scan_caches(
                 );
             }
             if path.0.file_name() == Some(OsStr::new("release")) {
-                io.request(
-                    ReadDirectory(path.0.clone()),
+                io.request_batch(
+                    path.0.clone(),
+                    None,
+                    batch_size,
                     entity,
                     Purpose::targeted(PurposeKind::CacheEntries, profile),
                 );
@@ -1214,8 +1283,10 @@ fn scan_caches(
                     if let Ok(path) = scan.paths.get(*candidate) {
                         if path.0.file_name() == Some(OsStr::new("incremental")) {
                             io.commands.entity(*candidate).insert(Incremental);
-                            io.request(
-                                ReadDirectory(path.0.clone()),
+                            io.request_batch(
+                                path.0.clone(),
+                                None,
+                                batch_size,
                                 entity,
                                 Purpose::targeted(PurposeKind::Increments, *candidate),
                             );
@@ -1233,7 +1304,13 @@ fn scan_caches(
     }
 }
 
-fn collect_caches(mut requests: Requests, facts: Facts, receipts: Receipts, mut io: IoWriter) {
+fn collect_caches(
+    mut requests: Requests,
+    facts: Facts,
+    receipts: Receipts,
+    directories: DirectoryScans,
+    mut io: IoWriter,
+) {
     for (entity, _request, captured, mut phase) in &mut requests {
         let Ok((_checkout, _, _, _)) = facts.get(captured.root) else {
             continue;
@@ -1241,8 +1318,9 @@ fn collect_caches(mut requests: Requests, facts: Facts, receipts: Receipts, mut 
         if *phase != Phase::Caches {
             continue;
         }
-        let planned = false;
-        for (receipt, root, purpose, DirectoryEntries(entries)) in &receipts.entries {
+        let batch_size = directories.batch(entity);
+        let mut continued = false;
+        for (receipt, root, purpose, batch) in &receipts.entries {
             if root.0 != entity {
                 continue;
             }
@@ -1251,7 +1329,7 @@ fn collect_caches(mut requests: Requests, facts: Facts, receipts: Receipts, mut 
                     kind: PurposeKind::Increments,
                     entity: Some(cache),
                 } => {
-                    for (path, metadata) in entries {
+                    for (path, metadata) in &batch.entries {
                         if !metadata.is_dir() {
                             continue;
                         }
@@ -1263,13 +1341,12 @@ fn collect_caches(mut requests: Requests, facts: Facts, receipts: Receipts, mut 
                             ChildOf(*cache),
                         ));
                     }
-                    io.commands.entity(receipt).despawn();
                 }
                 Purpose {
                     kind: PurposeKind::CacheEntries,
                     entity: Some(profile),
                 } => {
-                    for (path, metadata) in entries {
+                    for (path, metadata) in &batch.entries {
                         if !metadata.is_dir() {
                             continue;
                         }
@@ -1298,13 +1375,23 @@ fn collect_caches(mut requests: Requests, facts: Facts, receipts: Receipts, mut 
                             ChildOf(*profile),
                         ));
                     }
-                    io.commands.entity(receipt).despawn();
                 }
                 _ => continue,
             }
+            if let Some(next) = &batch.next {
+                continued = true;
+                io.request_batch(
+                    batch.path.clone(),
+                    Some(next.clone()),
+                    batch_size,
+                    entity,
+                    *purpose,
+                );
+            }
+            io.commands.entity(receipt).despawn();
         }
 
-        if !planned && !receipts.pending.iter().any(|(root, _)| root.0 == entity) {
+        if !continued && !receipts.pending.iter().any(|(root, _)| root.0 == entity) {
             *phase = Phase::Usage;
         }
     }
@@ -1694,7 +1781,7 @@ fn select(
         if *phase != Phase::Select {
             continue;
         }
-        let Ok((checkout, settings, storage, _)) = facts.get(captured.root) else {
+        let Ok((checkout, settings, _storage, _)) = facts.get(captured.root) else {
             continue;
         };
         if !retention.choosing.contains(entity) {
@@ -1742,30 +1829,80 @@ fn select(
             }
             io.commands.entity(receipt).despawn();
         }
-        for (receipt, root, purpose, DirectoryEntries(entries)) in &receipts.entries {
+    }
+}
+
+fn collect_deps(
+    mut requests: Requests,
+    facts: Facts,
+    retention: Retention,
+    receipts: Receipts,
+    mut directories: DirectoryScans,
+    mut io: IoWriter,
+) {
+    for (entity, _request, captured, phase) in &mut requests {
+        if *phase != Phase::Select {
+            continue;
+        }
+        let Ok((_checkout, _settings, storage, _)) = facts.get(captured.root) else {
+            continue;
+        };
+        let batch_size = directories.batch(entity);
+        for (receipt, root, purpose, batch) in &receipts.entries {
             if root.0 != entity {
                 continue;
             }
             let Some(cache) = purpose.target(PurposeKind::CacheEntries) else {
                 continue;
             };
-
-            let selected = if retention.pruning.contains(entity) {
-                storage.policy().prunable_deps(entries)
-            } else {
-                let current = retention.deps.get(entity).map(|usage| usage.0).unwrap_or(0);
-                let (stale, remaining) = storage.policy().stale_deps(entries, current);
-                io.commands.entity(entity).insert(DepsUsage(remaining));
-                stale
-            };
-            for (path, metadata) in selected {
-                io.commands.spawn((
-                    Selected,
-                    Root(entity),
-                    Cwd(path),
-                    Metadata(metadata),
-                    ChildOf(*cache),
-                ));
+            if retention.pruning.contains(entity) {
+                for (path, metadata) in storage.policy().prunable_deps(&batch.entries) {
+                    io.commands.spawn((
+                        Selected,
+                        Root(entity),
+                        Cwd(path),
+                        Metadata(metadata),
+                        ChildOf(*cache),
+                    ));
+                }
+                if let Some(next) = &batch.next {
+                    io.request_batch(
+                        batch.path.clone(),
+                        Some(next.clone()),
+                        batch_size,
+                        entity,
+                        *purpose,
+                    );
+                }
+            } else if let Ok(mut buffer) = directories.deps.get_mut(*cache) {
+                for (path, metadata) in &batch.entries {
+                    if Policy::is_hashed_artifact(path) {
+                        buffer.0.push((path.clone(), metadata.clone()));
+                    }
+                }
+                if let Some(next) = &batch.next {
+                    io.request_batch(
+                        batch.path.clone(),
+                        Some(next.clone()),
+                        batch_size,
+                        entity,
+                        *purpose,
+                    );
+                } else {
+                    let current = retention.deps.get(entity).map(|usage| usage.0).unwrap_or(0);
+                    let (stale, remaining) = storage.policy().stale_deps(&buffer.0, current);
+                    io.commands.entity(entity).insert(DepsUsage(remaining));
+                    for (path, metadata) in stale {
+                        io.commands.spawn((
+                            Selected,
+                            Root(entity),
+                            Cwd(path),
+                            Metadata(metadata),
+                            ChildOf(*cache),
+                        ));
+                    }
+                    buffer.0.clear();
+                }
             }
             io.commands.entity(receipt).despawn();
         }
@@ -1778,6 +1915,7 @@ fn select_caches(
     retention: Retention,
     candidates: Candidates,
     profiles: Profiles,
+    directories: DirectoryScans,
     mut io: IoWriter,
 ) {
     for (entity, _request, captured, phase) in &mut requests {
@@ -1787,6 +1925,7 @@ fn select_caches(
         let Ok((_checkout, _settings, storage, _)) = facts.get(captured.root) else {
             continue;
         };
+        let batch_size = directories.batch(entity);
         if retention.pruning.contains(entity) {
             for (cache, root, path, parent) in &candidates.caches {
                 if root.0 != entity {
@@ -1802,8 +1941,10 @@ fn select_caches(
                     continue;
                 }
                 if path.0.file_name() == Some(OsStr::new("deps")) {
-                    io.request(
-                        ReadDirectory(path.0.clone()),
+                    io.request_batch(
+                        path.0.clone(),
+                        None,
+                        batch_size,
                         entity,
                         Purpose::targeted(PurposeKind::CacheEntries, cache),
                     );
@@ -1824,8 +1965,11 @@ fn select_caches(
                 if profiles.locks.get(parent.parent()).is_err() || profiles.active.contains(cache) {
                     continue;
                 }
-                io.request(
-                    ReadDirectory(path.0.clone()),
+                io.commands.entity(cache).insert(DepsBuffer::default());
+                io.request_batch(
+                    path.0.clone(),
+                    None,
+                    batch_size,
                     entity,
                     Purpose::targeted(PurposeKind::CacheEntries, cache),
                 );
@@ -2382,6 +2526,10 @@ mod tests {
         }
 
         fn run(&self, request: Request) -> u8 {
+            self.run_with_batch(request, ScanBatch::default())
+        }
+
+        fn run_with_batch(&self, request: Request, batch: ScanBatch) -> u8 {
             let mut environment = crate::environment::Environment::current();
             let path = format!(
                 "{}:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -2409,6 +2557,7 @@ mod tests {
                     ChildOf(operation),
                     crate::Attempt(1),
                     OperationState::Pending,
+                    batch,
                 ))
                 .id();
             match request.kind {
@@ -2944,5 +3093,63 @@ mod tests {
         fixture.observe("12 policy", &format!("p12\nn{}\n", old.display()));
         assert_eq!(fixture.run(Request::finish("dev".into())), 0);
         assert!(old.is_file());
+    }
+
+    #[test]
+    fn deps_budget_evicts_superseded_hashes_across_multiple_directory_batches() {
+        let mut fixture = Fixture::new();
+        fixture.storage.policy.deps_limit = 1;
+        let deps = fixture.checkout.target.join("debug/deps");
+        fs::create_dir_all(&deps).unwrap();
+        let mut stale = Vec::new();
+        let mut latest = Vec::new();
+        for index in 0..4usize {
+            let old = deps.join(format!("batch_{index}-0000000000000001"));
+            let current = deps.join(format!("batch_{index}-0000000000000002"));
+            for (path, timestamp) in [(&old, 1u64), (&current, 2)] {
+                fs::write(path, vec![b'x'; 128 * 1024]).unwrap();
+                File::open(path)
+                    .unwrap()
+                    .set_times(
+                        FileTimes::new()
+                            .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(timestamp)),
+                    )
+                    .unwrap();
+            }
+            stale.push(old);
+            latest.push(current);
+        }
+        assert_eq!(
+            fixture.run_with_batch(Request::new(RequestKind::Preflight), ScanBatch(2)),
+            0
+        );
+        for path in stale {
+            assert!(!path.exists(), "superseded dep should be removed: {path:?}");
+        }
+        for path in latest {
+            assert!(path.is_file(), "latest dep should remain: {path:?}");
+        }
+    }
+
+    #[test]
+    fn clean_prunes_all_deps_entries_across_multiple_directory_batches() {
+        let fixture = Fixture::new();
+        let deps = fixture.checkout.target.join("debug/deps");
+        fs::create_dir_all(&deps).unwrap();
+        let mut paths = Vec::new();
+        for index in 0..10usize {
+            let path = deps.join(format!("crate_{index}-0000000000000001"));
+            fs::write(&path, vec![b'x'; 1024]).unwrap();
+            paths.push(path);
+        }
+        assert_eq!(
+            fixture.run_with_batch(Request::clean(true), ScanBatch(2)),
+            0
+        );
+        assert_eq!(
+            paths.iter().filter(|path| path.exists()).count(),
+            0,
+            "batched clean must drain the directory to EOF without an arbitrary total limit"
+        );
     }
 }
