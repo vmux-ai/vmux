@@ -72,18 +72,31 @@ pub struct RefreshRequest {
     pub refresh_catalogs: bool,
 }
 
-fn refresh(trigger: On<RefreshRequest>, mut registry: Query<(&mut Registry, &mut Catalog)>) {
+fn refresh(
+    trigger: On<RefreshRequest>,
+    mut registry: Query<(&mut Registry, &mut Catalog)>,
+    scans: Query<(), With<Scan>>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
+) {
     let Ok((mut state, mut catalog)) = registry.get_mut(trigger.event().entity) else {
         return;
     };
-    if trigger.event().refresh_catalogs || !catalog.loaded {
+    if trigger.event().refresh_catalogs {
         state.dirty = true;
-        state.refresh_catalogs |= trigger.event().refresh_catalogs;
+        state.refresh_catalogs = true;
         state.generation = state.generation.wrapping_add(1);
-        if trigger.event().refresh_catalogs && catalog.loaded {
+        if catalog.loaded {
             catalog.loaded = false;
             catalog.revision = catalog.revision.wrapping_add(1);
         }
+    } else if !catalog.loaded && !state.dirty && scans.is_empty() {
+        state.dirty = true;
+        state.generation = state.generation.wrapping_add(1);
+    } else {
+        return;
+    }
+    if let Some(wake) = wake {
+        wake.0.wake_by_ref();
     }
 }
 

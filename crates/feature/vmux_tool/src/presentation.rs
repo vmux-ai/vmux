@@ -130,21 +130,30 @@ fn ready(
     let Some(route) = ToolRoute::parse(&page.url) else {
         return;
     };
+    let mut refresh = None;
     if let Ok(mut state) = states.get_mut(entity) {
-        if let Ok((registry, store, mut sequence)) = registries.single_mut()
-            && !state.bound(registry, store)
-        {
-            state.bind(registry, store, sequence.next());
+        if let Ok((registry, store, mut sequence)) = registries.single_mut() {
+            if !state.bound(registry, store) {
+                state.bind(registry, store, sequence.next());
+            }
+            refresh = Some(registry);
         }
         state.navigate(&route);
-        return;
+    } else {
+        let mut state = State::new(0);
+        if let Ok((registry, store, mut sequence)) = registries.single_mut() {
+            state.bind(registry, store, sequence.next());
+            refresh = Some(registry);
+        }
+        state.navigate(&route);
+        commands.entity(entity).insert(state);
     }
-    let mut state = State::new(0);
-    if let Ok((registry, store, mut sequence)) = registries.single_mut() {
-        state.bind(registry, store, sequence.next());
+    if let Some(registry) = refresh {
+        commands.trigger(crate::tool_inventory::RefreshRequest {
+            entity: registry,
+            refresh_catalogs: false,
+        });
     }
-    state.navigate(&route);
-    commands.entity(entity).insert(state);
 }
 
 fn filter(trigger: On<UiInput<ToolsFilterRequest>>, mut states: Query<&mut State>) {
@@ -645,5 +654,99 @@ pub(crate) mod tests {
         assert!(!replacement.manifest_path().exists());
         assert!(fixture.state(page).pending.is_empty());
         assert!(fixture.state(page).notice.is_none());
+    }
+
+    #[test]
+    fn page_ready_starts_the_initial_scan_once_and_publishes_declared_providers() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(
+            directory.path().join("config"),
+            directory.path().join("home"),
+        );
+        ToolsManifest::default()
+            .write_to(&store.manifest_path())
+            .unwrap();
+        let mut app = App::new();
+        app.add_plugins((
+            bevy::app::TaskPoolPlugin::default(),
+            vmux_feature::manifest::FeaturePlugin::<crate::Feature>::default(),
+            crate::ToolRuntimePlugin,
+            crate::host::ToolHostPlugin,
+        ))
+        .add_observer(capture)
+        .add_message::<PageOpenRequest>();
+        let registry = app
+            .world_mut()
+            .spawn((
+                Registry::default(),
+                Catalog::default(),
+                store.clone(),
+                ToolsManifest::default(),
+                Sequence::default(),
+            ))
+            .id();
+        let page = app
+            .world_mut()
+            .spawn(PageMetadata {
+                url: "vmux://tools/acp".into(),
+                ..Default::default()
+            })
+            .id();
+        let lease = store.lease().unwrap();
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: PageReady {},
+        });
+        app.update();
+        let initial = &app.world().get::<Captured>(page).unwrap().0;
+        let routes: Vec<_> = initial
+            .snapshot
+            .providers
+            .iter()
+            .map(|provider| provider.route.as_str())
+            .collect();
+        assert_eq!(routes, ["homebrew", "homebrew", "npm", "mcp", "dotfiles"]);
+        assert!(!initial.snapshot.loaded);
+        assert!(app.world().get::<Registry>(registry).unwrap().dirty);
+        let generation = app.world().get::<Registry>(registry).unwrap().generation;
+        drop(lease);
+        app.update();
+        let scan = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::tool_inventory::Scan>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: PageReady {},
+        });
+        app.update();
+        assert_eq!(
+            app.world().get::<Registry>(registry).unwrap().generation,
+            generation
+        );
+        assert!(app.world().get_entity(scan).is_ok());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !app.world().get::<Captured>(page).unwrap().0.snapshot.loaded {
+            app.update();
+            assert!(
+                Instant::now() < deadline,
+                "initial tool scan did not finish"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: PageReady {},
+        });
+        app.update();
+        assert!(!app.world().get::<Registry>(registry).unwrap().dirty);
+        assert!(
+            app.world_mut()
+                .query_filtered::<Entity, With<crate::tool_inventory::Scan>>()
+                .iter(app.world())
+                .next()
+                .is_none()
+        );
     }
 }
