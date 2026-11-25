@@ -14,10 +14,10 @@ fn main() {
 
 #[cfg(feature = "development")]
 fn development() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .unwrap();
+    let manifest_dir = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"),
+    );
+    let root = manifest_dir.ancestors().nth(3).unwrap();
     let key = source::Source::key(root, || false).expect("DX compiler inputs");
     println!("cargo:rustc-env=VMUX_DX_SOURCE_KEY={key}");
     for path in source::Source::paths(root, &|| false).expect("DX compiler paths") {
