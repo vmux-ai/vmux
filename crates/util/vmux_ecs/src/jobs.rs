@@ -8,7 +8,8 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::world::DeferredWorld;
 
 use crate::blocking::{BlockingRuntime, BlockingTask, Lane, SpawnError};
-use crate::{Active, ChannelWake, Operation, OperationPlugin, OperationState, OperationTarget};
+use crate::channel::ChannelWake;
+use crate::{Active, Operation, OperationPlugin, OperationState, OperationTarget};
 
 pub struct JobsPlugin;
 
@@ -809,7 +810,10 @@ mod tests {
             output: wake_tx,
             source: JobWake(Waker::noop().clone()),
         }))));
-        let channel_wake = app.world().resource::<crate::ChannelWake>().clone();
+        let channel_wake = app
+            .world()
+            .resource::<crate::channel::ChannelWake>()
+            .clone();
         channel_wake.0.wake_by_ref();
         assert!(wake_rx.try_recv().is_ok());
     }

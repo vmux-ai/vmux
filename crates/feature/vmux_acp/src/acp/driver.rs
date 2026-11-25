@@ -28,7 +28,8 @@ use base64::Engine;
 use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-use vmux_ecs::{AsyncChannel, ChannelSender, ProcessId};
+use vmux_ecs::ProcessId;
+use vmux_ecs::channel::{AsyncChannel, ChannelSender};
 
 use super::agent_process::AgentProcess;
 #[cfg(test)]

@@ -24,8 +24,9 @@ use vmux_api::protocol::{
 #[cfg(test)]
 use vmux_api::session::Message;
 use vmux_api::session::{RemoteApproval, RemoteSession, RemoteStatus};
+use vmux_ecs::channel::{ChannelReceived, SpawnReceiver, SpawnSender};
 use vmux_ecs::service::{AbortTask, Shutdown, ShutdownComplete, ShutdownPending};
-use vmux_ecs::{ChannelReceived, CreatedAt, ProcessId, SpawnReceiver, SpawnSender};
+use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
 use vmux_session::SessionId;
 

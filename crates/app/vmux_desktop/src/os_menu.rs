@@ -20,10 +20,10 @@ use vmux_command::{
     BindCommands, CommandDefinition, CommandInvocation, DispatchCommandInvocations,
     WriteCommandRequests,
 };
+use vmux_ecs::channel::{AsyncChannelPlugin, MessageSender};
 #[cfg(target_os = "macos")]
 use vmux_ecs::page::BindsEditingChords;
 use vmux_ecs::team::User;
-use vmux_ecs::{AsyncChannelPlugin, MessageSender};
 use vmux_layout::stack::CloseRequest;
 use vmux_layout::tab::TabClosed;
 #[cfg(target_os = "macos")]
@@ -239,10 +239,9 @@ fn setup(
     #[cfg(target_os = "macos")]
     let edit_items = collect_edit_menu_items();
 
-    let sender = sender.clone();
-    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        let _ = sender.send(OsMenuEvent(event.id.0.clone()));
-    }));
+    MenuEvent::set_event_handler(Some(
+        sender.callback(|event: MenuEvent| OsMenuEvent(event.id.0)),
+    ));
 
     commands.spawn((
         Name::new("Close Vmux menu item"),

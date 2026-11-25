@@ -226,6 +226,16 @@ impl<M: Message> MessageSender<M> {
         self.sender.send(message)
     }
 
+    pub fn callback<E>(
+        &self,
+        map: impl Fn(E) -> M + Send + Sync + 'static,
+    ) -> impl Fn(E) + Send + Sync + 'static {
+        let sender = self.clone();
+        move |event| {
+            let _ = sender.send(map(event));
+        }
+    }
+
     pub fn is_closed(&self) -> bool {
         self.sender.is_closed()
     }

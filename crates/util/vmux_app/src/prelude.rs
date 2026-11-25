@@ -4,12 +4,6 @@ pub use crate::{VmuxPlugin, VmuxPluginBuilder, VmuxPluginOptions};
 pub use vmux_acp::AcpPlugin;
 #[cfg(feature = "browser")]
 pub use vmux_browser::BrowserPlugin;
-#[cfg(feature = "ecs")]
-pub use vmux_ecs::{
-    AsyncChannel, AsyncChannelPlugin, ChannelClosed, ChannelDrain, ChannelMode, ChannelReceived,
-    ChannelSendError, ChannelSendErrorKind, ChannelSender, ChannelSet, ChannelWake, MessageChannel,
-    MessageMode, MessageSender, SpawnChannel, SpawnMode, SpawnReceiver, SpawnSender,
-};
 #[cfg(feature = "jobs")]
 pub use vmux_ecs::{
     Job, JobOwner, JobPlugin, JobReady, JobRequest, JobResult, JobSet, JobWake, JobsPlugin,

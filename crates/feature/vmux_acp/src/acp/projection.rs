@@ -14,7 +14,8 @@ use vmux_api::protocol::{
     AgentRequestId, FileTouchKind, ServiceMessage, SharedEvent,
 };
 use vmux_api::session::{AssistantBlock, Message, PlanStep};
-use vmux_ecs::{AsyncChannelPlugin, ChannelReceived, Order};
+use vmux_ecs::Order;
+use vmux_ecs::channel::{AsyncChannelPlugin, ChannelReceived};
 
 use super::workspace_driver::WorkspaceLocation;
 use super::{

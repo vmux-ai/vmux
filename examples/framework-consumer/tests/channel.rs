@@ -5,9 +5,10 @@ use std::task::Waker;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_app::VmuxPlugin;
-use vmux_app::ecs::{
+use vmux_app::ecs::JobWake;
+use vmux_app::ecs::channel::{
     AsyncChannel, AsyncChannelPlugin, ChannelClosed, ChannelReceived, ChannelSendErrorKind,
-    JobWake, MessageSender, SpawnSender,
+    MessageSender, SpawnSender,
 };
 
 struct WakeCounter(AtomicUsize);
