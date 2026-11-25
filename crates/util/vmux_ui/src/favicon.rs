@@ -1,3 +1,4 @@
+use crate::agent_icon::{AgentIcon, AgentIconVariant};
 pub use components::{Favicon, GlobeIcon};
 
 pub struct FaviconSource;
@@ -14,7 +15,7 @@ impl FaviconSource {
     }
 
     pub fn agent(agent_id: &str) -> Option<String> {
-        AgentBrand::from_id(agent_id).map(|brand| brand.icon_url().to_string())
+        AgentIcon::from_id(agent_id).map(|icon| icon.data_uri(AgentIconVariant::Color))
     }
 
     pub fn vmux(url: &str) -> Option<String> {
@@ -36,40 +37,6 @@ impl FaviconSource {
         }
         Self::host(url)
             .map(|host| format!("https://www.google.com/s2/favicons?domain={host}&sz=64"))
-    }
-}
-
-enum AgentBrand {
-    Claude,
-    Codex,
-    Gemini,
-    Mistral,
-}
-
-impl AgentBrand {
-    fn from_id(value: &str) -> Option<Self> {
-        for token in value
-            .to_ascii_lowercase()
-            .split(|character: char| !character.is_ascii_alphanumeric())
-        {
-            match token {
-                "claude" => return Some(Self::Claude),
-                "codex" => return Some(Self::Codex),
-                "gemini" => return Some(Self::Gemini),
-                "mistral" | "vibe" => return Some(Self::Mistral),
-                _ => {}
-            }
-        }
-        None
-    }
-
-    fn icon_url(&self) -> &'static str {
-        match self {
-            Self::Claude => "assets/agent-logos/claude.png",
-            Self::Codex => "assets/agent-logos/codex.png",
-            Self::Gemini => "https://cdn.agentclientprotocol.com/registry/v1/latest/gemini.svg",
-            Self::Mistral => "assets/agent-logos/vibe.png",
-        }
     }
 }
 
@@ -219,7 +186,7 @@ mod tests {
     fn agent_maps_vibe() {
         assert_eq!(
             FaviconSource::agent("mistral-vibe"),
-            Some("assets/agent-logos/vibe.png".to_string())
+            Some(AgentIcon::Mistral.data_uri(AgentIconVariant::Color))
         );
     }
 
@@ -227,11 +194,11 @@ mod tests {
     fn agent_maps_claude_and_codex() {
         assert_eq!(
             FaviconSource::agent("claude-acp"),
-            Some("assets/agent-logos/claude.png".to_string())
+            Some(AgentIcon::Claude.data_uri(AgentIconVariant::Color))
         );
         assert_eq!(
             FaviconSource::agent("codex-acp"),
-            Some("assets/agent-logos/codex.png".to_string())
+            Some(AgentIcon::Codex.data_uri(AgentIconVariant::Color))
         );
     }
 
@@ -281,7 +248,7 @@ mod tests {
     fn agent_maps_gemini() {
         assert_eq!(
             FaviconSource::agent("gemini"),
-            Some("https://cdn.agentclientprotocol.com/registry/v1/latest/gemini.svg".to_string())
+            Some(AgentIcon::Gemini.data_uri(AgentIconVariant::Color))
         );
     }
 

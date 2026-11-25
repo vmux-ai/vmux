@@ -1,3 +1,4 @@
+pub use crate::agent_icon::{AgentIcon, AgentIconVariant, AgentIconView};
 pub use wasm::{BuiltinIconView, GitIconView, GitSymbolView, LineIconView, PageIconView};
 
 pub const GIT_ICON_URL: &str = "vmux://git/assets/favicons/git.svg";
