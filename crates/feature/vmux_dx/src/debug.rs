@@ -390,12 +390,16 @@ pub struct Run {
 }
 
 impl Run {
-    fn missing_message(&self, branch: &str) -> String {
+    fn missing_message(&self, branch: &str, commit: Option<&str>) -> String {
+        let revision = match commit {
+            Some(commit) if commit != branch => format!("{branch} ({commit})"),
+            _ => branch.to_owned(),
+        };
         if self.profile == "dev" {
-            format!("No completed dev app for branch {branch}; run vmux build {branch} first")
+            format!("No completed dev app for branch {revision}; run vmux build {branch} first")
         } else {
             format!(
-                "No completed {} app for branch {branch}; run vmux build {branch} -p {} first",
+                "No completed {} app for branch {revision}; run vmux build {branch} -p {} first",
                 self.profile, self.profile
             )
         }
@@ -713,6 +717,9 @@ struct Binding {
 struct Target(PathBuf);
 
 #[derive(Component)]
+struct StaleArtifact;
+
+#[derive(Component)]
 struct File(PathBuf);
 
 #[derive(Component)]
@@ -876,6 +883,14 @@ impl Facts<'_, '_> {
         }
         self.get::<FileDigest, R>(owner)
             .map(|digest| digest.0.clone())
+    }
+
+    fn command_output<R: Component>(&self, owner: Entity) -> Option<String> {
+        self.get::<ToolOutput, R>(owner)
+            .filter(|ToolOutput(output)| output.status.success())
+            .and_then(|_| self.text::<R>(owner))
+            .map(|text| text.trim().to_owned())
+            .filter(|text| !text.is_empty())
     }
 
     fn related<T: Component, R: Relationship>(&self, owner: Entity, source: Entity) -> Option<&T> {
@@ -2882,6 +2897,21 @@ fn publish_start(
                 false,
             );
         }
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(
+                &settings.0,
+                &checkout.root,
+                "git".into(),
+                ["rev-parse", "--short=7", "HEAD"]
+                    .map(OsString::from)
+                    .into(),
+            ),
+            CommitSlot,
+            true,
+        );
         *phase = PublishPhase::Check;
 
         if *phase != previous_phase {
@@ -2915,6 +2945,9 @@ fn publish_check(
             .collect::<Vec<_>>();
         sources.sort_by_key(|(_, _, order, _)| order.0);
         let mut stamp = format!("{}\n", checkout.root.display());
+        if let Some(commit) = facts.command_output::<CommitSlot>(entity) {
+            stamp.push_str(&format!("head={commit}\n"));
+        }
         let mut failed = false;
         for (source, file, _, _) in sources {
             let valid = matches!(facts.related::<PathMetadata, ForLibrary>(entity, source), Some(PathMetadata(Some(metadata))) if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
@@ -3152,22 +3185,56 @@ fn run_start(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>, mut io
         };
 
         match profile.as_str() {
-            "local" => io.request(
-                &mut sequence,
-                entity,
-                &mut previous,
-                InspectPath(checkout.directory("release")),
-                DirectorySlot,
-                false,
-            ),
-            "dev" => io.request(
-                &mut sequence,
-                entity,
-                &mut previous,
-                InspectPath(checkout.directory("debug").join(".vmux-dev-ready")),
-                PathSlot,
-                false,
-            ),
+            "local" => {
+                io.request(
+                    &mut sequence,
+                    entity,
+                    &mut previous,
+                    InspectPath(checkout.directory("release")),
+                    DirectorySlot,
+                    false,
+                );
+                io.request(
+                    &mut sequence,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(
+                        &settings.0,
+                        &checkout.root,
+                        "git".into(),
+                        ["rev-parse", "--short=7", "HEAD"]
+                            .map(OsString::from)
+                            .into(),
+                    ),
+                    CommitSlot,
+                    true,
+                );
+            }
+            "dev" => {
+                io.request(
+                    &mut sequence,
+                    entity,
+                    &mut previous,
+                    InspectPath(checkout.directory("debug").join(".vmux-dev-ready")),
+                    PathSlot,
+                    false,
+                );
+                io.request(
+                    &mut sequence,
+                    entity,
+                    &mut previous,
+                    CaptureOutput::new(
+                        &settings.0,
+                        &checkout.root,
+                        "git".into(),
+                        ["rev-parse", "--short=7", "HEAD"]
+                            .map(OsString::from)
+                            .into(),
+                    ),
+                    CommitSlot,
+                    true,
+                );
+            }
             _ => {
                 let target = checkout
                     .directory("release")
@@ -3324,12 +3391,23 @@ fn read_development(mut requests: RunRequests, facts: Facts, wake: Res<JobWake>,
         let Some(stamp) = facts.text::<StampSlot>(entity) else {
             continue;
         };
-        let mut lines = stamp.lines();
+        let mut lines = stamp.lines().peekable();
         if lines.next() != checkout.root.to_str() {
             io.commands.entity(entity).insert(Failed(Failure::message(
                 "Artifact belongs to another checkout",
             )));
             continue;
+        }
+        let recorded_head = lines
+            .peek()
+            .and_then(|line| line.strip_prefix("head="))
+            .map(str::to_owned);
+        if recorded_head.is_some() {
+            lines.next();
+        }
+        let current_head = facts.command_output::<CommitSlot>(entity);
+        if current_head.is_some() && recorded_head != current_head {
+            io.commands.entity(entity).insert(StaleArtifact);
         }
         let mut failed = false;
         let mut count = 0;
@@ -3499,6 +3577,7 @@ fn verify_development(
     mut requests: RunRequests,
     facts: Facts,
     checks: Query<(Entity, &File, &Expected, &Order, &ChildOf)>,
+    stale: Query<(), With<StaleArtifact>>,
     wake: Res<JobWake>,
     mut io: IoWriter,
 ) {
@@ -3541,6 +3620,11 @@ fn verify_development(
             io.commands.entity(entity).insert(Failed(Failure::message(
                 "Development artifact is incomplete or has changed; run vmux build",
             )));
+            continue;
+        }
+        if stale.contains(entity) {
+            *phase = RunPhase::Missing;
+            wake.0.wake_by_ref();
             continue;
         }
         let path = if cfg!(target_os = "macos") {
@@ -3594,6 +3678,9 @@ fn run_select(
         };
 
         let prefix = format!("{} (", product.value("VMUX_HOST_NAME"));
+        let expected = facts
+            .command_output::<CommitSlot>(entity)
+            .map(|head| format!("{prefix}{head}).app"));
         let mut latest = None;
         for (entry, parent) in &entries {
             if parent.parent() != entity || !entry.directory || entry.symlink {
@@ -3602,7 +3689,11 @@ fn run_select(
             let Some(name) = entry.path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            if !name.starts_with(&prefix) || !name.ends_with(").app") {
+            if let Some(expected) = &expected {
+                if name != expected {
+                    continue;
+                }
+            } else if !name.starts_with(&prefix) || !name.ends_with(").app") {
                 continue;
             }
             if latest
@@ -3710,20 +3801,12 @@ fn report_missing(mut requests: RunRequests, facts: Facts, mut io: IoWriter) {
         if facts.pending(entity) {
             continue;
         }
-        let branch = facts
-            .get::<ToolOutput, BranchSlot>(entity)
-            .filter(|ToolOutput(output)| output.status.success())
-            .and_then(|_| facts.text::<BranchSlot>(entity))
-            .unwrap_or_default();
-        let commit = facts
-            .get::<ToolOutput, CommitSlot>(entity)
-            .filter(|ToolOutput(output)| output.status.success())
-            .and_then(|_| facts.text::<CommitSlot>(entity))
-            .unwrap_or_default();
-        let resolved = if !branch.trim().is_empty() {
-            branch.trim().to_owned()
-        } else if !commit.trim().is_empty() {
-            commit.trim().to_owned()
+        let branch = facts.command_output::<BranchSlot>(entity);
+        let commit = facts.command_output::<CommitSlot>(entity);
+        let resolved = if let Some(branch) = branch {
+            branch
+        } else if let Some(commit) = &commit {
+            commit.clone()
         } else {
             checkout
                 .root
@@ -3732,9 +3815,9 @@ fn report_missing(mut requests: RunRequests, facts: Facts, mut io: IoWriter) {
                 .unwrap_or("unknown")
                 .to_owned()
         };
-        io.commands
-            .entity(entity)
-            .insert(Failed(Failure::message(request.missing_message(&resolved))));
+        io.commands.entity(entity).insert(Failed(Failure::message(
+            request.missing_message(&resolved, commit.as_deref()),
+        )));
     }
 }
 

@@ -56,11 +56,11 @@ investigating a failure; it is not required before every push.
 You can use Vmux itself as the editor: open this checkout as a Project, select the worktree in its Space, and keep Code, Terminal, and a Session together. The same build and test commands work whether you edit manually or ask an agent to make the change.
 
 `vmux desktop <branch>` opens the desktop app for that branch without compiling when a
-completed artifact already exists, and builds it first when missing. Pass `--no-build` to
-fail instead of compiling. `vmux desktop` uses the current checkout; select
-`vmux desktop main` when you intend main. Use `vmux build <branch>` to build without
-launching. `vmux run` remains available for explicit platform selection, including mobile
-and web.
+completed artifact matching the current commit already exists, and builds it first when
+missing or outdated. Pass `--no-build` to fail instead of compiling. `vmux desktop` uses
+the current checkout; select `vmux desktop main` when you intend main. Use
+`vmux build <branch>` to build without launching. `vmux run` remains available for
+explicit platform selection, including mobile and web.
 
 ## CLI updates
 
