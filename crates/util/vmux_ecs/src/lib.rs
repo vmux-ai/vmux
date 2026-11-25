@@ -13,6 +13,8 @@ pub use vmux_task::{
 #[cfg(feature = "host")]
 pub use vmux_task::{TokioTask, TokioTaskOutcome};
 pub use vmux_time as time;
+#[cfg(all(host, feature = "watch"))]
+pub use vmux_watch as watch;
 
 #[cfg(all(host, feature = "host"))]
 pub use archive::{

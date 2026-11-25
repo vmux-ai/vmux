@@ -11,11 +11,13 @@ default = []
 records = ["bevy_ecs/serialize", "bevy_ecs/reflect_auto_register"]
 cli = []
 jobs = []
+watch = ["dep:vmux_watch"]
 contracts = ["dep:rkyv", "dep:vmux_api"]
 store = ["dep:bevy_world_serialization", "dep:moonshine-save", "dep:ron"]
 host = [
     "cli",
     "jobs",
+    "watch",
     "contracts",
     "store",
     "dep:tokio",
@@ -69,6 +71,7 @@ tokio = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 vmux_flex = { path = "../vmux_flex", optional = true }
 vmux_transport = { path = "../vmux_transport", optional = true }
+vmux_watch = { path = "../vmux_watch", optional = true }
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 
 [lints]

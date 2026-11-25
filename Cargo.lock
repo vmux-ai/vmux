@@ -10711,6 +10711,7 @@ dependencies = [
  "vmux_task",
  "vmux_time",
  "vmux_transport",
+ "vmux_watch",
  "web-time",
  "zip",
 ]
@@ -10736,7 +10737,6 @@ dependencies = [
  "image",
  "lsp-types",
  "moonshine-save",
- "notify 6.1.1",
  "percent-encoding",
  "pulldown-cmark",
  "regex",
@@ -10963,7 +10963,6 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "moonshine-save",
- "notify 6.1.1",
  "rkyv",
  "serde",
  "serde_json",
@@ -11680,6 +11679,19 @@ dependencies = [
  "tempfile",
  "url",
  "vmux_spawn",
+]
+
+[[package]]
+name = "vmux_watch"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "notify 6.1.1",
+ "tempfile",
+ "tracing",
+ "vmux_channel",
+ "vmux_path",
 ]
 
 [[package]]

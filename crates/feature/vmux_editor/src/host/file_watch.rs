@@ -2,133 +2,60 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use vmux_ecs::{Active, Cwd, JobWake};
+use vmux_ecs::watch::{FileWatch, FileWatchPlugin, FileWatchSet};
+use vmux_path::PathIdentity;
 
 use super::editor::FileView;
 use super::explorer::{ExplorerDirectory, ExplorerDirectoryExpanded};
 use super::file_lifecycle::FileChangesSet;
-use super::file_watch_io::Transport;
 
-pub(super) struct FileWatchPlugin;
+pub(super) struct EditorFileWatchPlugin;
 
-impl Plugin for FileWatchPlugin {
+impl Plugin for EditorFileWatchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<Observed>()
-            .add_message::<Reconciled>()
-            .add_systems(PreStartup, start_transport)
+        app.add_plugins(FileWatchPlugin)
+            .configure_sets(Update, FileWatchSet::Reconcile.before(FileChangesSet))
             .add_systems(
                 Update,
-                (wake, receive, invalidate, select, retire, register)
-                    .chain()
-                    .before(FileChangesSet),
+                select
+                    .after(FileWatchSet::Receive)
+                    .before(FileWatchSet::Reconcile),
             );
     }
 }
 
-fn start_transport(world: &mut World) {
-    if world.contains_non_send::<Transport>() {
-        return;
-    }
-    match Transport::new() {
-        Ok(transport) => {
-            world.insert_non_send(transport);
-        }
-        Err(error) => tracing::warn!("file watcher init failed: {error}"),
-    }
-}
-
-#[derive(Message)]
-pub(super) struct Observed {
-    pub(super) paths: Vec<PathBuf>,
-    pub(super) directory_removed: bool,
-    pub(super) error: Option<String>,
-}
-
-impl Observed {
-    pub(super) fn from_notify(result: notify::Result<notify::Event>) -> Self {
-        match result {
-            Ok(event) if matches!(event.kind, notify::EventKind::Access(_)) => Self {
-                paths: Vec::new(),
-                directory_removed: false,
-                error: None,
-            },
-            Ok(event) => Self {
-                directory_removed: matches!(
-                    event.kind,
-                    notify::EventKind::Remove(_)
-                        | notify::EventKind::Modify(notify::event::ModifyKind::Name(
-                            notify::event::RenameMode::From
-                                | notify::event::RenameMode::Both
-                                | notify::event::RenameMode::Any
-                        ))
-                ),
-                paths: event.paths,
-                error: None,
-            },
-            Err(error) => Self {
-                paths: Vec::new(),
-                directory_removed: false,
-                error: Some(error.to_string()),
-            },
-        }
-    }
-}
-
-#[derive(Message)]
-pub(super) struct Reconciled(pub PathBuf);
-
 #[derive(Component)]
 struct Watch;
-
-#[derive(Component)]
-struct Watching;
-
-#[derive(Component)]
-struct Failure(String);
-
-#[derive(Component)]
-struct Reset;
-
-fn wake(transport: Option<NonSend<Transport>>, wake: Option<Res<JobWake>>) {
-    if let Some(transport) = transport
-        && let Some(wake) = wake
-    {
-        transport.bind_wake(wake.0.clone());
-    }
-}
 
 fn select(
     views: Query<&FileView>,
     expanded: Query<&ExplorerDirectory, With<ExplorerDirectoryExpanded>>,
-    registrations: Query<(Entity, &Cwd, Has<Active>), With<Watch>>,
+    registrations: Query<(Entity, &FileWatch), With<Watch>>,
     mut commands: Commands,
 ) {
     let mut wanted = HashSet::new();
     for view in &views {
         if let Some(directory) = nearest_directory(&view.path) {
-            wanted.insert(vmux_path::PathIdentity::resolve(directory).into_path_buf());
+            wanted.insert(PathIdentity::resolve(directory).into_path_buf());
         }
     }
     for directory in &expanded {
-        wanted.insert(vmux_path::PathIdentity::resolve(&directory.path).into_path_buf());
+        wanted.insert(PathIdentity::resolve(&directory.path).into_path_buf());
     }
     let mut existing = HashSet::new();
-    for (entity, path, active) in &registrations {
-        existing.insert(path.0.clone());
-        if wanted.contains(&path.0) {
-            if !active {
-                commands.entity(entity).insert(Active);
-            }
-        } else if active {
-            commands.entity(entity).remove::<Active>();
+    for (entity, watch) in &registrations {
+        let path = watch.path().to_path_buf();
+        if wanted.contains(&path) {
+            existing.insert(path);
+        } else {
+            commands.entity(entity).despawn();
         }
     }
     for directory in wanted {
         if !existing.contains(&directory) {
             commands.spawn((
                 Name::new("Editor directory watch"),
-                Cwd(directory),
-                Active,
+                FileWatch::non_recursive(directory),
                 Watch,
             ));
         }
@@ -145,111 +72,6 @@ fn nearest_directory(path: &Path) -> Option<PathBuf> {
     }
 }
 
-type PendingRegistrations<'w, 's> = Query<
-    'w,
-    's,
-    (Entity, &'static Cwd, Option<&'static Failure>),
-    (With<Watch>, With<Active>, Without<Watching>),
->;
-
-fn register(
-    registrations: PendingRegistrations,
-    transport: Option<NonSendMut<Transport>>,
-    mut reconciled: MessageWriter<Reconciled>,
-    mut commands: Commands,
-) {
-    let Some(mut transport) = transport else {
-        return;
-    };
-    for (entity, path, failure) in &registrations {
-        match transport.watch(&path.0) {
-            Ok(()) => {
-                reconciled.write(Reconciled(path.0.clone()));
-                commands.entity(entity).insert(Watching).remove::<Failure>();
-            }
-            Err(error) => {
-                let message = error.to_string();
-                if failure.is_none_or(|failure| failure.0 != message) {
-                    tracing::warn!(path = %path.0.display(), "file watch failed: {message}");
-                    commands.entity(entity).insert(Failure(message));
-                }
-            }
-        }
-    }
-}
-
-type RetiringRegistrations<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static Cwd,
-        Has<Watching>,
-        Has<Active>,
-        Option<&'static Failure>,
-    ),
-    (With<Watch>, Or<(Without<Active>, With<Reset>)>),
->;
-
-fn retire(
-    registrations: RetiringRegistrations,
-    transport: Option<NonSendMut<Transport>>,
-    mut commands: Commands,
-) {
-    let Some(mut transport) = transport else {
-        return;
-    };
-    for (entity, path, watching, active, failure) in &registrations {
-        if watching {
-            match transport.unwatch(&path.0) {
-                Ok(()) => {}
-                Err(error) if matches!(error.kind, notify::ErrorKind::WatchNotFound) => {}
-                Err(error) => {
-                    let message = error.to_string();
-                    if failure.is_none_or(|failure| failure.0 != message) {
-                        tracing::warn!(path = %path.0.display(), "file unwatch failed: {message}");
-                        commands.entity(entity).insert(Failure(message));
-                    }
-                    continue;
-                }
-            }
-        }
-        if active {
-            commands
-                .entity(entity)
-                .remove::<(Watching, Reset, Failure)>();
-        } else {
-            commands.entity(entity).despawn();
-        }
-    }
-}
-
-fn invalidate(
-    mut observations: MessageReader<Observed>,
-    registrations: Query<(Entity, &Cwd), With<Watching>>,
-    mut commands: Commands,
-) {
-    for observation in observations.read() {
-        if !observation.directory_removed {
-            continue;
-        }
-        for (entity, directory) in &registrations {
-            if observation.paths.contains(&directory.0) {
-                commands.entity(entity).insert(Reset);
-            }
-        }
-    }
-}
-
-fn receive(transport: Option<NonSend<Transport>>, mut observations: MessageWriter<Observed>) {
-    let Some(transport) = transport else {
-        return;
-    };
-    while let Some(observation) = transport.receive() {
-        observations.write(Observed::from_notify(observation));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, mpsc};
@@ -257,6 +79,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use bevy_cef::prelude::Browsers;
+    use vmux_ecs::JobWake;
+    use vmux_ecs::watch::{FileWatchEvent, FileWatchEventKind, FileWatchReconciled, Watching};
 
     use super::super::editor::Editor;
     use super::super::file_lifecycle::{FileLifecyclePlugin, FileLoadTask};
@@ -304,9 +128,9 @@ mod tests {
             let mut registrations = self
                 .app
                 .world_mut()
-                .query_filtered::<&Cwd, With<Watching>>();
-            for path in registrations.iter(self.app.world()) {
-                paths.push(path.0.clone());
+                .query_filtered::<&FileWatch, (With<Watch>, With<Watching>)>();
+            for watch in registrations.iter(self.app.world()) {
+                paths.push(watch.path().to_path_buf());
             }
             paths.sort();
             paths
@@ -343,22 +167,29 @@ mod tests {
         let mut cursor = fixture
             .app
             .world()
-            .resource::<Messages<Reconciled>>()
+            .resource::<Messages<FileWatchReconciled>>()
             .get_cursor();
         cursor
-            .read(fixture.app.world().resource::<Messages<Reconciled>>())
+            .read(
+                fixture
+                    .app
+                    .world()
+                    .resource::<Messages<FileWatchReconciled>>(),
+            )
             .for_each(drop);
         fixture
             .app
             .world_mut()
-            .write_message(Observed::from_notify(Ok(notify::Event::new(
-                notify::EventKind::Remove(notify::event::RemoveKind::Folder),
-            )
-            .add_path(directory.clone()))));
+            .write_message(FileWatchEvent::directory_removed(vec![directory.clone()]));
         fixture.app.update();
         let roots: Vec<_> = cursor
-            .read(fixture.app.world().resource::<Messages<Reconciled>>())
-            .map(|fact| fact.0.clone())
+            .read(
+                fixture
+                    .app
+                    .world()
+                    .resource::<Messages<FileWatchReconciled>>(),
+            )
+            .map(|fact| fact.path.clone())
             .collect();
         assert_eq!(roots.as_slice(), std::slice::from_ref(&directory));
         assert_eq!(fixture.registrations(), [directory]);
@@ -437,13 +268,14 @@ mod tests {
     fn access_observations_do_not_retire_a_loaded_editor() {
         let mut fixture = Fixture::new();
         let view = fixture.open("file.txt");
+        let _ = std::fs::read_to_string(fixture.directory.path().join("file.txt")).unwrap();
         fixture
             .app
             .world_mut()
-            .write_message(Observed::from_notify(Ok(notify::Event::new(
-                notify::EventKind::Access(notify::event::AccessKind::Read),
-            )
-            .add_path(fixture.directory.path().join("file.txt")))));
+            .write_message(FileWatchEvent::changed(
+                Vec::new(),
+                FileWatchEventKind::Other,
+            ));
         fixture.app.update();
         assert_eq!(
             Editor::read(fixture.app.world(), view)
