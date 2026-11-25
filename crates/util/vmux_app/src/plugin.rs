@@ -116,7 +116,11 @@ pub struct VmuxEcsPlugin;
 #[cfg(feature = "ecs")]
 impl Plugin for VmuxEcsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((vmux_ecs::PrimitivesPlugin, vmux_ecs::OperationPlugin));
+        app.add_plugins((
+            vmux_ecs::PrimitivesPlugin,
+            vmux_ecs::OperationPlugin,
+            vmux_ecs::ShutdownPlugin,
+        ));
     }
 }
 

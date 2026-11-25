@@ -1,0 +1,22 @@
+[package]
+name = "vmux_runner"
+description = "Wake-driven headless Tokio runner for reactive Bevy ECS applications"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+host = ["vmux_ecs/host"]
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_tasks = { workspace = true, features = ["multi_threaded", "async_executor"] }
+tokio = { workspace = true }
+tracing = "0.1"
+vmux_ecs = { path = "../vmux_ecs", features = ["jobs"] }
+vmux_task = { path = "../vmux_task", features = ["tokio"] }
+
+[lints]
+workspace = true

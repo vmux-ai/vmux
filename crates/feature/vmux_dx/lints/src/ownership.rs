@@ -1011,6 +1011,7 @@ impl<'tcx> Ownership<'tcx> {
             "crossbeam_channel",
             "async_channel",
             "vmux_channel",
+            "vmux_runner",
             "vmux_watch",
             "async_io",
             "async_lock",

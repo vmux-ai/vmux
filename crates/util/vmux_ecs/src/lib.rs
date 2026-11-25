@@ -82,6 +82,10 @@ pub use rename::{Icon, RenamePlugin, RenameRequest, Renamed};
 pub use resource_path::{ContentDigest, FilePath};
 pub use revision::{BaseRevision, Revision};
 pub use selection::{SelectRequest, Selected, SelectionPlugin, SelectionSet};
+pub use shutdown::{
+    Shutdown, ShutdownBarrier, ShutdownComplete, ShutdownPending, ShutdownPhase, ShutdownPlugin,
+    ShutdownRequest, ShutdownSet, ShutdownState, ShutdownTimeout,
+};
 pub use status::{Busy, Failure, Loading, Progress, Ready, Retired, StatusPlugin};
 #[cfg(feature = "store")]
 pub use store::{
@@ -160,6 +164,7 @@ pub mod search;
 mod selection;
 #[cfg(all(host, feature = "host"))]
 pub mod service;
+mod shutdown;
 mod status;
 #[cfg(feature = "store")]
 pub mod store;
