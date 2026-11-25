@@ -274,7 +274,7 @@ fn environment(
         let agent = ready.0.clone();
         let shell = key.shell.clone();
         match workers.spawn_process(
-            vmux_ecs::wake::Wake::optional_waker(wake.clone()),
+            vmux_runner::WinitWake::optional_waker(wake.clone()),
             move || AcpInstallResult {
                 agent,
                 login_env: vmux_process::LoginShellEnvironment::get(&shell).to_vec(),

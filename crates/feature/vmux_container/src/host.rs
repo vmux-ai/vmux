@@ -7,9 +7,9 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::page::{HostedPage, PageReady};
-use vmux_ecs::wake::Wake;
 use vmux_ecs::{KeyboardOwner, PageMetadata, Revision, UiStatePlugin, UiStateWrite};
 use vmux_feature::manifest::FeaturePlugin;
+use vmux_runner::WinitWake;
 use vmux_vm::{EngineClient, Phase, Settings, Status};
 
 use crate::ContainerPlugin;
@@ -530,7 +530,7 @@ fn inspect(
         }
         let settings = settings.clone();
         let requested = settings.clone();
-        let wake = Wake::beside(proxy.as_deref());
+        let wake = WinitWake::beside(proxy.as_deref());
         commands.entity(entity).insert(InspectTask {
             settings: requested,
             revision: *revision,

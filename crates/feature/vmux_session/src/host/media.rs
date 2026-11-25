@@ -88,7 +88,7 @@ impl AttachmentTasks<'_, '_> {
             .iter()
             .map(|path| path.to_string_lossy().into_owned())
             .collect();
-        let wake = vmux_ecs::wake::Wake::beside(self.proxy.as_deref());
+        let wake = vmux_runner::WinitWake::beside(self.proxy.as_deref());
         let task = IoTaskPool::get().spawn(async move {
             let _wake = wake;
             let mut result = AttachmentResult::default();
@@ -880,7 +880,7 @@ fn query(
         );
         return;
     };
-    let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
+    let wake = vmux_runner::WinitWake::beside(proxy.as_deref());
     let task = IoTaskPool::get().spawn(async move {
         let _wake = wake;
         ComposerFileQuery::new(root, query).search(request_id)
@@ -1110,7 +1110,7 @@ fn drain_list_tasks(
             .iter()
             .any(|entry| !entry.is_dir && entry.mime_type.starts_with("image/"))
         {
-            let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
+            let wake = vmux_runner::WinitWake::beside(proxy.as_deref());
             let task = IoTaskPool::get().spawn(async move {
                 let _wake = wake;
                 chat_media_previews(entries)

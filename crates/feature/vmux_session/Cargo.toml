@@ -27,6 +27,7 @@ app = [
     "dep:vmux_command",
     "dep:vmux_git",
     "dep:vmux_page",
+    "dep:vmux_runner",
     "dep:vmux_tool",
     "dep:vmux_ui",
     "vmux_ecs/host",
@@ -79,6 +80,7 @@ ignore = "0.4"
 rfd = { workspace = true, optional = true }
 vmux_clipboard = { path = "../../util/vmux_clipboard", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }
+vmux_runner = { path = "../../util/vmux_runner", features = ["winit"], optional = true }
 vmux_tool = { path = "../vmux_tool", optional = true }
 
 [lints]

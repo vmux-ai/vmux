@@ -29,9 +29,7 @@ impl Plugin for McpConnectionPlugin {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
         }
-        if !app.is_plugin_added::<vmux_ecs::wake::WakePlugin>() {
-            app.add_plugins(vmux_ecs::wake::WakePlugin);
-        }
+        app.add_plugins(vmux_runner::WinitWakePlugin);
         if !app.is_plugin_added::<crate::storage::StoragePlugin>() {
             app.add_plugins(crate::storage::StoragePlugin);
         }

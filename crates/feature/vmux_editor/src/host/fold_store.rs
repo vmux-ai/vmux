@@ -48,7 +48,7 @@ struct Binding {
 }
 
 #[allow(unknown_lints, vmux_ecs_ownership)]
-struct EventLoopWake(vmux_ecs::wake::Wake);
+struct EventLoopWake(vmux_runner::WinitWake);
 
 impl Wake for EventLoopWake {
     fn wake(self: Arc<Self>) {
@@ -71,7 +71,7 @@ fn bind(
     if wake.is_none()
         && let Some(proxy) = proxy
     {
-        let wake = EventLoopWake(vmux_ecs::wake::Wake::beside(Some(&proxy)));
+        let wake = EventLoopWake(vmux_runner::WinitWake::beside(Some(&proxy)));
         commands.insert_resource(FileWake(Arc::new(wake).into()));
     }
 }

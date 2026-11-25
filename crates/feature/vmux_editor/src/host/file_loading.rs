@@ -27,10 +27,8 @@ pub(super) struct FileLoadingPlugin;
 
 impl Plugin for FileLoadingPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_ecs::wake::WakePlugin>() {
-            app.add_plugins(vmux_ecs::wake::WakePlugin);
-        }
         app.add_plugins((
+            vmux_runner::WinitWakePlugin,
             JobPlugin::<Inspect>::default(),
             JobPlugin::<Directory>::default(),
             JobPlugin::<Bytes>::default(),

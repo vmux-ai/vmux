@@ -16,6 +16,12 @@ use vmux_ecs::{
 };
 use vmux_task::TokioTask;
 
+#[cfg(all(feature = "winit", not(target_os = "ios")))]
+pub use winit::{WinitWake, WinitWakePlugin};
+
+#[cfg(all(feature = "winit", not(target_os = "ios")))]
+pub mod winit;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParkOutcome {
     Woken,

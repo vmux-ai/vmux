@@ -134,7 +134,7 @@ impl Plugin for VmuxRuntimePlugin {
             vmux_flex::WindowViewportPlugin,
             vmux_ecs::profile::ProfilePlugin,
             vmux_ecs::page::PagePlugin,
-            vmux_ecs::wake::WakePlugin,
+            vmux_runner::WinitWakePlugin,
         ));
         #[cfg(feature = "menu")]
         app.add_systems(bevy_app::PreUpdate, sync_menu_wake);
