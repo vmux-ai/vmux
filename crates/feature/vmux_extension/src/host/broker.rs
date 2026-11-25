@@ -10,6 +10,7 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+use vmux_ecs::SequenceCounter;
 #[cfg(test)]
 use vmux_feature::manifest::FeaturePlugin;
 
@@ -56,47 +57,23 @@ impl Plugin for ExtensionBrokerPlugin {
 #[derive(Component)]
 struct BridgeWakeArmed;
 
-#[derive(Component)]
-struct BridgeEventSequence(u64);
+#[derive(Clone, Copy)]
+struct BridgeEvent;
 
-impl BridgeEventSequence {
+impl BridgeEvent {
     const MAX_PENDING_EVENTS: usize = 256;
-
-    fn next(&mut self) -> u64 {
-        let sequence = self.0;
-        self.0 = self.0.saturating_add(1).max(1);
-        sequence
-    }
 }
 
-impl Default for BridgeEventSequence {
-    fn default() -> Self {
-        Self(1)
-    }
-}
+#[derive(Clone, Copy)]
+struct BridgeOrder;
 
-#[derive(Component)]
-struct BridgeOrderSequence(u64);
-
-impl BridgeOrderSequence {
+impl BridgeOrder {
     const MAX_MESSAGES_PER_UPDATE: usize = 128;
     const MAX_SEEN_REQUESTS: usize = 256;
     const MAX_CACHED_RESPONSES: usize = 256;
     const MAX_SUBSCRIPTIONS: usize = 64;
     const CONFORMANCE_NAMESPACE: &'static str = "__vmux_conformance";
     const MODEL_CHANGED_EVENT: &'static str = "modelChanged";
-
-    fn next(&mut self) -> u64 {
-        let order = self.0;
-        self.0 = self.0.saturating_add(1).max(1);
-        order
-    }
-}
-
-impl Default for BridgeOrderSequence {
-    fn default() -> Self {
-        Self(1)
-    }
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -304,7 +281,7 @@ impl BrokerRecords<'_, '_> {
                 }
             }
         }
-        if count >= BridgeOrderSequence::MAX_SEEN_REQUESTS
+        if count >= BridgeOrder::MAX_SEEN_REQUESTS
             && let Some((_, entity)) = oldest
         {
             self.commands.entity(entity).despawn();
@@ -337,7 +314,7 @@ impl BrokerRecords<'_, '_> {
                 }
             }
         }
-        if count >= BridgeOrderSequence::MAX_CACHED_RESPONSES
+        if count >= BridgeOrder::MAX_CACHED_RESPONSES
             && let Some((_, entity)) = oldest
         {
             self.commands.entity(entity).despawn();
@@ -391,7 +368,7 @@ impl BrokerRecords<'_, '_> {
             }
             count += 1;
         }
-        if count >= BridgeOrderSequence::MAX_SUBSCRIPTIONS {
+        if count >= BridgeOrder::MAX_SUBSCRIPTIONS {
             return Err(ExtensionApiError::new(
                 "subscription_limit",
                 "extension bridge subscription limit reached",
@@ -444,7 +421,7 @@ impl BrokerRecords<'_, '_> {
         session: (&str, u64),
         request: ApiRequest,
         context: (&ExtensionModel, &CapabilityMatrix),
-        order_sequence: &mut BridgeOrderSequence,
+        order_sequence: &mut SequenceCounter<BridgeOrder>,
         virtual_windows: &mut VirtualWindows,
     ) {
         let (extension_id, session_id) = session;
@@ -527,9 +504,8 @@ impl BrokerRecords<'_, '_> {
                 return;
             }
         };
-        let conformance_subscription = subscription.namespace
-            == BridgeOrderSequence::CONFORMANCE_NAMESPACE
-            && subscription.event == BridgeOrderSequence::MODEL_CHANGED_EVENT
+        let conformance_subscription = subscription.namespace == BridgeOrder::CONFORMANCE_NAMESPACE
+            && subscription.event == BridgeOrder::MODEL_CHANGED_EVENT
             && wake_timer.is_some()
             && server
                 .authorization(extension_id)
@@ -585,7 +561,7 @@ impl BrokerRecords<'_, '_> {
         authorization: &BridgeAuthorization,
         conformance_enabled: bool,
     ) -> BridgeServerMessage {
-        if request.namespace == BridgeOrderSequence::CONFORMANCE_NAMESPACE {
+        if request.namespace == BridgeOrder::CONFORMANCE_NAMESPACE {
             if request.method == "snapshot" && conformance_enabled {
                 return match serde_json::to_value(model) {
                     Ok(snapshot) => BridgeServerMessage::Response(ApiResponse::success(
@@ -750,7 +726,7 @@ impl BrokerRecords<'_, '_> {
                 "extension authorization is unavailable",
             )
         })?;
-        if request.namespace == BridgeOrderSequence::CONFORMANCE_NAMESPACE {
+        if request.namespace == BridgeOrder::CONFORMANCE_NAMESPACE {
             if ExtensionEnvironment::conformance_enabled() && authorization.conformance {
                 return Ok(());
             }
@@ -1025,7 +1001,7 @@ impl BrokerRecords<'_, '_> {
 
 #[derive(SystemParam)]
 struct PendingEventDispatch<'w, 's> {
-    sequence: Single<'w, 's, &'static mut BridgeEventSequence>,
+    sequence: Single<'w, 's, &'static mut SequenceCounter<BridgeEvent>>,
     pending: Query<'w, 's, &'static crate::Id, With<PendingBridgeEvent>>,
     commands: Commands<'w, 's>,
 }
@@ -1044,7 +1020,7 @@ impl PendingEventDispatch<'_, '_> {
             .iter()
             .filter(|id| id.0 == extension_id)
             .count();
-        if count >= BridgeEventSequence::MAX_PENDING_EVENTS {
+        if count >= BridgeEvent::MAX_PENDING_EVENTS {
             bevy::log::error!("extension bridge event queue overflow for extension {extension_id}");
             if let Err(error) = server.send(
                 extension_id,
@@ -1093,8 +1069,8 @@ fn spawn(manifests: Query<&vmux_feature::manifest::FeatureManifest>, mut command
     let matrix = matrix.expect("browser feature manifest has an extension policy");
     let mut entity = commands.spawn((
         Name::new("Extension broker"),
-        BridgeEventSequence::default(),
-        BridgeOrderSequence::default(),
+        SequenceCounter::<BridgeEvent>::starting_at(1),
+        SequenceCounter::<BridgeOrder>::starting_at(1),
         matrix,
     ));
     if ExtensionEnvironment::conformance_enabled() {
@@ -1162,7 +1138,7 @@ fn revoke_bridge_state(
 fn drain_bridge_requests(
     server: Single<&ExtensionBridgeServer>,
     broker: Single<(
-        &mut BridgeOrderSequence,
+        &mut SequenceCounter<BridgeOrder>,
         &CapabilityMatrix,
         Option<&mut ConformanceWakeScheduler>,
     )>,
@@ -1172,7 +1148,7 @@ fn drain_bridge_requests(
     mut records: BrokerRecords,
 ) {
     let (mut order_sequence, matrix, mut wake_timer) = broker.into_inner();
-    for _ in 0..BridgeOrderSequence::MAX_MESSAGES_PER_UPDATE {
+    for _ in 0..BridgeOrder::MAX_MESSAGES_PER_UPDATE {
         let Ok(inbound) = server.try_recv() else {
             break;
         };
@@ -1277,8 +1253,8 @@ fn forward_model_events(
             if server.authorization(extension_id).is_none() {
                 continue;
             }
-            if subscription.namespace == BridgeOrderSequence::CONFORMANCE_NAMESPACE
-                && subscription.event == BridgeOrderSequence::MODEL_CHANGED_EVENT
+            if subscription.namespace == BridgeOrder::CONFORMANCE_NAMESPACE
+                && subscription.event == BridgeOrder::MODEL_CHANGED_EVENT
                 && conformance_sent.insert(extension_id)
             {
                 let Ok(value) = serde_json::to_value(event) else {
@@ -1288,8 +1264,8 @@ fn forward_model_events(
                 pending.queue(
                     &server,
                     extension_id,
-                    BridgeOrderSequence::CONFORMANCE_NAMESPACE,
-                    BridgeOrderSequence::MODEL_CHANGED_EVENT,
+                    BridgeOrder::CONFORMANCE_NAMESPACE,
+                    BridgeOrder::MODEL_CHANGED_EVENT,
                     serde_json::json!([value]),
                 );
             }
@@ -1332,8 +1308,8 @@ fn fire_conformance_wake_timer(
         pending.queue(
             &server,
             &id.0,
-            BridgeOrderSequence::CONFORMANCE_NAMESPACE,
-            BridgeOrderSequence::MODEL_CHANGED_EVENT,
+            BridgeOrder::CONFORMANCE_NAMESPACE,
+            BridgeOrder::MODEL_CHANGED_EVENT,
             serde_json::json!([snapshot]),
         );
     }
@@ -1403,7 +1379,7 @@ mod tests {
             if let Some(scheduler) = scheduler {
                 let broker = app
                     .world_mut()
-                    .query_filtered::<Entity, With<BridgeOrderSequence>>()
+                    .query_filtered::<Entity, With<SequenceCounter<BridgeOrder>>>()
                     .single(app.world())
                     .unwrap();
                 app.world_mut().entity_mut(broker).insert(scheduler);
@@ -1693,7 +1669,7 @@ mod tests {
         let model = ExtensionModel::default();
         let request = || ApiRequest {
             request_id: "snapshot".into(),
-            namespace: BridgeOrderSequence::CONFORMANCE_NAMESPACE.into(),
+            namespace: BridgeOrder::CONFORMANCE_NAMESPACE.into(),
             method: "snapshot".into(),
             arguments: serde_json::json!({}),
             caller_context: Fixture::caller_context(),
@@ -1832,8 +1808,8 @@ mod tests {
         let mut fixture = Fixture::new(server, Some(ConformanceWakeScheduler::default()));
         let first_event = ApiEvent {
             sequence: 1,
-            namespace: BridgeOrderSequence::CONFORMANCE_NAMESPACE.into(),
-            event: BridgeOrderSequence::MODEL_CHANGED_EVENT.into(),
+            namespace: BridgeOrder::CONFORMANCE_NAMESPACE.into(),
+            event: BridgeOrder::MODEL_CHANGED_EVENT.into(),
             arguments: serde_json::json!([{ "change": 1 }]),
         };
         fixture.app.world_mut().spawn((
@@ -1865,8 +1841,8 @@ mod tests {
             &mut restarted,
             &BridgeClientMessage::Subscribe(EventSubscribe {
                 subscription_id: "model".into(),
-                namespace: BridgeOrderSequence::CONFORMANCE_NAMESPACE.into(),
-                event: BridgeOrderSequence::MODEL_CHANGED_EVENT.into(),
+                namespace: BridgeOrder::CONFORMANCE_NAMESPACE.into(),
+                event: BridgeOrder::MODEL_CHANGED_EVENT.into(),
                 caller_context: Fixture::caller_context(),
             }),
         );
@@ -1964,8 +1940,8 @@ mod tests {
         let subscribe = || {
             BridgeClientMessage::Subscribe(EventSubscribe {
                 subscription_id: "model".into(),
-                namespace: BridgeOrderSequence::CONFORMANCE_NAMESPACE.into(),
-                event: BridgeOrderSequence::MODEL_CHANGED_EVENT.into(),
+                namespace: BridgeOrder::CONFORMANCE_NAMESPACE.into(),
+                event: BridgeOrder::MODEL_CHANGED_EVENT.into(),
                 caller_context: Fixture::caller_context(),
             })
         };
@@ -2032,8 +2008,8 @@ mod tests {
         let BridgeServerMessage::Event(event) = Fixture::read(&mut socket) else {
             panic!("expected wake timer event");
         };
-        assert_eq!(event.namespace, BridgeOrderSequence::CONFORMANCE_NAMESPACE);
-        assert_eq!(event.event, BridgeOrderSequence::MODEL_CHANGED_EVENT);
+        assert_eq!(event.namespace, BridgeOrder::CONFORMANCE_NAMESPACE);
+        assert_eq!(event.event, BridgeOrder::MODEL_CHANGED_EVENT);
         assert_eq!(event.arguments, serde_json::json!([model]));
     }
 

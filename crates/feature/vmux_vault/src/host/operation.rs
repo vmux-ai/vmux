@@ -8,7 +8,10 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use parking_lot::Mutex;
-use vmux_ecs::{Operation, OperationRetained, OperationTarget, OperationTargetRevision};
+use vmux_ecs::{
+    Generation, Operation, OperationRetained, OperationTarget, OperationTargetRevision,
+    SequenceCounter,
+};
 
 use crate::state::{
     VaultAuthorization, VaultChooseCloudFolderRequest, VaultCompletion, VaultConnectCloudRequest,
@@ -20,13 +23,13 @@ use crate::state::{
 
 use super::key::{
     AcceptedStorage, KeyAdmission, KeyCanceled, KeyNamespace, KeyPermissions, KeyPort,
-    NamespaceGeneration,
+    VaultNamespace,
 };
 use super::vault_io::{ActiveVaultOperation, VaultOperationOutcome};
 
 use super::{
     OperationPlugin, OperationSet, PendingVaultOperation, ReadyVaultOperation, RuntimeSet,
-    VaultOperationContext, VaultOperationOutput, VaultOperationRequest, VaultOperationSequence,
+    VaultOperationContext, VaultOperationOutput, VaultOperationRequest, VaultOperationTag,
     VaultOperationTask, VaultRecoveryState, VaultRegistry, VaultScanTask, VaultStatusProjection,
     VaultSubscriber,
 };
@@ -91,7 +94,7 @@ impl VaultOperationOutput {
 
 #[derive(SystemParam)]
 struct VaultOperationQueue<'w, 's> {
-    sequences: Query<'w, 's, &'static mut VaultOperationSequence, With<VaultRegistry>>,
+    sequences: Query<'w, 's, &'static mut SequenceCounter<VaultOperationTag>, With<VaultRegistry>>,
     subscribers: Query<'w, 's, &'static mut VaultSubscriber>,
     commands: Commands<'w, 's>,
 }
@@ -423,7 +426,7 @@ fn connect_github(
         (
             Entity,
             &KeyNamespace,
-            &NamespaceGeneration,
+            &Generation<VaultNamespace>,
             &mut KeyAdmission,
             &AcceptedStorage,
         ),
@@ -441,7 +444,7 @@ fn connect_github(
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let (keys, ingress) = access.port(
             namespace,
-            generation.0,
+            generation.value(),
             &mut admission,
             entity,
             wake.clone(),
@@ -475,7 +478,7 @@ fn connect_github(
                 Operation::bundle("vault.connect_github").unwrap().running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.value()),
                 AcceptedStorage(storage),
                 keys,
                 ingress,
@@ -528,7 +531,7 @@ fn generate_recovery_key(
         (
             Entity,
             &KeyNamespace,
-            &NamespaceGeneration,
+            &Generation<VaultNamespace>,
             &mut KeyAdmission,
             &AcceptedStorage,
         ),
@@ -546,7 +549,7 @@ fn generate_recovery_key(
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let (keys, ingress) = access.port(
             namespace,
-            generation.0,
+            generation.value(),
             &mut admission,
             entity,
             wake.clone(),
@@ -572,7 +575,7 @@ fn generate_recovery_key(
                     .running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.value()),
                 AcceptedStorage(storage),
                 keys,
                 ingress,
@@ -613,7 +616,7 @@ fn create_recovery_key(
         (
             Entity,
             &KeyNamespace,
-            &NamespaceGeneration,
+            &Generation<VaultNamespace>,
             &mut KeyAdmission,
             &mut VaultRecoveryState,
             &AcceptedStorage,
@@ -633,7 +636,7 @@ fn create_recovery_key(
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let (keys, ingress) = access.port(
             namespace,
-            generation.0,
+            generation.value(),
             &mut admission,
             entity,
             wake.clone(),
@@ -661,7 +664,7 @@ fn create_recovery_key(
                     .running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.value()),
                 AcceptedStorage(storage),
                 keys,
                 ingress,
@@ -705,7 +708,7 @@ fn connect_cloud(
         (
             Entity,
             &KeyNamespace,
-            &NamespaceGeneration,
+            &Generation<VaultNamespace>,
             &mut KeyAdmission,
             &AcceptedStorage,
         ),
@@ -723,7 +726,7 @@ fn connect_cloud(
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let (keys, ingress) = access.port(
             namespace,
-            generation.0,
+            generation.value(),
             &mut admission,
             entity,
             wake.clone(),
@@ -747,7 +750,7 @@ fn connect_cloud(
                 Operation::bundle("vault.connect_cloud").unwrap().running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.value()),
                 AcceptedStorage(storage),
                 keys,
                 ingress,
@@ -787,7 +790,7 @@ fn drain(
     mut registry: Query<(
         &mut VaultRegistry,
         &mut VaultRecoveryState,
-        &NamespaceGeneration,
+        &Generation<VaultNamespace>,
     )>,
     mut subscribers: Query<&mut VaultSubscriber>,
     mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
@@ -796,7 +799,7 @@ fn drain(
     for (entity, context, target, accepted, mut task, is_sync, is_github) in &mut operations {
         let valid = registry
             .get(target.entity())
-            .is_ok_and(|(_, _, g)| g.0 == accepted.0)
+            .is_ok_and(|(_, _, g)| g.value() == accepted.0)
             && !task.canceled.load(Ordering::Acquire);
         let webview = context.webview;
         while let Ok(progress) = task.progress.get_mut().try_recv() {
@@ -826,7 +829,7 @@ fn drain(
         let Ok((mut state, mut recovery, generation)) = registry.get_mut(target.entity()) else {
             continue;
         };
-        if generation.0 != accepted.0 {
+        if generation.value() != accepted.0 {
             continue;
         }
         let (success, message, pending_upload, generated_recovery_key) = match result {
@@ -872,7 +875,7 @@ fn drain_outcomes(
         Option<&KeyCanceled>,
         Has<VaultOperationRequest<VaultSyncRequest>>,
     )>,
-    mut registry: Query<(&mut VaultRegistry, &NamespaceGeneration)>,
+    mut registry: Query<(&mut VaultRegistry, &Generation<VaultNamespace>)>,
     mut subscribers: Query<&mut VaultSubscriber>,
     mut commands: Commands,
 ) {
@@ -884,7 +887,7 @@ fn drain_outcomes(
         let Ok((mut state, generation)) = registry.get_mut(target.entity()) else {
             continue;
         };
-        if generation.0 != accepted.0 {
+        if generation.value() != accepted.0 {
             continue;
         }
         let (success, message, pending_upload) = match &outcome.0 {

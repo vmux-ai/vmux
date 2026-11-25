@@ -5,12 +5,13 @@ use crate::storage::VaultStorage;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, futures_lite::future};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use vmux_ecs::{Generation, SequenceCounter};
 
 use crate::state::{VaultOperationKind, VaultRepository, VaultSnapshot, VaultSyncRequest};
 
 use super::{
     PendingVaultOperation, ReadyVaultOperation, RuntimePlugin, RuntimeSet, VaultAutoSync,
-    VaultOperationContext, VaultOperationRequest, VaultOperationSequence, VaultOperationTask,
+    VaultOperationContext, VaultOperationRequest, VaultOperationTag, VaultOperationTask,
     VaultRecoveryState, VaultRegistry, VaultScanTask,
 };
 
@@ -172,11 +173,11 @@ fn spawn(mut commands: Commands) {
         super::key::RepositoryDirectory(storage.repository().to_path_buf()),
         super::key::AcceptedStorage(storage),
         super::key::KeyNamespace(crate::storage::keys::NativeKeyAccess::current()),
-        super::key::NamespaceGeneration::default(),
+        Generation::<super::key::VaultNamespace>::default(),
         super::key::KeyAdmission::default(),
         Name::new("Vault"),
         VaultRegistry::default(),
-        VaultOperationSequence::default(),
+        SequenceCounter::<VaultOperationTag>::default(),
         VaultAutoSync::default(),
         VaultRecoveryState::default(),
     ));
@@ -187,7 +188,7 @@ fn start_scan(
         Entity,
         &mut VaultRegistry,
         &super::key::KeyNamespace,
-        &super::key::NamespaceGeneration,
+        &Generation<super::key::VaultNamespace>,
         &mut super::key::KeyAdmission,
         &super::key::AcceptedStorage,
     )>,
@@ -220,13 +221,13 @@ fn start_scan(
             vmux_ecs::Operation::bundle("vault.scan").unwrap().running(),
             vmux_ecs::OperationRetained,
             vmux_ecs::OperationTarget::new(namespace),
-            vmux_ecs::OperationTargetRevision(namespace_generation.0),
+            vmux_ecs::OperationTargetRevision(namespace_generation.value()),
         ))
         .id();
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let (keys, ingress) = access.port(
         namespace,
-        namespace_generation.0,
+        namespace_generation.value(),
         &mut admission,
         entity,
         wake,
@@ -309,7 +310,7 @@ fn drain_scan(
     mut registries: Query<(
         &mut VaultRegistry,
         &mut VaultAutoSync,
-        &super::key::NamespaceGeneration,
+        &Generation<super::key::VaultNamespace>,
     )>,
     mut commands: Commands,
 ) {
@@ -323,7 +324,7 @@ fn drain_scan(
         else {
             continue;
         };
-        if accepted.0 != namespace_generation.0 {
+        if accepted.0 != namespace_generation.value() {
             continue;
         }
         if scan.generation != state.generation {
@@ -406,7 +407,7 @@ fn queue_auto_sync(
     mut registry: Query<(
         &VaultRegistry,
         &mut VaultAutoSync,
-        &mut VaultOperationSequence,
+        &mut SequenceCounter<VaultOperationTag>,
     )>,
     scans: Query<(), With<VaultScanTask>>,
     tasks: Query<
@@ -535,7 +536,7 @@ mod tests {
                 .spawn((
                     VaultRegistry::default(),
                     VaultAutoSync::default(),
-                    VaultOperationSequence::default(),
+                    SequenceCounter::<VaultOperationTag>::default(),
                 ))
                 .id();
             {

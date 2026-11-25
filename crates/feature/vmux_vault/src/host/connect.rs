@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use vmux_ecs::{Operation, OperationRetained, OperationTarget, OperationTargetRevision};
+use vmux_ecs::{
+    Generation, Operation, OperationRetained, OperationTarget, OperationTargetRevision,
+};
 use zeroize::Zeroizing;
 
 use crate::state::{
@@ -20,8 +22,8 @@ use crate::storage::{
 
 use super::key::{
     AcceptedStorage, CreateKey, EcsKeyRequest, KeyAdmission, KeyAuthoritySet, KeyCanceled,
-    KeyGeneration, KeyNamespace, KeyOutcome, KeyPermissions, KeyPort, KeyRequester, LoadKey,
-    NamespaceGeneration, VaultId, VaultKey,
+    KeyNamespace, KeyOutcome, KeyPermissions, KeyPort, KeyRequester, LoadKey, VaultId, VaultKey,
+    VaultNamespace,
 };
 use super::reconcile::{ReconcileDone, ReconcileInputs, ReconcileLauncher, ReconcileRetire};
 use super::sync::{SyncRemoteBranch, SyncSet};
@@ -367,8 +369,8 @@ struct LocalStateWriteTask(Task<Result<(), String>>);
 
 #[derive(SystemParam)]
 struct ConnectValidity<'w, 's> {
-    namespaces: Query<'w, 's, &'static NamespaceGeneration, With<KeyNamespace>>,
-    keys: Query<'w, 's, &'static KeyGeneration, With<VaultKey>>,
+    namespaces: Query<'w, 's, &'static Generation<VaultNamespace>, With<KeyNamespace>>,
+    keys: Query<'w, 's, &'static Generation<VaultKey>, With<VaultKey>>,
 }
 
 impl ConnectValidity<'_, '_> {
@@ -385,7 +387,7 @@ impl ConnectValidity<'_, '_> {
         let Ok(generation) = self.namespaces.get(target.entity()) else {
             return false;
         };
-        if generation.0 != accepted.0 {
+        if generation.value() != accepted.0 {
             return false;
         }
         if let Some(loan) = loan
@@ -393,7 +395,7 @@ impl ConnectValidity<'_, '_> {
             && !self
                 .keys
                 .get(owner)
-                .is_ok_and(|current| current.0 == expected)
+                .is_ok_and(|current| current.value() == expected)
         {
             return false;
         }
@@ -430,7 +432,7 @@ fn admit_create(
         (
             Entity,
             &KeyNamespace,
-            &NamespaceGeneration,
+            &Generation<VaultNamespace>,
             &mut KeyAdmission,
             &AcceptedStorage,
         ),
@@ -448,7 +450,7 @@ fn admit_create(
         let storage = captured.0.clone();
         let (keys, ingress) = access.port(
             namespace,
-            generation.0,
+            generation.value(),
             &mut admission,
             entity,
             wake.0.clone(),
@@ -471,7 +473,7 @@ fn admit_create(
                 Operation::bundle("vault.create").unwrap().running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.value()),
                 ActiveVaultOperation,
                 ConnectActive,
                 AcceptedStorage(storage),
@@ -505,7 +507,7 @@ fn admit_remote(
         (
             Entity,
             &KeyNamespace,
-            &NamespaceGeneration,
+            &Generation<VaultNamespace>,
             &mut KeyAdmission,
             &AcceptedStorage,
         ),
@@ -523,7 +525,7 @@ fn admit_remote(
         let storage = captured.0.clone();
         let (keys, ingress) = access.port(
             namespace,
-            generation.0,
+            generation.value(),
             &mut admission,
             entity,
             wake.0.clone(),
@@ -536,7 +538,7 @@ fn admit_remote(
                 Operation::bundle("vault.connect").unwrap().running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.value()),
                 ActiveVaultOperation,
                 ConnectActive,
                 AcceptedStorage(storage),
@@ -569,7 +571,7 @@ fn admit_folder(
         (
             Entity,
             &KeyNamespace,
-            &NamespaceGeneration,
+            &Generation<VaultNamespace>,
             &mut KeyAdmission,
             &AcceptedStorage,
         ),
@@ -587,7 +589,7 @@ fn admit_folder(
         let storage = captured.0.clone();
         let (keys, ingress) = access.port(
             namespace,
-            generation.0,
+            generation.value(),
             &mut admission,
             entity,
             wake.0.clone(),
@@ -620,7 +622,7 @@ fn admit_folder(
                 Operation::bundle("vault.connect_folder").unwrap().running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.value()),
                 ActiveVaultOperation,
                 ConnectActive,
                 AcceptedStorage(storage),
@@ -651,7 +653,7 @@ fn admit_create_cloud_folder(
         (
             Entity,
             &KeyNamespace,
-            &NamespaceGeneration,
+            &Generation<VaultNamespace>,
             &mut KeyAdmission,
             &AcceptedStorage,
         ),
@@ -669,7 +671,7 @@ fn admit_create_cloud_folder(
         let storage = captured.0.clone();
         let (keys, ingress) = access.port(
             namespace,
-            generation.0,
+            generation.value(),
             &mut admission,
             entity,
             wake.0.clone(),
@@ -685,7 +687,7 @@ fn admit_create_cloud_folder(
                     .running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.value()),
                 ActiveVaultOperation,
                 ConnectActive,
                 AcceptedStorage(storage),
@@ -721,7 +723,7 @@ fn admit_choose_cloud_folder(
         (
             Entity,
             &KeyNamespace,
-            &NamespaceGeneration,
+            &Generation<VaultNamespace>,
             &mut KeyAdmission,
             &AcceptedStorage,
         ),
@@ -739,7 +741,7 @@ fn admit_choose_cloud_folder(
         let storage = captured.0.clone();
         let (keys, ingress) = access.port(
             namespace,
-            generation.0,
+            generation.value(),
             &mut admission,
             entity,
             wake.0.clone(),
@@ -770,7 +772,7 @@ fn admit_choose_cloud_folder(
                     .running(),
                 OperationRetained,
                 OperationTarget::new(namespace),
-                OperationTargetRevision(generation.0),
+                OperationTargetRevision(generation.value()),
                 ActiveVaultOperation,
                 ConnectActive,
                 AcceptedStorage(storage),

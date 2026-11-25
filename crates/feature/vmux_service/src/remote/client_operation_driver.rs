@@ -1,9 +1,10 @@
 use bevy::prelude::{Bundle, Component};
 use tokio::sync::{mpsc, oneshot};
 use vmux_api::session::ClientOpId;
+use vmux_ecs::SequenceCounter;
 use vmux_transport::service::{RemoteFuture, RemoteOperationStore};
 
-use super::client_operation::ClientOperationCounter;
+use super::client_operation::ClientOperationOrder;
 
 #[derive(Clone)]
 pub(crate) struct ClientOperations {
@@ -23,7 +24,7 @@ impl ClientOperations {
                 wake,
             },
             (
-                ClientOperationCounter::default(),
+                SequenceCounter::<ClientOperationOrder>::default(),
                 ClientOperationInbox(ClientOperationReceivers {
                     claims: claim_inbox,
                     releases: release_inbox,
