@@ -832,6 +832,67 @@ fn collect_imports(
     }
 }
 
+#[test]
+fn build_scripts_read_manifest_dir_at_runtime() {
+    let crates_dir = Workspace::current().0.join("crates");
+    let mut violations = Vec::new();
+    audit_build_scripts(&crates_dir, &mut violations);
+
+    assert!(
+        violations.is_empty(),
+        "build scripts must read CARGO_MANIFEST_DIR at runtime via std::env::var_os so cached build scripts stay valid across worktrees:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn audit_build_scripts(dir: &Path, violations: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if path.file_name().and_then(|name| name.to_str()) == Some("target") {
+                continue;
+            }
+            audit_build_scripts(&path, violations);
+        } else if path.file_name().and_then(|name| name.to_str()) == Some("build.rs")
+            && let Ok(source) = std::fs::read_to_string(&path)
+            && let Ok(file) = syn::parse_file(&source)
+        {
+            let mut finder = CompileTimeManifestDir {
+                path: &path,
+                violations,
+            };
+            finder.visit_file(&file);
+        }
+    }
+}
+
+struct CompileTimeManifestDir<'a> {
+    path: &'a Path,
+    violations: &'a mut Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for CompileTimeManifestDir<'_> {
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        let is_env_macro = mac.path.segments.last().is_some_and(|segment| {
+            matches!(segment.ident.to_string().as_str(), "env" | "option_env")
+        });
+        if is_env_macro
+            && let Ok(literal) = syn::parse2::<syn::LitStr>(mac.tokens.clone())
+            && literal.value() == "CARGO_MANIFEST_DIR"
+        {
+            self.violations.push(format!(
+                "{}:{}: compile-time env!(\"CARGO_MANIFEST_DIR\") in build.rs",
+                self.path.display(),
+                literal.span().start().line
+            ));
+        }
+        visit::visit_macro(self, mac);
+    }
+}
+
 #[derive(Default)]
 struct QualifiedPaths(Vec<Vec<String>>);
 

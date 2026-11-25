@@ -122,7 +122,7 @@ impl VmuxPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::schedule::Schedules;
+    use bevy::ecs::schedule::{ScheduleLabel, Schedules};
 
     fn cef_create_probe() {}
 
@@ -161,18 +161,46 @@ mod tests {
 
     #[test]
     fn desktop_profile_composes_without_duplicate_plugin_panics() {
-        let mut app = App::new();
-        app.add_plugins(DefaultPlugins.build().disable::<bevy::winit::WinitPlugin>())
+        for feature_flags in [false, true] {
+            let mut app = App::new();
+            app.add_plugins(
+                DefaultPlugins
+                    .build()
+                    .disable::<bevy::winit::WinitPlugin>()
+                    .disable::<bevy::log::LogPlugin>(),
+            )
             .add_plugins(bevy_cef::prelude::IpcPlugin)
             .add_plugins(
                 vmux_app::VmuxPlugin::builder()
                     .desktop()
                     .browser(false)
+                    .feature_flags(feature_flags)
                     .build(),
-            );
-        assert!(app.is_plugin_added::<vmux_acp::AcpPlugin>());
-        assert!(app.is_plugin_added::<vmux_tool::ToolPlugin>());
-        assert!(app.is_plugin_added::<vmux_tool::McpRegistryPlugin>());
+            )
+            .add_plugins(DesktopPluginGroup);
+            assert!(app.is_plugin_added::<vmux_acp::AcpPlugin>());
+            assert!(app.is_plugin_added::<vmux_tool::ToolPlugin>());
+            assert!(app.is_plugin_added::<vmux_tool::McpRegistryPlugin>());
+            let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
+            for label in [
+                PreStartup.intern(),
+                Startup.intern(),
+                First.intern(),
+                PreUpdate.intern(),
+                Update.intern(),
+                PostUpdate.intern(),
+                Last.intern(),
+            ] {
+                if let Some(mut schedule) = schedules.remove(label) {
+                    let initialized = schedule.initialize(app.world_mut());
+                    assert!(
+                        initialized.is_ok(),
+                        "desktop schedule {label:?} must initialize cleanly (feature_flags={feature_flags}): {:?}",
+                        initialized.err()
+                    );
+                }
+            }
+        }
     }
 
     #[test]
