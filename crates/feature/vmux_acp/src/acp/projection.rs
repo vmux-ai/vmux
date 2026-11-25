@@ -15,32 +15,30 @@ use vmux_api::protocol::{
 };
 use vmux_api::session::{AssistantBlock, Message, PlanStep};
 use vmux_ecs::Order;
+use vmux_ecs::channel::{AsyncChannelPlugin, ChannelReceived};
 
 use super::workspace_driver::WorkspaceLocation;
 use super::{
-    AcpApprovalDetailsInbox, AcpHistoryReplay, AcpReplayBeginInbox, AcpReplayFinishInbox,
-    AcpSessionConfigs, AcpSessionCwd, AcpSessionShared, AcpSessionUpdateInbox,
-    AcpSnapshotRequestInbox, SessionId,
+    AcpHistoryReplay, AcpProjectionEvent, AcpSessionConfigs, AcpSessionCwd, AcpSessionShared,
+    SessionId,
 };
 
 pub(super) struct AcpProjectionPlugin;
 
 impl Plugin for AcpProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(begin_history_replay)
+        app.add_plugins(AsyncChannelPlugin::<AcpProjectionEvent>::default())
+            .add_observer(dispatch_transcript)
+            .add_observer(begin_history_replay)
             .add_observer(apply_session_update)
             .add_observer(finish_history_replay)
             .add_observer(emit_transcript_snapshot)
             .add_observer(emit_proposed_diff)
             .add_observer(emit_file_touched)
             .add_observer(resolve_approval_details)
-            .add_observer(record_user_message)
-            .add_systems(Update, drain_inboxes.in_set(AcpProjectionSet));
+            .add_observer(record_user_message);
     }
 }
-
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(super) struct AcpProjectionSet;
 
 #[derive(Component, Default)]
 pub(super) struct AcpProjectionOrder(u32);
@@ -1223,60 +1221,44 @@ impl AcpSessionConfigs {
     }
 }
 
-fn drain_inboxes(
-    mut sessions: Query<(
-        Entity,
-        &mut AcpReplayBeginInbox,
-        &mut AcpSessionUpdateInbox,
-        &mut AcpReplayFinishInbox,
-        &mut AcpSnapshotRequestInbox,
-        &mut AcpApprovalDetailsInbox,
-    )>,
+fn dispatch_transcript(
+    mut trigger: On<ChannelReceived<AcpProjectionEvent>>,
     mut commands: Commands,
 ) {
-    for (session, mut begin, mut update, mut finish, mut snapshot, mut approval) in &mut sessions {
-        let mut next_begin = begin.0.try_recv().ok();
-        let mut next_update = update.0.try_recv().ok();
-        let mut next_finish = finish.0.try_recv().ok();
-        let mut next_snapshot = snapshot.0.try_recv().ok();
-        let mut next_approval = approval.0.try_recv().ok();
-        loop {
-            let min_seq = [
-                next_begin,
-                next_update.as_ref().map(|(seq, _)| *seq),
-                next_finish.map(|(seq, _)| seq),
-                next_snapshot,
-                next_approval.as_ref().map(|(seq, _)| *seq),
-            ]
-            .into_iter()
-            .flatten()
-            .min();
-            let Some(seq) = min_seq else {
-                break;
-            };
-            if next_begin == Some(seq) {
-                next_begin = begin.0.try_recv().ok();
-                commands.trigger(BeginHistoryReplay { session });
-            } else if next_update.as_ref().is_some_and(|(s, _)| *s == seq) {
-                let (_, payload) = next_update.take().unwrap();
-                next_update = update.0.try_recv().ok();
-                commands.trigger(ApplySessionUpdate {
-                    session,
-                    update: payload,
-                });
-            } else if next_finish.is_some_and(|(s, _)| s == seq) {
-                let (_, loaded) = next_finish.take().unwrap();
-                next_finish = finish.0.try_recv().ok();
-                commands.trigger(FinishHistoryReplay { session, loaded });
-            } else if next_snapshot == Some(seq) {
-                next_snapshot = snapshot.0.try_recv().ok();
-                commands.trigger(EmitTranscriptSnapshot { session });
-            } else if next_approval.as_ref().is_some_and(|(s, _)| *s == seq) {
-                let (_, request) = next_approval.take().unwrap();
-                next_approval = approval.0.try_recv().ok();
-                commands.trigger(ResolveApprovalDetails { session, request });
-            }
+    let handled = matches!(
+        trigger.event().get(),
+        Some(
+            AcpProjectionEvent::BeginHistoryReplay
+                | AcpProjectionEvent::SessionUpdate(_)
+                | AcpProjectionEvent::FinishHistoryReplay { .. }
+                | AcpProjectionEvent::RequestSnapshot
+                | AcpProjectionEvent::ApprovalDetails(_)
+        )
+    );
+    if !handled {
+        return;
+    }
+    let session = trigger.event().entity;
+    let Some(event) = trigger.event_mut().take() else {
+        return;
+    };
+    match event {
+        AcpProjectionEvent::BeginHistoryReplay => {
+            commands.trigger(BeginHistoryReplay { session });
         }
+        AcpProjectionEvent::SessionUpdate(update) => {
+            commands.trigger(ApplySessionUpdate { session, update });
+        }
+        AcpProjectionEvent::FinishHistoryReplay { loaded } => {
+            commands.trigger(FinishHistoryReplay { session, loaded });
+        }
+        AcpProjectionEvent::RequestSnapshot => {
+            commands.trigger(EmitTranscriptSnapshot { session });
+        }
+        AcpProjectionEvent::ApprovalDetails(request) => {
+            commands.trigger(ResolveApprovalDetails { session, request });
+        }
+        _ => {}
     }
 }
 
@@ -1555,7 +1537,8 @@ mod tests {
             let (stream_tx, stream) = broadcast::channel(64);
             let (wake, _) = mpsc::unbounded_channel();
             let (processes, _process_runtime) = ProcessRuntime::new(wake.clone());
-            let (projection, projection_inboxes) = AcpProjectionSenders::open(wake);
+            let (projection, projection_inboxes) =
+                AcpProjectionSenders::open_with_waker(super::super::AcpWake::waker(wake));
             let shared = Arc::new(AcpShared::new(
                 "s1".into(),
                 PathBuf::from("/tmp"),

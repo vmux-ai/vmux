@@ -2963,6 +2963,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_channel"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "vmux_macro",
+]
+
+[[package]]
 name = "vmux_ecs"
 version = "0.0.35"
 dependencies = [
@@ -2977,6 +2986,7 @@ dependencies = [
  "serde_json",
  "uuid",
  "vmux_api",
+ "vmux_channel",
  "vmux_macro",
  "vmux_task",
  "web-time",

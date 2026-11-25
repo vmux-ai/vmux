@@ -413,6 +413,7 @@ impl Profile {
                 "crates/util/vmux_ecs/**",
                 "crates/util/vmux_api/**",
                 "crates/util/vmux_macro/**",
+                "crates/util/vmux_channel/**",
                 "crates/util/vmux_task/**",
                 "crates/build_*.rs",
             ] {

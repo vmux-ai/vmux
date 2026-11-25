@@ -1,5 +1,5 @@
 use bevy::prelude::{
-    App, ApplyDeferred, Commands, Component, Entity, IntoScheduleConfigs, Name, Query, Single,
+    App, ApplyDeferred, Commands, Component, Entity, IntoScheduleConfigs, Name, On, Query, Single,
     Update,
 };
 pub(crate) use catalog_driver::{CatalogDriver, CatalogRequest};
@@ -8,12 +8,13 @@ use driver::{
     AcpPromptCommand, AcpSelectedConfigInput, AcpShared,
 };
 use projection::{
-    AcpProjectionOrder, AcpProjectionPlugin, AcpProjectionSet, AcpTranscripts,
-    ApprovalDetailsRequest, RecordUserMessage,
+    AcpProjectionOrder, AcpProjectionPlugin, AcpTranscripts, ApprovalDetailsRequest,
+    RecordUserMessage,
 };
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::task::Waker;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_api::protocol::{
@@ -23,6 +24,7 @@ use vmux_api::protocol::{
 #[cfg(test)]
 use vmux_api::session::Message;
 use vmux_api::session::{RemoteApproval, RemoteSession, RemoteStatus};
+use vmux_ecs::channel::{ChannelReceived, SpawnReceiver, SpawnSender};
 use vmux_ecs::service::{AbortTask, Shutdown, ShutdownComplete, ShutdownPending};
 use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
@@ -40,34 +42,19 @@ pub(crate) struct AcpRuntimePlugin;
 
 impl bevy::prelude::Plugin for AcpRuntimePlugin {
     fn build(&self, app: &mut App) {
+        AcpSessions::add_channels(app);
         app.add_plugins(AcpProjectionPlugin)
-            .add_systems(
-                Update,
-                (receive, ApplyDeferred, spawn, ApplyDeferred)
-                    .chain()
-                    .before(AcpProjectionSet),
-            )
+            .add_observer(project_event)
             .add_systems(
                 Update,
                 (
+                    spawn,
                     ApplyDeferred,
-                    (
-                        project_info,
-                        project_config_state,
-                        project_selected_config,
-                        project_status,
-                        project_startup,
-                        project_approval_requested,
-                        project_approval_resolved,
-                        snapshot_selection,
-                    )
-                        .chain(),
                     (route_prompts, route_approvals, route_configs, route_cancels).chain(),
                     ApplyDeferred,
                     (subscribe, read, list, rebind, close, reap).chain(),
                 )
-                    .chain()
-                    .after(AcpProjectionSet),
+                    .chain(),
             )
             .add_systems(Shutdown, begin_shutdown)
             .add_systems(ShutdownComplete, shutdown);
@@ -77,55 +64,101 @@ impl bevy::prelude::Plugin for AcpRuntimePlugin {
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 struct AcpSessionConfigs(Vec<AcpSessionConfig>);
 
+impl AcpSessionConfigs {
+    fn apply_state(&mut self, input: AcpConfigStateInput) -> bool {
+        let next = Self::from_acp(&input.config_options, input.modes.as_ref());
+        if *self == next {
+            return false;
+        }
+        *self = next;
+        true
+    }
+
+    fn apply_selected(&mut self, input: AcpSelectedConfigInput) -> bool {
+        if !input.config_options.is_empty() {
+            let legacy = self
+                .0
+                .iter()
+                .find(|config| config.config_id.is_none())
+                .cloned();
+            let mut next = Self::from_acp(&input.config_options, None);
+            if !next
+                .0
+                .iter()
+                .any(|config| config.category.as_deref() == Some("mode"))
+                && let Some(legacy) = legacy
+            {
+                next.0.push(legacy);
+            }
+            *self = next;
+        }
+        let Some(config) = self
+            .0
+            .iter_mut()
+            .find(|config| config.config_id.as_deref() == input.config_id.as_deref())
+        else {
+            return false;
+        };
+        if config.current_value == input.value
+            || !config
+                .values
+                .iter()
+                .any(|option| option.value == input.value)
+        {
+            return false;
+        }
+        config.current_value = input.value;
+        true
+    }
+}
+
 #[derive(Clone, Default)]
 struct AcpSelectionSnapshot {
     configs: Vec<AcpSessionConfig>,
 }
 
+pub(super) struct AcpWake(mpsc::UnboundedSender<()>);
+
+impl AcpWake {
+    pub(super) fn waker(wake: mpsc::UnboundedSender<()>) -> Waker {
+        Waker::from(Arc::new(Self(wake)))
+    }
+}
+
+impl std::task::Wake for AcpWake {
+    fn wake(self: Arc<Self>) {
+        let _ = self.0.send(());
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        let _ = self.0.send(());
+    }
+}
+
+#[vmux_ecs::channels]
 #[derive(Clone)]
 pub struct AcpSessions {
-    spawns: mpsc::UnboundedSender<SpawnAcpSession>,
-    prompts: mpsc::UnboundedSender<SendAcpPrompt>,
-    approvals: mpsc::UnboundedSender<ApproveAcpTool>,
-    configs: mpsc::UnboundedSender<SetAcpConfig>,
-    cancels: mpsc::UnboundedSender<CancelAcpSession>,
-    subscriptions: mpsc::UnboundedSender<SubscribeAcpSession>,
-    snapshots: mpsc::UnboundedSender<SnapshotAcpSession>,
-    agent_infos: mpsc::UnboundedSender<AcpSessionAgentInfo>,
-    config_states: mpsc::UnboundedSender<AcpSessionConfigRequest>,
-    statuses: mpsc::UnboundedSender<AcpSessionStatusRequest>,
-    lists: mpsc::UnboundedSender<ListAcpSessions>,
-    lookups: mpsc::UnboundedSender<FindAcpSession>,
-    rebinds: mpsc::UnboundedSender<RebindAcpSession>,
-    closes: mpsc::UnboundedSender<CloseAcpSession>,
-    wake: mpsc::UnboundedSender<()>,
+    spawns: SpawnSender<SpawnAcpSession>,
+    prompts: SpawnSender<SendAcpPrompt>,
+    approvals: SpawnSender<ApproveAcpTool>,
+    configs: SpawnSender<SetAcpConfig>,
+    cancels: SpawnSender<CancelAcpSession>,
+    subscriptions: SpawnSender<SubscribeAcpSession>,
+    snapshots: SpawnSender<SnapshotAcpSession>,
+    agent_infos: SpawnSender<AcpSessionAgentInfo>,
+    config_states: SpawnSender<AcpSessionConfigRequest>,
+    statuses: SpawnSender<AcpSessionStatusRequest>,
+    lists: SpawnSender<ListAcpSessions>,
+    lookups: SpawnSender<FindAcpSession>,
+    rebinds: SpawnSender<RebindAcpSession>,
+    closes: SpawnSender<CloseAcpSession>,
 }
-
-struct AcpSessionReceivers {
-    spawns: mpsc::UnboundedReceiver<SpawnAcpSession>,
-    prompts: mpsc::UnboundedReceiver<SendAcpPrompt>,
-    approvals: mpsc::UnboundedReceiver<ApproveAcpTool>,
-    configs: mpsc::UnboundedReceiver<SetAcpConfig>,
-    cancels: mpsc::UnboundedReceiver<CancelAcpSession>,
-    subscriptions: mpsc::UnboundedReceiver<SubscribeAcpSession>,
-    snapshots: mpsc::UnboundedReceiver<SnapshotAcpSession>,
-    agent_infos: mpsc::UnboundedReceiver<AcpSessionAgentInfo>,
-    config_states: mpsc::UnboundedReceiver<AcpSessionConfigRequest>,
-    statuses: mpsc::UnboundedReceiver<AcpSessionStatusRequest>,
-    lists: mpsc::UnboundedReceiver<ListAcpSessions>,
-    lookups: mpsc::UnboundedReceiver<FindAcpSession>,
-    rebinds: mpsc::UnboundedReceiver<RebindAcpSession>,
-    closes: mpsc::UnboundedReceiver<CloseAcpSession>,
-}
-
-#[derive(Component)]
-struct AcpSessionInbox(AcpSessionReceivers);
 
 #[derive(Component)]
 struct AcpSessionRuntime(Handle);
 
 #[derive(Component)]
-struct AcpSessionWake(mpsc::UnboundedSender<()>);
+struct AcpSessionWake(Waker);
 
 #[derive(Component)]
 struct SpawnAcpSession {
@@ -269,44 +302,21 @@ struct AcpStartupReady;
 #[derive(Component)]
 struct AcpStartupFailed;
 
-#[derive(Component)]
-struct AcpStartupInbox(mpsc::UnboundedReceiver<bool>);
-
-#[derive(Component)]
-struct AcpReplayBeginInbox(mpsc::UnboundedReceiver<u64>);
-
-#[derive(Component)]
-struct AcpSessionUpdateInbox(mpsc::UnboundedReceiver<(u64, Box<SessionUpdate>)>);
-
-#[derive(Component)]
-struct AcpReplayFinishInbox(mpsc::UnboundedReceiver<(u64, bool)>);
-
-#[derive(Component)]
-struct AcpSnapshotRequestInbox(mpsc::UnboundedReceiver<u64>);
-
-#[derive(Component)]
-struct AcpApprovalDetailsInbox(mpsc::UnboundedReceiver<(u64, ApprovalDetailsRequest)>);
-
-#[derive(Component)]
-struct AcpAgentInfoInbox(mpsc::UnboundedReceiver<String>);
-
-#[derive(Component)]
-struct AcpConfigStateInbox(mpsc::UnboundedReceiver<AcpConfigStateInput>);
-
-#[derive(Component)]
-struct AcpSelectedConfigInbox(mpsc::UnboundedReceiver<AcpSelectedConfigInput>);
-
-#[derive(Component)]
-struct AcpStatusInbox(mpsc::UnboundedReceiver<AgentRunStatus>);
-
-#[derive(Component)]
-struct AcpApprovalRequestedInbox(mpsc::UnboundedReceiver<RemoteApproval>);
-
-#[derive(Component)]
-struct AcpApprovalResolvedInbox(mpsc::UnboundedReceiver<String>);
-
-#[derive(Component)]
-struct AcpSelectionSnapshotInbox(mpsc::UnboundedReceiver<oneshot::Sender<AcpSelectionSnapshot>>);
+enum AcpProjectionEvent {
+    BeginHistoryReplay,
+    SessionUpdate(Box<SessionUpdate>),
+    FinishHistoryReplay { loaded: bool },
+    RequestSnapshot,
+    ApprovalDetails(ApprovalDetailsRequest),
+    AgentInfo(String),
+    ConfigState(AcpConfigStateInput),
+    SelectedConfig(AcpSelectedConfigInput),
+    Status(AgentRunStatus),
+    ApprovalRequested(RemoteApproval),
+    ApprovalResolved(String),
+    SelectionSnapshot(oneshot::Sender<AcpSelectionSnapshot>),
+    Startup(bool),
+}
 
 #[derive(Component, Default)]
 struct AcpAgentName(Option<String>);
@@ -314,8 +324,56 @@ struct AcpAgentName(Option<String>);
 #[derive(Component)]
 struct AcpRunState(AgentRunStatus);
 
+impl AcpRunState {
+    fn apply(
+        &mut self,
+        sid: &str,
+        status: AgentRunStatus,
+        approval: &mut AcpApprovalState,
+        shared: &AcpShared,
+    ) {
+        if let AgentRunStatus::Errored(message) = &status {
+            tracing::warn!(target: "acp", sid = %sid, "{message}");
+        }
+        if !matches!(status, AgentRunStatus::Streaming) {
+            approval.0 = None;
+        }
+        self.0 = status.clone();
+        shared.emit(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
+            sid: sid.to_string(),
+            status,
+        }));
+    }
+}
+
 #[derive(Component, Default)]
 struct AcpApprovalState(Option<RemoteApproval>);
+
+impl AcpApprovalState {
+    fn request(&mut self, sid: &str, next: RemoteApproval, shared: &AcpShared) {
+        self.0 = Some(next.clone());
+        shared.emit(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
+            sid: sid.to_string(),
+            call_id: next.call_id,
+            name: next.name,
+            args: next.args,
+        }));
+    }
+
+    fn resolve(&mut self, sid: &str, call_id: String, shared: &AcpShared) {
+        if self
+            .0
+            .as_ref()
+            .is_some_and(|pending| pending.call_id == call_id)
+        {
+            self.0 = None;
+            shared.emit(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
+                sid: sid.to_string(),
+                call_id,
+            }));
+        }
+    }
+}
 
 #[derive(Component, Default)]
 struct AcpHistoryReplay {
@@ -327,51 +385,6 @@ struct AcpSessionAgent(String);
 
 #[derive(Component)]
 struct AcpSessionClosing;
-
-fn receive(mut inbox: Single<&mut AcpSessionInbox>, mut commands: Commands) {
-    while let Ok(request) = inbox.0.spawns.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.prompts.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.approvals.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.configs.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.cancels.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.subscriptions.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.snapshots.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.agent_infos.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.config_states.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.statuses.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.lists.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.lookups.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.rebinds.try_recv() {
-        commands.spawn(request);
-    }
-    while let Ok(request) = inbox.0.closes.try_recv() {
-        commands.spawn(request);
-    }
-}
 
 fn spawn(
     runtime: Single<&AcpSessionRuntime>,
@@ -398,7 +411,8 @@ fn spawn(
             let (config_tx, config_rx) = mpsc::unbounded_channel();
             let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
             let (close_tx, close_rx) = mpsc::unbounded_channel();
-            let (projection, projection_inboxes) = AcpProjectionSenders::open(wake.0.clone());
+            let (projection, projection_inboxes) =
+                AcpProjectionSenders::open_with_waker(wake.0.clone());
             let (stream_tx, _) = broadcast::channel(256);
             let cwd = std::mem::take(&mut request.cwd);
             let shared = Arc::new(AcpShared::with_projection(
@@ -453,34 +467,65 @@ fn spawn(
     }
 }
 
-fn project_startup(mut sessions: Query<(Entity, &mut AcpStartupInbox)>, mut commands: Commands) {
-    for (entity, mut inbox) in &mut sessions {
-        while let Ok(ready) = inbox.0.try_recv() {
-            if ready {
-                commands
-                    .entity(entity)
-                    .remove::<AcpStartupFailed>()
-                    .insert(AcpStartupReady);
-            } else {
-                commands
-                    .entity(entity)
-                    .remove::<AcpStartupReady>()
-                    .insert(AcpStartupFailed);
-            }
-        }
-    }
-}
+type ProjectionSessions<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static SessionId,
+        &'static AcpSessionShared,
+        &'static mut AcpAgentName,
+        &'static mut AcpSessionConfigs,
+        &'static mut AcpRunState,
+        &'static mut AcpApprovalState,
+    ),
+>;
 
-fn project_info(
-    mut sessions: Query<(
-        &SessionId,
-        &AcpSessionShared,
-        &mut AcpAgentInfoInbox,
-        &mut AcpAgentName,
-    )>,
+fn project_event(
+    mut trigger: On<ChannelReceived<AcpProjectionEvent>>,
+    mut sessions: ProjectionSessions,
+    mut commands: Commands,
 ) {
-    for (sid, shared, mut inbox, mut agent_name) in &mut sessions {
-        while let Ok(name) = inbox.0.try_recv() {
+    let handled = matches!(
+        trigger.event().get(),
+        Some(
+            AcpProjectionEvent::AgentInfo(_)
+                | AcpProjectionEvent::ConfigState(_)
+                | AcpProjectionEvent::SelectedConfig(_)
+                | AcpProjectionEvent::Status(_)
+                | AcpProjectionEvent::ApprovalRequested(_)
+                | AcpProjectionEvent::ApprovalResolved(_)
+                | AcpProjectionEvent::SelectionSnapshot(_)
+                | AcpProjectionEvent::Startup(_)
+        )
+    );
+    if !handled {
+        return;
+    }
+    let entity = trigger.event().entity;
+    let Some(event) = trigger.event_mut().take() else {
+        return;
+    };
+    if let AcpProjectionEvent::Startup(ready) = event {
+        if ready {
+            commands
+                .entity(entity)
+                .remove::<AcpStartupFailed>()
+                .insert(AcpStartupReady);
+        } else {
+            commands
+                .entity(entity)
+                .remove::<AcpStartupReady>()
+                .insert(AcpStartupFailed);
+        }
+        return;
+    }
+    let Ok((sid, shared, mut agent_name, mut configs, mut run_state, mut approval)) =
+        sessions.get_mut(entity)
+    else {
+        return;
+    };
+    match event {
+        AcpProjectionEvent::AgentInfo(name) => {
             agent_name.0 = Some(name.clone());
             shared
                 .0
@@ -489,169 +534,37 @@ fn project_info(
                     name,
                 }));
         }
-    }
-}
-
-fn project_config_state(
-    mut sessions: Query<(
-        &SessionId,
-        &AcpSessionShared,
-        &mut AcpConfigStateInbox,
-        &mut AcpSessionConfigs,
-    )>,
-) {
-    for (sid, shared, mut inbox, mut configs) in &mut sessions {
-        while let Ok(input) = inbox.0.try_recv() {
-            let next = AcpSessionConfigs::from_acp(&input.config_options, input.modes.as_ref());
-            if *configs == next {
-                continue;
-            }
-            *configs = next;
-            shared.0.emit(ServiceMessage::AcpSessionConfigState {
-                sid: sid.0.clone(),
-                configs: configs.0.clone(),
-            });
-        }
-    }
-}
-
-fn project_selected_config(
-    mut sessions: Query<(
-        &SessionId,
-        &AcpSessionShared,
-        &mut AcpSelectedConfigInbox,
-        &mut AcpSessionConfigs,
-    )>,
-) {
-    for (sid, shared, mut inbox, mut configs) in &mut sessions {
-        while let Ok(input) = inbox.0.try_recv() {
-            if !input.config_options.is_empty() {
-                let legacy = configs
-                    .0
-                    .iter()
-                    .find(|config| config.config_id.is_none())
-                    .cloned();
-                let mut next = AcpSessionConfigs::from_acp(&input.config_options, None);
-                if !next
-                    .0
-                    .iter()
-                    .any(|config| config.category.as_deref() == Some("mode"))
-                    && let Some(legacy) = legacy
-                {
-                    next.0.push(legacy);
-                }
-                *configs = next;
-            }
-            let Some(config) = configs
-                .0
-                .iter_mut()
-                .find(|config| config.config_id.as_deref() == input.config_id.as_deref())
-            else {
-                continue;
-            };
-            if config.current_value == input.value
-                || !config
-                    .values
-                    .iter()
-                    .any(|option| option.value == input.value)
-            {
-                continue;
-            }
-            config.current_value = input.value;
-            shared.0.emit(ServiceMessage::AcpSessionConfigState {
-                sid: sid.0.clone(),
-                configs: configs.0.clone(),
-            });
-        }
-    }
-}
-
-fn project_status(
-    mut sessions: Query<(
-        &SessionId,
-        &AcpSessionShared,
-        &mut AcpStatusInbox,
-        &mut AcpRunState,
-        &mut AcpApprovalState,
-    )>,
-) {
-    for (sid, shared, mut inbox, mut run_state, mut approval) in &mut sessions {
-        while let Ok(status) = inbox.0.try_recv() {
-            if let AgentRunStatus::Errored(message) = &status {
-                tracing::warn!(target: "acp", sid = %sid.0, "{message}");
-            }
-            if !matches!(status, AgentRunStatus::Streaming) {
-                approval.0 = None;
-            }
-            run_state.0 = status.clone();
-            shared
-                .0
-                .emit(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
+        AcpProjectionEvent::ConfigState(input) => {
+            if configs.apply_state(input) {
+                shared.0.emit(ServiceMessage::AcpSessionConfigState {
                     sid: sid.0.clone(),
-                    status,
-                }));
-        }
-    }
-}
-
-fn project_approval_requested(
-    mut sessions: Query<(
-        &SessionId,
-        &AcpSessionShared,
-        &mut AcpApprovalRequestedInbox,
-        &mut AcpApprovalState,
-    )>,
-) {
-    for (sid, shared, mut inbox, mut approval) in &mut sessions {
-        while let Ok(next) = inbox.0.try_recv() {
-            approval.0 = Some(next.clone());
-            shared
-                .0
-                .emit(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
-                    sid: sid.0.clone(),
-                    call_id: next.call_id,
-                    name: next.name,
-                    args: next.args,
-                }));
-        }
-    }
-}
-
-fn project_approval_resolved(
-    mut sessions: Query<(
-        &SessionId,
-        &AcpSessionShared,
-        &mut AcpApprovalResolvedInbox,
-        &mut AcpApprovalState,
-    )>,
-) {
-    for (sid, shared, mut inbox, mut approval) in &mut sessions {
-        while let Ok(call_id) = inbox.0.try_recv() {
-            if approval
-                .0
-                .as_ref()
-                .is_none_or(|pending| pending.call_id != call_id)
-            {
-                continue;
+                    configs: configs.0.clone(),
+                });
             }
-            approval.0 = None;
-            shared
-                .0
-                .emit(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
-                    sid: sid.0.clone(),
-                    call_id,
-                }));
         }
-    }
-}
-
-fn snapshot_selection(mut sessions: Query<(&mut AcpSelectionSnapshotInbox, &AcpSessionConfigs)>) {
-    for (mut inbox, configs) in &mut sessions {
-        while let Ok(response) = inbox.0.try_recv() {
+        AcpProjectionEvent::SelectedConfig(input) => {
+            if configs.apply_selected(input) {
+                shared.0.emit(ServiceMessage::AcpSessionConfigState {
+                    sid: sid.0.clone(),
+                    configs: configs.0.clone(),
+                });
+            }
+        }
+        AcpProjectionEvent::Status(status) => {
+            run_state.apply(&sid.0, status, &mut approval, &shared.0);
+        }
+        AcpProjectionEvent::ApprovalRequested(next) => {
+            approval.request(&sid.0, next, &shared.0);
+        }
+        AcpProjectionEvent::ApprovalResolved(call_id) => {
+            approval.resolve(&sid.0, call_id, &shared.0);
+        }
+        AcpProjectionEvent::SelectionSnapshot(response) => {
             let _ = response.send(AcpSelectionSnapshot {
                 configs: configs.0.clone(),
             });
         }
+        _ => {}
     }
 }
 
@@ -1016,20 +929,22 @@ fn reap(
 }
 
 fn begin_shutdown(
-    mut inbox: Single<&mut AcpSessionInbox>,
+    channels: Single<(
+        &SpawnReceiver<SpawnAcpSession>,
+        &SpawnReceiver<SendAcpPrompt>,
+        &SpawnReceiver<ApproveAcpTool>,
+        &SpawnReceiver<SetAcpConfig>,
+        &SpawnReceiver<CancelAcpSession>,
+    )>,
     tasks: Query<(Entity, &AcpCloseInput), bevy::prelude::With<AcpSessionShared>>,
     mut commands: Commands,
 ) {
-    inbox.0.spawns.close();
-    inbox.0.prompts.close();
-    inbox.0.approvals.close();
-    inbox.0.configs.close();
-    inbox.0.cancels.close();
-    while inbox.0.spawns.try_recv().is_ok() {}
-    while inbox.0.prompts.try_recv().is_ok() {}
-    while inbox.0.approvals.try_recv().is_ok() {}
-    while inbox.0.configs.try_recv().is_ok() {}
-    while inbox.0.cancels.try_recv().is_ok() {}
+    let (spawns, prompts, approvals, configs, cancels) = channels.into_inner();
+    spawns.close_and_clear();
+    prompts.close_and_clear();
+    approvals.close_and_clear();
+    configs.close_and_clear();
+    cancels.close_and_clear();
     for (entity, close_input) in &tasks {
         let _ = close_input.0.send(());
         commands.entity(entity).insert(ShutdownPending);

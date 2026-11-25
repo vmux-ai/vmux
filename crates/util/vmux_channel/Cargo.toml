@@ -1,0 +1,14 @@
+[package]
+name = "vmux_channel"
+description = "Typed wake-driven external-to-ECS async channels"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+vmux_macro = { path = "../vmux_macro" }
+
+[lints]
+workspace = true

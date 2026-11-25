@@ -3,9 +3,12 @@ use std::marker::PhantomData;
 use std::task::Waker;
 
 use bevy_app::{App, Plugin, PostUpdate, Update};
+use bevy_ecs::lifecycle::HookContext;
 use bevy_ecs::prelude::*;
+use bevy_ecs::world::DeferredWorld;
 
 use crate::blocking::{BlockingRuntime, BlockingTask, Lane, SpawnError};
+use crate::channel::ChannelWake;
 use crate::{Active, Operation, OperationPlugin, OperationState, OperationTarget};
 
 pub struct JobsPlugin;
@@ -73,7 +76,13 @@ pub enum JobSet {
 }
 
 #[derive(Resource, Clone)]
+#[component(on_insert = sync_channel_wake)]
 pub struct JobWake(pub Waker);
+
+fn sync_channel_wake(mut world: DeferredWorld, context: HookContext) {
+    let waker = world.get::<JobWake>(context.entity).unwrap().0.clone();
+    world.commands().insert_resource(ChannelWake(waker));
+}
 
 #[derive(Component)]
 #[component(immutable)]
@@ -791,6 +800,22 @@ mod tests {
             fixture.app.update();
             assert!(!fixture.running());
         }
+    }
+
+    #[test]
+    fn inserting_job_wake_synchronizes_channel_wake() {
+        let mut app = App::new();
+        let (wake_tx, wake_rx) = mpsc::sync_channel(4);
+        app.insert_resource(JobWake(Waker::from(Arc::new(ChannelWake {
+            output: wake_tx,
+            source: JobWake(Waker::noop().clone()),
+        }))));
+        let channel_wake = app
+            .world()
+            .resource::<crate::channel::ChannelWake>()
+            .clone();
+        channel_wake.0.wake_by_ref();
+        assert!(wake_rx.try_recv().is_ok());
     }
 
     #[test]

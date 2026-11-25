@@ -1,7 +1,9 @@
 extern crate self as vmux_ecs;
 
+pub use vmux_macro::ecs_channels as channels;
 pub use vmux_macro::types;
 
+pub use vmux_channel as channel;
 #[cfg(feature = "store")]
 pub use vmux_macro::store;
 pub use vmux_task::{

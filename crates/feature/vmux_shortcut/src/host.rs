@@ -1082,7 +1082,7 @@ mod tests {
             [
                 Binding {
                     shortcut: Shortcut::Chord(
-                        ctrl_b.clone(),
+                        ctrl_b,
                         KeyCombo {
                             key: KeyCode::KeyX,
                             modifiers: Modifiers::default(),
@@ -1282,7 +1282,7 @@ mod tests {
             Source::Settings,
             [
                 Binding {
-                    shortcut: Shortcut::Direct(combo.clone()),
+                    shortcut: Shortcut::Direct(combo),
                     command: "close_pane".into(),
                     when: When::parse("!chat.selector"),
                 },
