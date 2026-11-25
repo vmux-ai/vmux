@@ -61,11 +61,15 @@ impl Declaration {
             Some(domain) => quote!(#domain),
             None => quote!(Self),
         };
+        let filter = match &self.args.filter {
+            Some(filter) => quote!(#filter),
+            None => quote!(::vmux_ecs::store::With<::vmux_ecs::store::Save>),
+        };
         let tracking = if self.args.track {
             quote! {
                 fn track(app: &mut ::vmux_ecs::store::App) {
                     use ::vmux_ecs::store::StoreAppExt;
-                    #(app.track_store::<#types>();)*
+                    #(app.track_domain::<#domain, #filter, #types>();)*
                 }
             }
         } else {
@@ -98,30 +102,75 @@ impl Declaration {
 
 struct Arguments {
     domain: Option<Type>,
+    filter: Option<Type>,
     track: bool,
     types: Vec<Type>,
+}
+
+impl Arguments {
+    fn has_options(input: ParseStream) -> bool {
+        let fork = input.fork();
+        while !fork.is_empty() {
+            if fork.peek(Token![;]) {
+                return true;
+            }
+            if fork.parse::<proc_macro2::TokenTree>().is_err() {
+                return false;
+            }
+        }
+        false
+    }
 }
 
 impl Parse for Arguments {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut domain = None;
+        let mut filter = None;
         let mut track = false;
-        if input.peek(Ident) && input.peek2(Token![=]) {
-            let option: Ident = input.parse()?;
-            if option != "domain" {
-                return Err(syn::Error::new_spanned(option, "expected domain"));
-            }
-            input.parse::<Token![=]>()?;
-            domain = Some(input.parse()?);
-            if input.peek(Token![,]) {
-                input.parse::<Token![,]>()?;
+        if Self::has_options(input) {
+            while !input.peek(Token![;]) {
                 let option: Ident = input.parse()?;
-                if option != "track" {
-                    return Err(syn::Error::new_spanned(option, "expected track"));
+                match option.to_string().as_str() {
+                    "domain" => {
+                        if domain.is_some() {
+                            return Err(syn::Error::new_spanned(option, "duplicate domain"));
+                        }
+                        input.parse::<Token![=]>()?;
+                        domain = Some(input.parse()?);
+                    }
+                    "filter" => {
+                        if filter.is_some() {
+                            return Err(syn::Error::new_spanned(option, "duplicate filter"));
+                        }
+                        input.parse::<Token![=]>()?;
+                        filter = Some(input.parse()?);
+                    }
+                    "track" => {
+                        if track {
+                            return Err(syn::Error::new_spanned(option, "duplicate track"));
+                        }
+                        track = true;
+                    }
+                    _ => {
+                        return Err(syn::Error::new_spanned(
+                            option,
+                            "expected domain, filter, or track",
+                        ));
+                    }
                 }
-                track = true;
+                if input.peek(Token![,]) {
+                    input.parse::<Token![,]>()?;
+                } else {
+                    break;
+                }
             }
             input.parse::<Token![;]>()?;
+            if filter.is_some() && !track {
+                return Err(syn::Error::new(
+                    input.span(),
+                    "filter option requires track",
+                ));
+            }
         }
         let declared = Punctuated::<Type, Token![,]>::parse_terminated(input)?;
         let mut types = Vec::new();
@@ -130,6 +179,7 @@ impl Parse for Arguments {
         }
         Ok(Self {
             domain,
+            filter,
             track,
             types,
         })
@@ -175,6 +225,18 @@ mod tests {
                 ),
             ),
             (
+                quote!(filter = BookmarkFilter; Name),
+                parse_quote!(
+                    struct Store;
+                ),
+            ),
+            (
+                quote!(track, track; Name),
+                parse_quote!(
+                    struct Store;
+                ),
+            ),
+            (
                 quote!(),
                 parse_quote!(
                     struct Store;
@@ -184,6 +246,31 @@ mod tests {
         for (args, item) in cases {
             assert!(Declaration::parse(args, item).is_err());
         }
+    }
+
+    #[test]
+    fn store_schemas_support_standalone_track_and_custom_filters() {
+        let standalone = Declaration::parse(
+            quote!(track; Name, Title),
+            parse_quote!(
+                struct NotesStore;
+            ),
+        )
+        .unwrap();
+        let expanded = standalone.expand().to_string();
+        assert!(expanded.contains("track_domain :: < Self , :: vmux_ecs :: store :: With < :: vmux_ecs :: store :: Save > , Name >"));
+        assert!(expanded.contains("track_domain :: < Self , :: vmux_ecs :: store :: With < :: vmux_ecs :: store :: Save > , Title >"));
+
+        let filtered = Declaration::parse(
+            quote!(filter = BookmarkFilter, track; Pin, Name),
+            parse_quote!(
+                struct BookmarkStore;
+            ),
+        )
+        .unwrap();
+        let expanded = filtered.expand().to_string();
+        assert!(expanded.contains("track_domain :: < Self , BookmarkFilter , Pin >"));
+        assert!(expanded.contains("track_domain :: < Self , BookmarkFilter , Name >"));
     }
 
     #[test]

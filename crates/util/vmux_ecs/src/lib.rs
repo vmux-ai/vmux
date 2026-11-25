@@ -77,6 +77,11 @@ pub use resource_path::{ContentDigest, FilePath};
 pub use revision::{BaseRevision, Revision};
 pub use selection::{SelectRequest, Selected, SelectionPlugin, SelectionSet};
 pub use status::{Busy, Failure, Loading, Progress, Ready, Retired, StatusPlugin};
+#[cfg(feature = "store")]
+pub use store::{
+    AutoSave, AutoSavePaused, AutoSavePlugin, AutoSavePolicy, AutoSaveSet, SchemaPlugin, StorePath,
+    StoreWriteRequest, StoreWriteResult,
+};
 pub use timestamp::{
     ActivateRequest, ArchiveRequest, ArchivedAt, CreatedAt, ExpiresAt, LastActivatedAt,
     LastVisitedAt, TimestampPlugin, Touch, UnarchiveRequest, UnixMillis, UpdatedAt,

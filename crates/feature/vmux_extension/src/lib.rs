@@ -10,9 +10,9 @@ pub use install::{ExtensionInstallCompleted, ExtensionInstallRequest};
 pub use core::CorePlugin as ExtensionPlugin;
 
 pub use core::{
-    Association, AutoSave, Catalog, Changed, CleanupCompleted, CleanupRequest, CorePlugin, Enabled,
-    Evidence, ExtensionSchedule, ExtensionSet, Grant, Grants, HostPermissions, Icon, Id, Install,
-    InstallOwner, InstallRequest, Installed, LoadCompleted, LoadRequest, Loaded,
+    Association, Catalog, CatalogStore, Changed, CleanupCompleted, CleanupRequest, CorePlugin,
+    Enabled, Evidence, ExtensionSchedule, ExtensionSet, Grant, Grants, HostPermissions, Icon, Id,
+    Install, InstallOwner, InstallRequest, Installed, LoadCompleted, LoadRequest, Loaded,
     OptionalHostPermissions, OptionalPermissions, Package, Permissions, Pin, Pinned, Popup,
     PreparedEvidence, ProfileId, PublicKey, Root, Save, Seed, SourceHash, State, Ticket, Toggle,
     Uninstall, Version, WriteCompleted, WriteError, WriteTaskRequest,
