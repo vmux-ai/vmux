@@ -8,7 +8,10 @@ use bevy_app::{App, PreUpdate, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake};
-use vmux_ecs::{Cwd, Operation as WorkOperation, OperationState};
+use vmux_ecs::{
+    Cwd, Operation as WorkOperation, OperationAdmitted, OperationPlugin, OperationPolicy,
+    OperationState, OperationTarget,
+};
 
 use crate::debug_io::{Flight, Task};
 use crate::execution::Failure;
@@ -27,6 +30,9 @@ pub(crate) struct StorageRuntimePlugin;
 
 impl bevy_app::Plugin for StorageRuntimePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<OperationPlugin>() {
+            app.add_plugins(OperationPlugin);
+        }
         app.add_plugins((
             IoPlugin::<Inspect>::default(),
             IoPlugin::<Canonicalize>::default(),
@@ -79,7 +85,7 @@ impl bevy_app::Plugin for StorageRuntimePlugin {
                 .chain()
                 .in_set(Stage::Decide),
         )
-        .add_systems(Update, admit.in_set(Stage::Admit))
+        .add_systems(Update, prune.in_set(Stage::Admit))
         .add_systems(Update, (release, finish).chain().in_set(Stage::Release));
     }
 }
@@ -197,9 +203,6 @@ struct Submitted;
 
 #[derive(Component)]
 struct Received;
-
-#[derive(Component)]
-struct Admitted;
 
 #[derive(Component, Clone, Copy)]
 struct Purpose {
@@ -355,6 +358,8 @@ impl IoWriter<'_, '_> {
     fn request<J: StorageJob>(&mut self, job: J, root: Entity, purpose: Purpose) {
         self.commands.spawn((
             WorkOperation::bundle("dx.storage.io").unwrap(),
+            OperationTarget::new(root),
+            OperationPolicy::SerializePerTarget,
             job,
             purpose,
             Root(root),
@@ -684,14 +689,18 @@ type ReportRequests<'w, 's> = Query<
 type CancelRequests<'w, 's> =
     Query<'w, 's, (Entity, &'static Captured), (With<Request>, Without<Sent>)>;
 
-type AdmitPending<'w, 's> =
-    Query<'w, 's, (Entity, &'static Root, &'static ChildOf), (With<Io>, Without<Admitted>)>;
+type PrunePending<'w, 's> =
+    Query<'w, 's, (Entity, &'static Root, &'static ChildOf), (With<Io>, Without<Submitted>)>;
 
 type AdmitRequests<'w, 's> =
     Query<'w, 's, (&'static Captured, &'static ChildOf, Option<&'static Failed>)>;
 
-type IssuePending<'w, 's, J> =
-    Query<'w, 's, (Entity, &'static J, &'static Root), (With<Admitted>, Without<Submitted>)>;
+type IssuePending<'w, 's, J> = Query<
+    'w,
+    's,
+    (Entity, &'static J, &'static Root, &'static OperationState),
+    (With<Io>, With<OperationAdmitted>, Without<Submitted>),
+>;
 
 type WakeRequests<'w, 's> =
     Query<'w, 's, Entity, (With<Request>, Without<Complete>, Without<Failed>)>;
@@ -761,6 +770,8 @@ fn initialize(incoming: InitializeIncoming, facts: Facts, mut commands: Commands
             .insert((Phase::Target, Cwd(checkout.target.clone())));
         commands.spawn((
             WorkOperation::bundle("dx.storage.io").unwrap(),
+            OperationTarget::new(entity),
+            OperationPolicy::SerializePerTarget,
             Inspect(checkout.target.clone()),
             Purpose::new(PurposeKind::Target),
             Root(entity),
@@ -2314,17 +2325,13 @@ fn cancel(
     }
 }
 
-fn admit(
-    pending: AdmitPending,
+fn prune(
+    pending: PrunePending,
     requests: AdmitRequests,
     attempts: Query<&crate::Attempt>,
     states: Query<&OperationState>,
-    active: Query<&OperationState, With<Io>>,
     mut commands: Commands,
 ) {
-    if active.iter().any(|state| *state == OperationState::Running) {
-        return;
-    }
     for (entity, root, parent) in &pending {
         let Ok((captured, request_parent, failed)) = requests.get(root.0) else {
             continue;
@@ -2341,11 +2348,9 @@ fn admit(
         {
             commands
                 .entity(entity)
-                .insert((Admitted, Submitted, OperationState::Canceled));
-            continue;
+                .insert((Submitted, OperationState::Canceled))
+                .remove::<OperationAdmitted>();
         }
-        commands.entity(entity).insert(Admitted);
-        break;
     }
 }
 
@@ -2355,15 +2360,15 @@ fn issue<J: StorageJob>(
     wake: Res<JobWake>,
     mut commands: Commands,
 ) {
-    for (entity, operation, root) in &pending {
+    for (entity, operation, root, state) in &pending {
+        if *state != OperationState::Running {
+            continue;
+        }
         let loan = loans.get(root.0).ok().and_then(|loan| loan.0.clone());
         let (task, flight) = Task::new(operation.clone(), loan, Vec::new(), wake.0.clone());
-        commands.entity(entity).insert((
-            Submitted,
-            flight,
-            JobRequest(task),
-            OperationState::Running,
-        ));
+        commands
+            .entity(entity)
+            .insert((Submitted, flight, JobRequest(task)));
         wake.0.wake_by_ref();
     }
 }
