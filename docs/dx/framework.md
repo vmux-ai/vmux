@@ -6,7 +6,14 @@ This is optional reading. To change Vmux itself or make a personal build, follow
 
 ## See a small example
 
-The [pane example](https://github.com/vmux-ai/vmux/blob/main/tests/sdk/core/tests/pane.rs) creates a Bevy app and enables Vmux's layout behavior:
+Runnable Bevy-style examples live in [`examples/`](https://github.com/vmux-ai/vmux/blob/main/examples/README.md). Each example is a short standalone binary you can run directly:
+
+```sh
+cargo run -p vmux_examples --example panes
+cargo run -p vmux_examples --example async_channel
+```
+
+For instance, [`examples/layout/panes.rs`](https://github.com/vmux-ai/vmux/blob/main/examples/layout/panes.rs) creates a Bevy app and enables Vmux's layout behavior:
 
 ```rust
 use bevy_app::App;
@@ -16,9 +23,9 @@ let mut app = App::new();
 app.add_plugins(VmuxPlugin::builder().layout(true).build());
 ```
 
-It then creates panes, sends a selection request, and checks which pane became active. It runs as a test and does not open a window. Your application would supply the UI that displays those panes.
+It then creates panes, sends a selection request, and checks which pane became active without opening a window. Your application supplies the UI that displays those panes.
 
-The independent SDK core test workspace lives in `tests/sdk/core`: it uses Vmux as a dependency. Its [document example](https://github.com/vmux-ai/vmux/blob/main/tests/sdk/core/src/lib.rs) also shows renaming and saving documents. These are compatibility tests, rather than a finished application template.
+Independent Cargo workspace compatibility suites live in `tests/sdk/core` and `tests/sdk/host`: they consume Vmux as an external path or Git dependency and verify dependency isolation. The [document example](https://github.com/vmux-ai/vmux/blob/main/tests/sdk/core/src/lib.rs) shows renaming and saving documents. These are compatibility tests, rather than a finished application template.
 
 ## Run the example tests
 

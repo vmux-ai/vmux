@@ -10797,6 +10797,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_examples"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_math",
+ "bevy_reflect",
+ "bevy_tasks",
+ "moonshine-save",
+ "tempfile",
+ "vmux_app",
+ "vmux_ecs",
+]
+
+[[package]]
 name = "vmux_extension"
 version = "0.0.35"
 dependencies = [
