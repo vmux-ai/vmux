@@ -404,6 +404,63 @@ impl Run {
             )
         }
     }
+
+    fn matches_bundle_name(&self, product_name: &str, name: &str) -> bool {
+        if self.profile == "dev" {
+            return name == format!("{product_name} Dev.app");
+        }
+        if self.profile == "local" {
+            let prefix = format!("{product_name} (");
+            let Some(rest) = name.strip_prefix(&prefix) else {
+                return false;
+            };
+            let Some(revision) = rest.strip_suffix(").app") else {
+                return false;
+            };
+            return revision.len() == 7
+                && revision
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+        }
+        name == format!("{product_name}.app")
+    }
+
+    fn conflicting_running_app(
+        &self,
+        product_name: &str,
+        target: &Path,
+        ps_output: &str,
+    ) -> Option<(u32, PathBuf)> {
+        for line in ps_output.lines() {
+            let trimmed = line.trim_start();
+            let Some((pid_text, command)) = trimmed.split_once(char::is_whitespace) else {
+                continue;
+            };
+            let Ok(pid) = pid_text.parse::<u32>() else {
+                continue;
+            };
+            let command = command.trim_start();
+            let marker = "/Contents/MacOS/vmux_desktop";
+            let Some(index) = command.find(marker) else {
+                continue;
+            };
+            let after = &command[index + marker.len()..];
+            if !after.is_empty() && !after.starts_with(char::is_whitespace) {
+                continue;
+            }
+            let running = PathBuf::from(&command[..index]);
+            let Some(name) = running.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !self.matches_bundle_name(product_name, name) {
+                continue;
+            }
+            if running != target {
+                return Some((pid, running));
+            }
+        }
+        None
+    }
 }
 
 #[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
@@ -629,6 +686,9 @@ struct BranchSlot;
 struct CommitSlot;
 
 #[derive(Component)]
+struct ProcessSlot;
+
+#[derive(Component)]
 struct StdlibSlot;
 
 #[derive(Component)]
@@ -780,6 +840,7 @@ type NativeResults<'w, 's> = Query<
                 With<ManifestSlot>,
                 With<BranchSlot>,
                 With<CommitSlot>,
+                With<ProcessSlot>,
                 With<StdlibSlot>,
                 With<RpathsSlot>,
             )>,
@@ -3870,6 +3931,19 @@ fn run_verify(
             (),
             false,
         );
+        io.request(
+            &mut sequence,
+            entity,
+            &mut previous,
+            CaptureOutput::new(
+                &settings.0,
+                &checkout.root,
+                "ps".into(),
+                vec!["-axo".into(), "pid=,args=".into()],
+            ),
+            ProcessSlot,
+            true,
+        );
         *phase = RunPhase::Execute;
 
         if *phase != previous_phase {
@@ -3901,7 +3975,7 @@ fn run_execute(
         }
         let previous_phase = *phase;
         let mut previous = None;
-        let _product = match settings.0.product(&checkout.root) {
+        let product = match settings.0.product(&checkout.root) {
             Ok(product) => product,
             Err(error) => {
                 io.commands
@@ -3912,6 +3986,23 @@ fn run_execute(
         };
 
         let target = targets.get(entity).unwrap();
+        if cfg!(target_os = "macos")
+            && let Some(processes) = facts.command_output::<ProcessSlot>(entity)
+            && let Some((pid, running)) = request.conflicting_running_app(
+                product.value("VMUX_HOST_NAME"),
+                &target.0,
+                &processes,
+            )
+        {
+            io.commands.entity(entity).insert(Failed(Failure::message(format!(
+                "Another {} {} app is already running ({}, pid {pid}); quit it before launching {}",
+                profile,
+                product.value("VMUX_HOST_NAME"),
+                running.display(),
+                target.0.display()
+            ))));
+            continue;
+        }
         let mut environment = settings.0.clone();
         let (program, arguments) = if cfg!(target_os = "macos") || profile != "dev" {
             let mut arguments = Vec::new();
@@ -6414,5 +6505,58 @@ exit 0
             0
         );
         assert!(!fixture.root.join("opened").exists());
+    }
+
+    #[test]
+    fn conflicting_running_app_matches_only_different_bundles_of_the_same_profile() {
+        let dev = Run {
+            profile: "dev".into(),
+            platform: "desktop".into(),
+            allow_build: false,
+        };
+        let local = Run {
+            profile: "local".into(),
+            platform: "desktop".into(),
+            allow_build: false,
+        };
+        let target_dev = PathBuf::from("/worktrees/vmux-menu/target/debug/Vmux Dev.app");
+        let ps = "\
+  101 /worktrees/other/target/debug/Vmux Dev.app/Contents/MacOS/vmux_desktop\n\
+  202 /worktrees/other/target/release/Vmux (1234abc).app/Contents/MacOS/vmux_desktop\n\
+  303 /Applications/Vmux.app/Contents/MacOS/vmux_desktop\n";
+        assert_eq!(
+            dev.conflicting_running_app("Vmux", &target_dev, ps),
+            Some((
+                101,
+                PathBuf::from("/worktrees/other/target/debug/Vmux Dev.app")
+            ))
+        );
+        assert_eq!(
+            dev.conflicting_running_app(
+                "Vmux",
+                Path::new("/worktrees/other/target/debug/Vmux Dev.app"),
+                ps
+            ),
+            None
+        );
+        assert_eq!(
+            local.conflicting_running_app(
+                "Vmux",
+                Path::new("/worktrees/main/target/release/Vmux (9999999).app"),
+                ps
+            ),
+            Some((
+                202,
+                PathBuf::from("/worktrees/other/target/release/Vmux (1234abc).app")
+            ))
+        );
+        assert_eq!(
+            dev.conflicting_running_app(
+                "Vmux",
+                &target_dev,
+                "202 /worktrees/other/target/release/Vmux (1234abc).app/Contents/MacOS/vmux_desktop\n"
+            ),
+            None
+        );
     }
 }
