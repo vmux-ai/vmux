@@ -3,21 +3,26 @@ use bevy::prelude::*;
 use bevy::prelude::{App, Plugin};
 use moonshine_save::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::time::Duration;
 use vmux_api::PageIcon;
 use vmux_api::bookmark::SmartBookmarkFolder;
 use vmux_ecs::profile::SessionEnvironment;
-use vmux_ecs::store::State;
-use vmux_ecs::store::{SchemaPlugin, Types};
+use vmux_ecs::store::{
+    AutoSave, AutoSavePaused, AutoSavePlugin, AutoSavePolicy, SchemaPlugin, State, StorePath,
+    StoreWriteRequest, StoreWriteResult, Types,
+};
+use vmux_ecs::time::BackoffPolicy;
+#[cfg(test)]
+use vmux_ecs::time::Clock;
 use vmux_ecs::{
-    Bookmark, BookmarkOrder, Collapsed, EntityTarget, Failure, Folder, Loading, PageMetadata, Pin,
-    Ready, StatusPlugin, Uuid,
+    Bookmark, BookmarkOrder, Collapsed, Failure, Folder, Loading, PageMetadata, Pin, Ready,
+    StatusPlugin, Uuid,
 };
 use vmux_layout::LayoutStartupSet;
 #[cfg(test)]
 use vmux_setting::AppSettings;
 use vmux_setting::BookmarkDefaults;
-
-use crate::store_driver::{BookmarkFilter, BookmarkStorePath};
 
 pub(super) struct BookmarkStorePlugin;
 
@@ -26,36 +31,38 @@ impl Plugin for BookmarkStorePlugin {
         if !app.is_plugin_added::<StatusPlugin>() {
             app.add_plugins(StatusPlugin);
         }
-        app.add_plugins(SchemaPlugin::<BookmarkStore>::default())
-            .init_resource::<OfferedBookmarkDefaults>()
-            .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
-            .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
-            .add_observer(seed_defaults)
-            .add_observer(insert_defaults)
-            .add_observer(migrate_vm)
-            .add_observer(retire_defaults)
-            .add_observer(claim_pins)
-            .add_observer(order_legacy)
-            .add_observer(order_vm)
-            .add_observer(publish_pins)
-            .add_observer(seed_folders)
-            .add_observer(finish_defaults)
-            .add_observer(begin_write)
-            .add_observer(written)
-            .add_systems(
-                Startup,
-                (spawn, ApplyDeferred, load_bookmarks_on_startup)
-                    .chain()
-                    .after(LayoutStartupSet::Store),
-            )
-            .add_systems(
-                PostUpdate,
-                (mark_bookmarks_dirty, autosave_bookmarks).chain(),
-            );
+        app.add_plugins((
+            SchemaPlugin::<BookmarkStore>::default(),
+            AutoSavePlugin::<BookmarkStore>::default(),
+        ))
+        .init_resource::<OfferedBookmarkDefaults>()
+        .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
+        .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
+        .add_observer(seed_defaults)
+        .add_observer(insert_defaults)
+        .add_observer(migrate_vm)
+        .add_observer(retire_defaults)
+        .add_observer(claim_pins)
+        .add_observer(order_legacy)
+        .add_observer(order_vm)
+        .add_observer(publish_pins)
+        .add_observer(seed_folders)
+        .add_observer(finish_defaults)
+        .add_observer(write_snapshot)
+        .add_systems(
+            Startup,
+            (spawn, ApplyDeferred, load_bookmarks_on_startup)
+                .chain()
+                .after(LayoutStartupSet::Store),
+        );
     }
 }
 
+type BookmarkFilter = Or<(With<Pin>, With<Bookmark>, With<Folder>)>;
+
 #[vmux_ecs::store(
+    filter = BookmarkFilter,
+    track;
     ChildOf,
     Children,
     Name,
@@ -70,6 +77,36 @@ impl Plugin for BookmarkStorePlugin {
     OfferedBookmarkDefaults
 )]
 struct BookmarkStore;
+
+impl BookmarkStore {
+    fn load(path: &Path) -> std::io::Result<LoadWorld<BookmarkFilter>> {
+        let mut source = std::fs::read_to_string(path)?;
+        for (legacy, current) in [
+            (
+                "vmux_desktop::bookmark_persistence::OfferedBookmarkDefaults",
+                "vmux_bookmark::OfferedBookmarkDefaults",
+            ),
+            ("vmux_core::BookmarkOrder", "vmux_ecs::BookmarkOrder"),
+            ("vmux_core::Pin", "vmux_ecs::Pin"),
+            ("vmux_core::Bookmark", "vmux_ecs::Bookmark"),
+            ("vmux_core::Folder", "vmux_ecs::Folder"),
+            ("vmux_core::Collapsed", "vmux_ecs::Collapsed"),
+            ("vmux_core::Uuid", "vmux_ecs::Uuid"),
+        ] {
+            source = source.replace(legacy, current);
+        }
+        if let Some((normalized, unknown)) = vmux_api::icon::StoredPageIcons(&source).normalize() {
+            warn!(
+                ?unknown,
+                "Replacing unavailable bookmark icons while loading"
+            );
+            source = normalized;
+        }
+        Ok(LoadWorld::<BookmarkFilter>::from_stream(
+            std::io::Cursor::new(source.into_bytes()),
+        ))
+    }
+}
 
 type BookmarkStoreTypes = Types<BookmarkStore>;
 
@@ -89,17 +126,24 @@ fn spawn(profile: vmux_ecs::profile::CurrentProfile, mut commands: Commands) {
             }
         }
     };
-    commands.spawn((
+    let mut store = commands.spawn((
         Name::new("Bookmark store"),
-        BookmarkAutoSave,
-        BookmarkStorePath(path),
+        AutoSave::<BookmarkStore>::default(),
+        StorePath::new(path),
+        AutoSavePolicy::immediate().with_retry(BackoffPolicy::exponential(
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )),
     ));
+    if SessionEnvironment::is_test() {
+        store.insert(AutoSavePaused);
+    }
 }
 
 fn load_bookmarks_on_startup(
-    store: Single<Entity, With<BookmarkAutoSave>>,
-    mut state: Single<&mut State, With<BookmarkAutoSave>>,
-    path: Single<&BookmarkStorePath>,
+    store: Single<Entity, With<AutoSave<BookmarkStore>>>,
+    mut state: Single<&mut State, With<AutoSave<BookmarkStore>>>,
+    path: Single<&StorePath, With<AutoSave<BookmarkStore>>>,
     mut commands: Commands,
 ) {
     if SessionEnvironment::is_test() {
@@ -110,7 +154,7 @@ fn load_bookmarks_on_startup(
         commands.trigger(SeedBookmarkDefaults);
         return;
     }
-    let load = match path.load() {
+    let load = match BookmarkStore::load(&path.0) {
         Ok(load) => load,
         Err(error) => {
             error!(path = %path.0.display(), %error, "bookmark load failed");
@@ -127,8 +171,8 @@ fn load_bookmarks_on_startup(
 
 fn seed_defaults(
     _trigger: On<Loaded>,
-    pending: Option<Single<Entity, (With<BookmarkAutoSave>, With<Loading>)>>,
-    mut state: Single<&mut State, With<BookmarkAutoSave>>,
+    pending: Option<Single<Entity, (With<AutoSave<BookmarkStore>>, With<Loading>)>>,
+    mut state: Single<&mut State, With<AutoSave<BookmarkStore>>>,
     mut commands: Commands,
 ) {
     let Some(pending) = pending else {
@@ -177,7 +221,7 @@ struct BookmarkSeed<'w, 's> {
         Query<'w, 's, (Entity, &'static Name, Option<&'static SmartBookmarkFolder>), With<Folder>>,
     orders: Query<'w, 's, &'static BookmarkOrder, BookmarkFilter>,
     offered: ResMut<'w, OfferedBookmarkDefaults>,
-    auto: Single<'w, 's, (Entity, &'static mut State), With<BookmarkAutoSave>>,
+    auto: Single<'w, 's, (Entity, &'static mut State), With<AutoSave<BookmarkStore>>>,
     commands: Commands<'w, 's>,
 }
 
@@ -623,125 +667,32 @@ fn finish_defaults(trigger: On<FinishDefaults>, roots: Query<&Seeding>, mut seed
         .remove::<(Seeding, NextOrder)>();
 }
 
-#[derive(Component, Default)]
-#[require(State)]
-struct BookmarkAutoSave;
-
-#[derive(Component)]
-struct RetryAt(std::time::Instant);
-
-fn mark_bookmarks_dirty(
-    mut auto: Single<&mut State, With<BookmarkAutoSave>>,
-    changed: Query<
-        (),
-        (
-            BookmarkFilter,
-            Or<(
-                Added<Pin>,
-                Added<Bookmark>,
-                Added<Folder>,
-                Added<Collapsed>,
-                Changed<Name>,
-                Changed<BookmarkOrder>,
-                Changed<PageMetadata>,
-                Changed<ChildOf>,
-            )>,
-        ),
-    >,
-    bookmark_items: Query<(), Or<(With<Bookmark>, With<Pin>, With<Folder>)>>,
-    mut removed_pin: RemovedComponents<Pin>,
-    mut removed_bookmark: RemovedComponents<Bookmark>,
-    mut removed_folder: RemovedComponents<Folder>,
-    mut removed_collapsed: RemovedComponents<Collapsed>,
-    mut removed_child_of: RemovedComponents<ChildOf>,
-) {
-    let mut removed_child_of_bookmark = false;
-    for entity in removed_child_of.read() {
-        removed_child_of_bookmark |= bookmark_items.get(entity).is_ok();
-    }
-    let pin_removed = removed_pin.read().count() > 0;
-    let bookmark_removed = removed_bookmark.read().count() > 0;
-    let folder_removed = removed_folder.read().count() > 0;
-    let collapsed_removed = removed_collapsed.read().count() > 0;
-    let any_removed = pin_removed
-        || bookmark_removed
-        || folder_removed
-        || collapsed_removed
-        || removed_child_of_bookmark;
-    if any_removed || !changed.is_empty() {
-        auto.advance();
-    }
-}
-
-fn autosave_bookmarks(
-    store: Single<(Entity, &State, Option<&RetryAt>), With<BookmarkAutoSave>>,
-    path: Single<&BookmarkStorePath>,
+fn write_snapshot(
+    request: On<StoreWriteRequest<BookmarkStore>>,
     types: Res<BookmarkStoreTypes>,
     mut commands: Commands,
 ) {
-    let (entity, state, retry) = store.into_inner();
-    if !state.is_dirty()
-        || state.phase() != vmux_ecs::store::Phase::Ready
-        || SessionEnvironment::is_test()
-    {
+    if SessionEnvironment::is_test() {
+        commands.trigger(StoreWriteResult::<BookmarkStore>::ok(
+            request.entity,
+            request.revision,
+        ));
         return;
     }
-    if retry.is_some_and(|retry| std::time::Instant::now() < retry.0) {
-        return;
-    }
-    if let Some(parent) = path.0.parent() {
+    if let Some(parent) = request.path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let mut save = SaveWorld::<BookmarkFilter>::into_file(path.0.clone());
+    let mut save = SaveWorld::<BookmarkFilter>::into_file(request.path.clone());
     types.apply(&mut save);
-    commands.queue(BookmarkWrite {
-        target: EntityTarget::new(entity),
-        save: Some(save),
-    });
-}
-
-#[derive(Event)]
-struct BookmarkWrite {
-    target: EntityTarget<BookmarkAutoSave>,
-    save: Option<SaveWorld<BookmarkFilter>>,
-}
-
-impl Command for BookmarkWrite {
-    type Out = ();
-
-    fn apply(self, world: &mut World) {
-        world.trigger(self);
-    }
-}
-
-fn begin_write(
-    mut request: On<BookmarkWrite>,
-    mut stores: Query<&mut State, With<BookmarkAutoSave>>,
-    mut commands: Commands,
-) {
-    let request = request.event_mut();
-    if request.save.is_none() {
-        return;
-    }
-    let entity = request.target.entity();
-    let Ok(mut state) = stores.get_mut(entity) else {
-        return;
-    };
-    let Some(revision) = state.begin() else {
-        return;
-    };
-    let Some(save) = request.save.take() else {
-        return;
-    };
     commands.queue(WriteSnapshot {
-        target: request.target,
-        revision,
+        store: request.entity,
+        revision: request.revision,
         save,
     });
 }
 
 struct WriteSnapshot {
-    target: EntityTarget<BookmarkAutoSave>,
+    store: Entity,
     revision: u64,
     save: SaveWorld<BookmarkFilter>,
 }
@@ -753,41 +704,14 @@ impl Command for WriteSnapshot {
         let result = moonshine_save::save::SaveCommand(self.save)
             .apply(world)
             .map_err(|error| error.to_string());
-        world.trigger(Written {
-            entity: self.target.entity(),
-            revision: self.revision,
+        if let Err(error) = &result {
+            error!(%error, "bookmark write failed; retrying with backoff");
+        }
+        world.trigger(StoreWriteResult::<BookmarkStore>::new(
+            self.store,
+            self.revision,
             result,
-        });
-    }
-}
-
-#[derive(EntityEvent)]
-struct Written {
-    entity: Entity,
-    revision: u64,
-    result: Result<(), String>,
-}
-
-fn written(
-    result: On<Written>,
-    mut stores: Query<&mut State, With<BookmarkAutoSave>>,
-    mut commands: Commands,
-) {
-    let Ok(mut state) = stores.get_mut(result.entity) else {
-        return;
-    };
-    match &result.result {
-        Ok(()) => {
-            state.succeed(result.revision);
-            commands.entity(result.entity).remove::<RetryAt>();
-        }
-        Err(error) => {
-            error!(%error, "bookmark write failed; retrying in 60 seconds");
-            state.retry(result.revision, error.clone());
-            commands.entity(result.entity).insert(RetryAt(
-                std::time::Instant::now() + std::time::Duration::from_secs(60),
-            ));
-        }
+        ));
     }
 }
 
@@ -820,7 +744,7 @@ mod tests {
         .add_plugins(SchemaPlugin::<BookmarkStore>::default())
         .insert_resource(OfferedBookmarkDefaults::default())
         .add_observer(load_on::<LoadWorld<BookmarkFilter>>);
-        let load = BookmarkStorePath(path.clone()).load().unwrap();
+        let load = BookmarkStore::load(&path).unwrap();
         app.world_mut().commands().trigger_load(load);
         app.update();
         app.update();
@@ -839,16 +763,25 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("bookmarks.ron");
         std::fs::create_dir(&path).unwrap();
+        let clock = Clock::fake(1_700_000_000_000);
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            bevy::asset::AssetPlugin::default(),
-            vmux_ecs::PrimitivesPlugin,
-        ))
-        .add_plugins(BookmarkStorePlugin);
+        app.insert_resource(clock.clone())
+            .add_plugins((
+                MinimalPlugins,
+                bevy::asset::AssetPlugin::default(),
+                vmux_ecs::PrimitivesPlugin,
+            ))
+            .add_plugins(BookmarkStorePlugin);
         let store = app
             .world_mut()
-            .spawn((BookmarkAutoSave, BookmarkStorePath(path.clone())))
+            .spawn((
+                AutoSave::<BookmarkStore>::default(),
+                StorePath::new(path.clone()),
+                AutoSavePolicy::immediate().with_retry(BackoffPolicy::exponential(
+                    Duration::from_secs(60),
+                    Duration::from_secs(60),
+                )),
+            ))
             .id();
         app.world_mut().spawn((
             Bookmark,
@@ -858,15 +791,13 @@ mod tests {
                 ..Default::default()
             },
         ));
-        app.world_mut().get_mut::<State>(store).unwrap().advance();
         app.world_mut().run_schedule(PostUpdate);
         assert!(path.is_dir());
         assert!(app.world().get::<State>(store).unwrap().is_dirty());
         assert!(app.world().get::<State>(store).unwrap().error().is_some());
         std::fs::remove_dir(&path).unwrap();
-        app.world_mut().get_mut::<RetryAt>(store).unwrap().0 =
-            std::time::Instant::now() - std::time::Duration::from_secs(1);
-        app.world_mut().run_schedule(PostUpdate);
+        clock.advance(Duration::from_secs(60));
+        app.update();
         assert!(path.is_file());
         let state = app.world().get::<State>(store).unwrap();
         assert!(!state.is_dirty());
@@ -1016,7 +947,7 @@ mod tests {
         .add_plugins(SchemaPlugin::<BookmarkStore>::default())
         .init_resource::<OfferedBookmarkDefaults>()
         .add_observer(load_on::<LoadWorld<BookmarkFilter>>);
-        let load = BookmarkStorePath(path.clone()).load().unwrap();
+        let load = BookmarkStore::load(&path).unwrap();
         app.world_mut().commands().trigger_load(load);
         app.update();
         let mut bookmarks = app
@@ -1057,7 +988,7 @@ mod tests {
             pin_order_revision: 5,
             ..default()
         });
-        app.world_mut().spawn(BookmarkAutoSave);
+        app.world_mut().spawn(AutoSave::<BookmarkStore>::default());
         for (order, url) in ["vmux://vm/", "vmux://vm/docker/containers"]
             .into_iter()
             .enumerate()
@@ -1108,7 +1039,7 @@ mod tests {
             pin_order_revision: 4,
             ..default()
         });
-        app.world_mut().spawn(BookmarkAutoSave);
+        app.world_mut().spawn(AutoSave::<BookmarkStore>::default());
         let mut container = Entity::PLACEHOLDER;
         for (order, url) in [
             "https://first.example/",
@@ -1203,7 +1134,7 @@ mod tests {
             pin_order_revision: 4,
             ..default()
         });
-        app.world_mut().spawn(BookmarkAutoSave);
+        app.world_mut().spawn(AutoSave::<BookmarkStore>::default());
         app.world_mut().spawn((
             Pin,
             Uuid("simulator".into()),
@@ -1289,7 +1220,10 @@ mod tests {
             },
         ];
         let mut load_app = App::new();
-        let store = load_app.world_mut().spawn((BookmarkAutoSave, Loading)).id();
+        let store = load_app
+            .world_mut()
+            .spawn((AutoSave::<BookmarkStore>::default(), Loading))
+            .id();
         load_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
@@ -1308,9 +1242,7 @@ mod tests {
             .add_observer(order_vm)
             .add_observer(publish_pins)
             .add_observer(seed_folders)
-            .add_observer(finish_defaults)
-            .add_observer(begin_write)
-            .add_observer(written);
+            .add_observer(finish_defaults);
         load_app
             .world_mut()
             .commands()

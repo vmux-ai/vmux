@@ -8,6 +8,7 @@ use bevy_ecs::system::SystemParam;
 use std::result::Result;
 use vmux_api::extension::{ExtPinRequest, ExtToggleRequest, ExtUninstallRequest};
 pub use vmux_ecs::store::State;
+use vmux_ecs::store::{AutoSavePlugin, StoreWriteRequest, StoreWriteResult};
 use vmux_ecs::{
     Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget,
     OperationTargetRevision, Revision,
@@ -15,12 +16,17 @@ use vmux_ecs::{
 
 use crate::snapshot::{ExtEntry, ExtensionGrants, Index};
 
+pub struct CatalogStore;
+
 pub struct CorePlugin;
 
 impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
+        }
+        if !app.is_plugin_added::<AutoSavePlugin<CatalogStore>>() {
+            app.add_plugins(AutoSavePlugin::<CatalogStore>::default());
         }
         app.init_resource::<Clock>()
             .add_message::<LoadRequest>()
@@ -43,7 +49,7 @@ impl Plugin for CorePlugin {
             )
             .add_systems(
                 ExtensionSchedule,
-                (autosave, queue, accept, settle, release)
+                (repair, queue, accept, settle, release)
                     .chain()
                     .in_set(ExtensionSet::Accept),
             )
@@ -56,6 +62,7 @@ impl Plugin for CorePlugin {
             .add_observer(grant)
             .add_observer(save)
             .add_observer(admit)
+            .add_observer(write_autosave)
             .add_observer(discard)
             .add_observer(retire);
     }
@@ -149,9 +156,6 @@ pub struct InstallOwner {
 
 #[derive(Component)]
 pub(crate) struct Installing(pub Entity);
-
-#[derive(Component)]
-pub struct AutoSave;
 
 #[derive(Component)]
 pub struct WriteError(pub String);
@@ -617,6 +621,7 @@ struct Writing {
     snapshot: Index,
     cleanup: Option<(String, String)>,
     before: State,
+    managed: bool,
 }
 
 #[derive(Message)]
@@ -898,7 +903,14 @@ fn finish(
         };
         match &result {
             Ok(()) => {
-                state.succeed(completion.revision);
+                if writing.managed {
+                    commands.trigger(StoreWriteResult::<CatalogStore>::ok(
+                        ticket.owner,
+                        completion.revision,
+                    ));
+                } else {
+                    state.succeed(completion.revision);
+                }
                 *revision = Revision(completion.revision);
                 effects.updates.write(Reconcile {
                     ticket: ticket.clone(),
@@ -922,7 +934,13 @@ fn finish(
                 }
             }
             Err(error) => {
-                if completion.result.is_ok() {
+                if writing.managed {
+                    commands.trigger(StoreWriteResult::<CatalogStore>::err(
+                        ticket.owner,
+                        completion.revision,
+                        error.clone(),
+                    ));
+                } else if completion.result.is_ok() {
                     state.retry(completion.revision, error.clone());
                     commands
                         .entity(ticket.owner)
@@ -1302,7 +1320,7 @@ fn evidence(
     }
 }
 
-fn autosave(
+fn repair(
     roots: Query<
         (
             &Scope,
@@ -1310,15 +1328,14 @@ fn autosave(
             Has<WriteError>,
             Has<RepairRequired>,
             Has<RepairSuspended>,
-            Has<AutoSave>,
         ),
         (With<Loaded>, Without<Writing>),
     >,
     requests: Query<&Scope, With<Pending>>,
     mut commands: Commands,
 ) {
-    for (scope, state, error, repair_required, repair_suspended, auto) in &roots {
-        if (!auto && !repair_required && !repair_suspended)
+    for (scope, state, error, repair_required, repair_suspended) in &roots {
+        if (!repair_required && !repair_suspended)
             || !state.is_dirty()
             || (error && !repair_required)
             || requests.iter().any(|request| request.0 == scope.0)
@@ -1327,6 +1344,107 @@ fn autosave(
         }
         commands.spawn(Save::bundle(scope.0.clone()));
     }
+}
+
+fn write_autosave(
+    request: On<StoreWriteRequest<CatalogStore>>,
+    mut store: ParamSet<(
+        Catalog,
+        Query<
+            (
+                &Scope,
+                &Revision,
+                &State,
+                Has<Writing>,
+                Has<RepairRequired>,
+                Has<RepairSuspended>,
+            ),
+            With<Loaded>,
+        >,
+    )>,
+    mut writes: MessageWriter<WriteTaskRequest>,
+    mut commands: Commands,
+) {
+    let owner = request.entity;
+    let snapshot = {
+        let catalog = store.p0();
+        let Some(ticket) = catalog.ticket(owner).cloned() else {
+            commands.trigger(StoreWriteResult::<CatalogStore>::err(
+                owner,
+                request.revision,
+                "extension root not found",
+            ));
+            return;
+        };
+        if !catalog.ready(&ticket) {
+            commands.trigger(StoreWriteResult::<CatalogStore>::err(
+                owner,
+                request.revision,
+                "extension store is unavailable",
+            ));
+            return;
+        }
+        match catalog.snapshot(owner) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                commands.trigger(StoreWriteResult::<CatalogStore>::err(
+                    owner,
+                    request.revision,
+                    error,
+                ));
+                return;
+            }
+        }
+    };
+    let roots = store.p1();
+    let Ok((scope, base, state, writing, repair_required, repair_suspended)) = roots.get(owner)
+    else {
+        commands.trigger(StoreWriteResult::<CatalogStore>::err(
+            owner,
+            request.revision,
+            "extension root is not loaded",
+        ));
+        return;
+    };
+    if writing || repair_required || repair_suspended {
+        commands.trigger(StoreWriteResult::<CatalogStore>::err(
+            owner,
+            request.revision,
+            "extension store is busy",
+        ));
+        return;
+    }
+    if let Err(error) = snapshot.validate() {
+        commands.trigger(StoreWriteResult::<CatalogStore>::err(
+            owner,
+            request.revision,
+            error,
+        ));
+        return;
+    }
+    let operation = commands
+        .spawn((
+            Operation::bundle("extension.save").unwrap().running(),
+            OperationTarget::new(owner),
+            OperationTargetRevision(request.revision),
+        ))
+        .id();
+    commands.entity(owner).insert(Writing {
+        ticket: scope.0.clone(),
+        operation,
+        base: *base,
+        revision: request.revision,
+        snapshot: snapshot.clone(),
+        cleanup: None,
+        before: state.clone(),
+        managed: true,
+    });
+    writes.write(WriteTaskRequest {
+        ticket: scope.0.clone(),
+        operation,
+        revision: request.revision,
+        snapshot,
+    });
 }
 
 fn queue(
@@ -1912,6 +2030,7 @@ fn admit(
         snapshot: proposed.clone(),
         cleanup,
         before,
+        managed: false,
     });
     writes.write(WriteTaskRequest {
         ticket: scope.0.clone(),
@@ -2658,6 +2777,83 @@ mod tests {
         assert_eq!(
             fixture.app.world().get::<OperationState>(operation),
             Some(&OperationState::Canceled)
+        );
+    }
+
+    #[test]
+    fn autosave_retries_with_backoff_and_flushes_on_exit() {
+        let clock = vmux_ecs::time::Clock::fake(1_700_000_000_000);
+        let mut fixture = Fixture::new();
+        fixture.app.insert_resource(clock.clone());
+        fixture.app.world_mut().entity_mut(fixture.root).insert((
+            vmux_ecs::store::AutoSave::<CatalogStore>::default(),
+            vmux_ecs::store::StorePath::new("/extensions"),
+            vmux_ecs::store::AutoSavePolicy::new(
+                std::time::Duration::from_millis(100),
+                None,
+                vmux_ecs::time::BackoffPolicy::exponential(
+                    std::time::Duration::from_secs(1),
+                    std::time::Duration::from_secs(4),
+                ),
+            ),
+        ));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.root)
+            .insert(PreparedEvidence(vec![Evidence {
+                id: PACKAGE_ID.into(),
+                profile: "personal".into(),
+                source_hash: Some("auto-hash".into()),
+                ..Default::default()
+            }]));
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world_mut()
+                .resource_mut::<Messages<WriteTaskRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+
+        clock.advance(std::time::Duration::from_millis(100));
+        fixture.app.update();
+        let first = fixture.write();
+        fixture.finish(&first, Err("disk full".into()));
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<State>(fixture.root)
+                .unwrap()
+                .is_dirty()
+        );
+
+        clock.advance(std::time::Duration::from_millis(500));
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world_mut()
+                .resource_mut::<Messages<WriteTaskRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+
+        clock.advance(std::time::Duration::from_millis(500));
+        fixture.app.update();
+        let retry = fixture.write();
+        fixture.finish(&retry, Ok(()));
+        assert!(
+            !fixture
+                .app
+                .world()
+                .get::<State>(fixture.root)
+                .unwrap()
+                .is_dirty()
         );
     }
 }

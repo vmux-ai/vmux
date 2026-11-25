@@ -1,5 +1,7 @@
+use std::time::Duration;
+
 use crate::filesystem::FilesystemPlugin;
-use crate::{AutoSave, Catalog, CorePlugin, ExtensionSchedule, Root, Seed};
+use crate::{Catalog, CatalogStore, CorePlugin, ExtensionSchedule, Root, Seed};
 use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
 pub(crate) use load::PreparedExtensions;
@@ -8,6 +10,8 @@ use vmux_api::protocol::AgentRequest;
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
+use vmux_ecs::store::{AutoSave, AutoSavePolicy, StorePath};
+use vmux_ecs::time::BackoffPolicy;
 use vmux_feature::manifest::FeaturePlugin;
 use vmux_tool::{AddedTool, ToolCommand, ToolDispatchSet};
 
@@ -98,7 +102,12 @@ impl Plugin for ExtensionPlugin {
             }
         }
         app.world_mut().entity_mut(root).insert((
-            AutoSave,
+            AutoSave::<CatalogStore>::default(),
+            StorePath::new(root_path),
+            AutoSavePolicy::immediate().with_retry(BackoffPolicy::exponential(
+                Duration::from_secs(1),
+                Duration::from_secs(60),
+            )),
             RuntimeIds(ids),
             RuntimeGeneration(generation),
             crate::ProfileId(vmux_ecs::profile::Profile::current().into_id()),
