@@ -1,13 +1,22 @@
+extern crate self as vmux_menu;
+
 use std::ffi::c_void;
+use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use std::task::Waker;
 
-use bevy_app::{App, Plugin, PreUpdate, Update};
+use bevy_app::{App, Plugin, PreUpdate, Startup, Update};
 use bevy_ecs::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
 
 #[cfg(feature = "native")]
 pub use native::NativeMenuPlugin;
+pub use vmux_macro::menu;
+
+#[doc(hidden)]
+pub mod macro_support {
+    pub use bevy_ecs::prelude::{ChildOf, Commands, Component, Entity};
+}
 
 #[cfg(feature = "native")]
 mod native;
@@ -35,6 +44,73 @@ impl Plugin for MenuPlugin {
                     cleanup_transient.in_set(MenuSet::Cleanup),
                 ),
             );
+    }
+}
+
+pub trait MenuAction: Component + Copy + Send + Sync + 'static {
+    fn id(self) -> &'static str;
+
+    fn spawn(commands: &mut Commands, about: Option<About>) -> Entity;
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Selected<A: MenuAction>(pub A);
+
+pub struct MenuActionPlugin<A: MenuAction> {
+    auto_spawn: bool,
+    about: Option<About>,
+    marker: PhantomData<fn() -> A>,
+}
+
+impl<A: MenuAction> Default for MenuActionPlugin<A> {
+    fn default() -> Self {
+        Self {
+            auto_spawn: true,
+            about: None,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<A: MenuAction> MenuActionPlugin<A> {
+    pub fn with_about(mut self, about: About) -> Self {
+        self.about = Some(about);
+        self
+    }
+
+    pub fn manual_spawn(mut self) -> Self {
+        self.auto_spawn = false;
+        self
+    }
+}
+
+impl<A: MenuAction> Plugin for MenuActionPlugin<A> {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<MenuPlugin>() {
+            app.add_plugins(MenuPlugin);
+        }
+        app.add_message::<Selected<A>>().add_systems(
+            Update,
+            forward_actions::<A>
+                .in_set(MenuSet::Forward)
+                .after(forward_events),
+        );
+        if self.auto_spawn {
+            if let Some(about) = &self.about {
+                app.world_mut()
+                    .spawn((ActionAbout::<A>::default(), about.clone()));
+            }
+            app.add_systems(Startup, spawn_actions::<A>);
+        }
+    }
+}
+
+#[derive(Component)]
+struct ActionAbout<A: MenuAction>(PhantomData<fn() -> A>);
+
+impl<A: MenuAction> Default for ActionAbout<A> {
+    fn default() -> Self {
+        Self(PhantomData)
     }
 }
 
@@ -95,6 +171,21 @@ impl Submenu {
             title: title.into(),
             enabled: true,
         }
+    }
+
+    pub fn standard_edit(title: impl Into<String>) -> impl Bundle {
+        (
+            Self::new(title),
+            children![
+                Predefined::Undo,
+                Predefined::Redo,
+                Separator,
+                Predefined::Cut,
+                Predefined::Copy,
+                Predefined::Paste,
+                Predefined::SelectAll,
+            ],
+        )
     }
 
     pub fn with_enabled(mut self, enabled: bool) -> Self {
@@ -280,6 +371,30 @@ fn forward_events(
     }
 }
 
+fn spawn_actions<A: MenuAction>(
+    mut commands: Commands,
+    abouts: Query<(Entity, &About), With<ActionAbout<A>>>,
+) {
+    let mut about = None;
+    for (entity, metadata) in &abouts {
+        about = Some(metadata.clone());
+        commands.entity(entity).despawn();
+    }
+    A::spawn(&mut commands, about);
+}
+
+fn forward_actions<A: MenuAction>(
+    mut selections: MessageReader<Selection>,
+    actions: Query<&A>,
+    mut selected: MessageWriter<Selected<A>>,
+) {
+    for selection in selections.read() {
+        if let Ok(&action) = actions.get(selection.target()) {
+            selected.write(Selected(action));
+        }
+    }
+}
+
 fn cleanup_transient(
     mut selections: MessageReader<Selection>,
     transient: Query<(), With<Transient>>,
@@ -332,6 +447,31 @@ mod tests {
         }
     }
 
+    #[vmux_menu::menu(standard_edit = "Edit")]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum SampleMenu {
+        #[submenu("App")]
+        #[predefined(about)]
+        #[separator]
+        #[item("Quit App", id = "sample_quit", accelerator = "super+q")]
+        Quit,
+        #[submenu("File > Recent")]
+        #[item("Open...", accelerator = "super+o")]
+        Open,
+    }
+
+    #[derive(Resource, Default)]
+    struct RecordedActions(Vec<SampleMenu>);
+
+    fn record_actions(
+        mut actions: MessageReader<Selected<SampleMenu>>,
+        mut recorded: ResMut<RecordedActions>,
+    ) {
+        for Selected(action) in actions.read() {
+            recorded.0.push(*action);
+        }
+    }
+
     #[test]
     fn event_sender_wakes_and_forwards_selection_in_order() {
         let mut app = App::new();
@@ -377,5 +517,35 @@ mod tests {
         );
         assert!(app.world().get_entity(open).is_ok());
         assert!(app.world().get_entity(transient).is_err());
+    }
+
+    #[test]
+    fn declarative_menu_macro_spawns_tree_and_dispatches_typed_actions() {
+        let mut app = App::new();
+        app.add_plugins(MenuActionPlugin::<SampleMenu>::default().with_about(About {
+            name: Some("Sample".into()),
+            version: Some("1.0.0".into()),
+            ..Default::default()
+        }))
+        .init_resource::<RecordedActions>()
+        .add_systems(Update, record_actions.in_set(MenuSet::Dispatch));
+
+        app.update();
+
+        let world = app.world_mut();
+        let about = world.query::<&About>().single(world).unwrap();
+        assert_eq!(about.name.as_deref(), Some("Sample"));
+        let predefined_count = world.query::<&Predefined>().iter(world).count();
+        assert_eq!(predefined_count, 7);
+
+        let sender = app.world().resource::<EventSender>().clone();
+        sender.send(SampleMenu::Open.id());
+        sender.send(SampleMenu::Quit.id());
+
+        app.update();
+        assert_eq!(
+            app.world().resource::<RecordedActions>().0,
+            vec![SampleMenu::Open, SampleMenu::Quit]
+        );
     }
 }

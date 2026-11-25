@@ -16,6 +16,7 @@ bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 crossbeam-channel = { workspace = true }
 muda = { version = "0.19", optional = true }
+vmux_macro = { path = "../vmux_macro" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { version = "0.3", default-features = false, features = ["std"], optional = true }

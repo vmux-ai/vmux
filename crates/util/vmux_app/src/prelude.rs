@@ -30,7 +30,8 @@ pub use vmux_lsp::LspPlugin;
 pub use vmux_menu::NativeMenuPlugin;
 #[cfg(feature = "menu")]
 pub use vmux_menu::{
-    Entry as MenuEntry, MenuBar, MenuPlugin, MenuSet, Selection as MenuSelection, Submenu,
+    Entry as MenuEntry, MenuAction, MenuActionPlugin, MenuBar, MenuPlugin, MenuSet,
+    Selected as MenuActionSelected, Selection as MenuSelection, Submenu,
 };
 #[cfg(feature = "project")]
 pub use vmux_project::ProjectPlugin;

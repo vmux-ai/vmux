@@ -9,6 +9,7 @@ mod bin_event;
 mod channel;
 mod command;
 mod contract;
+mod menu;
 mod page;
 mod service_message;
 mod store;
@@ -18,6 +19,24 @@ mod tool_input;
 mod ui_event_variants;
 mod ui_state;
 mod variant_names;
+
+#[proc_macro_attribute]
+pub fn menu(args: TokenStream, input: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(input as DeriveInput);
+    match menu::Declaration::parse(args.into(), item, "::vmux_menu") {
+        Ok(declaration) => declaration.expand().into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn app_menu(args: TokenStream, input: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(input as DeriveInput);
+    match menu::Declaration::parse(args.into(), item, "::vmux_app::menu") {
+        Ok(declaration) => declaration.expand().into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
 
 #[proc_macro_attribute]
 pub fn channels(args: TokenStream, input: TokenStream) -> TokenStream {

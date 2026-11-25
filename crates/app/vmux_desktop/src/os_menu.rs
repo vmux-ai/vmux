@@ -274,24 +274,27 @@ fn spawn_application_menu(commands: &mut Commands, bar: Entity, locale: &Locale)
         "local" | "dev" => format!("v{} ({})", env!("CARGO_PKG_VERSION"), env!("VMUX_GIT_HASH")),
         _ => format!("v{}", env!("CARGO_PKG_VERSION")),
     };
-    let submenu = commands.spawn((Submenu::new(app_name), ChildOf(bar))).id();
     commands.spawn((
-        Predefined::About,
-        About {
-            version: Some(version),
-            copyright: Some(String::new()),
-            ..default()
-        },
-        ChildOf(submenu),
-    ));
-    commands.spawn((Separator, ChildOf(submenu)));
-    commands.spawn((
-        Name::new("Close Vmux menu item"),
-        Entry::new(close_product_label(locale), true)
-            .with_id("app_quit")
-            .with_accelerator("super+q"),
-        HideWindowsMenuEntry,
-        ChildOf(submenu),
+        Submenu::new(app_name),
+        ChildOf(bar),
+        children![
+            (
+                Predefined::About,
+                About {
+                    version: Some(version),
+                    copyright: Some(String::new()),
+                    ..default()
+                },
+            ),
+            Separator,
+            (
+                Name::new("Close Vmux menu item"),
+                Entry::new(close_product_label(locale), true)
+                    .with_id("app_quit")
+                    .with_accelerator("super+q"),
+                HideWindowsMenuEntry,
+            ),
+        ],
     ));
 }
 
@@ -343,20 +346,11 @@ fn spawn_command_menus(
 }
 
 fn spawn_standard_edit_menu(commands: &mut Commands, bar: Entity, locale: &Locale) {
-    let edit = commands
-        .spawn((
-            Submenu::new(locale.translate("menu-edit")),
-            LocalizedSubmenu("menu-edit"),
-            ChildOf(bar),
-        ))
-        .id();
-    commands.spawn((Predefined::Undo, ChildOf(edit)));
-    commands.spawn((Predefined::Redo, ChildOf(edit)));
-    commands.spawn((Separator, ChildOf(edit)));
-    commands.spawn((Predefined::Cut, ChildOf(edit)));
-    commands.spawn((Predefined::Copy, ChildOf(edit)));
-    commands.spawn((Predefined::Paste, ChildOf(edit)));
-    commands.spawn((Predefined::SelectAll, ChildOf(edit)));
+    commands.spawn((
+        Submenu::standard_edit(locale.translate("menu-edit")),
+        LocalizedSubmenu("menu-edit"),
+        ChildOf(bar),
+    ));
 }
 
 fn sync_locale(

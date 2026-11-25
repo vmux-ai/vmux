@@ -11077,6 +11077,7 @@ dependencies = [
  "crossbeam-channel",
  "muda 0.19.2",
  "objc2-foundation 0.3.2",
+ "vmux_macro",
 ]
 
 [[package]]

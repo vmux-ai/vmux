@@ -3179,6 +3179,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "crossbeam-channel",
+ "vmux_macro",
 ]
 
 [[package]]
