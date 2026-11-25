@@ -415,6 +415,7 @@ impl Profile {
                 "crates/util/vmux_macro/**",
                 "crates/util/vmux_channel/**",
                 "crates/util/vmux_task/**",
+                "crates/util/vmux_time/**",
                 "crates/build_*.rs",
             ] {
                 paths.push(path.into());

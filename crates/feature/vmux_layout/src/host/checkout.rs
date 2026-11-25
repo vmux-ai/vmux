@@ -6,6 +6,7 @@ use std::fs::File;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use vmux_ecs::time::{Clock, Deadline, DeadlinePlugin, DeadlineReached};
 use vmux_ecs::{
     Cwd, JobRequest, JobResult, Operation, OperationPlugin, OperationState, OperationTarget,
     OperationTargetRevision,
@@ -13,7 +14,6 @@ use vmux_ecs::{
 use vmux_git::state::CheckedOutBranch;
 use vmux_git::worktree::CheckoutInfo;
 
-use super::deadline::{DeadlineOwner, DeadlineRegistration, DeadlineScheduler};
 use crate::worktree::{TabWorktreeActivation, WorktreeName};
 
 pub(crate) use io::{Canonicalize, Identify, Inspect};
@@ -32,102 +32,103 @@ impl Plugin for CheckoutPlugin {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
         }
-        app.init_resource::<DeadlineScheduler>()
-            .add_plugins((
-                io::IoPlugin,
-                cleanup::CleanupPlugin,
-                custody::CustodyPlugin,
-                recovery::RecoveryPlugin,
-            ))
-            .add_message::<CreateCheckout>()
-            .add_message::<CreateBranchCheckout>()
-            .add_message::<SelectBranchCheckout>()
-            .add_message::<RestoreCheckout>()
-            .add_message::<CommitCheckout>()
-            .add_message::<CancelCheckout>()
-            .add_message::<RetainCheckout>()
-            .add_message::<HoldCheckout>()
-            .add_message::<ReleaseCheckout>()
-            .add_message::<CheckoutPrepared>()
-            .add_message::<CheckoutFailed>()
-            .add_systems(
-                Update,
+        app.add_plugins((
+            DeadlinePlugin::<CheckoutRetry>::default(),
+            io::IoPlugin,
+            cleanup::CleanupPlugin,
+            custody::CustodyPlugin,
+            recovery::RecoveryPlugin,
+        ))
+        .add_observer(on_retry_ready)
+        .add_message::<CreateCheckout>()
+        .add_message::<CreateBranchCheckout>()
+        .add_message::<SelectBranchCheckout>()
+        .add_message::<RestoreCheckout>()
+        .add_message::<CommitCheckout>()
+        .add_message::<CancelCheckout>()
+        .add_message::<RetainCheckout>()
+        .add_message::<HoldCheckout>()
+        .add_message::<ReleaseCheckout>()
+        .add_message::<CheckoutPrepared>()
+        .add_message::<CheckoutFailed>()
+        .add_systems(
+            Update,
+            (
                 (
-                    (
-                        accept_create,
-                        accept_branch,
-                        accept_select,
-                        accept_restore,
-                        preserve,
-                        holds,
-                        release_holds,
-                        cancel,
-                        retry_lock,
-                        input,
-                        identity,
-                        repository,
-                        lock,
-                        validate_branch,
-                        head,
-                        initial_commit,
-                        read_head,
-                    )
-                        .chain(),
-                    (
-                        base_remote,
-                        base_candidates,
-                        base_configuration,
-                        verify_base,
-                    )
-                        .chain(),
-                    (
-                        registrations,
-                        branches,
-                        prune_registration,
-                        resume_waiters,
-                        destination,
-                        storage,
-                        canonical_storage,
-                        choose_path,
-                        inspect_destination,
-                        canonical_destination,
-                        normalize_recovery,
-                        reserve,
-                        claim,
-                        adopt,
-                        resolve_base,
-                        observe_identity,
-                        evidence,
-                    )
-                        .chain(),
-                    (
-                        journal_directory,
-                        journal,
-                        add,
-                        created,
-                        record_base,
-                        inspect,
-                        verify_link,
-                        verify_branch,
-                        execution,
-                        commit,
-                        abort,
-                        cleanup_journal,
-                    )
-                        .chain(),
+                    accept_create,
+                    accept_branch,
+                    accept_select,
+                    accept_restore,
+                    preserve,
+                    holds,
+                    release_holds,
+                    cancel,
+                    retry_lock,
+                    input,
+                    identity,
+                    repository,
+                    lock,
+                    validate_branch,
+                    head,
+                    initial_commit,
+                    read_head,
                 )
-                    .chain()
-                    .after(recovery::RecoverySet)
-                    .before(cleanup::CleanupSet),
+                    .chain(),
+                (
+                    base_remote,
+                    base_candidates,
+                    base_configuration,
+                    verify_base,
+                )
+                    .chain(),
+                (
+                    registrations,
+                    branches,
+                    prune_registration,
+                    resume_waiters,
+                    destination,
+                    storage,
+                    canonical_storage,
+                    choose_path,
+                    inspect_destination,
+                    canonical_destination,
+                    normalize_recovery,
+                    reserve,
+                    claim,
+                    adopt,
+                    resolve_base,
+                    observe_identity,
+                    evidence,
+                )
+                    .chain(),
+                (
+                    journal_directory,
+                    journal,
+                    add,
+                    created,
+                    record_base,
+                    inspect,
+                    verify_link,
+                    verify_branch,
+                    execution,
+                    commit,
+                    abort,
+                    cleanup_journal,
+                )
+                    .chain(),
             )
-            .add_systems(Update, finish_operations.after(custody::CustodySet))
-            .add_systems(
-                Update,
-                (retire_released, retire_repositories)
-                    .chain()
-                    .after(finish_operations),
-            )
-            .add_observer(retire_target);
+                .chain()
+                .after(recovery::RecoverySet)
+                .before(cleanup::CleanupSet),
+        )
+        .add_systems(Update, finish_operations.after(custody::CustodySet))
+        .add_systems(
+            Update,
+            (retire_released, retire_repositories)
+                .chain()
+                .after(finish_operations),
+        )
+        .add_observer(retire_target);
     }
 }
 
@@ -257,10 +258,14 @@ struct SourceRepository(Entity);
 struct RepositoryGuard(Arc<File>);
 #[derive(Component)]
 struct Job(Entity);
+struct CheckoutRetry;
+type RetryDeadline = Deadline<CheckoutRetry>;
+
 #[derive(Component)]
-struct RetryDeadline {
-    at: std::time::Instant,
-    _registration: DeadlineRegistration,
+struct RetryReady;
+
+fn on_retry_ready(reached: On<DeadlineReached<CheckoutRetry>>, mut commands: Commands) {
+    commands.entity(reached.entity).try_insert(RetryReady);
 }
 #[derive(Component)]
 struct LeaseCheckout(Entity);
@@ -688,13 +693,19 @@ fn commit(
 #[derive(SystemParam)]
 struct Effects<'w, 's> {
     commands: Commands<'w, 's>,
-    deadlines: Res<'w, DeadlineScheduler>,
-    proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
+    clock: Res<'w, Clock>,
     stopped: Query<'w, 's, (), Or<(With<AbortRequested>, With<Failure>)>>,
     failures: Query<'w, 's, &'static Failure>,
 }
 
 impl Effects<'_, '_> {
+    fn pause_retry(&mut self, owner: Entity) {
+        let deadline = RetryDeadline::after(&self.clock, std::time::Duration::from_millis(20));
+        self.commands
+            .entity(owner)
+            .remove::<RetryReady>()
+            .insert(deadline);
+    }
     fn request<J: vmux_ecs::Job>(&mut self, owner: Entity, request: J) -> Entity {
         self.commands
             .spawn((
@@ -888,16 +899,7 @@ fn lock(
             }
             Ok(Ok(None)) => {
                 effects.finish(operation, job.0, Phase::LockPause);
-                let at = std::time::Instant::now() + std::time::Duration::from_millis(20);
-                let registration = effects.deadlines.register(
-                    DeadlineOwner::Checkout(operation),
-                    at,
-                    effects.proxy.as_deref(),
-                );
-                effects.commands.entity(operation).insert(RetryDeadline {
-                    at,
-                    _registration: registration,
-                });
+                effects.pause_retry(operation);
             }
             Ok(Err(error)) | Err(error) => effects.fail(operation, job.0, error.clone()),
         }
@@ -1147,22 +1149,25 @@ fn read_head(
     }
 }
 
-fn retry_lock(operations: Query<(Entity, &Progress, &RetryDeadline)>, mut effects: Effects) {
-    for (operation, progress, deadline) in &operations {
+fn retry_lock(
+    operations: Query<(Entity, &Progress, Option<&RetryDeadline>, Has<RetryReady>)>,
+    mut effects: Effects,
+) {
+    for (operation, progress, deadline, ready) in &operations {
         let next = match progress.0 {
             Phase::LockPause => Phase::Lock,
             Phase::CleanupLockPause => Phase::CleanupLock,
             Phase::CleanupReferencePause => Phase::CleanupReferences,
             _ => continue,
         };
-        if std::time::Instant::now() < deadline.at {
+        if !ready && !deadline.is_some_and(|deadline| deadline.is_due(&effects.clock)) {
             continue;
         }
         effects
             .commands
             .entity(operation)
             .insert(Progress(next))
-            .remove::<RetryDeadline>();
+            .remove::<(RetryDeadline, RetryReady)>();
     }
 }
 
@@ -3134,6 +3139,7 @@ fn finish_operations(
             RepositoryGuard,
             Job,
             RetryDeadline,
+            RetryReady,
         )>();
     }
 }

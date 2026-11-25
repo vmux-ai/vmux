@@ -5,24 +5,25 @@ use std::time::Duration;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::prelude::{Changed, Commands};
-use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{CefSystems, HostWindow, UiInput};
 use vmux_ecs::KeyboardOwner;
 use vmux_ecs::page::{HostHistory, PageMetadataCatalog, PageReady, PrewarmPage};
+use vmux_ecs::time::{Clock, Deadline, DeadlinePlugin};
 use vmux_ecs::{
     PageMetadata, PageNavigation, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
 };
 
 use crate::cef::LayoutCef;
-use crate::host::deadline::{DeadlineOwner, DeadlineScheduler};
 use crate::window::VmuxWindow;
 use vmux_flex::prelude::*;
 
 pub struct PrewarmPagesPlugin;
 
+struct PrewarmDelay;
+
 impl bevy::prelude::Plugin for PrewarmPagesPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.init_resource::<DeadlineScheduler>()
+        app.add_plugins(DeadlinePlugin::<PrewarmDelay>::default())
             .add_observer(cancel)
             .add_systems(
                 Update,
@@ -135,8 +136,7 @@ impl PoolRetry {
 #[derive(SystemParam)]
 struct PoolWake<'w> {
     time: Res<'w, Time>,
-    scheduler: Option<Res<'w, DeadlineScheduler>>,
-    proxy: Option<Res<'w, EventLoopProxyWrapper>>,
+    clock: Res<'w, Clock>,
 }
 
 impl PoolWake<'_> {
@@ -144,27 +144,24 @@ impl PoolWake<'_> {
         self.time.elapsed()
     }
 
-    fn schedule(&self, pool: Entity, after: Duration, now: Duration) {
-        if let Some(scheduler) = self.scheduler.as_deref() {
-            scheduler.schedule(
-                DeadlineOwner::Prewarm(pool),
-                std::time::Instant::now() + after.saturating_sub(now),
-                self.proxy.as_deref(),
-            );
-        }
+    fn schedule(&self, commands: &mut Commands, pool: Entity, after: Duration, now: Duration) {
+        commands
+            .entity(pool)
+            .try_insert(Deadline::<PrewarmDelay>::after(
+                &self.clock,
+                after.saturating_sub(now),
+            ));
     }
 
-    fn cancel(&self, pool: Entity) {
-        if let Some(scheduler) = self.scheduler.as_deref() {
-            scheduler.cancel(DeadlineOwner::Prewarm(pool));
-        }
+    fn cancel(&self, commands: &mut Commands, pool: Entity) {
+        commands.entity(pool).try_remove::<Deadline<PrewarmDelay>>();
     }
 }
 
-fn cancel(removed: On<Remove, WarmPagePoolNode>, scheduler: Option<Res<DeadlineScheduler>>) {
-    if let Some(scheduler) = scheduler {
-        scheduler.cancel(DeadlineOwner::Prewarm(removed.entity));
-    }
+fn cancel(removed: On<Remove, WarmPagePoolNode>, mut commands: Commands) {
+    commands
+        .entity(removed.entity)
+        .try_remove::<Deadline<PrewarmDelay>>();
 }
 
 #[derive(SystemParam)]
@@ -492,7 +489,7 @@ fn reconcile(
     }
     for (entity, node, _) in &pool_nodes {
         if !desired.contains_key(node.url) {
-            wake.cancel(entity);
+            wake.cancel(&mut commands, entity);
             commands.entity(entity).try_despawn();
         }
     }
@@ -583,7 +580,7 @@ fn reconcile_page_pool(
         }
         if ready && !failed {
             retry.succeeded();
-            wake.cancel(node);
+            wake.cancel(commands, node);
         }
         if retained >= limit {
             commands.entity(entity).try_despawn();
@@ -592,7 +589,7 @@ fn reconcile_page_pool(
         }
     }
     if let Some(after) = retry.waiting(now) {
-        wake.schedule(node, after, now);
+        wake.schedule(commands, node, after, now);
     } else if retained < limit && *remaining > 0 {
         *remaining -= 1;
         let page_metadata = metadata.metadata_for(page.url, &page.title);

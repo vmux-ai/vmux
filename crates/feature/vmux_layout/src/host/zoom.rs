@@ -5,8 +5,8 @@ use bevy::{
         world::DeferredWorld,
     },
     prelude::*,
-    winit::EventLoopProxyWrapper,
 };
+use vmux_ecs::time::{Clock, Deadline, DeadlinePlugin};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -16,15 +16,16 @@ use crate::{
     tab::Tab,
 };
 
-use super::deadline::{DeadlineOwner, DeadlineScheduler};
 use super::{command::LayoutRequestSet, pane::ArrangementSet};
 
 pub(crate) struct PaneZoomPlugin;
 
+pub(super) struct PaneZoomAnimation;
+
 impl Plugin for PaneZoomPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<FocusRequest>()
-            .init_resource::<DeadlineScheduler>()
+        app.add_plugins(DeadlinePlugin::<PaneZoomAnimation>::default())
+            .add_message::<FocusRequest>()
             .add_message::<OpenRequest>()
             .add_message::<ToggleZoomRequest>()
             .add_systems(
@@ -335,8 +336,7 @@ fn sync_visibility(
 
 fn animate(
     time: Res<Time>,
-    scheduler: Res<DeadlineScheduler>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
+    clock: Res<Clock>,
     mut transitions: Query<(Entity, &mut PaneZoomTransition)>,
     mut nodes: Query<&mut Node>,
     mut commands: Commands,
@@ -368,14 +368,16 @@ fn animate(
                     }
                 }
             }
-            commands.entity(tab).remove::<PaneZoomTransition>();
-            scheduler.cancel(DeadlineOwner::PaneZoomAnimation(tab));
+            commands
+                .entity(tab)
+                .remove::<(PaneZoomTransition, Deadline<PaneZoomAnimation>)>();
         } else {
-            scheduler.schedule(
-                DeadlineOwner::PaneZoomAnimation(tab),
-                std::time::Instant::now() + std::time::Duration::from_millis(16),
-                proxy.as_deref(),
-            );
+            commands
+                .entity(tab)
+                .insert(Deadline::<PaneZoomAnimation>::after(
+                    &clock,
+                    std::time::Duration::from_millis(16),
+                ));
         }
     }
 }

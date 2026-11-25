@@ -6,13 +6,13 @@ use vmux_flex::prelude::*;
 use vmux_history::{CreatedAt, LastActivatedAt};
 
 use crate::TerminalLayoutSpawnRequest;
-use crate::host::deadline::{DeadlineOwner, DeadlineScheduler};
-use crate::host::zoom::PaneZoomTransition;
+use crate::host::zoom::{PaneZoomAnimation, PaneZoomTransition};
 use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, Zoomed};
 use crate::protocol::{self as proto, LayoutNode};
 use crate::stack::Stack;
 use crate::tab::Tab;
 use crate::window::WindowHierarchy;
+use vmux_ecs::time::Deadline;
 
 use super::Reconcile;
 
@@ -24,7 +24,6 @@ pub(super) struct Topology<'w, 's> {
     children: Query<'w, 's, &'static Children>,
     nodes: Query<'w, 's, (), Or<(With<Tab>, With<Pane>, With<Stack>)>>,
     windows: WindowHierarchy<'w, 's>,
-    scheduler: Option<Res<'w, DeadlineScheduler>>,
     page_open: MessageWriter<'w, PageOpenRequest>,
     terminal: MessageWriter<'w, TerminalLayoutSpawnRequest>,
 }
@@ -229,10 +228,9 @@ impl Topology<'_, '_> {
     }
 
     pub(super) fn zoom(&mut self, tab: Entity, leaf: Option<Entity>, hidden: Vec<Entity>) {
-        self.commands.entity(tab).remove::<PaneZoomTransition>();
-        if let Some(scheduler) = &self.scheduler {
-            scheduler.cancel(DeadlineOwner::PaneZoomAnimation(tab));
-        }
+        self.commands
+            .entity(tab)
+            .remove::<(PaneZoomTransition, Deadline<PaneZoomAnimation>)>();
         self.commands.entity(tab).remove::<Zoomed>();
         if let Some(leaf) = leaf {
             self.commands.entity(tab).insert(Zoomed { leaf, hidden });

@@ -1,5 +1,4 @@
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use objc2::{ClassType, MainThreadMarker, MainThreadOnly, rc::Retained, runtime::AnyClass};
@@ -11,6 +10,7 @@ use objc2_app_kit::{
     NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use vmux_ecs::time::{Clock, Deadline, DeadlinePlugin};
 
 use crate::boot_status::{
     Closed, Dismissal, PageCounts, PresentedAt, SplashRequestSet, SplashStatus,
@@ -18,9 +18,12 @@ use crate::boot_status::{
 
 pub(crate) struct SplashPlugin;
 
+struct SplashFade;
+
 impl Plugin for SplashPlugin {
     fn build(&self, app: &mut App) {
-        app.init_non_send::<SplashState>()
+        app.add_plugins(DeadlinePlugin::<SplashFade>::default())
+            .init_non_send::<SplashState>()
             .add_systems(PostStartup, show)
             .add_systems(
                 Last,
@@ -37,7 +40,6 @@ struct SplashState {
     status_label: Option<Retained<NSTextField>>,
     owner: Option<Entity>,
     fade_started: Option<Instant>,
-    cleanup_wake: Option<bevy::tasks::Task<()>>,
 }
 
 impl SplashState {
@@ -165,27 +167,25 @@ impl SplashState {
         true
     }
 
-    fn dismiss(&mut self, owner: Entity, wake: std::task::Waker) {
+    fn dismiss(&mut self, owner: Entity, clock: &Clock) -> bool {
         if self.owner != Some(owner) || self.fade_started.is_some() {
-            return;
+            return false;
         }
         let Some(panel) = self.window.as_ref() else {
-            return;
+            return false;
         };
         let window: &NSWindow = panel.as_super();
         window.animator().setAlphaValue(0.0);
-        self.fade_started = Some(Instant::now());
-        self.cleanup_wake = Some(bevy::tasks::IoTaskPool::get().spawn(async move {
-            async_io::Timer::after(Duration::from_millis(280)).await;
-            wake.wake();
-        }));
+        self.fade_started = Some(clock.now());
+        true
     }
 
-    fn drain(&mut self, cancelled: bool) -> Option<Entity> {
+    fn drain(&mut self, cancelled: bool, clock: Option<&Clock>) -> Option<Entity> {
         if !cancelled
-            && self
-                .fade_started
-                .is_none_or(|started| started.elapsed() < Duration::from_millis(280))
+            && self.fade_started.is_none_or(|started| {
+                clock.map_or_else(|| started.elapsed(), |clock| clock.elapsed_since(started))
+                    < Duration::from_millis(280)
+            })
         {
             return None;
         }
@@ -195,7 +195,6 @@ impl SplashState {
         }
         self.status_label = None;
         self.fade_started = None;
-        self.cleanup_wake = None;
         self.owner.take()
     }
 
@@ -208,47 +207,55 @@ impl SplashState {
 
 impl Drop for SplashState {
     fn drop(&mut self) {
-        let _ = self.drain(true);
+        let _ = self.drain(true, None);
     }
 }
 
 fn show(
     mut state: NonSendMut<SplashState>,
     boot: Single<(Entity, &SplashStatus, &PageCounts)>,
+    clock: Res<Clock>,
     mut commands: Commands,
 ) {
     let (owner, boot, pages) = *boot;
     if state.show(owner, boot, pages) {
-        commands.entity(owner).insert(PresentedAt(Instant::now()));
+        commands.entity(owner).insert(PresentedAt(clock.now()));
     }
 }
 
 fn dismiss(
     mut state: NonSendMut<SplashState>,
     requests: Query<Entity, With<Dismissal>>,
-    wake: Option<Res<vmux_ecs::JobWake>>,
+    clock: Res<Clock>,
+    mut commands: Commands,
 ) {
-    let Some(wake) = wake else {
-        return;
-    };
     for owner in &requests {
-        state.dismiss(owner, wake.0.clone());
+        if state.dismiss(owner, &clock) {
+            commands.entity(owner).insert(Deadline::<SplashFade>::after(
+                &clock,
+                Duration::from_millis(280),
+            ));
+        }
     }
 }
 
 fn drain(
     mut state: NonSendMut<SplashState>,
     owners: Query<(), With<SplashStatus>>,
+    clock: Res<Clock>,
     mut commands: Commands,
 ) {
     let Some(owner) = state.owner else {
         return;
     };
     let current = owners.contains(owner);
-    if let Some(owner) = state.drain(!current)
+    if let Some(owner) = state.drain(!current, Some(&clock))
         && current
     {
-        commands.entity(owner).try_insert(Closed);
+        commands
+            .entity(owner)
+            .try_insert(Closed)
+            .try_remove::<Deadline<SplashFade>>();
     }
 }
 

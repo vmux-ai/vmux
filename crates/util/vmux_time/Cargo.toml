@@ -1,0 +1,14 @@
+[package]
+name = "vmux_time"
+description = "Injectable clock and coalesced ECS deadline scheduler for vmux"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+web-time = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,5 +1,4 @@
 use super::Header;
-use super::deadline::{DeadlineOwner, DeadlineScheduler};
 use crate::Open;
 use crate::event::CEF_RESERVED_HEIGHT_PX;
 use crate::settings::LayoutSettings;
@@ -7,8 +6,8 @@ use crate::side_sheet::{SideSheet, SideSheetPosition};
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
 use bevy::prelude::{Commands, Window};
-use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::HostWindow;
+use vmux_ecs::time::{Clock, Deadline, DeadlinePlugin};
 #[cfg(test)]
 use vmux_feature::manifest::FeaturePlugin;
 use vmux_flex::prelude::*;
@@ -17,6 +16,8 @@ use super::command::LayoutRequestSet;
 
 pub struct TogglePlugin;
 
+struct LayoutAnimation;
+
 impl Plugin for TogglePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
@@ -24,7 +25,7 @@ impl Plugin for TogglePlugin {
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.init_resource::<DeadlineScheduler>()
+        app.add_plugins(DeadlinePlugin::<LayoutAnimation>::default())
             .add_message::<ToggleLayoutRequest>()
             .add_message::<ToggleUrlBarRequest>()
             .add_systems(
@@ -318,8 +319,7 @@ fn handle_visibility_requests(
 
 fn animate(
     time: Res<Time>,
-    scheduler: Res<DeadlineScheduler>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
+    clock: Res<Clock>,
     mut transitions: Query<(Entity, &mut LayoutTransition), With<Window>>,
     mut layout: ParamSet<(
         Query<(Entity, &mut Node), With<Header>>,
@@ -394,14 +394,16 @@ fn animate(
                     }
                 }
             }
-            commands.entity(window).remove::<LayoutTransition>();
-            scheduler.cancel(DeadlineOwner::LayoutAnimation(window));
+            commands
+                .entity(window)
+                .remove::<(LayoutTransition, Deadline<LayoutAnimation>)>();
         } else {
-            scheduler.schedule(
-                DeadlineOwner::LayoutAnimation(window),
-                std::time::Instant::now() + std::time::Duration::from_millis(16),
-                proxy.as_deref(),
-            );
+            commands
+                .entity(window)
+                .insert(Deadline::<LayoutAnimation>::after(
+                    &clock,
+                    std::time::Duration::from_millis(16),
+                ));
         }
     }
 }

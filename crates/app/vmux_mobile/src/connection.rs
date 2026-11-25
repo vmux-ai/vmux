@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bevy_app::{App, Plugin as BevyPlugin, PreUpdate, Startup};
 use bevy_ecs::component::Component;
@@ -7,9 +7,10 @@ use bevy_ecs::hierarchy::ChildOf;
 use bevy_ecs::message::{Message, MessageReader, MessageWriter};
 use bevy_ecs::query::With;
 use bevy_ecs::schedule::IntoScheduleConfigs;
-use bevy_ecs::system::{Commands, NonSendMarker, Query, SystemParam};
+use bevy_ecs::system::{Commands, NonSendMarker, Query, Res, SystemParam};
 use dioxus::prelude::*;
 use vmux_api::session::ClientOpId;
+use vmux_ecs::time::{Clock, Deadline, DeadlinePlugin};
 use vmux_ecs::{Operation, OperationError, OperationRetained, OperationState};
 use vmux_ui::i18n::translate;
 
@@ -35,7 +36,8 @@ pub(crate) struct MobileConnectionPlugin;
 
 impl BevyPlugin for MobileConnectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<PairLinkChanged>()
+        app.add_plugins(DeadlinePlugin::<CatalogRefresh>::default())
+            .add_message::<PairLinkChanged>()
             .add_message::<PairRequest>()
             .add_message::<ScanRequest>()
             .add_message::<ScanCompleted>()
@@ -127,18 +129,13 @@ pub(crate) enum CredentialPersistence {
     Failed,
 }
 
-#[derive(Component)]
-pub(crate) struct RefreshDeadline(pub(crate) Instant);
+pub(crate) struct CatalogRefresh;
 
-impl RefreshDeadline {
-    const INTERVAL: Duration = Duration::from_secs(3);
+impl CatalogRefresh {
+    pub(crate) const INTERVAL: Duration = Duration::from_secs(3);
 }
 
-impl Default for RefreshDeadline {
-    fn default() -> Self {
-        Self(Instant::now() + Self::INTERVAL)
-    }
-}
+pub(crate) type RefreshDeadline = Deadline<CatalogRefresh>;
 
 #[derive(Component, Default)]
 pub(crate) struct ActiveConnectionHandle(pub(crate) Option<ConnectionHandle>);
@@ -357,6 +354,7 @@ impl ConnectionOps<'_, '_> {
 fn spawn_root(
     roots: Query<Entity, With<MobileRoot>>,
     sources: Query<(Entity, &SourceEpoch, &CredentialsPath), With<ConnectionSource>>,
+    clock: Res<Clock>,
     mut commands: Commands,
 ) {
     let root = match roots.single() {
@@ -393,7 +391,7 @@ fn spawn_root(
                     ConnectionPairing::default(),
                     ConnectionNotice::default(),
                     CredentialPersistence::Unknown,
-                    RefreshDeadline::default(),
+                    RefreshDeadline::after(&clock, CatalogRefresh::INTERVAL),
                     ActiveConnectionHandle::default(),
                     ScanGeneration::default(),
                     ActiveScan::default(),
@@ -803,7 +801,6 @@ type AttemptSourceQuery<'w, 's> = Query<
         &'static mut ConnectionNotice,
         &'static mut ConnectionReachable,
         &'static mut ConnectionPairing,
-        &'static mut RefreshDeadline,
         &'static mut ActiveConnectionHandle,
         &'static CredentialsPath,
     ),
@@ -813,6 +810,7 @@ type AttemptSourceQuery<'w, 's> = Query<
 fn adopt_attempt_sessions(
     mut ops: Query<(Entity, &mut ConnectionAttempt, &ReadSessionsReceipt)>,
     mut sources: AttemptSourceQuery,
+    clock: Res<Clock>,
     mut reconcile: MessageWriter<ReconcileSessions>,
     mut ops_cmd: ConnectionOps,
 ) {
@@ -829,7 +827,6 @@ fn adopt_attempt_sessions(
             mut notice,
             mut reachable,
             mut pairing,
-            mut refresh_at,
             mut active_handle,
             path,
         )) = sources.get_mut(attempt.source)
@@ -861,7 +858,10 @@ fn adopt_attempt_sessions(
                 draft.0.clear();
                 notice.0.clear();
                 reachable.0 = true;
-                refresh_at.0 = Instant::now() + RefreshDeadline::INTERVAL;
+                ops_cmd
+                    .commands
+                    .entity(attempt.source)
+                    .insert(RefreshDeadline::after(&clock, CatalogRefresh::INTERVAL));
                 reconcile.write(ReconcileSessions {
                     source: attempt.source,
                     epoch: attempt.epoch,
@@ -888,7 +888,10 @@ fn adopt_attempt_sessions(
                     *auth = AuthStage::Paired;
                     reachable.0 = false;
                     notice.0 = error.to_string();
-                    refresh_at.0 = Instant::now() + RefreshDeadline::INTERVAL;
+                    ops_cmd
+                        .commands
+                        .entity(attempt.source)
+                        .insert(RefreshDeadline::after(&clock, CatalogRefresh::INTERVAL));
                     ops_cmd.retire(entity, OperationState::Failed);
                 }
                 ConnectionAttemptOrigin::Pair => {
@@ -902,24 +905,29 @@ fn adopt_attempt_sessions(
     }
 }
 
+type RefreshSourceQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static AuthStage,
+        &'static SourceEpoch,
+        Option<&'static RefreshDeadline>,
+        &'static ActiveConnectionHandle,
+    ),
+    With<ConnectionSource>,
+>;
+
 fn schedule_refresh(
-    sources: Query<
-        (
-            Entity,
-            &AuthStage,
-            &SourceEpoch,
-            &RefreshDeadline,
-            &ActiveConnectionHandle,
-        ),
-        With<ConnectionSource>,
-    >,
+    sources: RefreshSourceQuery,
     refreshes: Query<&CatalogRefreshOp>,
+    clock: Res<Clock>,
     mut commands: Commands,
 ) {
     let Ok((source, auth, epoch, deadline, active_handle)) = sources.single() else {
         return;
     };
-    if *auth != AuthStage::Paired || Instant::now() < deadline.0 {
+    if *auth != AuthStage::Paired || deadline.is_some_and(|deadline| !deadline.is_due(&clock)) {
         return;
     }
     if refreshes
@@ -949,12 +957,12 @@ fn adopt_refresh_sessions(
     mut sources: Query<
         (
             &SourceEpoch,
-            &mut RefreshDeadline,
             &mut ConnectionReachable,
             &mut ConnectionNotice,
         ),
         With<ConnectionSource>,
     >,
+    clock: Res<Clock>,
     mut reconcile: MessageWriter<ReconcileSessions>,
     mut unauthorized: MessageWriter<SourceUnauthorized>,
     mut ops_cmd: ConnectionOps,
@@ -964,8 +972,7 @@ fn adopt_refresh_sessions(
             .commands
             .entity(entity)
             .remove::<ReadSessionsReceipt>();
-        let Ok((epoch, mut refresh_at, mut reachable, mut notice)) = sources.get_mut(op.source)
-        else {
+        let Ok((epoch, mut reachable, mut notice)) = sources.get_mut(op.source) else {
             ops_cmd.retire(entity, OperationState::Canceled);
             continue;
         };
@@ -973,7 +980,10 @@ fn adopt_refresh_sessions(
             ops_cmd.retire(entity, OperationState::Canceled);
             continue;
         }
-        refresh_at.0 = Instant::now() + RefreshDeadline::INTERVAL;
+        ops_cmd
+            .commands
+            .entity(op.source)
+            .insert(RefreshDeadline::after(&clock, CatalogRefresh::INTERVAL));
         match &receipt.0 {
             Ok(sessions) => {
                 reachable.0 = true;

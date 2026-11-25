@@ -1,7 +1,6 @@
 use bevy_ecs::prelude::*;
 use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 use std::path::PathBuf;
-use web_time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "contracts")]
 #[derive(Component, Clone, Debug)]
@@ -10,20 +9,6 @@ pub struct PendingPrompt(pub String);
 #[cfg(feature = "contracts")]
 #[derive(Component, Clone, Debug, Default)]
 pub struct PendingPromptAttachments(pub Vec<vmux_api::protocol::AgentAttachment>);
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct UnixMillis(pub i64);
-
-impl UnixMillis {
-    pub fn now() -> Self {
-        Self(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as i64,
-        )
-    }
-}
 
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KeyboardOwner;
@@ -138,45 +123,6 @@ pub struct RegistrationOrder(pub u32);
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component)]
-#[type_path = "vmux_history"]
-pub struct CreatedAt(pub i64);
-
-impl CreatedAt {
-    pub fn now() -> Self {
-        Self(UnixMillis::now().0)
-    }
-}
-
-#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
-#[reflect(Component)]
-#[type_path = "vmux_history"]
-pub struct LastActivatedAt(pub i64);
-
-impl LastActivatedAt {
-    pub fn now() -> Self {
-        Self(UnixMillis::now().0)
-    }
-
-    pub fn latest(entities: impl Iterator<Item = (Entity, Self)>) -> Option<Entity> {
-        entities
-            .max_by_key(|(_, activated_at)| activated_at.0)
-            .map(|(entity, _)| entity)
-    }
-}
-
-#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
-#[reflect(Component)]
-#[type_path = "vmux_ecs"]
-pub struct ArchivedAt(pub i64);
-
-#[derive(EntityEvent, Clone, Copy, Debug)]
-pub struct ActivateRequest {
-    #[event_target]
-    pub entity: Entity,
-}
-
-#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
-#[reflect(Component)]
 #[require(TransitionType)]
 #[type_path = "vmux_history"]
 pub struct Visit;
@@ -190,11 +136,6 @@ pub struct Url;
 #[reflect(Component, Default)]
 #[type_path = "vmux_history"]
 pub struct VisitCount(pub u32);
-
-#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
-#[reflect(Component, Default)]
-#[type_path = "vmux_history"]
-pub struct LastVisitedAt(pub i64);
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]

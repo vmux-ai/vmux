@@ -1,13 +1,12 @@
 use bevy::ecs::system::Commands;
 use bevy::prelude::Changed;
 use bevy::prelude::*;
-use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use vmux_ecs::page::{HostsPage, PageReady};
+use vmux_ecs::time::{Deadline, DeadlinePlugin, TimeWake};
 use vmux_ecs::{PageMetadata, PageOpenId, PagePresented};
 use vmux_flex::prelude::Visibility;
 
 use crate::cef::Browser;
-use crate::host::deadline::{DeadlineOwner, DeadlineScheduler};
 use crate::hosted_page::{
     SurfaceHandoff, SurfaceHandoffFailed, SurfacePaintReady, SurfacePresentationReady,
     SurfaceTransitionReady,
@@ -16,9 +15,11 @@ use crate::presentation::Projection;
 
 pub struct PageSlotPlugin;
 
+struct PageSlotTimeout;
+
 impl Plugin for PageSlotPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DeadlineScheduler>()
+        app.add_plugins(DeadlinePlugin::<PageSlotTimeout>::default())
             .init_resource::<ReadinessWake>()
             .add_message::<Ack>()
             .add_observer(queue_wake::<PageReady>)
@@ -57,11 +58,11 @@ fn queue_wake<T: Component>(_: On<Add, T>, mut pending: ResMut<ReadinessWake>) {
     pending.0 = true;
 }
 
-fn flush_wake(mut pending: ResMut<ReadinessWake>, proxy: Option<Res<EventLoopProxyWrapper>>) {
+fn flush_wake(mut pending: ResMut<ReadinessWake>, wake: Option<Res<TimeWake>>) {
     if pending.0
-        && let Some(proxy) = proxy
+        && let Some(wake) = wake
     {
-        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+        wake.wake();
     }
     pending.0 = false;
 }
@@ -605,37 +606,28 @@ fn apply(
 }
 
 fn schedule_deadline_wake(
-    scheduler: Res<DeadlineScheduler>,
     changed: Query<(Entity, &Transition), Changed<Transition>>,
-    transitions: Query<(Entity, &Transition)>,
     mut removed: RemovedComponents<Transition>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
 ) {
     for entity in removed.read() {
-        scheduler.cancel(DeadlineOwner::PageSlot(entity));
-    }
-    if proxy.as_ref().is_some_and(|proxy| proxy.is_added()) {
-        for (entity, transition) in &transitions {
-            if transition.phase.is_terminal() {
-                scheduler.cancel(DeadlineOwner::PageSlot(entity));
-                continue;
-            }
-            let Some(deadline) = transition.deadline else {
-                continue;
-            };
-            scheduler.schedule(DeadlineOwner::PageSlot(entity), deadline, proxy.as_deref());
-        }
-        return;
+        commands
+            .entity(entity)
+            .try_remove::<Deadline<PageSlotTimeout>>();
     }
     for (entity, transition) in &changed {
         if transition.phase.is_terminal() {
-            scheduler.cancel(DeadlineOwner::PageSlot(entity));
+            commands
+                .entity(entity)
+                .try_remove::<Deadline<PageSlotTimeout>>();
             continue;
         }
         let Some(deadline) = transition.deadline else {
             continue;
         };
-        scheduler.schedule(DeadlineOwner::PageSlot(entity), deadline, proxy.as_deref());
+        commands
+            .entity(entity)
+            .try_insert(Deadline::<PageSlotTimeout>::at(deadline));
     }
 }
 

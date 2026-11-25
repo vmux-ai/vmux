@@ -10709,6 +10709,7 @@ dependencies = [
  "vmux_path",
  "vmux_profile",
  "vmux_task",
+ "vmux_time",
  "vmux_transport",
  "web-time",
  "zip",
@@ -11536,6 +11537,15 @@ dependencies = [
  "vmux_tool",
  "vmux_transport",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_time"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "web-time",
 ]
 
 [[package]]

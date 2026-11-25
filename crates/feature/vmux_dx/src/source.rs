@@ -24,6 +24,7 @@ impl Source {
             "vmux_api",
             "vmux_channel",
             "vmux_task",
+            "vmux_time",
             "vmux_macro",
         ] {
             let group = match name {

@@ -9,6 +9,7 @@ pub use vmux_macro::store;
 pub use vmux_task::{
     AsyncTask, TaskApply, TaskFailure, TaskPlugin, TaskResult, TaskSet, TaskToken, TaskWaker,
 };
+pub use vmux_time as time;
 
 #[cfg(all(host, feature = "host"))]
 pub use archive::{
@@ -17,10 +18,9 @@ pub use archive::{
 #[cfg(feature = "jobs")]
 pub use blocking::{BlockingCancellation, BlockingPool, BlockingRuntime, BlockingTask};
 pub use component::{
-    ActivateRequest, Active, ArchivedAt, Bookmark, BookmarkOrder, Collapsed, CollectionView,
-    CreatedAt, Cwd, Description, EffectiveStartupUrl, EntityTarget, Folder, HostShell,
-    JsonArguments, KeyboardOwner, LastActivatedAt, LastVisitedAt, PagePresented, Pin,
-    RegistrationOrder, Terminal, TransitionType, UnixMillis, Url, Uuid, Visit, VisitCount,
+    Active, Bookmark, BookmarkOrder, Collapsed, CollectionView, Cwd, Description,
+    EffectiveStartupUrl, EntityTarget, Folder, HostShell, JsonArguments, KeyboardOwner,
+    PagePresented, Pin, RegistrationOrder, Terminal, TransitionType, Url, Uuid, Visit, VisitCount,
     VisitedUrl, WindowFullscreen, WindowFullscreenSet,
 };
 #[cfg(feature = "contracts")]
@@ -77,6 +77,10 @@ pub use resource_path::{ContentDigest, FilePath};
 pub use revision::{BaseRevision, Revision};
 pub use selection::{SelectRequest, Selected, SelectionPlugin, SelectionSet};
 pub use status::{Busy, Failure, Loading, Progress, Ready, Retired, StatusPlugin};
+pub use timestamp::{
+    ActivateRequest, ArchiveRequest, ArchivedAt, CreatedAt, ExpiresAt, LastActivatedAt,
+    LastVisitedAt, TimestampPlugin, Touch, UnarchiveRequest, UnixMillis, UpdatedAt,
+};
 pub use toggle::{Disabled, Toggle, TogglePlugin, Toggled, TogglesPlugin};
 #[cfg(all(host, feature = "host"))]
 pub use ui_state::{UiState, UiStateFlushSet, UiStatePlugin, UiStateWrite, UiStateWriter};
@@ -152,6 +156,7 @@ pub mod store;
 pub mod team;
 #[cfg(all(host, feature = "host"))]
 pub mod terminal;
+mod timestamp;
 mod toggle;
 pub mod types;
 #[cfg(all(host, feature = "host"))]
