@@ -256,14 +256,8 @@ impl Workspace {
                 .insert("test-rust".into(), self.tree(root, &args)?);
         }
         if selection.sdk {
-            let mut sdk = self.tree(
-                root,
-                &["--manifest-path", "examples/framework-consumer/Cargo.toml"],
-            )?;
-            sdk.extend(self.tree(
-                root,
-                &["--manifest-path", "examples/host-consumer/Cargo.toml"],
-            )?);
+            let mut sdk = self.tree(root, &["--manifest-path", "tests/sdk/core/Cargo.toml"])?;
+            sdk.extend(self.tree(root, &["--manifest-path", "tests/sdk/host/Cargo.toml"])?);
             for package in [
                 "vmux_ecs",
                 "vmux_project",
@@ -478,8 +472,7 @@ impl Workspace {
                         .packages
                         .iter()
                         .any(|package| package.directory.starts_with("patches/cargo-packager")));
-            let consumer = file.starts_with("examples/framework-consumer")
-                || file.starts_with("examples/host-consumer");
+            let consumer = file.starts_with("tests/sdk/core") || file.starts_with("tests/sdk/host");
             if Scope::policy(file)
                 || independent
                 || consumer
@@ -886,7 +879,7 @@ mod tests {
             "crates/util/vmux_macro/ecs-policy.ron",
             "crates/app/vmux_desktop/ecs-policy.ron",
             "patches/bevy_window-0.19.0/ecs-policy.ron",
-            "examples/framework-consumer/ecs-policy.ron",
+            "tests/sdk/core/ecs-policy.ron",
             "website/ecs-policy.ron",
             "scripts/ecs-policy.ron",
         ] {
@@ -1165,17 +1158,14 @@ mod tests {
                 &[],
                 &[("vmux_ecs", "../../util/vmux_ecs", "")],
             );
-            for (consumer, feature) in [
-                ("framework-consumer", "contracts"),
-                ("host-consumer", "host"),
-            ] {
-                repository.write(&format!("examples/{consumer}/Cargo.toml"), &format!("[workspace]\n[package]\nname = '{consumer}'\nversion = '1.0.0'\nedition = '2024'\n[dependencies]\nvmux_app = {{ path = '../../crates/util/vmux_app', features = ['{feature}'] }}"));
-                repository.write(&format!("examples/{consumer}/src/lib.rs"), "");
+            for (consumer, feature) in [("core", "contracts"), ("host", "host")] {
+                repository.write(&format!("tests/sdk/{consumer}/Cargo.toml"), &format!("[workspace]\n[package]\nname = 'sdk-{consumer}'\nversion = '1.0.0'\nedition = '2024'\n[dependencies]\nvmux_app = {{ path = '../../../crates/util/vmux_app', features = ['{feature}'] }}"));
+                repository.write(&format!("tests/sdk/{consumer}/src/lib.rs"), "");
             }
             for manifest in [
                 "Cargo.toml",
-                "examples/framework-consumer/Cargo.toml",
-                "examples/host-consumer/Cargo.toml",
+                "tests/sdk/core/Cargo.toml",
+                "tests/sdk/host/Cargo.toml",
             ] {
                 let status = Command::new("cargo")
                     .args([
@@ -1413,7 +1403,7 @@ mod tests {
             }
         }
         let mut selection = workspace
-            .select(&["examples/framework-consumer/src/lib.rs".into()])
+            .select(&["tests/sdk/core/src/lib.rs".into()])
             .unwrap();
         workspace.variants(&root, &mut selection).unwrap();
         assert!(selection.sdk);

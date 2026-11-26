@@ -1279,31 +1279,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "framework-consumer"
-version = "0.1.0"
-dependencies = [
- "bevy_app",
- "bevy_asset",
- "bevy_ecs",
- "bevy_math",
- "bevy_reflect",
- "crossbeam-channel",
- "lsp-types",
- "moonshine-save",
- "rkyv",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "vmux_api",
- "vmux_app",
- "vmux_ecs",
- "vmux_extension",
- "vmux_layout",
- "vmux_store",
-]
-
-[[package]]
 name = "fsevent-sys"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2556,6 +2531,31 @@ dependencies = [
  "ref-cast",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "sdk-core"
+version = "0.1.0"
+dependencies = [
+ "bevy_app",
+ "bevy_asset",
+ "bevy_ecs",
+ "bevy_math",
+ "bevy_reflect",
+ "crossbeam-channel",
+ "lsp-types",
+ "moonshine-save",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "vmux_api",
+ "vmux_app",
+ "vmux_ecs",
+ "vmux_extension",
+ "vmux_layout",
+ "vmux_store",
 ]
 
 [[package]]

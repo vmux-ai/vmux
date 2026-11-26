@@ -3456,7 +3456,7 @@ fn nested_generic_plugins_preserve_argument_positions_and_boundary_edges() {
 #[test]
 fn generic_example_registrations_resolve_hyphenated_package_directories() {
     let mut inventory = Inventory::default();
-    let path = "examples/framework-consumer/tests/generic.rs";
+    let path = "tests/sdk/core/tests/generic.rs";
     inventory.source(path, "use bevy_app::{App,Plugin}; use bevy_ecs::prelude::*; #[derive(Component)] struct State; struct Bridge<T>(std::marker::PhantomData<T>); impl<J> Plugin for Bridge<J> { fn build(&self,app:&mut App) { app.add_observer(receive::<J>); } } fn receive<T>(event:On<Add,T>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_plugins(Bridge::<State>::default()); } }");
     inventory.resolve_usage();
     assert!(inventory.used(&inventory.entries[&format!("{path}||struct:State")]));
