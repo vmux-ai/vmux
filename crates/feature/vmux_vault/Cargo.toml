@@ -27,7 +27,6 @@ bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 chrono = { workspace = true }
-notify = { workspace = true }
 parking_lot = "0.12"
 rfd = { workspace = true }
 ring = "0.17"

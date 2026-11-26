@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 use super::GitUpdateSet;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_ecs::PagePresented;
+use vmux_ecs::watch::{FileWatch, FileWatchEvent, FileWatchPlugin, FileWatchSet, WatchMode};
 use vmux_path::PathIdentity;
 
 use super::runtime::{GitRuntime, GitTask};
@@ -17,14 +17,22 @@ pub(super) struct WatchPlugin;
 
 impl Plugin for WatchPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GitRuntime>()
+        app.add_plugins(FileWatchPlugin)
+            .init_resource::<GitRuntime>()
             .init_resource::<GitWatchDeadline>()
             .add_systems(Startup, initialize)
             .add_systems(Startup, spawn_repo_info_cache)
             .add_systems(
                 Update,
+                reconcile_targets
+                    .after(FileWatchSet::Receive)
+                    .before(FileWatchSet::Reconcile),
+            )
+            .add_systems(
+                Update,
                 (
                     sync_page_subscriptions.run_if(page_subscriptions_changed),
+                    forward_events,
                     drain,
                     start_relevance_tasks,
                     poll_relevance_tasks,
@@ -188,30 +196,17 @@ fn initialize(world: &mut World) {
         .clone()
         .map(|proxy| (world.resource::<GitWatchDeadline>().clone(), proxy));
     let events = GitWatch::start_events(proxy);
-    let tx = events.sender;
-    match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-        if !GitWatch::should_forward(&result) {
-            return;
-        }
-        let Ok(event) = result else {
-            return;
-        };
-        tx.send(event.paths);
-    }) {
-        Ok(watcher) => {
-            world.insert_non_send(GitWatch {
-                watcher: GitFileWatcher::Recommended(watcher),
-                rx: events.receiver,
-                watch_references: HashMap::new(),
-                subscriptions: HashMap::new(),
-                subscription_owners: HashMap::new(),
-                repo_info_subscriptions: HashMap::new(),
-                repo_info_owners: HashMap::new(),
-                retry_wake,
-            });
-        }
-        Err(error) => bevy::log::warn!("git watcher init failed: {error}"),
-    }
+    world.insert_non_send(GitWatch {
+        tx: Some(events.sender),
+        rx: events.receiver,
+        watch_references: HashMap::new(),
+        dirty_watches: false,
+        subscriptions: HashMap::new(),
+        subscription_owners: HashMap::new(),
+        repo_info_subscriptions: HashMap::new(),
+        repo_info_owners: HashMap::new(),
+        retry_wake,
+    });
 }
 
 fn spawn_repo_info_cache(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
@@ -253,10 +248,14 @@ pub(super) struct GitWatchSubscription {
     targets: Vec<GitWatchTarget>,
 }
 
+#[derive(Component)]
+struct TargetRegistration;
+
 pub(super) struct GitWatch {
-    watcher: GitFileWatcher,
+    tx: Option<GitWatchSender>,
     rx: mpsc::Receiver<GitWatchBatch>,
     watch_references: HashMap<GitWatchTarget, usize>,
+    dirty_watches: bool,
     subscriptions: HashMap<Entity, GitSubscription>,
     subscription_owners: HashMap<GitWatchTarget, HashSet<Entity>>,
     repo_info_subscriptions: HashMap<PathBuf, Vec<GitWatchTarget>>,
@@ -265,64 +264,6 @@ pub(super) struct GitWatch {
         GitWatchDeadline,
         bevy::winit::EventLoopProxy<WinitUserEvent>,
     )>,
-}
-
-enum GitFileWatcher {
-    Recommended(RecommendedWatcher),
-    #[cfg(test)]
-    Test,
-}
-
-impl GitFileWatcher {
-    fn watch_targets(
-        &mut self,
-        targets: &[GitWatchTarget],
-        previous: &[GitWatchTarget],
-    ) -> notify::Result<()> {
-        if targets.is_empty() {
-            return Ok(());
-        }
-        match self {
-            Self::Recommended(watcher) => {
-                let mut paths = watcher.paths_mut();
-                let mut added: Vec<&Path> = Vec::new();
-                for target in targets {
-                    let mode = if target.recursive {
-                        RecursiveMode::Recursive
-                    } else {
-                        RecursiveMode::NonRecursive
-                    };
-                    if let Err(error) = paths.add(&target.path, mode) {
-                        for path in &added {
-                            let _ = paths.remove(path);
-                        }
-                        for target in previous {
-                            let mode = if target.recursive {
-                                RecursiveMode::Recursive
-                            } else {
-                                RecursiveMode::NonRecursive
-                            };
-                            let _ = paths.add(&target.path, mode);
-                        }
-                        let _ = paths.commit();
-                        return Err(error);
-                    }
-                    added.push(target.path.as_path());
-                }
-                paths.commit()
-            }
-            #[cfg(test)]
-            Self::Test => Ok(()),
-        }
-    }
-
-    fn unwatch(&mut self, path: &Path) -> notify::Result<()> {
-        match self {
-            Self::Recommended(watcher) => watcher.unwatch(path),
-            #[cfg(test)]
-            Self::Test => Ok(()),
-        }
-    }
 }
 
 #[derive(Clone, Default)]
@@ -1079,17 +1020,18 @@ impl GitWatch {
         })
     }
 
-    fn should_forward(result: &notify::Result<notify::Event>) -> bool {
-        match result {
-            Ok(event) => {
-                !matches!(event.kind, EventKind::Access(_))
-                    && event
-                        .paths
-                        .iter()
-                        .any(|path| !GitWatchTarget::is_lock_path(path))
-            }
-            Err(_) => true,
-        }
+    fn matching_paths(&self, paths: &[PathBuf]) -> Vec<PathBuf> {
+        paths
+            .iter()
+            .filter(|path| {
+                !GitWatchTarget::is_lock_path(path)
+                    && self
+                        .watch_references
+                        .keys()
+                        .any(|target| target.matches(path))
+            })
+            .cloned()
+            .collect()
     }
 
     fn subscribe(
@@ -1251,21 +1193,13 @@ impl GitWatch {
             );
             return false;
         }
-        let missing = targets
-            .iter()
-            .filter(|target| !self.watch_references.contains_key(*target))
-            .cloned()
-            .collect::<Vec<_>>();
-        let previous = self.watch_references.keys().cloned().collect::<Vec<_>>();
-        if self.watcher.watch_targets(&missing, &previous).is_err() {
-            return false;
-        }
         for target in targets {
             if let Some(references) = self.watch_references.get_mut(target) {
                 *references += 1;
                 continue;
             }
             self.watch_references.insert(target.clone(), 1);
+            self.dirty_watches = true;
         }
         true
     }
@@ -1284,13 +1218,7 @@ impl GitWatch {
                 continue;
             }
             self.watch_references.remove(target);
-            if self
-                .watch_references
-                .keys()
-                .all(|other| other.path != target.path)
-            {
-                let _ = self.watcher.unwatch(&target.path);
-            }
+            self.dirty_watches = true;
         }
     }
 
@@ -1404,9 +1332,10 @@ impl GitWatch {
     pub(super) fn test() -> Self {
         let (_, rx) = mpsc::channel();
         Self {
-            watcher: GitFileWatcher::Test,
+            tx: None,
             rx,
             watch_references: HashMap::new(),
+            dirty_watches: false,
             subscriptions: HashMap::new(),
             subscription_owners: HashMap::new(),
             repo_info_subscriptions: HashMap::new(),
@@ -1543,6 +1472,75 @@ fn sync_page_subscriptions(
                 runtime.proxy.as_deref(),
             ),
             None => deadline.cancel(GitWatchDeadlineOwner::Subscriptions),
+        }
+    }
+}
+
+fn reconcile_targets(
+    watch: Option<NonSendMut<GitWatch>>,
+    existing: Query<(Entity, &FileWatch), With<TargetRegistration>>,
+    mut commands: Commands,
+) {
+    let Some(mut watch) = watch else {
+        for (entity, _) in &existing {
+            commands.entity(entity).despawn();
+        }
+        return;
+    };
+    if !watch.dirty_watches {
+        return;
+    }
+    watch.dirty_watches = false;
+    let mut desired: HashMap<PathBuf, WatchMode> = HashMap::new();
+    for target in watch.watch_references.keys() {
+        let mode = if target.recursive {
+            WatchMode::Recursive
+        } else {
+            WatchMode::NonRecursive
+        };
+        let entry = desired.entry(target.path.clone()).or_insert(mode);
+        if mode == WatchMode::Recursive {
+            *entry = WatchMode::Recursive;
+        }
+    }
+    let mut kept = HashSet::new();
+    for (entity, current) in &existing {
+        let path = current.path().to_path_buf();
+        match desired.get(&path).copied() {
+            Some(mode) if current.mode() == mode && kept.insert(path) => {}
+            _ => {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+    for (path, mode) in desired {
+        if kept.contains(&path) {
+            continue;
+        }
+        let file_watch = match mode {
+            WatchMode::Recursive => FileWatch::recursive(path),
+            WatchMode::NonRecursive => FileWatch::non_recursive(path),
+        };
+        commands.spawn((Name::new("Git watch"), TargetRegistration, file_watch));
+    }
+}
+
+fn forward_events(mut events: MessageReader<FileWatchEvent>, watch: Option<NonSend<GitWatch>>) {
+    let Some(watch) = watch else {
+        events.clear();
+        return;
+    };
+    let Some(tx) = watch.tx.as_ref() else {
+        events.clear();
+        return;
+    };
+    for event in events.read() {
+        if event.error.is_some() {
+            continue;
+        }
+        let paths = watch.matching_paths(&event.paths);
+        if !paths.is_empty() {
+            tx.send(paths);
         }
     }
 }
@@ -1856,50 +1854,119 @@ fn schedule_repo_info_deadline(
 mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
+    use std::task::{Wake, Waker};
+
+    use vmux_ecs::channel::ChannelWake;
+    use vmux_ecs::watch::{WatchError, Watching};
 
     use super::*;
     use crate::host::repository::test_repo;
+
+    struct TestWake(mpsc::Sender<()>);
+
+    impl Wake for TestWake {
+        fn wake(self: Arc<Self>) {
+            let _ = self.0.send(());
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            let _ = self.0.send(());
+        }
+    }
+
+    #[derive(Resource, Default)]
+    struct RecordedWatchPaths(Vec<PathBuf>);
+
+    fn record_paths(
+        mut events: MessageReader<FileWatchEvent>,
+        mut recorded: ResMut<RecordedWatchPaths>,
+    ) {
+        for event in events.read() {
+            recorded.0.extend(event.paths.iter().cloned());
+        }
+    }
 
     #[test]
     fn failed_watch_batches_preserve_previously_registered_files() {
         let retained = tempfile::tempdir().unwrap();
         let added = tempfile::tempdir().unwrap();
-        let (sender, receiver) = mpsc::channel();
-        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            if let Ok(event) = event {
-                let _ = sender.send(event.paths);
-            }
-        })
-        .unwrap();
-        let mut watcher = GitFileWatcher::Recommended(watcher);
+        let (wake_tx, wake_rx) = mpsc::channel();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, WatchPlugin))
+            .insert_resource(ChannelWake(Waker::from(Arc::new(TestWake(wake_tx)))))
+            .init_resource::<RecordedWatchPaths>()
+            .add_systems(Update, record_paths.after(FileWatchSet::Reconcile));
+        app.update();
+
         let previous = GitWatchTarget {
-            path: retained.path().to_path_buf(),
+            path: PathIdentity::resolve(retained.path()).into_path_buf(),
             recursive: true,
             kind: GitWatchKind::Worktree,
         };
-        watcher
-            .watch_targets(std::slice::from_ref(&previous), &[])
-            .unwrap();
+        assert!(
+            app.world_mut()
+                .non_send_mut::<GitWatch>()
+                .acquire_targets(std::slice::from_ref(&previous))
+        );
+        app.update();
+
         let targets = [
             GitWatchTarget {
-                path: added.path().to_path_buf(),
+                path: PathIdentity::resolve(added.path()).into_path_buf(),
                 recursive: true,
                 kind: GitWatchKind::Worktree,
             },
             GitWatchTarget {
-                path: added.path().join("missing"),
+                path: PathIdentity::resolve(added.path().join("missing")).into_path_buf(),
                 recursive: true,
                 kind: GitWatchKind::Worktree,
             },
         ];
-        assert!(watcher.watch_targets(&targets, &[previous]).is_err());
+        assert!(
+            app.world_mut()
+                .non_send_mut::<GitWatch>()
+                .acquire_targets(&targets)
+        );
+        app.update();
+
+        let mut registrations = app
+            .world_mut()
+            .query_filtered::<(&FileWatch, Has<Watching>, Has<WatchError>), With<TargetRegistration>>();
+        let mut retained_watching = false;
+        let mut missing_errored = false;
+        for (watch, watching, errored) in registrations.iter(app.world()) {
+            if watch.path() == previous.path {
+                retained_watching = watching;
+            }
+            if watch.path() == targets[1].path {
+                missing_errored = errored;
+            }
+        }
+        assert!(retained_watching);
+        assert!(missing_errored);
+
+        while wake_rx.try_recv().is_ok() {}
+        app.world_mut()
+            .resource_mut::<RecordedWatchPaths>()
+            .0
+            .clear();
         std::fs::write(retained.path().join("retained.txt"), "changed").unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let paths = receiver
-                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .expect("the original file watch must survive a failed batch");
-            if paths.iter().any(|path| path.ends_with("retained.txt")) {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "the original file watch must survive a failed batch"
+            );
+            let _ = wake_rx.recv_timeout(remaining.min(Duration::from_millis(50)));
+            app.update();
+            if app
+                .world()
+                .resource::<RecordedWatchPaths>()
+                .0
+                .iter()
+                .any(|path| path.ends_with("retained.txt"))
+            {
                 break;
             }
         }
