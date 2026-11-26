@@ -10408,6 +10408,7 @@ dependencies = [
  "vmux_menu",
  "vmux_profile",
  "vmux_project",
+ "vmux_quic",
  "vmux_remote",
  "vmux_runner",
  "vmux_service",
@@ -11276,6 +11277,25 @@ dependencies = [
  "vmux_api",
  "vmux_ecs",
  "vmux_path",
+]
+
+[[package]]
+name = "vmux_quic"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bytes",
+ "quinn",
+ "rustls",
+ "tokio",
+ "tracing",
+ "vmux_channel",
+ "vmux_ecs",
+ "vmux_runner",
+ "vmux_task",
+ "vmux_time",
+ "vmux_transport",
 ]
 
 [[package]]

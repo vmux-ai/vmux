@@ -1,0 +1,26 @@
+[package]
+name = "vmux_quic"
+description = "ECS-native QUIC server plugin bridged through wake-driven async channels"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bytes = { workspace = true }
+quinn = { workspace = true }
+rustls = { workspace = true }
+tokio = { workspace = true }
+tracing = "0.1"
+vmux_channel = { path = "../vmux_channel" }
+vmux_ecs = { path = "../vmux_ecs" }
+vmux_task = { path = "../vmux_task", features = ["tokio"] }
+vmux_time = { path = "../vmux_time" }
+vmux_transport = { path = "../vmux_transport", default-features = false }
+
+[dev-dependencies]
+vmux_runner = { path = "../vmux_runner" }
+
+[lints]
+workspace = true
