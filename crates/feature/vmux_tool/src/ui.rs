@@ -13,7 +13,7 @@ use dioxus::prelude::*;
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_api::extension::ExtensionsUiState;
 use vmux_ui::components::avatar::AgentThumbnail;
-use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbOptionIcon};
+use vmux_ui::components::breadcrumb::BreadcrumbOption;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerDetails,
     ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSection, ManagerSidebarItem,
@@ -152,7 +152,6 @@ struct ToolRouteOption {
     id: String,
     label: String,
     url: String,
-    icon_url: String,
     icon: vmux_api::BuiltinIcon,
 }
 
@@ -162,7 +161,7 @@ impl From<ToolRouteOption> for BreadcrumbOption {
             label: option.label,
             value: option.url,
             identity_seed: String::new(),
-            icon_url: option.icon_url,
+            icon_url: String::new(),
             icon: Some(option.icon),
         }
     }
@@ -183,7 +182,6 @@ impl ToolRouteOption {
         Self {
             label: translate(label_key),
             url: ToolRoute::named(id.clone()).url(),
-            icon_url: Self::icon_url(&id),
             icon: Self::icon(&id),
             id,
         }
@@ -231,27 +229,13 @@ impl ToolRouteOption {
         count
     }
 
-    fn icon_url(route: &str) -> String {
-        match route {
-            "acp" => "assets/tool-logos/acp.png",
-            "lsp" => "assets/favicons/lsp.svg",
-            "homebrew" => "assets/tool-logos/homebrew.svg",
-            "npm" => "assets/tool-logos/npm.svg",
-            "mcp" => "assets/tool-logos/mcp.png",
-            "dotfiles" => "assets/favicons/files.svg",
-            "extensions" => "assets/favicons/extensions.svg",
-            _ => "assets/favicons/tools.svg",
-        }
-        .to_string()
-    }
-
     fn icon(route: &str) -> vmux_api::BuiltinIcon {
         match route {
-            "acp" => vmux_api::BuiltinIcon::Sparkles,
-            "lsp" => vmux_api::BuiltinIcon::Brain,
-            "homebrew" => vmux_api::BuiltinIcon::Hammer,
-            "npm" => vmux_api::BuiltinIcon::Layers,
-            "mcp" => vmux_api::BuiltinIcon::Server,
+            "acp" => vmux_api::BuiltinIcon::Acp,
+            "lsp" => vmux_api::BuiltinIcon::Server,
+            "homebrew" => vmux_api::BuiltinIcon::Homebrew,
+            "npm" => vmux_api::BuiltinIcon::Npm,
+            "mcp" => vmux_api::BuiltinIcon::Mcp,
             "dotfiles" => vmux_api::BuiltinIcon::Files,
             "extensions" => vmux_api::BuiltinIcon::Puzzle,
             _ => vmux_api::BuiltinIcon::Toolbox,
@@ -267,13 +251,11 @@ impl ToolRouteOption {
             }
             let route = ToolRoute::named(provider.route.clone());
             let label = provider.localized_route_title();
-            let icon_url = Self::icon_url(&provider.route);
             let icon = Self::icon(&provider.route);
             options.push(Self {
                 id: provider.route,
                 label,
                 url: route.url(),
-                icon_url,
                 icon,
             });
         }
@@ -281,7 +263,6 @@ impl ToolRouteOption {
             id: "extensions".to_string(),
             label: translate("extensions-title"),
             url: crate::EXTENSIONS_URL.to_string(),
-            icon_url: Self::icon_url("extensions"),
             icon: Self::icon("extensions"),
         });
         options.sort_by(|left, right| {
@@ -347,10 +328,7 @@ fn ToolsSidebar(active: String, state: ToolsUiState, extensions: ExtensionsUiSta
                     key: "{option.id}",
                     label: option.label.clone(), selected: option.id == active,
                     count: if option.id == "extensions" { extensions.extensions.len() } else { option.count(&state.snapshot) },
-                    leading: rsx! { BreadcrumbOptionIcon {
-                        option: BreadcrumbOption::from(option.clone()),
-                        class: "size-4 shrink-0".to_string(),
-                    } },
+                    builtin_icon: Some(option.icon),
                     onclick: move |event| PageNavigation::click(option.url.clone(), &event),
                 }
             }
@@ -967,6 +945,11 @@ mod tests {
             address.fixed[0].entry.label,
             translate("tools-provider-acp-agents")
         );
+        assert_eq!(
+            address.fixed[0].entry.icon,
+            Some(vmux_api::BuiltinIcon::Acp)
+        );
+        assert!(address.fixed[0].entry.icon_url.is_empty());
         let extensions = ToolRouteOption::address("extensions", Vec::new());
         assert_eq!(
             extensions.fixed[0].entry.intent,
@@ -974,6 +957,21 @@ mod tests {
                 url: "vmux://tools/extensions".into()
             })
         );
+        for (route, expected) in [
+            ("acp", vmux_api::BuiltinIcon::Acp),
+            ("dotfiles", vmux_api::BuiltinIcon::Files),
+            ("extensions", vmux_api::BuiltinIcon::Puzzle),
+            ("homebrew", vmux_api::BuiltinIcon::Homebrew),
+            ("lsp", vmux_api::BuiltinIcon::Server),
+            ("mcp", vmux_api::BuiltinIcon::Mcp),
+            ("npm", vmux_api::BuiltinIcon::Npm),
+        ] {
+            let entry = ToolRouteOption::address(route, Vec::new()).fixed[0]
+                .entry
+                .clone();
+            assert_eq!(entry.icon, Some(expected), "route {route}");
+            assert!(entry.icon_url.is_empty(), "route {route}");
+        }
     }
 
     #[test]

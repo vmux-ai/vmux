@@ -964,10 +964,6 @@ done
             "assets/index.css",
             "assets/theme.css",
             "assets/favicons/tools.svg",
-            "assets/tool-logos/acp.png",
-            "assets/tool-logos/homebrew.svg",
-            "assets/tool-logos/mcp.png",
-            "assets/tool-logos/npm.svg",
         ] {
             let path = dist.join(name);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();

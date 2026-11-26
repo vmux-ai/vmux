@@ -40,6 +40,10 @@ pub enum BuiltinIcon {
     Docker,
     Containers,
     Info,
+    Acp,
+    Homebrew,
+    Mcp,
+    Npm,
 }
 
 impl BuiltinIcon {

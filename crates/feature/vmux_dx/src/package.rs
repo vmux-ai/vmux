@@ -1399,10 +1399,6 @@ fn prepare_web(
             "assets/index.css",
             "assets/theme.css",
             "assets/favicons/tools.svg",
-            "assets/tool-logos/acp.png",
-            "assets/tool-logos/homebrew.svg",
-            "assets/tool-logos/mcp.png",
-            "assets/tool-logos/npm.svg",
         ] {
             io.request(
                 entity,
