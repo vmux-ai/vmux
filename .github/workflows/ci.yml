@@ -154,6 +154,7 @@ jobs:
               - 'website/Cargo.toml'
               - 'website/Cargo.lock'
               - 'crates/**'
+              - 'examples/**'
               - 'tests/sdk/core/**'
               - 'tests/sdk/host/**'
               - 'cef/**'

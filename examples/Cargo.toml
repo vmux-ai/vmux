@@ -1,0 +1,85 @@
+[package]
+name = "vmux_examples"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Runnable Bevy-style examples for Vmux Framework"
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_math = { workspace = true }
+bevy_reflect = { workspace = true }
+bevy_tasks = { workspace = true }
+moonshine-save = { workspace = true }
+tempfile = "3"
+vmux_app = { path = "../crates/util/vmux_app", features = ["contracts", "manifest", "hosting", "project", "jobs", "watch", "store", "flex", "layout", "menu"] }
+vmux_ecs = { path = "../crates/util/vmux_ecs", features = ["store", "watch"] }
+
+[[example]]
+name = "selection"
+path = "ecs/selection.rs"
+
+[[example]]
+name = "lease"
+path = "ecs/lease.rs"
+
+[[example]]
+name = "generation_dirty"
+path = "ecs/generation_dirty.rs"
+
+[[example]]
+name = "vocabulary"
+path = "ecs/vocabulary.rs"
+
+[[example]]
+name = "operation_policy"
+path = "ecs/operation_policy.rs"
+
+[[example]]
+name = "autosave_store"
+path = "ecs/autosave_store.rs"
+
+[[example]]
+name = "async_channel"
+path = "concurrency/async_channel.rs"
+
+[[example]]
+name = "async_task"
+path = "concurrency/async_task.rs"
+
+[[example]]
+name = "io_task"
+path = "concurrency/io_task.rs"
+
+[[example]]
+name = "jobs"
+path = "concurrency/jobs.rs"
+
+[[example]]
+name = "deadline"
+path = "concurrency/deadline.rs"
+
+[[example]]
+name = "watch"
+path = "concurrency/watch.rs"
+
+[[example]]
+name = "panes"
+path = "layout/panes.rs"
+
+[[example]]
+name = "flex"
+path = "layout/flex.rs"
+
+[[example]]
+name = "declarative_menu"
+path = "menu/declarative_menu.rs"
+
+[[example]]
+name = "external_feature"
+path = "manifest/external_feature.rs"
+
+[[example]]
+name = "web_host"
+path = "manifest/web_host.rs"
