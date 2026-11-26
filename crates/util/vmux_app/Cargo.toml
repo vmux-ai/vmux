@@ -75,7 +75,7 @@ daemon = [
     "host",
     "ecs",
     "runner",
-    "vmux_ecs/host",
+    "vmux_ecs/headless-host",
     "vmux_runner/host",
     "dep:tokio",
     "dep:tracing",

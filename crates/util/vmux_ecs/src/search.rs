@@ -1,7 +1,12 @@
 use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
-use bevy::prelude::*;
+use bevy_app::{App, Last, Plugin, Update};
+use bevy_ecs::prelude::{
+    Commands, Component, Entity, EntityEvent, On, Query, Remove, Res, Resource, With,
+};
+
+use crate::JobWake;
 
 pub struct SearchPlugin<M> {
     debounce: Duration,
@@ -210,22 +215,42 @@ fn publish<M: Send + Sync + 'static>(
 
 fn wake<M: Send + Sync + 'static>(
     pending: Query<(), With<Pending<M>>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    wake: Option<Res<JobWake>>,
 ) {
     if pending.is_empty() {
         return;
     }
-    let Some(proxy) = proxy else {
+    let Some(wake) = wake else {
         return;
     };
-    let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
+    wake.0.wake_by_ref();
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use std::task::{Wake, Waker};
+
+    use bevy_ecs::prelude::Single;
+
     use super::*;
 
     struct Catalog;
+
+    struct CounterWake(AtomicUsize);
+
+    impl Wake for CounterWake {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 
     #[derive(Component, Default)]
     struct Captured(Vec<(String, u64)>);
@@ -239,8 +264,7 @@ mod tests {
     #[test]
     fn latest_request_replaces_pending_work() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(SearchPlugin::<Catalog>::new(Duration::from_secs(1)))
+        app.add_plugins(SearchPlugin::<Catalog>::new(Duration::from_secs(1)))
             .add_observer(capture);
         let target = app
             .world_mut()
@@ -264,8 +288,7 @@ mod tests {
     #[test]
     fn duplicate_requests_are_suppressed() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(SearchPlugin::<Catalog>::new(Duration::ZERO))
+        app.add_plugins(SearchPlugin::<Catalog>::new(Duration::ZERO))
             .add_observer(capture);
         let target = app
             .world_mut()
@@ -284,8 +307,7 @@ mod tests {
     #[test]
     fn cancel_invalidates_pending_results() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(SearchPlugin::<Catalog>::new(Duration::from_secs(1)))
+        app.add_plugins(SearchPlugin::<Catalog>::new(Duration::from_secs(1)))
             .add_observer(capture);
         let target = app
             .world_mut()
@@ -298,5 +320,26 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<Captured>(target).unwrap().0.is_empty());
+    }
+
+    #[test]
+    fn pending_debounce_wakes_job_wake_until_cancelled() {
+        let counter = Arc::new(CounterWake(AtomicUsize::new(0)));
+        let mut app = App::new();
+        app.insert_resource(JobWake(Waker::from(counter.clone())))
+            .add_plugins(SearchPlugin::<Catalog>::new(Duration::from_secs(1)));
+        let target = app.world_mut().spawn(State::<Catalog>::default()).id();
+
+        app.update();
+        assert_eq!(counter.0.load(Ordering::Relaxed), 0);
+
+        app.world_mut()
+            .trigger(Request::<Catalog>::new(target, "query".to_string()));
+        app.update();
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+
+        app.world_mut().trigger(Cancel::<Catalog>::new(target));
+        app.update();
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
     }
 }

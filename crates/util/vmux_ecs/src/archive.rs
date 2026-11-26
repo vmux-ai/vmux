@@ -1,4 +1,5 @@
-use bevy::prelude::*;
+use bevy_ecs::prelude::{Component, Entity, Message, ReflectComponent};
+use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 use vmux_store::Save;
 
 use crate::WorkspaceKind;

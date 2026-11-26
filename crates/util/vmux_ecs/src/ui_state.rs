@@ -1,11 +1,17 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::marker::PhantomData;
 
-use bevy::prelude::*;
+use bevy_app::{App, Last, Plugin, PostUpdate};
 use bevy_cef::prelude::{
     BinHostEmitEvent, BinIpcBlocked, BinIpcEpoch, BinIpcNavigationRevision,
     BinIpcSurfaceGeneration, Browsers,
 };
+use bevy_ecs::prelude::{
+    Add, Commands, Component, DetectChangesMut, Entity, EntityEvent, IntoScheduleConfigs, Mut,
+    NonSend, On, Query, Remove, ResMut, Resource, SystemSet, With, World,
+};
+use bevy_ecs::schedule::ApplyDeferred;
+use bevy_ecs::system::{Command, SystemParam};
 use rkyv::api::high::HighSerializer;
 use rkyv::ser::allocator::ArenaHandle;
 use rkyv::util::AlignedVec;
@@ -56,9 +62,7 @@ where
         if self.post_update {
             app.add_systems(
                 PostUpdate,
-                (emit::<S>, bevy::ecs::schedule::ApplyDeferred)
-                    .chain()
-                    .in_set(UiStateFlushSet),
+                (emit::<S>, ApplyDeferred).chain().in_set(UiStateFlushSet),
             );
         }
     }
@@ -287,7 +291,7 @@ impl<S: UiStateContract> Command for UiStateDelivery<S> {
     }
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
+#[derive(SystemParam)]
 pub struct UiStateWriter<'w, 's, S: UiStateContract> {
     metadata: Query<'w, 's, &'static crate::PageMetadata>,
     updates: Query<'w, 's, &'static mut UiState<S>>,
@@ -491,7 +495,7 @@ fn cache_removed<S: UiStateContract>(
     cache.put(key, retained);
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
+#[derive(SystemParam)]
 struct UiStateStore<'w, S: UiStateContract> {
     cache: ResMut<'w, UiStateCache<S>>,
     dirty: ResMut<'w, UiStateDirty<S>>,
@@ -637,6 +641,9 @@ impl<S: UiStateContract> UiStateWrite<S> {
 
 #[cfg(test)]
 mod tests {
+    use bevy_app::Update;
+    use bevy_ecs::prelude::Res;
+
     use crate::event::{
         FileDocumentKind, FileMetaEvent, FileThemeEvent, FileUiStatePatch, FileViewportPatch,
     };
@@ -916,7 +923,7 @@ mod tests {
     #[test]
     fn cold_file_navigation_keeps_the_old_document_until_content_and_preserves_the_editor_theme() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<FileUiState>::default()))
+        app.add_plugins(UiStatePlugin::<FileUiState>::default())
             .init_resource::<Emitted>()
             .add_observer(record_file_state);
         let entity = app
@@ -1018,14 +1025,11 @@ mod tests {
     #[test]
     fn early_state_flush_delivers_before_presentation_in_the_same_frame() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            UiStatePlugin::<SnapshotState>::with_post_update_flush(),
-        ))
-        .init_resource::<SnapshotEmitted>()
-        .init_resource::<PresentedValue>()
-        .add_observer(record_snapshot)
-        .add_systems(PostUpdate, present_snapshot.after(UiStateFlushSet));
+        app.add_plugins(UiStatePlugin::<SnapshotState>::with_post_update_flush())
+            .init_resource::<SnapshotEmitted>()
+            .init_resource::<PresentedValue>()
+            .add_observer(record_snapshot)
+            .add_systems(PostUpdate, present_snapshot.after(UiStateFlushSet));
         let entity = app
             .world_mut()
             .spawn(UiState::<SnapshotState>::default())
@@ -1047,7 +1051,7 @@ mod tests {
     #[test]
     fn same_frame_updates_emit_one_snapshot() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<FileUiState>::default()))
+        app.add_plugins(UiStatePlugin::<FileUiState>::default())
             .init_resource::<Emitted>()
             .add_observer(record_file_state);
         let entity = app
@@ -1080,7 +1084,7 @@ mod tests {
     #[test]
     fn snapshot_updates_retry_and_replay_the_latest_value() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<SnapshotState>::default()))
+        app.add_plugins(UiStatePlugin::<SnapshotState>::default())
             .init_resource::<SnapshotEmitted>()
             .add_observer(record_snapshot);
         let entity = app
@@ -1119,7 +1123,7 @@ mod tests {
     #[test]
     fn activation_does_not_replay_an_already_synced_snapshot() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<SnapshotState>::default()))
+        app.add_plugins(UiStatePlugin::<SnapshotState>::default())
             .init_resource::<SnapshotEmitted>()
             .add_observer(record_snapshot);
         let entity = app.world_mut().spawn_empty().id();
@@ -1146,7 +1150,7 @@ mod tests {
     #[test]
     fn a_reopened_route_receives_its_cached_snapshot() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<SnapshotState>::default()))
+        app.add_plugins(UiStatePlugin::<SnapshotState>::default())
             .init_resource::<SnapshotEmitted>()
             .add_observer(record_snapshot);
         let first = app
@@ -1193,7 +1197,7 @@ mod tests {
     #[test]
     fn closing_before_emit_caches_pending_updates() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<SnapshotState>::default()))
+        app.add_plugins(UiStatePlugin::<SnapshotState>::default())
             .init_resource::<SnapshotEmitted>()
             .add_observer(record_snapshot);
         let first = app
@@ -1237,7 +1241,7 @@ mod tests {
     #[test]
     fn transition_keeps_synced_state_across_activation() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<SnapshotState>::default()))
+        app.add_plugins(UiStatePlugin::<SnapshotState>::default())
             .init_resource::<SnapshotEmitted>()
             .add_observer(record_snapshot);
         let entity = app.world_mut().spawn(crate::PageTransition).id();
@@ -1270,7 +1274,7 @@ mod tests {
     #[test]
     fn blocked_page_retries_its_latest_snapshot_after_restore() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<SnapshotState>::default()))
+        app.add_plugins(UiStatePlugin::<SnapshotState>::default())
             .init_resource::<SnapshotEmitted>()
             .add_observer(record_snapshot);
         let entity = app.world_mut().spawn(BinIpcBlocked).id();
@@ -1299,7 +1303,7 @@ mod tests {
     #[test]
     fn denied_page_retries_its_latest_snapshot_after_permission_arrives() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<SnapshotState>::default()))
+        app.add_plugins(UiStatePlugin::<SnapshotState>::default())
             .init_resource::<SnapshotEmitted>()
             .add_observer(record_snapshot);
         let entity = app.world_mut().spawn_empty().id();
@@ -1334,7 +1338,7 @@ mod tests {
     #[test]
     fn reopened_patch_state_seeds_from_the_cached_snapshot() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<PatchState>::default()))
+        app.add_plugins(UiStatePlugin::<PatchState>::default())
             .init_resource::<PatchEmitted>()
             .add_observer(record_patch_state);
         let first = app
@@ -1379,7 +1383,7 @@ mod tests {
     #[test]
     fn direct_writer_keeps_same_frame_updates_when_state_is_missing() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<PatchState>::default()))
+        app.add_plugins(UiStatePlugin::<PatchState>::default())
             .init_resource::<PatchEmitted>()
             .add_observer(record_patch_state)
             .add_systems(Update, push_patch_state);
@@ -1401,7 +1405,7 @@ mod tests {
     #[test]
     fn route_change_keeps_pending_updates_with_the_previous_route() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<PatchState>::default()));
+        app.add_plugins(UiStatePlugin::<PatchState>::default());
         let entity = app
             .world_mut()
             .spawn((
@@ -1442,7 +1446,7 @@ mod tests {
     #[test]
     fn route_change_never_emits_the_previous_route_updates() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<PatchState>::default()))
+        app.add_plugins(UiStatePlugin::<PatchState>::default())
             .init_resource::<PatchEmitted>()
             .add_observer(record_patch_state);
         let entity = app
@@ -1481,7 +1485,7 @@ mod tests {
     #[test]
     fn rejected_delivery_retries_with_a_bounded_snapshot_replay() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<SnapshotState>::default()))
+        app.add_plugins(UiStatePlugin::<SnapshotState>::default())
             .init_resource::<RejectedEmitted>()
             .add_observer(reject_snapshot);
         let entity = app.world_mut().spawn_empty().id();
@@ -1515,7 +1519,7 @@ mod tests {
     #[test]
     fn rejected_delivery_retries_the_same_transient_snapshot() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<TransientState>::default()))
+        app.add_plugins(UiStatePlugin::<TransientState>::default())
             .init_resource::<TransientDelivery>()
             .add_observer(record_transient);
         let entity = app.world_mut().spawn_empty().id();
@@ -1552,7 +1556,7 @@ mod tests {
     #[test]
     fn blocked_delivery_keeps_transient_updates_until_unblocked() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<TransientState>::default()))
+        app.add_plugins(UiStatePlugin::<TransientState>::default())
             .init_resource::<TransientDelivery>()
             .add_observer(record_transient);
         app.world_mut().resource_mut::<TransientDelivery>().accept = true;
@@ -1592,7 +1596,7 @@ mod tests {
     #[test]
     fn restore_discards_the_interrupted_route_state() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<PatchState>::default()))
+        app.add_plugins(UiStatePlugin::<PatchState>::default())
             .add_systems(Update, restore_patch_state);
         let entity = app
             .world_mut()
@@ -1626,7 +1630,7 @@ mod tests {
     #[test]
     fn writes_to_closed_pages_are_ignored() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<SnapshotState>::default()));
+        app.add_plugins(UiStatePlugin::<SnapshotState>::default());
         let entity = app.world_mut().spawn_empty().id();
         app.world_mut().despawn(entity);
 

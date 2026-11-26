@@ -1,11 +1,12 @@
-use bevy::prelude::*;
+use bevy_app::{App, Plugin, Update};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use bevy_ecs::prelude::{Changed, Commands, Entity, On, Query};
 use vmux_api::page_location::{PageLocationRequest, PageLocationUiState};
 use vmux_api::{BinEvent, PageMetadata, PageReady, UiEventPermissions};
 
 pub struct PageLocationPlugin;
 
-impl bevy::app::Plugin for PageLocationPlugin {
+impl Plugin for PageLocationPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             UiEventPlugin::<(PageLocationRequest,)>::default(),

@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy_ecs::prelude::{Entity, Message};
 
 #[derive(Message, Clone)]
 pub struct BrowserSnapshotRequest {

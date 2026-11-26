@@ -1,6 +1,6 @@
 pub use vmux_api::process_id::*;
 
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 #[derive(bevy_ecs::prelude::EntityEvent, Clone, Copy, Debug)]
 pub struct ProcessPresentationRequest {
     #[event_target]

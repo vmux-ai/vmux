@@ -1,7 +1,8 @@
-use crate::KeyboardOwner;
-use bevy::ecs::system::SystemParam;
-use bevy::prelude::*;
+use bevy_ecs::prelude::{Component, Has, Message, Query, With};
+use bevy_ecs::system::SystemParam;
 use vmux_flex::prelude::*;
+
+use crate::KeyboardOwner;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowOverlay;

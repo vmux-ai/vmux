@@ -10,7 +10,7 @@ pub use editor::*;
 pub use explorer::*;
 pub use file_ui_state::*;
 pub use lsp::*;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub use page::*;
 pub use terminal::*;
 
@@ -18,7 +18,7 @@ mod editor;
 mod explorer;
 mod file_ui_state;
 mod lsp;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 mod page;
 mod terminal;
 

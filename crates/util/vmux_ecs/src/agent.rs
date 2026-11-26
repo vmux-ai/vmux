@@ -1,6 +1,10 @@
 use std::path::PathBuf;
 
-use bevy::prelude::*;
+use bevy_app::{App, Plugin, Update};
+use bevy_ecs::prelude::{
+    Commands, Component, Entity, IntoScheduleConfigs, Message, MessageReader, MessageWriter, Name,
+    Query, ResMut, Resource, SystemSet, With,
+};
 
 use vmux_api::protocol::{AgentCommandResult, AgentRequest, AgentRequestId};
 
@@ -434,17 +438,19 @@ pub struct SwapStackSession {
 
 #[cfg(test)]
 mod dispatch_tests {
+    use bevy_ecs::message::{MessageCursor, Messages};
+
     use super::*;
 
     struct DispatchFixture {
         app: App,
-        ready: bevy::ecs::message::MessageCursor<AgentRequestReady>,
+        ready: MessageCursor<AgentRequestReady>,
     }
 
     impl DispatchFixture {
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, AgentRequestDispatchPlugin));
+            app.add_plugins(AgentRequestDispatchPlugin);
             Self {
                 app,
                 ready: Default::default(),
@@ -590,7 +596,7 @@ mod dispatch_tests {
             .remove::<AgentRequestGate>();
         fixture.app.update();
         assert!(fixture.delivered().is_empty());
-        let mut cursor = bevy::ecs::message::MessageCursor::<AgentCommandResponse>::default();
+        let mut cursor = MessageCursor::<AgentCommandResponse>::default();
         let replies = fixture
             .app
             .world()
