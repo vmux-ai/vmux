@@ -414,6 +414,7 @@ impl Profile {
                 "crates/util/vmux_api/**",
                 "crates/util/vmux_macro/**",
                 "crates/util/vmux_channel/**",
+                "crates/util/vmux_job/**",
                 "crates/util/vmux_store/**",
                 "crates/util/vmux_watch/**",
                 "crates/util/vmux_task/**",

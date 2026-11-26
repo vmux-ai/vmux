@@ -20,8 +20,6 @@ pub use vmux_watch as watch;
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
-#[cfg(feature = "jobs")]
-pub use blocking::{BlockingCancellation, BlockingPool, BlockingRuntime, BlockingTask};
 pub use component::{
     Active, Bookmark, BookmarkOrder, Collapsed, CollectionView, Cwd, Description,
     EffectiveStartupUrl, EntityTarget, Folder, HostShell, JsonArguments, KeyboardOwner,
@@ -43,10 +41,7 @@ pub use generation::{
 pub use identity::{
     IdentityIndex, IdentityIndexPlugin, IdentityIndexSet, IdentityIndexWriter, IdentityLookupError,
 };
-#[cfg(feature = "jobs")]
-pub use jobs::{
-    Job, JobOwner, JobPlugin, JobReady, JobRequest, JobResult, JobSet, JobWake, JobsPlugin,
-};
+pub use job_wake::JobWake;
 #[cfg(all(host, feature = "host"))]
 pub use launcher::{
     CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged,
@@ -109,8 +104,6 @@ pub mod address;
 pub mod agent;
 #[cfg(all(host, feature = "host"))]
 mod archive;
-#[cfg(feature = "jobs")]
-pub mod blocking;
 #[cfg(all(host, feature = "host"))]
 pub mod browser;
 #[cfg(feature = "cli")]
@@ -126,8 +119,7 @@ mod generation;
 #[cfg(all(host, feature = "host"))]
 pub mod host_spawn;
 mod identity;
-#[cfg(feature = "jobs")]
-pub mod jobs;
+mod job_wake;
 #[cfg(all(host, feature = "host"))]
 pub mod launcher;
 mod lease;

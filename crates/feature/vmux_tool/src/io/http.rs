@@ -2,7 +2,7 @@ use std::io::Read;
 use std::sync::Arc;
 use zeroize::Zeroizing;
 
-use vmux_ecs::{BlockingCancellation, Job};
+use vmux_job::{BlockingCancellation, Job};
 
 use super::FileBytes;
 
@@ -102,8 +102,8 @@ impl Get {
 impl Job for Get {
     type Output = Result<FileBytes, String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 
     fn run(self) -> Self::Output {

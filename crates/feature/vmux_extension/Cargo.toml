@@ -12,7 +12,7 @@ path = "src/lib.rs"
 [features]
 default = []
 conformance = ["host"]
-filesystem = ["vmux_ecs/jobs", "dep:vmux_path", "dep:sha2"]
+filesystem = ["dep:vmux_job", "dep:vmux_path", "dep:sha2"]
 host = [
     "filesystem", "vmux_ecs/host", "dep:vmux_layout", "dep:bevy", "dep:bevy_cef",
     "dep:crossbeam-channel", "dep:base64", "dep:libc", "dep:polling", "dep:reqwest", "dep:rkyv",
@@ -29,6 +29,7 @@ vmux_api = { path = "../../util/vmux_api" }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["store"] }
+vmux_job = { path = "../../util/vmux_job", optional = true }
 vmux_layout = { path = "../vmux_layout", features = ["host"], optional = true }
 vmux_path = { path = "../../util/vmux_path", optional = true }
 sha2 = { version = "0.10", optional = true }

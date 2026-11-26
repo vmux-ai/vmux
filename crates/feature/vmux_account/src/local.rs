@@ -5,10 +5,8 @@ use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use vmux_ecs::record::{Receipt, Record};
-use vmux_ecs::{
-    BlockingCancellation, Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake,
-    Operation,
-};
+use vmux_ecs::{JobWake, Operation};
+use vmux_job::{BlockingCancellation, Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 
 use crate::{
     Commit, DirectoryObservation, Loaded, Location, ReadCompleted, ReadRequest, Root, Set,

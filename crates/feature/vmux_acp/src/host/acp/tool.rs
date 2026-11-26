@@ -52,7 +52,7 @@ impl Plugin for AcpToolPlugin {
             )
                 .chain()
                 .before(vmux_editor::lsp::activation::ActivationSet)
-                .before(vmux_ecs::JobSet::Submit),
+                .before(vmux_job::JobSet::Submit),
         )
         .add_systems(
             PostUpdate,
@@ -62,7 +62,7 @@ impl Plugin for AcpToolPlugin {
                 release::<ToolUninstallRequest>,
                 orphaned,
             )
-                .after(vmux_ecs::JobSet::Cleanup),
+                .after(vmux_job::JobSet::Cleanup),
         );
     }
 }

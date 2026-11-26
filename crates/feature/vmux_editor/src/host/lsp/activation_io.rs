@@ -2,7 +2,7 @@ use super::package_path::PackageName;
 use super::store::PackageStore;
 use bevy::prelude::Component;
 use std::path::PathBuf;
-use vmux_ecs::{BlockingCancellation, Job};
+use vmux_job::{BlockingCancellation, Job};
 use vmux_tool::io::TemporaryDirectory as Staging;
 
 #[derive(Clone)]

@@ -12,7 +12,7 @@ contracts = ["dep:percent-encoding", "dep:rkyv", "dep:serde_json", "dep:vmux_api
 geometry = ["dep:vmux_flex", "dep:bevy_transform"]
 store = ["vmux_ecs/store", "dep:moonshine-save"]
 host = ["vmux_feature/page",
-    "contracts", "geometry", "store", "vmux_ecs/host",
+    "contracts", "geometry", "store", "vmux_ecs/host", "dep:vmux_job",
     "dep:vmux_page", "dep:vmux_path", "dep:vmux_ui", "dep:vmux_session", "dep:vmux_git",
     "dep:bevy", "dep:bevy_asset", "dep:bevy_cef", "dep:bevy_cef_core", "dep:libc",
     "dep:raw-window-handle", "dep:rfd", "dep:ron", "dep:sha2", "dep:uuid",
@@ -29,6 +29,7 @@ bevy_ecs.workspace = true
 bevy_reflect.workspace = true
 serde.workspace = true
 vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_job = { path = "../../util/vmux_job", optional = true }
 percent-encoding = { version = "2", optional = true }
 rkyv = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }

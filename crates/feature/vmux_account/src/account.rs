@@ -1,6 +1,6 @@
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
-use vmux_ecs::JobSet;
+use vmux_job::JobSet;
 
 pub struct AccountPlugin;
 

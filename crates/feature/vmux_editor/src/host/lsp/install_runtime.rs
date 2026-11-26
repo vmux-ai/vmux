@@ -12,9 +12,8 @@ use bevy::prelude::*;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use vmux_ecs::event::{InstallPhase, LspInstallProgress};
-use vmux_ecs::{
-    JobPlugin, JobRequest, JobResult, Operation, OperationRetained, OperationState, OperationTarget,
-};
+use vmux_ecs::{Operation, OperationRetained, OperationState, OperationTarget};
+use vmux_job::{JobPlugin, JobRequest, JobResult};
 use vmux_tool::io::{
     Authorization, CloseTemporary, CreateTemporary, Execute, Get, TemporaryDirectory,
     TemporaryTransfer,
@@ -70,13 +69,13 @@ impl Plugin for InstallPlugin {
                 .chain()
                 .in_set(InstallSet)
                 .before(activation::ActivationSet)
-                .before(vmux_ecs::JobSet::Submit),
+                .before(vmux_job::JobSet::Submit),
         )
         .add_systems(
             PostUpdate,
             (drain, closed, wake)
                 .chain()
-                .after(vmux_ecs::JobSet::Cleanup),
+                .after(vmux_job::JobSet::Cleanup),
         );
     }
 }
@@ -1191,7 +1190,7 @@ type DrainRequests<'w, 's> = Query<
 
 fn drain(
     requests: DrainRequests<'_, '_>,
-    native: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    native: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     probes: Query<(Entity, &ExecutableFor)>,
     links: Query<(Entity, &LinkFor)>,
     cleanup: Query<&CleanupFor>,
@@ -1364,8 +1363,8 @@ mod tests {
 
     impl Plugin for MetadataFixturePlugin {
         fn build(&self, app: &mut App) {
-            if !app.is_plugin_added::<vmux_ecs::JobPlugin<Get>>() {
-                app.add_plugins(vmux_ecs::JobPlugin::<Get>::default());
+            if !app.is_plugin_added::<vmux_job::JobPlugin<Get>>() {
+                app.add_plugins(vmux_job::JobPlugin::<Get>::default());
             }
             app.add_observer(metadata_endpoint);
         }
@@ -1554,7 +1553,7 @@ mod tests {
         release: Arc<Mutex<mpsc::Receiver<()>>>,
     }
 
-    impl vmux_ecs::Job for Held {
+    impl vmux_job::Job for Held {
         type Output = ();
         fn run(self) {
             let _staging = self.staging;
@@ -1773,8 +1772,8 @@ mod tests {
 
     impl Plugin for ToolchainFixturePlugin {
         fn build(&self, app: &mut App) {
-            if !app.is_plugin_added::<vmux_ecs::JobPlugin<Execute>>() {
-                app.add_plugins(vmux_ecs::JobPlugin::<Execute>::default());
+            if !app.is_plugin_added::<vmux_job::JobPlugin<Execute>>() {
+                app.add_plugins(vmux_job::JobPlugin::<Execute>::default());
             }
             app.add_observer(toolchain_endpoint);
         }

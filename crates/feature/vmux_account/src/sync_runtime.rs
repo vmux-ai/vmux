@@ -7,10 +7,9 @@ use bevy_ecs::query::QueryData;
 use bevy_ecs::system::SystemParam;
 use uuid::Uuid;
 use vmux_ecs::record::{Deleted, Record};
-use vmux_ecs::{
-    Job, JobOwner, JobPlugin, JobRequest, JobResult, JobWake, Operation, Revision, Uuid as Id,
-};
+use vmux_ecs::{JobWake, Operation, Revision, Uuid as Id};
 use vmux_feature::{Current, Definition};
+use vmux_job::{Job, JobOwner, JobPlugin, JobRequest, JobResult};
 
 use crate::cloud::transport::Reply;
 use crate::mutations::{

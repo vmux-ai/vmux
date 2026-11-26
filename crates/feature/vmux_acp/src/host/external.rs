@@ -17,10 +17,8 @@ use vmux_ecs::profile::CurrentProfile;
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
-use vmux_ecs::{
-    ArchivedAt, BlockingRuntime, BlockingTask, CreatedAt, EntityTarget, PageOpenRequest,
-    PageOpenTarget,
-};
+use vmux_ecs::{ArchivedAt, CreatedAt, EntityTarget, PageOpenRequest, PageOpenTarget};
+use vmux_job::{BlockingRuntime, BlockingTask};
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 use vmux_session::history::{
     Committed as HistoryCommitted, FileFacts, Prepare as HistoryPrepare, Read as HistoryRead,
@@ -4191,7 +4189,7 @@ mod tests {
                     read,
                     ConversationLoadTask {
                         revision: 1,
-                        task: vmux_ecs::BlockingPool::new("test-catalog", 1, 1)
+                        task: vmux_job::BlockingPool::new("test-catalog", 1, 1)
                             .spawn(None, move || {
                                 let mut history = HistoryReceived::messages(Vec::new(), false);
                                 history.entries.push((Some("stable".into()), message));

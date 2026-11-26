@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use bevy_ecs::prelude::Component;
-use vmux_ecs::blocking::Lane;
-use vmux_ecs::jobs::Job;
+use vmux_job::Job;
+use vmux_job::blocking::Lane;
 
 use crate::execution::Failure;
 use crate::storage_io::{Done, StorageJob};
@@ -26,7 +26,7 @@ impl Job for Rename {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Layout reset canceled"));
         }
         std::fs::rename(self.source, self.destination)

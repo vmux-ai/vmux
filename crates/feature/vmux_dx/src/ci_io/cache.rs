@@ -2,7 +2,7 @@ use super::IoJob;
 use super::fs::{Location, Written};
 use crate::temporary::Temporary;
 use std::path::{Path, PathBuf};
-use vmux_ecs::jobs::Job;
+use vmux_job::Job;
 
 #[derive(Clone)]
 pub(crate) struct StageFiles {
@@ -86,7 +86,7 @@ struct Files;
 
 impl Files {
     fn check() -> Result<(), String> {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err("Cache transfer canceled".into());
         }
         Ok(())

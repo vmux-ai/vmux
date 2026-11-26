@@ -195,7 +195,7 @@ mod tests {
     use crate::debug_io::{Guard, Task};
     use crate::repository_io::Read;
     use std::process::Command;
-    use vmux_ecs::jobs::JobRequest;
+    use vmux_job::JobRequest;
 
     use super::*;
 
@@ -385,7 +385,7 @@ mod tests {
         let (guard, flight) = Guard::new(
             None,
             Vec::new(),
-            app.world().resource::<vmux_ecs::jobs::JobWake>().0.clone(),
+            app.world().resource::<vmux_ecs::JobWake>().0.clone(),
         );
         app.world_mut().entity_mut(job).insert((
             read.clone(),

@@ -3196,6 +3196,7 @@ dependencies = [
  "vmux_feature",
  "vmux_flex",
  "vmux_http",
+ "vmux_job",
  "vmux_layout",
  "vmux_lsp",
  "vmux_macro",
@@ -3295,6 +3296,15 @@ dependencies = [
  "vmux_channel",
  "vmux_ecs",
  "vmux_task",
+]
+
+[[package]]
+name = "vmux_job"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "vmux_ecs",
 ]
 
 [[package]]

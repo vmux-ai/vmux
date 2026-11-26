@@ -4,10 +4,9 @@ use std::time::{Duration, Instant};
 
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
-use vmux_ecs::blocking::Lane;
-use vmux_ecs::{
-    BlockingCancellation, Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake,
-};
+use vmux_ecs::JobWake;
+use vmux_job::blocking::Lane;
+use vmux_job::{BlockingCancellation, Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 use vmux_transport::framing::{Frame, FrameStream};
 use vmux_transport::quic::MessageType;
 use vmux_transport::quic::endpoint::Trust;

@@ -6,7 +6,7 @@ use std::path::{Component as PathComponent, PathBuf};
 
 use bevy_ecs::prelude::Component;
 use sha2::{Digest, Sha256};
-use vmux_ecs::jobs::Job;
+use vmux_job::Job;
 
 use super::IoJob;
 
@@ -358,7 +358,7 @@ impl Job for SourceFacts {
 
 impl SourceFacts {
     fn cancellation() -> Result<(), String> {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err("CI source capture canceled".into());
         }
         Ok(())

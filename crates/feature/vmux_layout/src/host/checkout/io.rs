@@ -5,9 +5,9 @@ use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use vmux_ecs::blocking::Lane;
-use vmux_ecs::{Job, JobPlugin};
 use vmux_git::worktree::{CheckoutInfo, WorktreeCommand};
+use vmux_job::blocking::Lane;
+use vmux_job::{Job, JobPlugin};
 
 pub(super) struct IoPlugin;
 

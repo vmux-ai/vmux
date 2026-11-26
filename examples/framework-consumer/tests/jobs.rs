@@ -4,11 +4,11 @@ use std::time::{Duration, Instant};
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_app::VmuxPlugin;
-use vmux_app::ecs::blocking::{BlockingCancellation, BlockingPool, BlockingRuntime};
 use vmux_app::ecs::{
-    Job, JobOwner, JobPlugin, JobReady, JobRequest, JobResult, JobSet, Operation,
-    OperationCompleted, OperationError, OperationState, OperationTarget,
+    Operation, OperationCompleted, OperationError, OperationState, OperationTarget,
 };
+use vmux_app::job::blocking::{BlockingCancellation, BlockingPool, BlockingRuntime};
+use vmux_app::job::{Job, JobOwner, JobPlugin, JobReady, JobRequest, JobResult, JobSet};
 
 struct RenamePlugin;
 

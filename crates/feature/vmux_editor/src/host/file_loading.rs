@@ -4,9 +4,8 @@ use std::path::{Path, PathBuf};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_ecs::event::FileEncoding;
-use vmux_ecs::{
-    JobPlugin, JobRequest, JobResult, JobSet, JobWake, Operation, OperationState, OperationTarget,
-};
+use vmux_ecs::{JobWake, Operation, OperationState, OperationTarget};
+use vmux_job::{JobPlugin, JobRequest, JobResult, JobSet};
 
 use super::edit::highlight_cache::HighlightCache;
 use super::editor::{Editor, FileView};
@@ -515,8 +514,8 @@ mod tests {
     use std::task::Wake;
     use std::time::Duration;
 
-    use vmux_ecs::blocking::{BlockingPool, BlockingRuntime, BlockingTask, Lane};
     use vmux_ecs::profile::ActiveProfile;
+    use vmux_job::blocking::{BlockingPool, BlockingRuntime, BlockingTask, Lane};
 
     use super::super::fold_io::{FileStore, FileWake};
     use super::super::fold_preferences::{Root, Snapshot};

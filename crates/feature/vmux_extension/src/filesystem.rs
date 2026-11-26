@@ -5,9 +5,8 @@ use std::sync::Arc;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use sha2::{Digest, Sha256};
-use vmux_ecs::{
-    Cwd, Job, JobPlugin, JobRequest, JobResult, JobSet, JobWake, Operation, OperationCompleted,
-};
+use vmux_ecs::{Cwd, JobWake, Operation, OperationCompleted};
+use vmux_job::{Job, JobPlugin, JobRequest, JobResult, JobSet};
 
 use crate::core::{
     CleanupCompleted, CleanupRequest, ExtensionSet, InstallOwner, InstallRequest, LoadCompleted,
@@ -960,19 +959,19 @@ mod tests {
             }
         }
 
-        fn hold_file_jobs(&mut self) -> (vmux_ecs::BlockingTask<()>, mpsc::Sender<()>) {
-            self.app.insert_resource(vmux_ecs::BlockingRuntime::new(
-                vmux_ecs::BlockingPool::new("test-extension-short", 1, 8),
-                vmux_ecs::BlockingPool::new("test-extension-long", 1, 8),
-                vmux_ecs::BlockingPool::new("test-extension-process", 1, 8),
+        fn hold_file_jobs(&mut self) -> (vmux_job::BlockingTask<()>, mpsc::Sender<()>) {
+            self.app.insert_resource(vmux_job::BlockingRuntime::new(
+                vmux_job::BlockingPool::new("test-extension-short", 1, 8),
+                vmux_job::BlockingPool::new("test-extension-long", 1, 8),
+                vmux_job::BlockingPool::new("test-extension-process", 1, 8),
             ));
             let (started, entered) = mpsc::channel();
             let (release, wait) = mpsc::channel();
             let task = self
                 .app
                 .world()
-                .resource::<vmux_ecs::BlockingRuntime>()
-                .try_spawn(vmux_ecs::blocking::Lane::Short, None, move || {
+                .resource::<vmux_job::BlockingRuntime>()
+                .try_spawn(vmux_job::blocking::Lane::Short, None, move || {
                     started.send(()).unwrap();
                     wait.recv_timeout(Duration::from_secs(5)).unwrap();
                 })

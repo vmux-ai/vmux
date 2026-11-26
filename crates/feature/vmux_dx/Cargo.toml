@@ -19,7 +19,8 @@ syn = { version = "2", features = ["full", "visit"], optional = true }
 plist = "1"
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
-vmux_ecs = { path = "../../util/vmux_ecs", features = ["cli", "jobs"] }
+vmux_ecs = { path = "../../util/vmux_ecs", features = ["cli"] }
+vmux_job = { path = "../../util/vmux_job" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }

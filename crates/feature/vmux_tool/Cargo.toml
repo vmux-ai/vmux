@@ -24,6 +24,7 @@ zeroize = "1"
 vmux_path = { path = "../../util/vmux_path" }
 vmux_profile = { path = "../../util/vmux_profile" }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
+vmux_job = { path = "../../util/vmux_job" }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_macro = { path = "../../util/vmux_macro" }
 vmux_page = { path = "../../util/vmux_page" }

@@ -4,9 +4,10 @@ use std::path::PathBuf;
 
 use bevy_app::{App, PreStartup, Update};
 use bevy_ecs::prelude::*;
+use vmux_ecs::JobWake;
 use vmux_ecs::cli::{CliInvocation, CliResult, CliWake};
-use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake};
 use vmux_ecs::{Cwd, Operation, OperationState, Order};
+use vmux_job::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 
 use crate::Completed;
 use crate::debug_io::{Flight, Task};

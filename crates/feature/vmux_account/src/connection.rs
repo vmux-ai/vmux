@@ -6,7 +6,8 @@ use bevy_ecs::prelude::*;
 use ring::signature::KeyPair;
 use uuid::Uuid;
 use vmux_ecs::record::Scope;
-use vmux_ecs::{EntityTarget, JobSet, Operation, Ready, Revision};
+use vmux_ecs::{EntityTarget, Operation, Ready, Revision};
+use vmux_job::JobSet;
 use zeroize::Zeroizing;
 
 use crate::catalog::Catalog;

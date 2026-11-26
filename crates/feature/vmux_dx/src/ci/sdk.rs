@@ -110,7 +110,7 @@ fn configure_core(mut requests: ConfigureRequests<'_, '_>, mut io: Io) {
             ("test-sdk-ecs", "vmux_ecs", "", true),
             ("test-sdk-ecs", "vmux_ecs", "contracts", true),
             ("test-sdk-ecs", "vmux_ecs", "store", true),
-            ("test-sdk-ecs", "vmux_ecs", "jobs", true),
+            ("test-sdk-ecs", "vmux_job", "", true),
             (
                 "test-sdk-project",
                 "vmux_project",
@@ -364,7 +364,7 @@ mod tests {
                 "test --locked -p vmux_ecs --no-default-features --lib",
                 "test --locked -p vmux_ecs --no-default-features --features contracts --lib",
                 "test --locked -p vmux_ecs --no-default-features --features store --lib",
-                "test --locked -p vmux_ecs --no-default-features --features jobs --lib",
+                "test --locked -p vmux_job --no-default-features --lib",
                 "test --locked -p vmux_project --no-default-features --features contracts,filesystem --lib",
                 "test --locked -p vmux_extension --no-default-features --features filesystem --lib",
                 "test --locked -p vmux_flex --no-default-features",

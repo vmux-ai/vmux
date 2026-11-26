@@ -20,9 +20,8 @@ use vmux_ecs::event::{
     OutlineEvent, RefItem,
 };
 use vmux_ecs::page::PageReady;
-use vmux_ecs::{
-    FileUiStateWrite, Job, JobPlugin, JobRequest, JobResult, JobSet, JobWake, OperationState,
-};
+use vmux_ecs::{FileUiStateWrite, JobWake, OperationState};
+use vmux_job::{Job, JobPlugin, JobRequest, JobResult, JobSet};
 use vmux_lsp::{
     DocumentBinding, DocumentPath, LaunchServer, Root as WorkspaceRoot, Server, ServerBinding,
     ServerCompleted, ServerFailure, StartServer, Stopped, Transport,
@@ -405,8 +404,8 @@ impl Job for StartJob {
         .map_err(|error| error.to_string())
     }
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 }
 

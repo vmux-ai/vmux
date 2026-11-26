@@ -1,0 +1,17 @@
+[package]
+name = "vmux_job"
+description = "Bounded blocking thread pools and typed ECS job lifecycle"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+vmux_ecs = { path = "../vmux_ecs" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

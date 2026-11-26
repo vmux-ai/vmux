@@ -6,8 +6,9 @@ use super::{
 use bevy::prelude::*;
 use std::os::fd::AsRawFd;
 use std::sync::Arc;
-use vmux_ecs::{JobResult, OperationTarget};
+use vmux_ecs::OperationTarget;
 use vmux_git::worktree::WorktreeCommand;
+use vmux_job::JobResult;
 
 pub(super) struct CleanupPlugin;
 

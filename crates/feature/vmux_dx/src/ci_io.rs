@@ -4,8 +4,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use vmux_ecs::OperationState;
-use vmux_ecs::blocking::Lane;
-use vmux_ecs::jobs::{Job, JobPlugin, JobResult, JobSet};
+use vmux_job::blocking::Lane;
+use vmux_job::{Job, JobPlugin, JobResult, JobSet};
 pub(crate) mod cache;
 pub(crate) mod fs;
 pub(crate) mod process;
@@ -50,7 +50,7 @@ impl<J: IoJob> Job for Tracked<J> {
         self.job.lane()
     }
     fn run(self) -> Self::Output {
-        let result = if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        let result = if vmux_job::blocking::BlockingCancellation::canceled() {
             Err("CI operation canceled".into())
         } else {
             self.job.run()

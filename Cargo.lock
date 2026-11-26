@@ -10288,6 +10288,7 @@ dependencies = [
  "vmux_api",
  "vmux_ecs",
  "vmux_feature",
+ "vmux_job",
  "vmux_profile",
  "vmux_transport",
  "zeroize",
@@ -10335,6 +10336,7 @@ dependencies = [
  "vmux_feature",
  "vmux_flex",
  "vmux_git",
+ "vmux_job",
  "vmux_layout",
  "vmux_mcp",
  "vmux_path",
@@ -10397,6 +10399,7 @@ dependencies = [
  "vmux_history",
  "vmux_http",
  "vmux_input",
+ "vmux_job",
  "vmux_knowledge",
  "vmux_layout",
  "vmux_lsp",
@@ -10641,6 +10644,7 @@ dependencies = [
  "vmux_git",
  "vmux_history",
  "vmux_input",
+ "vmux_job",
  "vmux_knowledge",
  "vmux_layout",
  "vmux_menu",
@@ -10685,6 +10689,7 @@ dependencies = [
  "toml",
  "vmux_ecs",
  "vmux_feature",
+ "vmux_job",
  "yaml-rust",
 ]
 
@@ -10771,6 +10776,7 @@ dependencies = [
  "vmux_feature",
  "vmux_flex",
  "vmux_git",
+ "vmux_job",
  "vmux_knowledge",
  "vmux_layout",
  "vmux_lsp",
@@ -10817,6 +10823,7 @@ dependencies = [
  "vmux_feature",
  "vmux_flex",
  "vmux_history",
+ "vmux_job",
  "vmux_layout",
  "vmux_path",
  "vmux_tool",
@@ -10850,6 +10857,7 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_ecs",
+ "vmux_job",
  "vmux_macro",
  "vmux_page",
  "vmux_ui",
@@ -10913,6 +10921,7 @@ dependencies = [
  "vmux_api",
  "vmux_ecs",
  "vmux_feature",
+ "vmux_job",
  "vmux_page",
  "vmux_path",
  "vmux_runner",
@@ -10986,6 +10995,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_job"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "tempfile",
+ "vmux_ecs",
+]
+
+[[package]]
 name = "vmux_knowledge"
 version = "0.0.35"
 dependencies = [
@@ -11045,6 +11064,7 @@ dependencies = [
  "vmux_git",
  "vmux_history",
  "vmux_input",
+ "vmux_job",
  "vmux_page",
  "vmux_path",
  "vmux_project",
@@ -11201,6 +11221,7 @@ dependencies = [
  "url",
  "vmux_api",
  "vmux_ecs",
+ "vmux_job",
  "vmux_profile",
  "vmux_transport",
  "vte",
@@ -11272,6 +11293,7 @@ dependencies = [
  "tokio",
  "tracing",
  "vmux_ecs",
+ "vmux_job",
  "vmux_task",
 ]
 
@@ -11309,6 +11331,7 @@ dependencies = [
  "vmux_api",
  "vmux_ecs",
  "vmux_feature",
+ "vmux_job",
  "vmux_path",
  "vmux_process",
  "vmux_profile",
@@ -11357,6 +11380,7 @@ dependencies = [
  "vmux_ecs",
  "vmux_feature",
  "vmux_git",
+ "vmux_job",
  "vmux_page",
  "vmux_path",
  "vmux_runner",
@@ -11652,6 +11676,7 @@ dependencies = [
  "vmux_api",
  "vmux_ecs",
  "vmux_feature",
+ "vmux_job",
  "vmux_macro",
  "vmux_page",
  "vmux_path",

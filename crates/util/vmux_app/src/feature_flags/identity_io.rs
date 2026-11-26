@@ -2,7 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Write};
 use std::path::PathBuf;
 
-use vmux_ecs::Job;
+use vmux_job::Job;
 
 #[derive(Clone, bevy_ecs::prelude::Component)]
 #[component(immutable)]

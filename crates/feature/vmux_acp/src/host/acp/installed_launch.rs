@@ -1,6 +1,7 @@
 use bevy::prelude::*;
-use vmux_ecs::{Job, JobPlugin, JobRequest, JobResult, OperationState, OperationTarget};
+use vmux_ecs::{OperationState, OperationTarget};
 use vmux_editor::lsp::store::Receipt;
+use vmux_job::{Job, JobPlugin, JobRequest, JobResult};
 use vmux_session::provider::Read as CatalogRead;
 use vmux_tool::io::WriteFile;
 
@@ -20,9 +21,9 @@ impl Plugin for InstalledLaunchPlugin {
                     .chain()
                     .in_set(PreparationSet)
                     .after(InstalledSet)
-                    .before(vmux_ecs::JobSet::Submit),
+                    .before(vmux_job::JobSet::Submit),
             )
-            .add_systems(PostUpdate, release.after(vmux_ecs::JobSet::Cleanup));
+            .add_systems(PostUpdate, release.after(vmux_job::JobSet::Cleanup));
     }
 }
 
@@ -58,12 +59,12 @@ struct LoginEnvironment {
 impl Job for LoginEnvironment {
     type Output = Result<EnvironmentValues, String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Process
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Process
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return Err("ACP catalog environment canceled".into());
         }
         Ok(EnvironmentValues(
@@ -237,7 +238,7 @@ fn release(
         ),
         With<Request>,
     >,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     reads: Query<&OperationState, With<CatalogRead>>,
     wake: Option<Res<vmux_ecs::JobWake>>,
     mut commands: Commands,

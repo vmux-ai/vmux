@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy_ecs::prelude::Component;
-use vmux_ecs::blocking::Lane;
-use vmux_ecs::jobs::Job;
+use vmux_job::Job;
+use vmux_job::blocking::Lane;
 
 use crate::execution::Failure;
 use crate::storage_io::{Done, StorageJob};
@@ -31,7 +31,7 @@ impl Job for CreateTemporary {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Packaging canceled"));
         }
         Temporary::create(&self.parent, &self.prefix)
@@ -62,7 +62,7 @@ impl Job for WriteArchive {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Packaging canceled"));
         }
         let binary = OpenOptions::new()
@@ -117,7 +117,7 @@ impl Job for ReadArchive {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Packaging canceled"));
         }
         let file = OpenOptions::new()

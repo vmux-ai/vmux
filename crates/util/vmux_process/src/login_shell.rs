@@ -39,7 +39,7 @@ impl EnvironmentCache {
             return values;
         }
         let _capture = loop {
-            if vmux_ecs::BlockingCancellation::canceled() {
+            if vmux_job::BlockingCancellation::canceled() {
                 return &[];
             }
             match self.capture.try_lock() {
@@ -54,7 +54,7 @@ impl EnvironmentCache {
         let Some(values) = LoginShellEnvironment::capture_via_pty(shell) else {
             return &[];
         };
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return &[];
         }
         let _ = self.values.set(values);
@@ -93,7 +93,7 @@ impl LoginShellEnvironment {
     #[cfg(unix)]
     fn capture_via_pty(shell: &str) -> Option<Vec<(String, String)>> {
         let args = Self::capture_args(shell);
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return None;
         }
         let pair = NativePtySystem::default()
@@ -128,7 +128,7 @@ impl LoginShellEnvironment {
         let mut buffer = [0; 8192];
         let mut accepted = true;
         loop {
-            if vmux_ecs::BlockingCancellation::canceled() || std::time::Instant::now() >= deadline {
+            if vmux_job::BlockingCancellation::canceled() || std::time::Instant::now() >= deadline {
                 accepted = false;
                 break;
             }
@@ -153,7 +153,7 @@ impl LoginShellEnvironment {
             }
         }
         while accepted && child.try_wait().ok().flatten().is_none() {
-            if vmux_ecs::BlockingCancellation::canceled() || std::time::Instant::now() >= deadline {
+            if vmux_job::BlockingCancellation::canceled() || std::time::Instant::now() >= deadline {
                 accepted = false;
                 break;
             }
@@ -270,7 +270,7 @@ impl LoginShellEnvironment {
 
     #[cfg(unix)]
     fn nu_config_paths(shell: &str) -> Option<(String, String)> {
-        if vmux_ecs::BlockingCancellation::canceled() {
+        if vmux_job::BlockingCancellation::canceled() {
             return None;
         }
         let mut child = Command::new(shell)
@@ -299,7 +299,7 @@ impl LoginShellEnvironment {
         let mut buffer = [0; 4096];
         let mut accepted = true;
         loop {
-            if vmux_ecs::BlockingCancellation::canceled() || std::time::Instant::now() >= deadline {
+            if vmux_job::BlockingCancellation::canceled() || std::time::Instant::now() >= deadline {
                 accepted = false;
                 break;
             }
@@ -323,7 +323,7 @@ impl LoginShellEnvironment {
             }
         }
         while accepted && child.try_wait().ok().flatten().is_none() {
-            if vmux_ecs::BlockingCancellation::canceled() || std::time::Instant::now() >= deadline {
+            if vmux_job::BlockingCancellation::canceled() || std::time::Instant::now() >= deadline {
                 accepted = false;
                 break;
             }
@@ -538,7 +538,7 @@ mod tests {
     #[test]
     fn configuration_probe_cancellation_drains_and_reaps_before_capture() {
         let mut fixture = CaptureFixture::new("nu", "exec sleep 600");
-        let runtime = vmux_ecs::BlockingRuntime::default();
+        let runtime = vmux_job::BlockingRuntime::default();
         let shell = fixture.paths().shell.to_string_lossy().into_owned();
         let mut task = runtime
             .spawn_process(None, move || LoginShellEnvironment::capture_via_pty(&shell))
@@ -585,7 +585,7 @@ mod tests {
         let cache = std::sync::Arc::new(EnvironmentCache::new());
         let captured = cache.clone();
         let shell = blocked.paths().shell.to_string_lossy().into_owned();
-        let runtime = vmux_ecs::BlockingRuntime::default();
+        let runtime = vmux_job::BlockingRuntime::default();
         let mut task = runtime
             .spawn_process(None, move || captured.get(&shell).to_vec())
             .unwrap();

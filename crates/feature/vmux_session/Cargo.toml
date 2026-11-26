@@ -8,7 +8,7 @@ publish = false
 
 [features]
 default = ["app"]
-preferences = ["vmux_ecs/jobs", "dep:vmux_path"]
+preferences = ["dep:vmux_job", "dep:vmux_path"]
 app = [
     "vmux_feature/page-binding",
     "preferences",
@@ -65,6 +65,7 @@ unicode-segmentation = "1"
 url = { workspace = true }
 uuid = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs", default-features = false, features = ["contracts", "store"] }
+vmux_job = { path = "../../util/vmux_job", optional = true }
 vmux_path = { path = "../../util/vmux_path", optional = true }
 vmux_command = { path = "../vmux_command", optional = true }
 vmux_page = { path = "../../util/vmux_page", optional = true }

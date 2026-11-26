@@ -20,7 +20,8 @@ bevy_reflect = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
-vmux_ecs = { path = "../../util/vmux_ecs", features = ["records", "jobs"] }
+vmux_ecs = { path = "../../util/vmux_ecs", features = ["records"] }
+vmux_job = { path = "../../util/vmux_job" }
 vmux_profile = { path = "../../util/vmux_profile" }
 ring = "0.17"
 zeroize = "1"

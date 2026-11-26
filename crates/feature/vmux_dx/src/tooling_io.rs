@@ -6,8 +6,8 @@ use std::process::Command;
 use std::sync::Arc;
 
 use bevy_ecs::prelude::Component;
-use vmux_ecs::blocking::Lane;
-use vmux_ecs::jobs::Job;
+use vmux_job::Job;
+use vmux_job::blocking::Lane;
 
 use crate::execution::Failure;
 use crate::source::Source;
@@ -29,7 +29,7 @@ impl Job for SourceKey {
     }
 
     fn run(self) -> Self::Output {
-        Source::key(&self.0, vmux_ecs::blocking::BlockingCancellation::canceled)
+        Source::key(&self.0, vmux_job::blocking::BlockingCancellation::canceled)
             .map(Fingerprint)
             .map_err(|error| Failure::message(error.to_string()))
     }
@@ -128,7 +128,7 @@ impl<J: StorageJob> Job for Scoped<J> {
     }
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("CLI bootstrap canceled"));
         }
         self.0.run()

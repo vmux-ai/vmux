@@ -23,6 +23,7 @@ impl Source {
             "vmux_ecs",
             "vmux_api",
             "vmux_channel",
+            "vmux_job",
             "vmux_store",
             "vmux_watch",
             "vmux_task",

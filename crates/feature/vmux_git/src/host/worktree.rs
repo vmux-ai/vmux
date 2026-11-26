@@ -16,11 +16,11 @@ pub struct WorktreeCommand {
     pub guard: Option<Arc<File>>,
 }
 
-impl vmux_ecs::Job for WorktreeCommand {
+impl vmux_job::Job for WorktreeCommand {
     type Output = Result<(String, String, bool), GitError>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Process
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Process
     }
 
     fn run(self) -> Self::Output {

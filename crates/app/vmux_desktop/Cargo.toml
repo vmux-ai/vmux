@@ -243,6 +243,7 @@ bevy_utils = { version = "0.19.0", features = ["debug"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 rkyv = { workspace = true }
 tempfile = "3"
+vmux_job = { path = "../../util/vmux_job" }
 
 [package.metadata.packager]
 product-name = "Vmux"

@@ -7,8 +7,9 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::relationship::Relationship;
 use bevy_ecs::system::SystemParam;
 use sha2::{Digest, Sha256};
-use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake};
+use vmux_ecs::JobWake;
 use vmux_ecs::{Operation, OperationState, Order};
+use vmux_job::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 
 use crate::debug_io::{
     AcquireTarget, AcquiredLock, CaptureOutput, CleanupFlight, CleanupQueue, CloneExecutable,
@@ -647,7 +648,7 @@ struct OutputsDropped;
 struct CleanupWitness;
 
 #[derive(Component)]
-struct Reaping(vmux_ecs::blocking::BlockingTask<()>);
+struct Reaping(vmux_job::blocking::BlockingTask<()>);
 
 #[derive(Component, Clone)]
 pub(crate) struct Failed(pub Failure);
@@ -5510,14 +5511,14 @@ fn receive_cleanups(cleanup: Res<CleanupQueue>, mut commands: Commands) {
 }
 
 fn reap(
-    runtime: Res<vmux_ecs::blocking::BlockingRuntime>,
+    runtime: Res<vmux_job::blocking::BlockingRuntime>,
     wake: Res<JobWake>,
     pending: Query<(Entity, &ReapRequest), Without<Reaping>>,
     mut commands: Commands,
 ) {
     for (entity, request) in &pending {
         if let Ok(task) = runtime.try_spawn(
-            vmux_ecs::blocking::Lane::Process,
+            vmux_job::blocking::Lane::Process,
             Some(wake.0.clone()),
             request.job(),
         ) {

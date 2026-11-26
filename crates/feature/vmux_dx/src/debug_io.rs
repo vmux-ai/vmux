@@ -11,8 +11,8 @@ use std::task::Waker;
 
 use bevy_ecs::prelude::{Component, Entity, Resource};
 use sha2::{Digest, Sha256};
-use vmux_ecs::blocking::Lane;
-use vmux_ecs::jobs::Job;
+use vmux_job::Job;
+use vmux_job::blocking::Lane;
 
 use crate::environment::Environment;
 use crate::execution::{Execution, Failure};
@@ -373,7 +373,7 @@ impl Job for ProbeProcess {
     type Output = Result<ProbeOutput, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         let mut command = self.environment.command(self.program, &self.cwd);
@@ -381,7 +381,7 @@ impl Job for ProbeProcess {
         let output = Execution::new(command)
             .output_any(None)
             .map_err(Failure::from_error);
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         Signals::check().map_err(Failure::from_error)?;
@@ -410,7 +410,7 @@ impl Job for HashInput {
     type Output = Result<ToolOutput, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         let mut command = self.environment.command("git", &self.cwd);
@@ -491,7 +491,7 @@ impl Job for CaptureOutput {
     type Output = Result<ToolOutput, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         let mut command = self.environment.command(self.program, &self.cwd);
@@ -541,7 +541,7 @@ impl Job for RunProcess {
     type Output = Result<Done, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         let mut command = self.environment.command(self.program, &self.cwd);
@@ -601,7 +601,7 @@ impl Job for SpawnProcess {
     type Output = Result<ProcessValue, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         let mut command = self.environment.command(self.program, &self.cwd);
@@ -638,7 +638,7 @@ impl Job for ReadFile {
     type Output = Result<FileBytes, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         let file = fs::OpenOptions::new()
@@ -681,7 +681,7 @@ impl Job for HashFile {
     type Output = Result<FileDigest, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         let file = fs::OpenOptions::new()
@@ -700,7 +700,7 @@ impl Job for HashFile {
         let mut hash = Sha256::new();
         let mut bytes = [0; 65536];
         loop {
-            if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            if vmux_job::blocking::BlockingCancellation::canceled() {
                 return Err(Failure::message("Debug IO canceled"));
             }
             let count = file
@@ -732,7 +732,7 @@ impl Job for InspectPath {
     type Output = Result<PathMetadata, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         match fs::symlink_metadata(self.0) {
@@ -760,7 +760,7 @@ impl Job for ReadDirectory {
     type Output = Result<DirectoryEntries, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         let mut entries = Vec::new();
@@ -796,7 +796,7 @@ impl Job for CreateDirectory {
     type Output = Result<Done, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         fs::create_dir_all(self.0).map_err(|error| Failure::message(error.to_string()))?;
@@ -826,7 +826,7 @@ impl Job for CloneExecutable {
     type Output = Result<Done, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Executable snapshot canceled"));
         }
         let mut source = fs::OpenOptions::new()
@@ -862,7 +862,7 @@ impl Job for CloneExecutable {
         destination
             .set_permissions(metadata.permissions())
             .map_err(|error| Failure::message(error.to_string()))?;
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Executable snapshot canceled"));
         }
         fs::hard_link(staging, self.1).map_err(|error| Failure::message(error.to_string()))?;
@@ -879,7 +879,7 @@ impl CloneExecutable {
         let mut bytes = [0; 65536];
         let mut size = 0u64;
         loop {
-            if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            if vmux_job::blocking::BlockingCancellation::canceled() {
                 return Err(Failure::message("Executable snapshot canceled"));
             }
             let count = source
@@ -910,7 +910,7 @@ impl Job for CopyFile {
     type Output = Result<Done, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         if self.0 != self.1
@@ -931,7 +931,7 @@ impl Job for CopyFile {
             let temporary = Temporary::create(parent, ".vmux-copy").map_err(Failure::from_error)?;
             let staging = temporary.path().join("file");
             fs::copy(self.0, &staging).map_err(|error| Failure::message(error.to_string()))?;
-            if vmux_ecs::blocking::BlockingCancellation::canceled() {
+            if vmux_job::blocking::BlockingCancellation::canceled() {
                 return Err(Failure::message("Debug IO canceled"));
             }
             fs::rename(staging, self.1).map_err(|error| Failure::message(error.to_string()))?;
@@ -962,7 +962,7 @@ impl Job for RemoveDirectory {
     type Output = Result<Done, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         fs::remove_dir_all(self.0).map_err(|error| Failure::message(error.to_string()))?;
@@ -982,7 +982,7 @@ impl Job for RemoveFile {
     type Output = Result<Done, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         fs::remove_file(self.0).map_err(|error| Failure::message(error.to_string()))?;
@@ -1007,7 +1007,7 @@ impl Job for LinkPath {
     type Output = Result<Done, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         symlink(self.0, self.1).map_err(|error| Failure::message(error.to_string()))?;
@@ -1032,7 +1032,7 @@ impl Job for WriteFile {
     type Output = Result<PendingValue, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         let mut file = fs::OpenOptions::new()
@@ -1064,7 +1064,7 @@ impl Job for RenamePath {
     type Output = Result<Done, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         fs::rename(self.0, self.1).map_err(|error| Failure::message(error.to_string()))?;
@@ -1089,7 +1089,7 @@ impl Job for CreateTemporary {
     type Output = Result<TemporaryValue, Failure>;
 
     fn run(self) -> Self::Output {
-        if vmux_ecs::blocking::BlockingCancellation::canceled() {
+        if vmux_job::blocking::BlockingCancellation::canceled() {
             return Err(Failure::message("Debug IO canceled"));
         }
         let directory = Temporary::create(&std::env::temp_dir(), "vmux-local-codesign")
@@ -1170,7 +1170,7 @@ mod tests {
         let target = root.join("target");
         let held = TargetLock::acquire(&root, &target).unwrap();
         assert!(TargetLock::try_acquire(&root, &target).unwrap().is_none());
-        let pool = vmux_ecs::blocking::BlockingPool::new("lock-cancellation", 1, 1);
+        let pool = vmux_job::blocking::BlockingPool::new("lock-cancellation", 1, 1);
         let (job, flight) = Task::new(
             AcquireTarget {
                 root: root.clone(),
@@ -1338,7 +1338,7 @@ mod tests {
             .receive()
             .expect("discarded process must request cleanup");
         let request = ReapRequest::new(data);
-        let pool = vmux_ecs::blocking::BlockingPool::new("cleanup-fixture", 1, 1);
+        let pool = vmux_job::blocking::BlockingPool::new("cleanup-fixture", 1, 1);
         let mut running = pool.try_spawn(None, request.job()).unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {

@@ -21,6 +21,8 @@ pub use vmux_feature::manifest;
 pub use vmux_flex as flex;
 #[cfg(feature = "http-server")]
 pub use vmux_http as http;
+#[cfg(feature = "jobs")]
+pub use vmux_job as job;
 #[cfg(feature = "layout")]
 pub use vmux_layout as layout;
 #[cfg(feature = "lsp")]

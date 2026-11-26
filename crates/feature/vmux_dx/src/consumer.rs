@@ -150,7 +150,7 @@ impl Consumer {
             ("vmux_ecs", "", true),
             ("vmux_ecs", "contracts", true),
             ("vmux_ecs", "store", true),
-            ("vmux_ecs", "jobs", true),
+            ("vmux_job", "", true),
             ("vmux_project", "contracts,filesystem", true),
             ("vmux_extension", "filesystem", true),
             ("vmux_flex", "", false),

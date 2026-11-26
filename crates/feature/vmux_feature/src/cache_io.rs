@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
-use vmux_ecs::Job;
+use vmux_job::Job;
 
 pub(crate) struct Writer {
     path: PathBuf,

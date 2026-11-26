@@ -2,7 +2,7 @@ use bevy_ecs::prelude::Component;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::JoinHandle;
-use vmux_ecs::{BlockingCancellation, Job};
+use vmux_job::{BlockingCancellation, Job};
 
 #[derive(Clone)]
 pub struct CreateTemporary {
@@ -100,8 +100,8 @@ pub struct CloseTemporary {
 impl Job for CloseTemporary {
     type Output = Result<(), String>;
 
-    fn lane(&self) -> vmux_ecs::blocking::Lane {
-        vmux_ecs::blocking::Lane::Long
+    fn lane(&self) -> vmux_job::blocking::Lane {
+        vmux_job::blocking::Lane::Long
     }
 
     fn run(self) -> Self::Output {

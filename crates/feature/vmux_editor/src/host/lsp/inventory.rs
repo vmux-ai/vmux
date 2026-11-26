@@ -3,7 +3,8 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use vmux_ecs::profile::{CurrentProfile, ProfilePaths};
-use vmux_ecs::{EntityTarget, JobRequest, JobResult, Operation, OperationRetained, OperationState};
+use vmux_ecs::{EntityTarget, Operation, OperationRetained, OperationState};
+use vmux_job::{JobRequest, JobResult};
 use vmux_tool::ToolProviderId;
 use vmux_tool::io::{FindExecutable, ReadDirectory, ReadFile};
 use vmux_tool::observation::{

@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_ecs::{
-    BlockingCancellation, Job, JobPlugin, JobRequest, JobResult, Operation, OperationRetained,
-    OperationState, OperationTarget, PageMetadata, PageOpenRequest, PageOpenTarget,
+    Operation, OperationRetained, OperationState, OperationTarget, PageMetadata, PageOpenRequest,
+    PageOpenTarget,
 };
+use vmux_job::{BlockingCancellation, Job, JobPlugin, JobRequest, JobResult};
 
 use crate::ToolStore;
 use crate::io::PathChanged;
@@ -22,7 +23,7 @@ impl Plugin for ToolOpenPlugin {
         app.add_plugins(JobPlugin::<CreateEmptyFile>::default())
             .add_observer(accept)
             .add_systems(Update, cancel.in_set(crate::ToolOperationCancelSet))
-            .add_systems(PostUpdate, finish.after(vmux_ecs::JobSet::Cleanup));
+            .add_systems(PostUpdate, finish.after(vmux_job::JobSet::Cleanup));
     }
 }
 
@@ -116,7 +117,7 @@ fn finish(
         Option<&JobResult<CreateEmptyFile>>,
         Has<JobRequest<CreateEmptyFile>>,
     )>,
-    captures: Query<&OperationTarget, With<vmux_ecs::jobs::JobCapture>>,
+    captures: Query<&OperationTarget, With<vmux_job::JobCapture>>,
     pages: Query<(&State, &PageMetadata)>,
     stores: Query<&ToolStore, With<Registry>>,
     mut requests: MessageWriter<PageOpenRequest>,

@@ -3,8 +3,8 @@ use crate::execution::Execution;
 use bevy_ecs::prelude::Component;
 use std::path::PathBuf;
 use std::process::Output;
-use vmux_ecs::blocking::Lane;
-use vmux_ecs::jobs::Job;
+use vmux_job::Job;
+use vmux_job::blocking::Lane;
 
 #[derive(Component, Clone)]
 #[component(immutable)]

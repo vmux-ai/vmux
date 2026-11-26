@@ -2,9 +2,10 @@ use std::collections::BTreeSet;
 
 use bevy::prelude::*;
 use vmux_ecs::profile::{CurrentProfile, ProfilePaths};
-use vmux_ecs::{EntityTarget, JobRequest, JobResult, Operation, OperationRetained, OperationState};
+use vmux_ecs::{EntityTarget, Operation, OperationRetained, OperationState};
 use vmux_editor::lsp::package_path::PackageName;
 use vmux_editor::lsp::store::Receipt;
+use vmux_job::{JobRequest, JobResult};
 use vmux_tool::ToolProviderId;
 use vmux_tool::io::{ReadDirectory, ReadFile};
 use vmux_tool::observation::{
