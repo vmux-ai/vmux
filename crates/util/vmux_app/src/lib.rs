@@ -31,6 +31,8 @@ pub use vmux_lsp as lsp;
 pub use vmux_profile as host;
 #[cfg(feature = "project")]
 pub use vmux_project as project;
+#[cfg(feature = "quic-server")]
+pub use vmux_quic as quic;
 #[cfg(feature = "runner")]
 pub use vmux_runner as runner;
 #[cfg(feature = "store")]

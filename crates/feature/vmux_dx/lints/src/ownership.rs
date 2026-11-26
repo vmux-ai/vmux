@@ -1013,6 +1013,7 @@ impl<'tcx> Ownership<'tcx> {
             "vmux_channel",
             "vmux_http",
             "vmux_job",
+            "vmux_quic",
             "vmux_runner",
             "vmux_watch",
             "async_io",
