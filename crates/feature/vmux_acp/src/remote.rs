@@ -4,10 +4,10 @@ use tokio::sync::{mpsc, oneshot};
 use vmux_api::protocol::{
     AgentListAgents, AgentListTeam, SharedFailure, SharedMessage, SharedResponse,
 };
-use vmux_ecs::service::{AbortTask, Shutdown, ShutdownComplete, ShutdownPending};
+use vmux_ecs::service::{Shutdown, ShutdownComplete, ShutdownPending};
 use vmux_ecs::{
     EntityTarget, Operation, OperationCompleted, OperationRetained, OperationState,
-    OperationTarget, Uuid,
+    OperationTarget, TokioTask, Uuid,
 };
 use vmux_session::SessionId;
 
@@ -318,7 +318,7 @@ fn stop(
         commands.spawn((
             Name::new("Remote drain acknowledgment"),
             RemoteDrain(Some(sender)),
-            AbortTask(task),
+            TokioTask::new(task),
             ShutdownPending,
             Loan {
                 executor: executor.0.clone(),
@@ -346,7 +346,7 @@ fn acknowledge(
 fn drain(
     loans: Query<&Loan>,
     mut tasks: Query<
-        (Entity, &mut AbortTask, Option<&Joined>),
+        (Entity, &mut TokioTask, Option<&Joined>),
         Or<(With<Accepted>, With<RemoteDrain>)>,
     >,
     replies: Query<Entity, With<Reply>>,
@@ -357,13 +357,13 @@ fn drain(
     };
     for (_, task, joined) in &tasks {
         if joined.is_none() {
-            task.0.abort();
+            task.abort();
         }
     }
     loan.executor.block_on(async {
         for (entity, mut task, joined) in &mut tasks {
             if joined.is_none() {
-                let _ = (&mut task.0).await;
+                let _ = task.join().await;
             }
             commands.entity(entity).despawn();
         }

@@ -5,7 +5,7 @@ use std::task::{Context, Poll, Waker};
 
 use bevy_ecs::prelude::Component;
 use tokio::runtime::Handle;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinError, JoinHandle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TokioTaskOutcome {
@@ -54,19 +54,34 @@ impl TokioTask {
     }
 
     pub fn take_outcome(&mut self) -> Option<TokioTaskOutcome> {
-        let handle = self.handle.as_mut()?;
-        if !handle.is_finished() {
+        if !self.handle.as_ref()?.is_finished() {
             return None;
         }
-        let mut context = Context::from_waker(Waker::noop());
-        let outcome = match Pin::new(handle).poll(&mut context) {
-            Poll::Pending => return None,
-            Poll::Ready(Ok(())) => TokioTaskOutcome::Completed,
-            Poll::Ready(Err(error)) if error.is_panic() => TokioTaskOutcome::Panicked,
-            Poll::Ready(Err(_)) => TokioTaskOutcome::Canceled,
+        self.poll_outcome(Waker::noop())
+    }
+
+    pub fn poll_outcome(&mut self, waker: &Waker) -> Option<TokioTaskOutcome> {
+        let handle = self.handle.as_mut()?;
+        let mut context = Context::from_waker(waker);
+        let Poll::Ready(result) = Pin::new(handle).poll(&mut context) else {
+            return None;
         };
         self.handle.take();
-        Some(outcome)
+        Some(Self::classify(result))
+    }
+
+    pub async fn join(&mut self) -> Option<TokioTaskOutcome> {
+        let result = self.handle.as_mut()?.await;
+        self.handle.take();
+        Some(Self::classify(result))
+    }
+
+    fn classify(result: Result<(), JoinError>) -> TokioTaskOutcome {
+        match result {
+            Ok(()) => TokioTaskOutcome::Completed,
+            Err(error) if error.is_panic() => TokioTaskOutcome::Panicked,
+            Err(_) => TokioTaskOutcome::Canceled,
+        }
     }
 }
 
@@ -86,7 +101,8 @@ impl Drop for TokioTask {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
+    use std::sync::{Arc, mpsc};
+    use std::task::Wake;
     use std::time::{Duration, Instant};
 
     use bevy_ecs::world::World;
@@ -160,5 +176,68 @@ mod tests {
         started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         canceled.abort();
         assert_eq!(wait_outcome(&mut canceled), TokioTaskOutcome::Canceled);
+    }
+
+    struct WakeNotice(mpsc::SyncSender<()>);
+
+    impl Wake for WakeNotice {
+        fn wake(self: Arc<Self>) {
+            let _ = self.0.try_send(());
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            let _ = self.0.try_send(());
+        }
+    }
+
+    #[test]
+    fn poll_outcome_registers_waker_and_reports_completion() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_time()
+            .build()
+            .unwrap();
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let (wake_tx, wake_rx) = mpsc::sync_channel(1);
+        let waker = Waker::from(Arc::new(WakeNotice(wake_tx)));
+        let mut task = TokioTask::new(runtime.spawn_blocking(move || {
+            release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        }));
+        assert_eq!(task.poll_outcome(&waker), None);
+        release_tx.send(()).unwrap();
+        wake_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(task.poll_outcome(&waker), Some(TokioTaskOutcome::Completed));
+        assert_eq!(task.poll_outcome(&waker), None);
+    }
+
+    #[test]
+    fn join_awaits_task_completion_and_cancellation_once() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_time()
+            .build()
+            .unwrap();
+        let mut completed = TokioTask::spawn(runtime.handle(), async {});
+        assert_eq!(
+            runtime.block_on(completed.join()),
+            Some(TokioTaskOutcome::Completed)
+        );
+        assert_eq!(runtime.block_on(completed.join()), None);
+
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (dropped_tx, dropped_rx) = mpsc::sync_channel(1);
+        let mut canceled = TokioTask::spawn(runtime.handle(), async move {
+            let _notice = DropNotice(dropped_tx);
+            started_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        canceled.abort();
+        assert_eq!(
+            runtime.block_on(canceled.join()),
+            Some(TokioTaskOutcome::Canceled)
+        );
+        dropped_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(runtime.block_on(canceled.join()), None);
     }
 }
