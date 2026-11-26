@@ -3,8 +3,8 @@ use bevy_ecs::prelude::*;
 use std::sync::Arc;
 use uuid::Uuid;
 use vmux_api::control::{ControlCredentialSet, ControlReady, CredentialOutcome, CredentialReply};
-use vmux_ecs::service::{AbortTask, Protocols, Register, Wake};
-use vmux_ecs::{Operation, Revision};
+use vmux_ecs::service::{Protocols, Register, Wake};
+use vmux_ecs::{Operation, Revision, TokioTask};
 use vmux_feature::http::{Credential, CredentialSource, Endpoint};
 use vmux_feature::{InstallationScope, ReleaseProvider, Set};
 
@@ -112,7 +112,7 @@ struct Current<'w, 's> {
         (
             &'static ChildOf,
             &'static ClientPeer,
-            &'static AbortTask,
+            &'static TokioTask,
             Has<DesktopPeer>,
         ),
         With<Client>,
@@ -208,7 +208,7 @@ impl Current<'_, '_> {
             .clients
             .get(client)
             .map_err(|_| CredentialOutcome::Refused)?;
-        if parent.parent() != daemon || !admitted || task.0.is_finished() {
+        if parent.parent() != daemon || !admitted || task.is_finished() {
             return Err(CredentialOutcome::Refused);
         }
         let policy = self

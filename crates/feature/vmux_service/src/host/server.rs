@@ -4,7 +4,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
-use vmux_ecs::service::{AbortTask, Executor, Operations, Protocols, Register, Remote, Wake};
+use vmux_ecs::TokioTask;
+use vmux_ecs::service::{Executor, Operations, Protocols, Register, Remote, Wake};
 use vmux_process::ProcessRuntime;
 
 pub use super::peer::TrustedDesktop;
@@ -151,7 +152,7 @@ fn start(
                 started_at,
                 ConnectionInbox(connection_inbox),
                 Shutdown(shutdown),
-                AbortTask(task),
+                TokioTask::new(task),
             ));
         let _ = wake.0.send(());
     }
@@ -233,14 +234,14 @@ fn dispatch_clients(
         });
         commands
             .entity(entity)
-            .insert(AbortTask(task))
+            .insert(TokioTask::new(task))
             .remove::<PendingClient>();
     }
 }
 
-fn reap_clients(clients: Query<(Entity, &AbortTask), With<Client>>, mut commands: Commands) {
+fn reap_clients(clients: Query<(Entity, &TokioTask), With<Client>>, mut commands: Commands) {
     for (entity, task) in &clients {
-        if task.0.is_finished() {
+        if task.is_finished() {
             commands.entity(entity).despawn();
         }
     }
@@ -347,9 +348,9 @@ mod tests {
                 if shutdown.is_finished()
                     && app
                         .world_mut()
-                        .query_filtered::<&AbortTask, With<Daemon>>()
+                        .query_filtered::<&TokioTask, With<Daemon>>()
                         .iter(app.world())
-                        .all(|task| task.0.is_finished())
+                        .all(|task| task.is_finished())
                 {
                     break;
                 }

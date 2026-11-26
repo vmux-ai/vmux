@@ -457,24 +457,10 @@ impl HeadlessTokioRunner {
         if has_barrier {
             return true;
         }
-        let has_tokio_task = world
+        world
             .query_filtered::<&TokioTask, With<ShutdownPending>>()
             .iter(world)
-            .any(|task| !task.is_finished());
-        if has_tokio_task {
-            return true;
-        }
-        #[cfg(all(not(target_os = "ios"), feature = "host"))]
-        {
-            let has_abort_task = world
-                .query_filtered::<&vmux_ecs::service::AbortTask, With<ShutdownPending>>()
-                .iter(world)
-                .any(|task| !task.0.is_finished());
-            if has_abort_task {
-                return true;
-            }
-        }
-        false
+            .any(|task| !task.is_finished())
     }
 
     fn park_drain(&mut self, wait: Duration) {

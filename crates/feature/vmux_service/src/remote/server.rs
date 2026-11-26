@@ -4,8 +4,8 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use tokio::sync::{mpsc, watch};
 use vmux_api::remote::{Live, Observation as RemoteObservation, RemotePhase};
-use vmux_ecs::Revision;
-use vmux_ecs::service::{AbortTask, Executor, Register, Remote};
+use vmux_ecs::service::{Executor, Register, Remote};
+use vmux_ecs::{Revision, TokioTask};
 use vmux_feature::flag::Decision;
 use vmux_transport::service::RemoteDriver;
 
@@ -115,7 +115,7 @@ type RemoteRuntimes<'w, 's> = Query<
 >;
 
 type OwnedDialers<'w, 's> =
-    Query<'w, 's, (Entity, &'static AbortTask, &'static ChildOf, Has<Stopping>), With<Dialer>>;
+    Query<'w, 's, (Entity, &'static TokioTask, &'static ChildOf, Has<Stopping>), With<Dialer>>;
 
 fn retire(
     tasks: OwnedDialers,
@@ -130,7 +130,7 @@ fn retire(
         if !exposure.0 && !stopping {
             commands.entity(entity).insert(Stopping);
         }
-        if task.0.is_finished()
+        if task.is_finished()
             && !sessions
                 .iter()
                 .any(|session| session.parent() == owner.parent())
@@ -266,7 +266,7 @@ fn dial(
 }
 
 fn dispatch(
-    requests: Query<(Entity, &ChildOf, &RemoteState, &DialLiveness), Without<AbortTask>>,
+    requests: Query<(Entity, &ChildOf, &RemoteState, &DialLiveness), Without<TokioTask>>,
     runtimes: Query<(&Executor, &RemoteExposure)>,
     decision: Query<&Decision<bool>, With<Live>>,
     mut commands: Commands,
@@ -281,7 +281,7 @@ fn dispatch(
             continue;
         }
         let task = executor.0.spawn(state.clone().dial(liveness.0.clone()));
-        commands.entity(entity).insert(AbortTask(task));
+        commands.entity(entity).insert(TokioTask::new(task));
     }
 }
 
@@ -477,7 +477,7 @@ mod tests {
                 Name::new("Accepted remote IO"),
                 Dialer,
                 ChildOf(fixture.root),
-                AbortTask(task),
+                TokioTask::new(task),
             ))
             .id();
         fixture.app.update();
@@ -494,9 +494,8 @@ mod tests {
             !fixture
                 .app
                 .world()
-                .get::<AbortTask>(dialer)
+                .get::<TokioTask>(dialer)
                 .unwrap()
-                .0
                 .is_finished()
         );
         finish.send(()).unwrap();

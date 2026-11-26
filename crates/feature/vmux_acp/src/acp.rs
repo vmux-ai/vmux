@@ -25,8 +25,8 @@ use vmux_api::protocol::{
 use vmux_api::session::Message;
 use vmux_api::session::{RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_ecs::channel::{ChannelReceived, SpawnReceiver, SpawnSender};
-use vmux_ecs::service::{AbortTask, Shutdown, ShutdownComplete, ShutdownPending};
-use vmux_ecs::{CreatedAt, ProcessId};
+use vmux_ecs::service::{Shutdown, ShutdownComplete, ShutdownPending};
+use vmux_ecs::{CreatedAt, ProcessId, TokioTask};
 use vmux_process::ProcessRuntime;
 use vmux_session::SessionId;
 
@@ -456,7 +456,7 @@ fn spawn(
                 },
                 AcpSessionAgent(request.agent_id.clone()),
                 CreatedAt::now(),
-                AbortTask(task),
+                TokioTask::new(task),
             ));
             session_ids.insert(request.sid.clone());
         }
@@ -918,11 +918,11 @@ fn close(
 }
 
 fn reap(
-    sessions: Query<(Entity, &AbortTask), bevy::prelude::With<AcpSessionClosing>>,
+    sessions: Query<(Entity, &TokioTask), bevy::prelude::With<AcpSessionClosing>>,
     mut commands: Commands,
 ) {
     for (entity, task) in &sessions {
-        if task.0.is_finished() {
+        if task.is_finished() {
             commands.entity(entity).despawn();
         }
     }
@@ -953,13 +953,13 @@ fn begin_shutdown(
 
 fn shutdown(
     runtime: Single<&AcpSessionRuntime>,
-    mut tasks: Query<(Entity, &mut AbortTask), bevy::prelude::With<AcpSessionShared>>,
+    mut tasks: Query<(Entity, &mut TokioTask), bevy::prelude::With<AcpSessionShared>>,
     mut commands: Commands,
 ) {
     runtime.0.block_on(async {
         for (entity, mut task) in &mut tasks {
-            task.0.abort();
-            let _ = (&mut task.0).await;
+            task.abort();
+            let _ = task.join().await;
             commands.entity(entity).despawn();
         }
     });

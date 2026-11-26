@@ -23,15 +23,6 @@ pub struct Executor(pub tokio::runtime::Handle);
 #[derive(Component, Clone)]
 pub struct Wake(pub mpsc::UnboundedSender<()>);
 
-#[derive(Component)]
-pub struct AbortTask(pub tokio::task::JoinHandle<()>);
-
-impl Drop for AbortTask {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
 #[derive(Component, Clone)]
 #[allow(unknown_lints, vmux_ecs_ownership)]
 pub struct Operations(pub Arc<dyn RemoteOperationStore>);

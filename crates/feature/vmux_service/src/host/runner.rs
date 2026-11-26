@@ -68,7 +68,7 @@ mod tests {
             );
         app.world_mut().spawn(inboxes);
         app.world_mut().spawn((
-            vmux_ecs::service::AbortTask(task),
+            vmux_ecs::TokioTask::new(task),
             vmux_ecs::service::ShutdownPending,
         ));
         assert_eq!(app.run(), AppExit::Success);

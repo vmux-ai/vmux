@@ -1,13 +1,12 @@
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll, Wake as TaskWake, Waker};
+use std::task::{Wake as TaskWake, Waker};
 
 use bevy::prelude::*;
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot};
-use vmux_ecs::Uuid;
-use vmux_ecs::service::{AbortTask, Wake};
+use vmux_ecs::service::Wake;
+use vmux_ecs::{TokioTask, TokioTaskOutcome, Uuid};
 
 pub(super) struct RemoteIoPlugin;
 
@@ -50,7 +49,7 @@ impl<T: Send + Sync + 'static> Output<T> {
         (
             Name::new("Remote blocking IO"),
             Self(receiver),
-            AbortTask(task),
+            TokioTask::new(task),
             accepted,
             loan.clone(),
             CompletionWake(notify),
@@ -71,7 +70,7 @@ impl<T: Send + Sync + 'static> Output<T> {
         (
             Name::new("Remote native IO"),
             Self(receiver),
-            AbortTask(task),
+            TokioTask::new(task),
             accepted,
             loan.clone(),
             CompletionWake(notify),
@@ -102,17 +101,18 @@ impl TaskWake for Notify {
 }
 
 fn collect(
-    mut tasks: Query<(Entity, &mut AbortTask, &CompletionWake), Without<Joined>>,
+    mut tasks: Query<(Entity, &mut TokioTask, &CompletionWake), Without<Joined>>,
     mut commands: Commands,
 ) {
     for (entity, mut task, notify) in &mut tasks {
-        let mut context = Context::from_waker(&notify.0);
-        let Poll::Ready(result) = Pin::new(&mut task.0).poll(&mut context) else {
+        let Some(outcome) = task.poll_outcome(&notify.0) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .insert(Joined(result.map_err(|error| error.to_string())));
+        let result = match outcome {
+            TokioTaskOutcome::Completed => Ok(()),
+            TokioTaskOutcome::Canceled | TokioTaskOutcome::Panicked => Err(outcome.to_string()),
+        };
+        commands.entity(entity).insert(Joined(result));
         notify.0.wake_by_ref();
     }
 }
