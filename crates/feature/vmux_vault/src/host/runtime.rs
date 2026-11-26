@@ -4,8 +4,9 @@ use std::time::Duration;
 use crate::storage::VaultStorage;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, futures_lite::future};
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use vmux_ecs::watch::{FileWatch, FileWatchEvent, FileWatchPlugin};
 use vmux_ecs::{Generation, SequenceCounter};
+use vmux_path::PathIdentity;
 
 use crate::state::{VaultOperationKind, VaultRepository, VaultSnapshot, VaultSyncRequest};
 
@@ -17,13 +18,12 @@ use super::{
 
 impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<Notification>()
+        app.add_plugins(FileWatchPlugin)
             .add_systems(PreStartup, start_watch)
             .add_systems(Startup, spawn)
             .add_systems(
                 Update,
                 (
-                    receive,
                     drain_watch,
                     start_scan,
                     launch_scan,
@@ -43,45 +43,22 @@ fn start_watch(world: &mut World) {
     let wake = world
         .get_resource::<bevy::winit::EventLoopProxyWrapper>()
         .map(|wrapper| (**wrapper).clone());
-    if let Some(watch) = VaultWatch::new(wake) {
-        world.insert_non_send(watch);
-    }
+    world.insert_non_send(VaultWatch::new(wake));
 }
 
 struct VaultWatch {
-    _watcher: RecommendedWatcher,
-    rx: mpsc::Receiver<Notification>,
     debounce_tx: mpsc::Sender<()>,
     ready_rx: mpsc::Receiver<()>,
     remote_rx: mpsc::Receiver<()>,
 }
 
-#[derive(Message)]
-struct Notification(Vec<std::path::PathBuf>);
-
 impl VaultWatch {
     const AUTO_SYNC_DELAY: Duration = Duration::from_secs(2);
     const REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(30);
 
-    fn new(
-        watch_wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
-    ) -> Option<Self> {
-        let vault_root = VaultStorage::current().root().to_path_buf();
-        let _ = std::fs::create_dir_all(&vault_root);
-        let (watch_tx, watch_rx) = mpsc::channel();
+    fn new(watch_wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>) -> Self {
         let debounce_wake = watch_wake.clone();
-        let remote_wake = watch_wake.clone();
-        let mut watcher = match notify::recommended_watcher(Self::callback(watch_tx, watch_wake)) {
-            Ok(watcher) => watcher,
-            Err(error) => {
-                warn!("Vault watcher init failed: {error}");
-                return None;
-            }
-        };
-        if let Err(error) = watcher.watch(&vault_root, RecursiveMode::Recursive) {
-            warn!("Vault watcher init failed: {error}");
-            return None;
-        }
+        let remote_wake = watch_wake;
         let (debounce_tx, debounce_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
         let (remote_tx, remote_rx) = mpsc::channel();
@@ -127,49 +104,34 @@ impl VaultWatch {
         {
             warn!("Vault remote-sync worker init failed: {error}");
         }
-        Some(Self {
-            _watcher: watcher,
-            rx: watch_rx,
+        Self {
             debounce_tx,
             ready_rx,
             remote_rx,
-        })
-    }
-
-    fn callback(
-        sender: mpsc::Sender<Notification>,
-        wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
-    ) -> impl FnMut(notify::Result<notify::Event>) + Send + 'static {
-        move |result| {
-            if !Self::requests_sync(&result) {
-                return;
-            }
-            let Ok(event) = result else {
-                return;
-            };
-            if sender.send(Notification(event.paths)).is_ok()
-                && let Some(wake) = &wake
-            {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
         }
     }
 
-    fn requests_sync(result: &notify::Result<notify::Event>) -> bool {
-        result.as_ref().is_ok_and(|event| {
-            !matches!(event.kind, notify::EventKind::Access(_))
-                && event
-                    .paths
-                    .iter()
-                    .any(|path| VaultStorage::current().manages(path))
+    fn requests_sync(storage: &VaultStorage, event: &FileWatchEvent) -> bool {
+        if event.error.is_some() {
+            return false;
+        }
+        let resolved_root = PathIdentity::resolve(storage.root()).into_path_buf();
+        event.paths.iter().any(|path| {
+            storage.manages(path)
+                || path
+                    .strip_prefix(&resolved_root)
+                    .ok()
+                    .is_some_and(|relative| storage.manages(&storage.root().join(relative)))
         })
     }
 }
 
 fn spawn(mut commands: Commands) {
     let storage = VaultStorage::current();
+    let _ = std::fs::create_dir_all(storage.root());
     commands.spawn((
         vmux_ecs::Cwd(storage.root().to_path_buf()),
+        FileWatch::recursive(storage.root().to_path_buf()),
         super::key::RepositoryDirectory(storage.repository().to_path_buf()),
         super::key::AcceptedStorage(storage),
         super::key::KeyNamespace(crate::storage::keys::NativeKeyAccess::current()),
@@ -358,39 +320,36 @@ fn drain_scan(
     }
 }
 
-fn receive(watcher: Option<NonSend<VaultWatch>>, mut notifications: MessageWriter<Notification>) {
-    let Some(watcher) = watcher else {
-        return;
-    };
-    for notification in watcher.rx.try_iter() {
-        notifications.write(notification);
-    }
-}
-
 fn drain_watch(
     watcher: Option<NonSendMut<VaultWatch>>,
-    mut registry: Query<(&mut VaultRegistry, &mut VaultAutoSync)>,
-    mut notifications: MessageReader<Notification>,
+    mut registry: Query<(
+        &mut VaultRegistry,
+        &mut VaultAutoSync,
+        Option<&super::key::AcceptedStorage>,
+    )>,
+    mut events: MessageReader<FileWatchEvent>,
 ) {
-    let Some(watcher) = watcher else {
+    let Ok((mut state, mut auto_sync, accepted)) = registry.single_mut() else {
+        events.clear();
         return;
     };
-    let Ok((mut state, mut auto_sync)) = registry.single_mut() else {
-        return;
-    };
-    if watcher.remote_rx.try_iter().next().is_some() {
+    if let Some(watcher) = watcher.as_deref()
+        && watcher.remote_rx.try_iter().next().is_some()
+    {
         auto_sync.requested = true;
         auto_sync.remote_check = true;
     }
+    let storage = accepted
+        .map(|accepted| accepted.0.clone())
+        .unwrap_or_else(VaultStorage::current);
     let mut changed = false;
-    let storage = VaultStorage::current();
-    for notification in notifications.read() {
-        for path in &notification.0 {
-            changed |= storage.manages(path);
-        }
+    for event in events.read() {
+        changed |= VaultWatch::requests_sync(&storage, event);
     }
     if !changed {
-        if watcher.ready_rx.try_iter().next().is_some() {
+        if let Some(watcher) = watcher.as_deref()
+            && watcher.ready_rx.try_iter().next().is_some()
+        {
             auto_sync.requested = true;
         }
         return;
@@ -399,8 +358,10 @@ fn drain_watch(
     state.generation = state.generation.wrapping_add(1);
     auto_sync.requested = false;
     auto_sync.remote_check = false;
-    let _ = watcher.ready_rx.try_iter().count();
-    let _ = watcher.debounce_tx.send(());
+    if let Some(watcher) = watcher.as_deref() {
+        let _ = watcher.ready_rx.try_iter().count();
+        let _ = watcher.debounce_tx.send(());
+    }
 }
 
 fn queue_auto_sync(
@@ -523,6 +484,8 @@ impl VaultSnapshot {
 
 #[cfg(test)]
 mod tests {
+    use vmux_ecs::watch::FileWatchEventKind;
+
     use super::*;
 
     struct VaultAutoSyncScenario;
@@ -565,9 +528,24 @@ mod tests {
 
     #[test]
     fn vault_notifications_queue_only_managed_changes() {
-        let root = VaultStorage::current().root().to_path_buf();
-        let (sender, receiver) = mpsc::channel();
-        let mut callback = VaultWatch::callback(sender, None);
+        let storage = VaultStorage::current();
+        let root = storage.root().to_path_buf();
+        let mut app = App::new();
+        app.add_message::<FileWatchEvent>()
+            .add_systems(Update, drain_watch);
+        let vault = app
+            .world_mut()
+            .spawn((
+                VaultRegistry {
+                    dirty: false,
+                    generation: 1,
+                    ..Default::default()
+                },
+                VaultAutoSync::default(),
+                super::super::key::AcceptedStorage(storage),
+            ))
+            .id();
+
         for path in [
             "projects/repo/target/debug/object.o",
             "workspace/repo/file.rs",
@@ -575,35 +553,42 @@ mod tests {
             ".git/index.lock",
             "knowledge/.DS_Store",
         ] {
-            callback(Ok(notify::Event::new(notify::EventKind::Modify(
-                notify::event::ModifyKind::Any,
-            ))
-            .add_path(root.join(path))));
+            app.world_mut().write_message(FileWatchEvent::changed(
+                vec![root.join(path)],
+                FileWatchEventKind::Modified,
+            ));
         }
-        callback(Ok(notify::Event::new(notify::EventKind::Access(
-            notify::event::AccessKind::Any,
-        ))
-        .add_path(root.join("knowledge/note.md"))));
-        assert!(matches!(
-            receiver.try_recv(),
-            Err(mpsc::TryRecvError::Empty)
+        app.world_mut()
+            .write_message(FileWatchEvent::error("transient error"));
+        app.update();
+        let registry = app.world().get::<VaultRegistry>(vault).unwrap();
+        assert!(!registry.dirty);
+        assert_eq!(registry.generation, 1);
+
+        app.world_mut().write_message(FileWatchEvent::changed(
+            vec![root.join("knowledge/note.md")],
+            FileWatchEventKind::Modified,
         ));
-        let knowledge =
-            notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Any))
-                .add_path(root.join("knowledge/note.md"));
-        callback(Ok(knowledge.clone()));
-        assert_eq!(receiver.try_recv().unwrap().0, knowledge.paths);
-        let moved = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Name(
-            notify::event::RenameMode::Both,
-        )))
-        .add_path(root.join("projects/import/note.md"))
-        .add_path(root.join("knowledge/imported.md"));
-        callback(Ok(moved.clone()));
-        assert_eq!(receiver.try_recv().unwrap().0, moved.paths);
-        assert!(matches!(
-            receiver.try_recv(),
-            Err(mpsc::TryRecvError::Empty)
+        app.update();
+        let registry = app.world().get::<VaultRegistry>(vault).unwrap();
+        assert!(registry.dirty);
+        assert_eq!(registry.generation, 2);
+
+        app.world_mut()
+            .get_mut::<VaultRegistry>(vault)
+            .unwrap()
+            .dirty = false;
+        app.world_mut().write_message(FileWatchEvent::changed(
+            vec![
+                root.join("projects/import/note.md"),
+                root.join("knowledge/imported.md"),
+            ],
+            FileWatchEventKind::Renamed,
         ));
+        app.update();
+        let registry = app.world().get::<VaultRegistry>(vault).unwrap();
+        assert!(registry.dirty);
+        assert_eq!(registry.generation, 3);
     }
 
     #[test]

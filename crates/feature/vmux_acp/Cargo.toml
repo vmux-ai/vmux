@@ -43,7 +43,6 @@ app = [
     "dep:futures-lite",
     "dep:image",
     "dep:moonshine-save",
-    "dep:notify",
     "dep:rfd",
     "dep:reqwest",
     "dep:ron",
@@ -99,7 +98,6 @@ bevy = { workspace = true, optional = true }
 bevy_cef = { workspace = true, optional = true }
 bevy_reflect = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
-notify = { workspace = true, optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "blocking"], optional = true }
 rfd = { workspace = true, optional = true }
 ron = { workspace = true, optional = true }

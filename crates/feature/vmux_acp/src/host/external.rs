@@ -8,7 +8,6 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_api::chat::ResumeSession;
 use vmux_api::open_target::{OpenTarget, PaneOpenMode};
 use vmux_api::protocol::AcpProviderSession;
@@ -17,9 +16,13 @@ use vmux_ecs::profile::CurrentProfile;
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
+use vmux_ecs::watch::{
+    FileWatch, FileWatchEvent, FileWatchEventKind, FileWatchPlugin, FileWatchSet, WatchMode,
+};
 use vmux_ecs::{ArchivedAt, CreatedAt, EntityTarget, PageOpenRequest, PageOpenTarget};
 use vmux_job::{BlockingRuntime, BlockingTask};
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
+use vmux_path::PathIdentity;
 use vmux_session::history::{
     Committed as HistoryCommitted, FileFacts, Prepare as HistoryPrepare, Read as HistoryRead,
     Ready as HistoryReady, Received as HistoryReceived, Versions as HistoryVersions,
@@ -62,6 +65,7 @@ impl bevy::prelude::Plugin for ExternalPlugin {
             app.add_plugins(vmux_session::provider::ProviderPlugin);
         }
         app.add_plugins((
+            FileWatchPlugin,
             CatalogPlugin,
             ImportPlugin,
             archive::ArchivePlugin,
@@ -74,10 +78,17 @@ impl bevy::prelude::Plugin for ExternalPlugin {
         .add_message::<vmux_session::OperationReceived>()
         .add_systems(
             Update,
+            reconcile_targets
+                .after(FileWatchSet::Receive)
+                .before(FileWatchSet::Reconcile),
+        )
+        .add_systems(
+            Update,
             (
                 mark_activation_dirty,
                 activate,
                 cancel_scans,
+                forward_events,
                 watch,
                 request_changed_conversations,
                 finish,
@@ -961,10 +972,14 @@ impl ResumeOpener<'_> {
 }
 
 #[derive(Component)]
+struct SourceWatch;
+
+#[derive(Component)]
 struct Runtime {
+    change_sender: mpsc::Sender<SourceChange>,
     changes: Mutex<mpsc::Receiver<SourceChanges>>,
-    watcher: Option<RecommendedWatcher>,
     watched: HashMap<PathBuf, bool>,
+    watches_dirty: bool,
     sources: HashSet<SourceKind>,
     watch_codex_activity: bool,
     manager: bool,
@@ -972,47 +987,23 @@ struct Runtime {
 }
 
 impl Runtime {
-    fn ensure_watches(&mut self, paths: &SourcePaths) {
-        let Some(watcher) = self.watcher.as_mut() else {
-            return;
-        };
-        let desired = paths.watches(&self.sources, self.watch_codex_activity, self.manager);
-        let stale = self
-            .watched
-            .keys()
-            .filter(|path| !path.exists() || !desired.iter().any(|(desired, _)| desired == *path))
-            .cloned()
-            .collect::<Vec<_>>();
-        for path in stale {
-            self.watched.remove(&path);
-            let _ = watcher.unwatch(&path);
-        }
-        for (target, recursive) in desired {
+    fn desired_watches(&self, paths: &SourcePaths) -> HashMap<PathBuf, bool> {
+        let mut resolved = HashMap::new();
+        for (target, recursive) in
+            paths.watches(&self.sources, self.watch_codex_activity, self.manager)
+        {
             let mut path = target.clone();
             while !path.exists() && path.pop() {}
             if !path.exists() {
                 continue;
             }
             let recursive = recursive && path == target;
-            if self
-                .watched
-                .get(&path)
-                .is_some_and(|current| *current || !recursive)
-            {
-                continue;
-            }
-            if self.watched.remove(&path).is_some() {
-                let _ = watcher.unwatch(&path);
-            }
-            let mode = if recursive {
-                RecursiveMode::Recursive
-            } else {
-                RecursiveMode::NonRecursive
-            };
-            if watcher.watch(&path, mode).is_ok() {
-                self.watched.insert(path, recursive);
-            }
+            resolved
+                .entry(path)
+                .and_modify(|current| *current |= recursive)
+                .or_insert(recursive);
         }
+        resolved
     }
 }
 
@@ -1333,45 +1324,83 @@ impl SourcePaths {
         watches
     }
 
-    fn change(&self, kind: &notify::EventKind, path: &Path) -> Option<SourceChange> {
-        let codex_index = self.codex.join("session_index.jsonl");
-        let codex_sessions = self.codex.join("sessions");
-        let claude_history = self.claude.join("history.jsonl");
-        let vibe = self.vibe.join("logs/session");
-        if path == self.codex || path == codex_index {
+    fn resolve_deep(path: &Path) -> PathBuf {
+        let mut existing = path.to_path_buf();
+        let mut suffix = Vec::new();
+        while !existing.exists() {
+            let Some(name) = existing.file_name() else {
+                return PathIdentity::resolve(path).into_path_buf();
+            };
+            suffix.push(name.to_os_string());
+            if !existing.pop() {
+                return PathIdentity::resolve(path).into_path_buf();
+            }
+        }
+        let mut base = PathIdentity::resolve(&existing).into_path_buf();
+        for part in suffix.into_iter().rev() {
+            base.push(part);
+        }
+        base
+    }
+
+    fn change(&self, kind: FileWatchEventKind, path: &Path) -> Option<SourceChange> {
+        let resolved = Self::resolve_deep(path);
+        let codex = Self::resolve_deep(&self.codex);
+        let codex_index = codex.join("session_index.jsonl");
+        let codex_sessions = codex.join("sessions");
+        let claude = Self::resolve_deep(&self.claude);
+        let claude_history = claude.join("history.jsonl");
+        let vibe = Self::resolve_deep(&self.vibe).join("logs/session");
+        if resolved == codex || resolved == codex_index {
             return Some(SourceChange::Scan(SourceKind::Codex));
         }
-        if path == codex_sessions {
+        if resolved == codex_sessions {
             return Some(SourceChange::Scan(SourceKind::Codex));
         }
-        if path.starts_with(&codex_sessions) {
-            if kind.is_modify()
-                && path.extension().and_then(|extension| extension.to_str()) == Some("jsonl")
+        if resolved.starts_with(&codex_sessions) {
+            if matches!(
+                kind,
+                FileWatchEventKind::Modified | FileWatchEventKind::Renamed
+            ) && path.extension().and_then(|extension| extension.to_str()) == Some("jsonl")
             {
                 return Some(SourceChange::CodexActivity(path.to_path_buf()));
             }
-            if kind.is_create() || kind.is_remove() {
+            if matches!(
+                kind,
+                FileWatchEventKind::Created | FileWatchEventKind::Removed
+            ) {
                 return Some(SourceChange::Scan(SourceKind::Codex));
             }
             return None;
         }
-        if Self::codex_state(path, &self.codex) {
+        if Self::codex_state(&resolved, &codex) {
             return Some(SourceChange::CodexArchives);
         }
-        if path == self.claude || path == claude_history {
+        if resolved == claude || resolved == claude_history {
             return Some(SourceChange::Scan(SourceKind::Claude));
         }
-        if path == vibe || path.starts_with(&vibe) || vibe.starts_with(path) {
+        if resolved == vibe || resolved.starts_with(&vibe) || vibe.starts_with(&resolved) {
             return Some(SourceChange::Scan(SourceKind::Vibe));
         }
         None
     }
 
-    fn changes(&self, event: &notify::Event) -> Vec<SourceChange> {
+    fn changes(&self, event: &FileWatchEvent) -> Vec<SourceChange> {
+        if event.error.is_some()
+            || !matches!(
+                event.kind,
+                FileWatchEventKind::Created
+                    | FileWatchEventKind::Modified
+                    | FileWatchEventKind::Renamed
+                    | FileWatchEventKind::Removed
+            )
+        {
+            return Vec::new();
+        }
         event
             .paths
             .iter()
-            .filter_map(|path| self.change(&event.kind, path))
+            .filter_map(|path| self.change(event.kind, path))
             .collect()
     }
 
@@ -1738,7 +1767,7 @@ impl RuntimeActivation<'_, '_> {
             }
             return;
         }
-        if let Ok((_, mut runtime, paths)) = self.runtime.single_mut() {
+        if let Ok((_, mut runtime, _)) = self.runtime.single_mut() {
             if let Some(watch) = &mut runtime.conversation_watch {
                 watch.set_paths(conversation_paths);
             }
@@ -1753,7 +1782,7 @@ impl RuntimeActivation<'_, '_> {
                 runtime.sources = sources;
                 runtime.watch_codex_activity = watch_codex_activity;
                 runtime.manager = manager;
-                runtime.ensure_watches(paths);
+                runtime.watches_dirty = true;
                 for source in requested {
                     self.native_sources.queue(source);
                 }
@@ -1766,30 +1795,16 @@ impl RuntimeActivation<'_, '_> {
         let events = SourceWatchEvents::start(wake);
         let mut conversation_watch = ConversationWatch::start(events.sender.clone());
         conversation_watch.set_paths(conversation_paths);
-        let sender = events.sender;
-        let watched_paths = paths.clone();
-        let watcher =
-            notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
-                let Ok(event) = result else {
-                    return;
-                };
-                if !event.kind.is_create() && !event.kind.is_modify() && !event.kind.is_remove() {
-                    return;
-                }
-                for change in watched_paths.changes(&event) {
-                    let _ = sender.send(change);
-                }
-            });
-        let mut runtime = Runtime {
+        let runtime = Runtime {
+            change_sender: events.sender,
             changes: Mutex::new(events.receiver),
-            watcher: watcher.ok(),
             watched: HashMap::new(),
+            watches_dirty: true,
             sources: sources.clone(),
             watch_codex_activity,
             manager,
             conversation_watch: Some(conversation_watch),
         };
-        runtime.ensure_watches(&paths);
         self.commands
             .spawn((Name::new("ACP provider session catalog"), runtime, paths));
         for source in sources {
@@ -1943,8 +1958,84 @@ fn mark_activation_dirty(
     }
 }
 
+fn reconcile_targets(
+    mut runtime: Query<(&mut Runtime, &SourcePaths)>,
+    existing: Query<(Entity, &FileWatch), With<SourceWatch>>,
+    mut commands: Commands,
+) {
+    let Ok((mut runtime, paths)) = runtime.single_mut() else {
+        for (entity, _) in &existing {
+            commands.entity(entity).despawn();
+        }
+        return;
+    };
+    if !runtime.watches_dirty {
+        return;
+    }
+    runtime.watches_dirty = false;
+    let desired = runtime.desired_watches(paths);
+    runtime.watched = desired.clone();
+    let mut kept = HashSet::new();
+    for (entity, current) in &existing {
+        let path = current.path().to_path_buf();
+        let expected = desired.get(&path).copied().map(|recursive| {
+            if recursive {
+                WatchMode::Recursive
+            } else {
+                WatchMode::NonRecursive
+            }
+        });
+        match expected {
+            Some(mode) if current.mode() == mode && kept.insert(path) => {}
+            _ => {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+    for (path, recursive) in desired {
+        if kept.contains(&path) {
+            continue;
+        }
+        let file_watch = if recursive {
+            FileWatch::recursive(path)
+        } else {
+            FileWatch::non_recursive(path)
+        };
+        commands.spawn((Name::new("ACP source watch"), SourceWatch, file_watch));
+    }
+}
+
+fn forward_events(
+    mut events: MessageReader<FileWatchEvent>,
+    mut runtime: Query<(&mut Runtime, &SourcePaths)>,
+) {
+    let Ok((mut runtime, paths)) = runtime.single_mut() else {
+        events.clear();
+        return;
+    };
+    for event in events.read() {
+        let changes = paths.changes(event);
+        if changes.is_empty() {
+            continue;
+        }
+        if event.directory_removed
+            || matches!(
+                event.kind,
+                FileWatchEventKind::Created
+                    | FileWatchEventKind::Removed
+                    | FileWatchEventKind::Renamed
+            )
+        {
+            runtime.watches_dirty = true;
+        }
+        for change in changes {
+            let _ = runtime.change_sender.send(change);
+        }
+    }
+}
+
 fn watch(
-    runtime: Single<(Entity, &mut Runtime, &SourcePaths)>,
+    runtime: Single<(Entity, &mut Runtime)>,
     mut sources: NativeSources,
     mut entries: Query<
         (&ProviderSessionId, &AgentId, &mut SourceUpdatedAt),
@@ -1953,7 +2044,7 @@ fn watch(
     mut catalogs: Single<&mut CatalogControl>,
     mut conversations: MessageWriter<ProviderConversationChanged>,
 ) {
-    let (_, mut runtime, paths) = runtime.into_inner();
+    let (_, mut runtime) = runtime.into_inner();
     let mut changes = SourceChanges::default();
     {
         let Ok(receiver) = runtime.changes.lock() else {
@@ -1984,7 +2075,7 @@ fn watch(
     if changes.codex_archives && runtime.manager && runtime.sources.contains(&SourceKind::Codex) {
         sources.archives(SourceKind::Codex);
     }
-    runtime.ensure_watches(paths);
+    runtime.watches_dirty = true;
     for path in changes.codex_activity {
         let Some(activity) = codex::RolloutActivity::read(&path) else {
             continue;
@@ -3256,6 +3347,7 @@ mod tests {
     use std::io::Write;
     use vmux_ecs::PageMetadata;
     use vmux_ecs::profile::{ActiveProfile, Profile, ProfileDirectories, ProfilePaths};
+    use vmux_ecs::watch::Watching;
 
     struct QueuedCatalogFixture {
         app: App,
@@ -4624,23 +4716,71 @@ mod tests {
             claude: home.path().join(".claude"),
             vibe: home.path().join(".vibe"),
         };
+        let (change_sender, _) = mpsc::channel();
         let (_, receiver) = mpsc::channel();
-        let mut runtime = Runtime {
-            changes: Mutex::new(receiver),
-            watcher: notify::recommended_watcher(|_| {}).ok(),
-            watched: HashMap::new(),
-            sources: SourceKind::ALL.into_iter().collect(),
-            watch_codex_activity: false,
-            manager: true,
-            conversation_watch: None,
-        };
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, FileWatchPlugin))
+            .add_systems(
+                Update,
+                reconcile_targets
+                    .after(FileWatchSet::Receive)
+                    .before(FileWatchSet::Reconcile),
+            );
+        let runtime = app
+            .world_mut()
+            .spawn((
+                paths.clone(),
+                Runtime {
+                    change_sender,
+                    changes: Mutex::new(receiver),
+                    watched: HashMap::new(),
+                    watches_dirty: true,
+                    sources: SourceKind::ALL.into_iter().collect(),
+                    watch_codex_activity: false,
+                    manager: true,
+                    conversation_watch: None,
+                },
+            ))
+            .id();
 
-        runtime.ensure_watches(&paths);
-        assert_eq!(runtime.watched.get(home.path()), Some(&false));
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<Runtime>(runtime)
+                .unwrap()
+                .watched
+                .get(home.path()),
+            Some(&false)
+        );
+        assert!(
+            app.world_mut()
+                .query_filtered::<&FileWatch, (With<SourceWatch>, With<Watching>)>()
+                .iter(app.world())
+                .any(|watch| watch.path() == home.path() && watch.mode() == WatchMode::NonRecursive)
+        );
 
         std::fs::create_dir_all(&paths.codex).unwrap();
-        runtime.ensure_watches(&paths);
-        assert_eq!(runtime.watched.get(&paths.codex), Some(&false));
+        app.world_mut()
+            .get_mut::<Runtime>(runtime)
+            .unwrap()
+            .watches_dirty = true;
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<Runtime>(runtime)
+                .unwrap()
+                .watched
+                .get(&paths.codex),
+            Some(&false)
+        );
+        assert!(
+            app.world_mut()
+                .query_filtered::<&FileWatch, (With<SourceWatch>, With<Watching>)>()
+                .iter(app.world())
+                .any(|watch| {
+                    watch.path() == paths.codex && watch.mode() == WatchMode::NonRecursive
+                })
+        );
     }
 
     #[test]
@@ -4651,32 +4791,77 @@ mod tests {
             claude: home.path().join(".claude"),
             vibe: home.path().join(".vibe"),
         };
-        std::fs::create_dir_all(paths.codex.join("sessions")).unwrap();
+        let sessions = paths.codex.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let (change_sender, _) = mpsc::channel();
         let (_, receiver) = mpsc::channel();
-        let mut runtime = Runtime {
-            changes: Mutex::new(receiver),
-            watcher: notify::recommended_watcher(|_| {}).ok(),
-            watched: HashMap::new(),
-            sources: SourceKind::ALL.into_iter().collect(),
-            watch_codex_activity: false,
-            manager: true,
-            conversation_watch: None,
-        };
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, FileWatchPlugin))
+            .add_systems(
+                Update,
+                reconcile_targets
+                    .after(FileWatchSet::Receive)
+                    .before(FileWatchSet::Reconcile),
+            );
+        let runtime = app
+            .world_mut()
+            .spawn((
+                paths,
+                Runtime {
+                    change_sender,
+                    changes: Mutex::new(receiver),
+                    watched: HashMap::new(),
+                    watches_dirty: true,
+                    sources: SourceKind::ALL.into_iter().collect(),
+                    watch_codex_activity: false,
+                    manager: true,
+                    conversation_watch: None,
+                },
+            ))
+            .id();
 
-        runtime.ensure_watches(&paths);
+        app.update();
         assert_eq!(
-            runtime.watched.get(&paths.codex.join("sessions")),
+            app.world()
+                .get::<Runtime>(runtime)
+                .unwrap()
+                .watched
+                .get(&sessions),
             Some(&true)
         );
-        std::fs::remove_dir(paths.codex.join("sessions")).unwrap();
-        runtime.ensure_watches(&paths);
-        assert!(!runtime.watched.contains_key(&paths.codex.join("sessions")));
-        std::fs::create_dir(paths.codex.join("sessions")).unwrap();
-        runtime.ensure_watches(&paths);
+        std::fs::remove_dir(&sessions).unwrap();
+        app.world_mut()
+            .get_mut::<Runtime>(runtime)
+            .unwrap()
+            .watches_dirty = true;
+        app.update();
+        assert!(
+            !app.world()
+                .get::<Runtime>(runtime)
+                .unwrap()
+                .watched
+                .contains_key(&sessions)
+        );
+        std::fs::create_dir(&sessions).unwrap();
+        app.world_mut()
+            .get_mut::<Runtime>(runtime)
+            .unwrap()
+            .watches_dirty = true;
+        app.update();
 
         assert_eq!(
-            runtime.watched.get(&paths.codex.join("sessions")),
+            app.world()
+                .get::<Runtime>(runtime)
+                .unwrap()
+                .watched
+                .get(&sessions),
             Some(&true)
+        );
+        assert!(
+            app.world_mut()
+                .query_filtered::<&FileWatch, (With<SourceWatch>, With<Watching>)>()
+                .iter(app.world())
+                .any(|watch| watch.path() == sessions && watch.mode() == WatchMode::Recursive)
         );
     }
 
@@ -4688,25 +4873,25 @@ mod tests {
             claude: home.path().join(".claude"),
             vibe: home.path().join(".vibe"),
         };
-        let modified = notify::EventKind::Modify(notify::event::ModifyKind::Any);
+        let modified = FileWatchEventKind::Modified;
         let rollout = paths
             .codex
             .join("sessions/2026/11/01/rollout-session-id.jsonl");
 
         assert_eq!(
-            paths.change(&modified, &paths.codex.join("logs_2.sqlite-wal")),
+            paths.change(modified, &paths.codex.join("logs_2.sqlite-wal")),
             None
         );
         assert_eq!(
-            paths.change(&modified, &paths.codex.join("state_5.sqlite-wal")),
+            paths.change(modified, &paths.codex.join("state_5.sqlite-wal")),
             Some(SourceChange::CodexArchives)
         );
         assert_eq!(
-            paths.change(&modified, &paths.codex.join("session_index.jsonl")),
+            paths.change(modified, &paths.codex.join("session_index.jsonl")),
             Some(SourceChange::Scan(SourceKind::Codex))
         );
         assert_eq!(
-            paths.change(&modified, &rollout),
+            paths.change(modified, &rollout),
             Some(SourceChange::CodexActivity(rollout))
         );
     }
@@ -5159,6 +5344,7 @@ mod tests {
             .add_message::<TabLayoutSpawnRequest>()
             .add_message::<CreateRequest>()
             .add_plugins(ExternalPlugin);
+        let (change_sender, _) = mpsc::channel();
         let (_send, changes) = mpsc::channel();
         app.world_mut().spawn((
             SourcePaths {
@@ -5167,9 +5353,10 @@ mod tests {
                 vibe: dir.path().join("vibe"),
             },
             Runtime {
+                change_sender,
                 changes: Mutex::new(changes),
-                watcher: None,
                 watched: HashMap::new(),
+                watches_dirty: false,
                 sources: HashSet::new(),
                 watch_codex_activity: false,
                 manager: false,

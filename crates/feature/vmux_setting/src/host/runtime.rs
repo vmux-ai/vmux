@@ -3,10 +3,9 @@ use crate::schema::{FieldSpec, SectionSpec};
 use crate::state::{EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH};
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
+use vmux_ecs::watch::{FileWatch, FileWatchEvent, FileWatchEventKind, FileWatchPlugin};
 use vmux_feature::manifest::FeatureManifest;
 pub use vmux_layout::settings::LayoutSettings;
 use vmux_layout::settings::{ConfirmCloseSettings, ResolvedLocale};
@@ -14,6 +13,7 @@ use vmux_layout::settings::{ConfirmCloseSettings, ResolvedLocale};
 pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
 };
+use vmux_path::PathIdentity;
 
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
@@ -23,7 +23,8 @@ pub struct SettingsRuntimePlugin;
 
 impl Plugin for SettingsRuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<SettingsWriteRequest>()
+        app.add_plugins(FileWatchPlugin)
+            .add_message::<SettingsWriteRequest>()
             .add_message::<SettingsSaveRequest>()
             .init_resource::<BookmarkDefaults>()
             .init_resource::<SettingsDefaults>()
@@ -1269,11 +1270,7 @@ pub(super) struct SettingsManifest {
 }
 
 #[derive(Component)]
-struct SettingsWatcher {
-    rx: Mutex<mpsc::Receiver<()>>,
-    path: std::path::PathBuf,
-    _watcher: RecommendedWatcher,
-}
+struct SettingsPath(std::path::PathBuf);
 
 #[derive(Clone, Debug, Deserialize, Default)]
 struct PartialAppSettings {
@@ -1459,38 +1456,20 @@ fn load_settings(
     commands.insert_resource(settings);
 
     if let Some(path) = config_path {
-        let (tx, rx) = mpsc::channel();
-        let watch_path = path.clone();
-        match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-            if let Ok(event) = res
-                && (event.kind.is_modify() || event.kind.is_create())
-            {
-                let _ = tx.send(());
-            }
-        }) {
-            Ok(mut watcher) => {
-                if let Err(e) =
-                    watcher.watch(watch_path.parent().unwrap(), RecursiveMode::NonRecursive)
-                {
-                    bevy::log::warn!("Failed to watch settings dir: {e}");
-                } else {
-                    bevy::log::info!("Watching {} for changes", path.display());
-                    commands.entity(*runtime).insert(SettingsWatcher {
-                        rx: Mutex::new(rx),
-                        path,
-                        _watcher: watcher,
-                    });
-                }
-            }
-            Err(e) => {
-                bevy::log::warn!("Failed to create file watcher: {e}");
-            }
+        let watch_dir = path.parent().map(std::path::Path::to_path_buf);
+        commands.entity(*runtime).insert(SettingsPath(path.clone()));
+        if let Some(dir) = watch_dir {
+            bevy::log::info!("Watching {} for changes", path.display());
+            commands
+                .entity(*runtime)
+                .insert(FileWatch::non_recursive(dir));
         }
     }
 }
 
 fn reload_settings_on_change(
-    watcher: Option<Single<&SettingsWatcher>>,
+    path: Option<Single<&SettingsPath>>,
+    mut events: MessageReader<FileWatchEvent>,
     defaults: Res<SettingsDefaults>,
     mut settings: ResMut<AppSettings>,
     mut layout_settings: ResMut<LayoutSettings>,
@@ -1498,19 +1477,42 @@ fn reload_settings_on_change(
     mut resolved_locale: ResMut<ResolvedLocale>,
     last_hash: Single<&LastSelfWriteHash>,
 ) {
-    let Some(watcher) = watcher else { return };
-
-    let rx = watcher.rx.lock().unwrap();
+    let Some(path) = path else {
+        events.clear();
+        return;
+    };
+    let resolved_file = PathIdentity::resolve(&path.0).into_path_buf();
+    let resolved_dir = path
+        .0
+        .parent()
+        .map(|parent| PathIdentity::resolve(parent).into_path_buf());
     let mut changed = false;
-    while rx.try_recv().is_ok() {
-        changed = true;
+    for event in events.read() {
+        if event.error.is_some()
+            || !matches!(
+                event.kind,
+                FileWatchEventKind::Created
+                    | FileWatchEventKind::Modified
+                    | FileWatchEventKind::Renamed
+            )
+        {
+            continue;
+        }
+        if event.paths.iter().any(|candidate| {
+            let resolved = PathIdentity::resolve(candidate);
+            resolved.as_path() == resolved_file
+                || resolved_dir
+                    .as_deref()
+                    .is_some_and(|dir| resolved.as_path() == dir)
+        }) {
+            changed = true;
+        }
     }
-    drop(rx);
     if !changed {
         return;
     }
 
-    match std::fs::read_to_string(&watcher.path) {
+    match std::fs::read_to_string(&path.0) {
         Ok(text) => {
             let current_hash = LastSelfWriteHash::compute(text.as_bytes());
             if last_hash.0 == Some(current_hash) {
@@ -1519,7 +1521,7 @@ fn reload_settings_on_change(
             }
             match AppSettings::parse_with_defaults(&text, &defaults.0) {
                 Ok(new_settings) => {
-                    bevy::log::info!("Settings reloaded from {}", watcher.path.display());
+                    bevy::log::info!("Settings reloaded from {}", path.0.display());
                     let locale =
                         vmux_ui::i18n::Locale::requested(Some(&new_settings.appearance.locale));
                     locale.make_current();
@@ -2050,22 +2052,19 @@ fn flush_settings_save(
 
 fn persist_settings_to_disk(
     mut reader: MessageReader<SettingsWriteRequest>,
-    watcher: Option<Single<&SettingsWatcher>>,
+    path: Option<Single<&SettingsPath>>,
     mut last_hash: Single<&mut LastSelfWriteHash>,
 ) {
     for request in reader.read() {
-        let Some(watcher) = watcher.as_deref() else {
-            bevy::log::warn!("settings: no watcher path; cannot persist");
+        let Some(path) = path.as_deref() else {
+            bevy::log::warn!("settings: no config path; cannot persist");
             continue;
         };
         let bytes = request.ron_bytes.as_bytes();
         let hash = LastSelfWriteHash::compute(bytes);
         last_hash.0 = Some(hash);
-        if let Err(e) = vmux_path::AtomicFile::write(&watcher.path, bytes) {
-            bevy::log::warn!(
-                "settings: failed to persist {}: {e}",
-                watcher.path.display()
-            );
+        if let Err(e) = vmux_path::AtomicFile::write(&path.0, bytes) {
+            bevy::log::warn!("settings: failed to persist {}: {e}", path.0.display());
         }
     }
 }
@@ -3306,6 +3305,64 @@ mod tests {
         assert_eq!(
             AppSettings::test_parse(&out).unwrap().appearance.locale,
             "ja"
+        );
+    }
+
+    #[test]
+    fn reload_settings_reacts_only_to_matching_watch_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("settings.ron");
+        std::fs::write(&config, r#"(browser: (search_engine: "duckduckgo"))"#).unwrap();
+        let other = tempfile::tempdir().unwrap();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<FileWatchEvent>()
+            .insert_resource(SettingsDefaults(AppSettings::test_embedded_defaults()))
+            .insert_resource(AppSettings::test_embedded_defaults())
+            .insert_resource(LayoutSettings::default())
+            .insert_resource(ConfirmCloseSettings { enabled: true })
+            .insert_resource(ResolvedLocale(vmux_ui::i18n::Locale::requested(None)))
+            .add_systems(Update, reload_settings_on_change);
+        let runtime = app
+            .world_mut()
+            .spawn((SettingsPath(config.clone()), LastSelfWriteHash::default()))
+            .id();
+
+        app.world_mut().write_message(FileWatchEvent::changed(
+            vec![other.path().join("settings.ron")],
+            FileWatchEventKind::Modified,
+        ));
+        app.update();
+        assert_eq!(
+            app.world().resource::<AppSettings>().browser.search_engine,
+            "google"
+        );
+
+        app.world_mut().write_message(FileWatchEvent::changed(
+            vec![config.clone()],
+            FileWatchEventKind::Renamed,
+        ));
+        app.update();
+        assert_eq!(
+            app.world().resource::<AppSettings>().browser.search_engine,
+            "duckduckgo"
+        );
+
+        let self_written = r#"(browser: (search_engine: "bing"))"#;
+        std::fs::write(&config, self_written).unwrap();
+        app.world_mut()
+            .get_mut::<LastSelfWriteHash>(runtime)
+            .unwrap()
+            .0 = Some(LastSelfWriteHash::compute(self_written.as_bytes()));
+        app.world_mut().write_message(FileWatchEvent::changed(
+            vec![config],
+            FileWatchEventKind::Modified,
+        ));
+        app.update();
+        assert_eq!(
+            app.world().resource::<AppSettings>().browser.search_engine,
+            "duckduckgo"
         );
     }
 }
