@@ -7,8 +7,8 @@ use bevy_app::App;
 use bevy_ecs::prelude::*;
 use vmux_app::VmuxPlugin;
 use vmux_app::ecs::time::{
-    BackoffPolicy, Clock, Deadline, DeadlinePlugin, DeadlineReached, Debounce, RetryBackoff,
-    TimeWake,
+    BackoffPolicy, Clock, Deadline, DeadlinePlugin, DeadlineReached, Debounce, RateLimitDecision,
+    RateLimitPlugin, RateLimitPolicy, RateLimiter, RetryBackoff, TimeWake,
 };
 use vmux_app::ecs::{
     ArchiveRequest, ArchivedAt, CreatedAt, ExpiresAt, JobWake, Touch, UnarchiveRequest, UpdatedAt,
@@ -162,9 +162,79 @@ fn job_wake_automatically_wires_time_wake_for_coalesced_deadlines() {
     let clock = app.world().resource::<Clock>().clone();
     app.world_mut()
         .spawn(Deadline::<Refresh>::after(&clock, Duration::from_secs(20)));
-    app.world_mut()
-        .spawn(Deadline::<Refresh>::after(&clock, Duration::from_millis(20)));
+    app.world_mut().spawn(Deadline::<Refresh>::after(
+        &clock,
+        Duration::from_millis(20),
+    ));
 
     rx.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn rate_limiter_works_deterministically_with_fake_clock_through_vmux_app() {
+    let clock = Clock::fake(1_700_000_000_000);
+    let mut app = App::new();
+    app.insert_resource(clock.clone()).add_plugins((
+        VmuxPlugin::builder().build(),
+        RateLimitPlugin::<String>::default(),
+        RateLimitPlugin::<String>::default(),
+    ));
+
+    let endpoint = app
+        .world_mut()
+        .spawn(RateLimiter::<String>::new(
+            RateLimitPolicy::per_second(2, 2).with_max_entries(2),
+        ))
+        .id();
+
+    {
+        let mut limiter = app
+            .world_mut()
+            .get_mut::<RateLimiter<String>>(endpoint)
+            .unwrap();
+        assert_eq!(
+            limiter.check("10.0.0.1".to_string(), &clock),
+            RateLimitDecision::allowed()
+        );
+        assert_eq!(
+            limiter.check("10.0.0.1".to_string(), &clock),
+            RateLimitDecision::allowed()
+        );
+        assert_eq!(
+            limiter.check("10.0.0.1".to_string(), &clock),
+            RateLimitDecision::limited(Duration::from_millis(500))
+        );
+        assert_eq!(limiter.tracked(), 1);
+    }
+
+    clock.advance(Duration::from_millis(250));
+    app.update();
+    assert_eq!(
+        app.world()
+            .get::<RateLimiter<String>>(endpoint)
+            .unwrap()
+            .peek(&"10.0.0.1".to_string(), &clock),
+        RateLimitDecision::limited(Duration::from_millis(250))
+    );
+
+    clock.advance(Duration::from_millis(250));
+    {
+        let mut limiter = app
+            .world_mut()
+            .get_mut::<RateLimiter<String>>(endpoint)
+            .unwrap();
+        assert!(limiter.check("10.0.0.1".to_string(), &clock).is_allowed());
+        assert!(limiter.check("10.0.0.1".to_string(), &clock).is_limited());
+    }
+
+    clock.advance(Duration::from_secs(1));
+    app.update();
+    assert_eq!(
+        app.world()
+            .get::<RateLimiter<String>>(endpoint)
+            .unwrap()
+            .tracked(),
+        0
+    );
 }

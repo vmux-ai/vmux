@@ -10,9 +10,11 @@ pub use deadline::{
     BackoffPolicy, Deadline, DeadlinePlugin, DeadlineReached, DeadlineScheduler, DeadlineSet,
     Debounce, RetryBackoff,
 };
+pub use rate_limit::{RateLimitDecision, RateLimitPlugin, RateLimitPolicy, RateLimiter};
 
 mod clock;
 mod deadline;
+mod rate_limit;
 
 pub struct TimePlugin;
 
