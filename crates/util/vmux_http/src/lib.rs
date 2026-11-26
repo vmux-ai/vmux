@@ -5,6 +5,7 @@ use std::pin::pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Waker;
+use std::time::Duration;
 
 use bevy_app::{App, Plugin, PostUpdate, Update};
 use bevy_ecs::lifecycle::HookContext;
@@ -16,12 +17,12 @@ use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::net::TcpListener as TokioTcpListener;
 use tokio::runtime::Handle;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{Semaphore, oneshot, watch};
 use vmux_channel::{AsyncChannelPlugin, ChannelWake, SpawnReceiver, SpawnSender};
 use vmux_ecs::{
     Shutdown, ShutdownBarrier, ShutdownComplete, ShutdownPhase, ShutdownPlugin, ShutdownSet,
@@ -102,6 +103,9 @@ pub struct HttpServer {
     listener: Option<std::net::TcpListener>,
     runtime: Option<Handle>,
     max_body_bytes: usize,
+    max_connections: Option<usize>,
+    request_timeout: Option<Duration>,
+    header_read_timeout: Option<Duration>,
 }
 
 impl HttpServer {
@@ -113,6 +117,9 @@ impl HttpServer {
             listener: None,
             runtime: None,
             max_body_bytes: Self::DEFAULT_MAX_BODY_BYTES,
+            max_connections: None,
+            request_timeout: None,
+            header_read_timeout: None,
         }
     }
 
@@ -123,6 +130,9 @@ impl HttpServer {
             listener: Some(listener),
             runtime: None,
             max_body_bytes: Self::DEFAULT_MAX_BODY_BYTES,
+            max_connections: None,
+            request_timeout: None,
+            header_read_timeout: None,
         }
     }
 
@@ -134,6 +144,33 @@ impl HttpServer {
     pub fn with_max_body_bytes(mut self, max_body_bytes: usize) -> Self {
         self.max_body_bytes = max_body_bytes;
         self
+    }
+
+    pub fn with_max_connections(mut self, max_connections: usize) -> Self {
+        self.max_connections = Some(max_connections.max(1));
+        self
+    }
+
+    pub fn max_connections(&self) -> Option<usize> {
+        self.max_connections
+    }
+
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = Some(timeout);
+        self
+    }
+
+    pub fn request_timeout(&self) -> Option<Duration> {
+        self.request_timeout
+    }
+
+    pub fn with_header_read_timeout(mut self, timeout: Duration) -> Self {
+        self.header_read_timeout = Some(timeout);
+        self
+    }
+
+    pub fn header_read_timeout(&self) -> Option<Duration> {
+        self.header_read_timeout
     }
 
     pub fn addr(&self) -> Option<SocketAddr> {
@@ -355,6 +392,10 @@ impl HttpResponder {
     pub fn is_responded(&self) -> bool {
         self.tx.is_none()
     }
+
+    pub fn is_closed(&self) -> bool {
+        self.tx.as_ref().is_none_or(oneshot::Sender::is_closed)
+    }
 }
 
 impl Drop for HttpResponder {
@@ -426,6 +467,9 @@ struct AcceptConfig {
     server_entity: Entity,
     sender: SpawnSender<IncomingRequest>,
     max_body_bytes: usize,
+    connection_limit: Option<Arc<Semaphore>>,
+    request_timeout: Option<Duration>,
+    header_read_timeout: Option<Duration>,
     shutdown: watch::Receiver<bool>,
     active_connections: Arc<AtomicUsize>,
     drain_waker: Arc<Mutex<Option<Waker>>>,
@@ -444,19 +488,34 @@ impl AcceptConfig {
                 accepted = listener.accept() => {
                     match accepted {
                         Ok((stream, peer_addr)) => {
+                            let permit = match &self.connection_limit {
+                                Some(semaphore) => match Arc::clone(semaphore).try_acquire_owned() {
+                                    Ok(permit) => Some(permit),
+                                    Err(_) => {
+                                        tracing::debug!(
+                                            %peer_addr,
+                                            "HTTP connection rejected: max connections reached"
+                                        );
+                                        drop(stream);
+                                        continue;
+                                    }
+                                },
+                                None => None,
+                            };
                             let config = self.clone();
                             let guard = ConnectionGuard::new(
                                 Arc::clone(&self.active_connections),
                                 Arc::clone(&self.drain_waker),
                             );
                             handle.spawn(async move {
+                                let _permit = permit;
                                 let _guard = guard;
                                 config.serve_connection(stream, peer_addr).await;
                             });
                         }
                         Err(error) => {
                             tracing::warn!(%error, "HTTP accept failed");
-                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                            tokio::time::sleep(Duration::from_millis(10)).await;
                         }
                     }
                 }
@@ -469,6 +528,7 @@ impl AcceptConfig {
         let server_entity = self.server_entity;
         let sender = self.sender.clone();
         let max_body_bytes = self.max_body_bytes;
+        let request_timeout = self.request_timeout;
         let service = service_fn(move |request: hyper::Request<Incoming>| {
             let sender = sender.clone();
             async move {
@@ -477,6 +537,7 @@ impl AcceptConfig {
                         server_entity,
                         sender,
                         max_body_bytes,
+                        request_timeout,
                         peer_addr,
                         request,
                     )
@@ -484,7 +545,13 @@ impl AcceptConfig {
                 )
             }
         });
-        let mut conn = pin!(http1::Builder::new().serve_connection(io, service));
+        let mut builder = http1::Builder::new();
+        if let Some(timeout) = self.header_read_timeout {
+            builder
+                .timer(TokioTimer::new())
+                .header_read_timeout(timeout);
+        }
+        let mut conn = pin!(builder.serve_connection(io, service));
         tokio::select! {
             result = &mut conn => {
                 if let Err(error) = result {
@@ -510,11 +577,26 @@ impl AcceptConfig {
         server_entity: Entity,
         sender: SpawnSender<IncomingRequest>,
         max_body_bytes: usize,
+        request_timeout: Option<Duration>,
         peer_addr: SocketAddr,
         request: hyper::Request<Incoming>,
     ) -> hyper::Response<Full<Bytes>> {
         let (parts, body) = request.into_parts();
-        let collected = match Limited::new(body, max_body_bytes).collect().await {
+        let read_body = Limited::new(body, max_body_bytes).collect();
+        let body_result = match request_timeout {
+            Some(timeout) => match tokio::time::timeout(timeout, read_body).await {
+                Ok(result) => result,
+                Err(_) => {
+                    return HttpResponse::text(
+                        StatusCode::REQUEST_TIMEOUT,
+                        "request body timed out",
+                    )
+                    .into_hyper();
+                }
+            },
+            None => read_body.await,
+        };
+        let collected = match body_result {
             Ok(collected) => collected.to_bytes().to_vec(),
             Err(error) => {
                 if error.downcast_ref::<LengthLimitError>().is_some() {
@@ -543,7 +625,17 @@ impl AcceptConfig {
             return HttpResponse::text(StatusCode::SERVICE_UNAVAILABLE, "server shutting down")
                 .into_hyper();
         }
-        match rx.await {
+        let response = match request_timeout {
+            Some(timeout) => match tokio::time::timeout(timeout, rx).await {
+                Ok(result) => result,
+                Err(_) => {
+                    return HttpResponse::text(StatusCode::GATEWAY_TIMEOUT, "request timed out")
+                        .into_hyper();
+                }
+            },
+            None => rx.await,
+        };
+        match response {
             Ok(response) => response.into_hyper(),
             Err(_) => HttpResponse::internal_error("request dropped without response").into_hyper(),
         }
@@ -603,10 +695,16 @@ fn start_servers(
         }
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let active_connections = Arc::new(AtomicUsize::new(0));
+        let connection_limit = server
+            .max_connections
+            .map(|limit| Arc::new(Semaphore::new(limit)));
         let config = AcceptConfig {
             server_entity: entity,
             sender,
             max_body_bytes: server.max_body_bytes,
+            connection_limit,
+            request_timeout: server.request_timeout,
+            header_read_timeout: server.header_read_timeout,
             shutdown: shutdown_rx,
             active_connections: Arc::clone(&active_connections),
             drain_waker: Arc::clone(&drain_waker),
@@ -629,7 +727,7 @@ fn start_servers(
 
 fn reap_responded(requests: Query<(Entity, &HttpResponder)>, mut commands: Commands) {
     for (entity, responder) in &requests {
-        if responder.is_responded() {
+        if responder.is_closed() {
             commands.entity(entity).try_despawn();
         }
     }
@@ -656,7 +754,7 @@ fn begin_shutdown(
         commands.entity(entity).remove::<HttpServerBound>();
         let has_pending_requests = requests
             .iter()
-            .any(|(parent, responder)| parent.parent() == entity && !responder.is_responded());
+            .any(|(parent, responder)| parent.parent() == entity && !responder.is_closed());
         if has_pending_requests || runtime.active_connections() > 0 {
             commands.entity(entity).insert(ShutdownBarrier);
         }
@@ -671,7 +769,7 @@ fn sync_shutdown_barriers(
     for (entity, runtime) in &servers {
         let has_pending_requests = requests
             .iter()
-            .any(|(parent, responder)| parent.parent() == entity && !responder.is_responded());
+            .any(|(parent, responder)| parent.parent() == entity && !responder.is_closed());
         if !has_pending_requests && runtime.active_connections() == 0 {
             commands.entity(entity).remove::<ShutdownBarrier>();
         }
@@ -700,7 +798,7 @@ fn finish_shutdown(
 mod tests {
     use std::io::{Read, Write};
     use std::net::TcpStream;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     use serde::Deserialize;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1049,6 +1147,278 @@ mod tests {
         );
 
         app.world_mut().despawn(server);
+        wait_port_closed(addr);
+    }
+
+    #[derive(Resource)]
+    struct HoldGate {
+        arrived_tx: Option<oneshot::Sender<()>>,
+        release_rx: Option<oneshot::Receiver<()>>,
+    }
+
+    fn handle_gated_requests(
+        mut requests: Query<(&HttpRequest, &mut HttpResponder)>,
+        mut gate: ResMut<HoldGate>,
+    ) {
+        for (request, mut responder) in &mut requests {
+            if request.path() == "/hold" {
+                if let Some(tx) = gate.arrived_tx.take() {
+                    let _ = tx.send(());
+                }
+                if let Some(rx) = gate.release_rx.as_mut()
+                    && rx.try_recv().is_ok()
+                {
+                    gate.release_rx = None;
+                    responder.respond(HttpResponse::text(StatusCode::OK, "released"));
+                }
+            } else {
+                responder.respond(HttpResponse::text(StatusCode::OK, "pong"));
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn max_connections_rejects_excess_and_recovers_after_close() {
+        let clamped = HttpServer::bind("127.0.0.1:0".parse().unwrap()).with_max_connections(0);
+        assert_eq!(clamped.max_connections(), Some(1));
+
+        let (arrived_tx, arrived_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let (handle, mut runner) = HeadlessTokioRunner::handles(Handle::current());
+        runner = runner.with_housekeeping_floor(Duration::from_secs(30));
+
+        let (addr_tx, addr_rx) = oneshot::channel();
+        let mut app = App::new();
+        app.add_plugins((ShutdownPlugin, HttpServerPlugin))
+            .insert_resource(HttpRuntime::new(Handle::current()))
+            .insert_resource(DelayedReply {
+                addr_tx: Some(addr_tx),
+                release_rx: None,
+                shutdown_sent: false,
+            })
+            .insert_resource(HoldGate {
+                arrived_tx: Some(arrived_tx),
+                release_rx: Some(release_rx),
+            })
+            .add_systems(
+                Update,
+                (publish_bound_addr, handle_gated_requests).in_set(HttpServerSet::Serve),
+            );
+        app.world_mut()
+            .spawn(HttpServer::bind("127.0.0.1:0".parse().unwrap()).with_max_connections(1));
+
+        let driver_handle = handle.clone();
+        let client_task = tokio::spawn(async move {
+            let addr = addr_rx.await.unwrap();
+            let first = tokio::spawn(async move {
+                send_raw_http_async(
+                    addr,
+                    "GET /hold HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                )
+                .await
+            });
+            arrived_rx.await.unwrap();
+
+            let mut second = TokioTcpStream::connect(addr).await.unwrap();
+            let _ = second
+                .write_all(b"GET /ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await;
+            let mut rejected = Vec::new();
+            let read_result = second.read_to_end(&mut rejected).await;
+            assert!(
+                read_result.is_err() || rejected.is_empty(),
+                "excess connection must be rejected immediately, got: {:?}",
+                String::from_utf8_lossy(&rejected)
+            );
+            drop(second);
+
+            let _ = release_tx.send(());
+            driver_handle.wake();
+            let first_response = first.await.unwrap();
+            assert!(
+                first_response.starts_with("HTTP/1.1 200 OK\r\n"),
+                "{first_response}"
+            );
+            assert!(
+                first_response.ends_with("\r\n\r\nreleased"),
+                "{first_response}"
+            );
+
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let recovered = loop {
+                let mut third = TokioTcpStream::connect(addr).await.unwrap();
+                let _ = third
+                    .write_all(
+                        b"GET /ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+                let mut bytes = Vec::new();
+                if third.read_to_end(&mut bytes).await.is_ok() && !bytes.is_empty() {
+                    break String::from_utf8(bytes).unwrap();
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "connection slot never recovered after first connection closed"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            };
+            assert!(recovered.starts_with("HTTP/1.1 200 OK\r\n"), "{recovered}");
+            assert!(recovered.ends_with("\r\n\r\npong"), "{recovered}");
+
+            driver_handle.shutdown();
+            addr
+        });
+
+        let exit = runner.run_async(&mut app).await;
+        assert_eq!(exit, bevy_app::AppExit::Success);
+        let addr = client_task.await.unwrap();
+        wait_port_closed(addr);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn request_timeout_returns_504_on_stalled_handler_and_408_on_stalled_body() {
+        let server_spec = HttpServer::bind("127.0.0.1:0".parse().unwrap())
+            .with_request_timeout(Duration::from_millis(80))
+            .with_header_read_timeout(Duration::from_millis(80));
+        assert_eq!(
+            server_spec.request_timeout(),
+            Some(Duration::from_millis(80))
+        );
+        assert_eq!(
+            server_spec.header_read_timeout(),
+            Some(Duration::from_millis(80))
+        );
+
+        let (addr_tx, addr_rx) = oneshot::channel();
+        let (handle, mut runner) = HeadlessTokioRunner::handles(Handle::current());
+        runner = runner.with_housekeeping_floor(Duration::from_secs(30));
+
+        let mut app = App::new();
+        app.add_plugins((ShutdownPlugin, HttpServerPlugin))
+            .insert_resource(HttpRuntime::new(Handle::current()))
+            .insert_resource(DelayedReply {
+                addr_tx: Some(addr_tx),
+                release_rx: None,
+                shutdown_sent: false,
+            })
+            .add_systems(Update, publish_bound_addr.in_set(HttpServerSet::Serve));
+        app.world_mut().spawn(server_spec);
+
+        let driver_handle = handle.clone();
+        let client_task = tokio::spawn(async move {
+            let addr = addr_rx.await.unwrap();
+
+            let gateway_timeout = send_raw_http_async(
+                addr,
+                "GET /stall HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            )
+            .await;
+            assert!(
+                gateway_timeout.starts_with("HTTP/1.1 504 Gateway Timeout\r\n"),
+                "{gateway_timeout}"
+            );
+
+            let mut body_stream = TokioTcpStream::connect(addr).await.unwrap();
+            body_stream
+                .write_all(
+                    b"POST /upload HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial",
+                )
+                .await
+                .unwrap();
+            body_stream.flush().await.unwrap();
+            let mut body_response = Vec::new();
+            body_stream.read_to_end(&mut body_response).await.unwrap();
+            let body_response = String::from_utf8(body_response).unwrap();
+            assert!(
+                body_response.starts_with("HTTP/1.1 408 Request Timeout\r\n"),
+                "{body_response}"
+            );
+
+            let mut header_stream = TokioTcpStream::connect(addr).await.unwrap();
+            header_stream
+                .write_all(b"GET /slow-header HTTP/1.1\r\nHost: local")
+                .await
+                .unwrap();
+            header_stream.flush().await.unwrap();
+            let header_started = Instant::now();
+            let mut header_buf = Vec::new();
+            let _ = header_stream.read_to_end(&mut header_buf).await;
+            assert!(
+                header_started.elapsed() < Duration::from_secs(2),
+                "stalled header connection should close promptly on header_read_timeout"
+            );
+
+            driver_handle.shutdown();
+            addr
+        });
+
+        let started = Instant::now();
+        let exit = runner.run_async(&mut app).await;
+        assert_eq!(exit, bevy_app::AppExit::Success);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let addr = client_task.await.unwrap();
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<HttpRequest>>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        wait_port_closed(addr);
+    }
+
+    fn serve_async_roundtrip(
+        mut requests: Query<(&HttpRequest, &mut HttpResponder)>,
+        mut shutdown: MessageWriter<ShutdownRequest>,
+    ) {
+        for (request, mut responder) in &mut requests {
+            if request.path() == "/ping" {
+                responder.respond(HttpResponse::text(StatusCode::OK, "async-pong"));
+                shutdown.write(ShutdownRequest::success());
+            } else {
+                responder.respond(HttpResponse::not_found());
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn run_async_drives_http_server_inside_tokio_test() {
+        let (addr_tx, addr_rx) = oneshot::channel();
+        let mut runner = HeadlessTokioRunner::new(Handle::current())
+            .with_housekeeping_floor(Duration::from_secs(30));
+
+        let mut app = App::new();
+        app.add_plugins((ShutdownPlugin, HttpServerPlugin))
+            .insert_resource(HttpRuntime::new(Handle::current()))
+            .insert_resource(DelayedReply {
+                addr_tx: Some(addr_tx),
+                release_rx: None,
+                shutdown_sent: false,
+            })
+            .add_systems(
+                Update,
+                (publish_bound_addr, serve_async_roundtrip).in_set(HttpServerSet::Serve),
+            );
+        app.world_mut()
+            .spawn(HttpServer::bind("127.0.0.1:0".parse().unwrap()));
+
+        let client_task = tokio::spawn(async move {
+            let addr = addr_rx.await.unwrap();
+            let response = send_raw_http_async(
+                addr,
+                "GET /ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            )
+            .await;
+            (addr, response)
+        });
+
+        let started = Instant::now();
+        let exit = runner.run_async(&mut app).await;
+        assert_eq!(exit, bevy_app::AppExit::Success);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let (addr, response) = client_task.await.unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+        assert!(response.ends_with("\r\n\r\nasync-pong"), "{response}");
         wait_port_closed(addr);
     }
 }

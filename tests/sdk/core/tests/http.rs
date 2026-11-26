@@ -139,3 +139,87 @@ fn http_server_plugin_composes_with_headless_runner_and_shutdown() {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
+
+#[test]
+fn run_async_and_hardened_http_server_work_inside_tokio_runtime() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+
+    runtime.block_on(async {
+        let handle = tokio::runtime::Handle::current();
+        let (addr_tx, addr_rx) = oneshot::channel();
+        let mut runner = HeadlessTokioRunner::new(handle.clone())
+            .with_housekeeping_floor(Duration::from_secs(30));
+
+        let mut app = App::new();
+        app.add_plugins((
+            VmuxPlugin::builder().jobs(true).build(),
+            ShutdownPlugin,
+            HttpServerPlugin,
+        ))
+        .insert_resource(HttpRuntime::new(handle))
+        .insert_resource(BoundChannel(Some(addr_tx)))
+        .add_systems(
+            Update,
+            (notify_bound, serve_routes).in_set(HttpServerSet::Serve),
+        );
+        app.world_mut().spawn(
+            HttpServer::bind("127.0.0.1:0".parse().unwrap())
+                .with_max_connections(4)
+                .with_request_timeout(Duration::from_millis(150))
+                .with_header_read_timeout(Duration::from_millis(150)),
+        );
+
+        let client = tokio::spawn(async move {
+            let addr = addr_rx.await.unwrap();
+            let health = send_http(
+                addr,
+                "GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            )
+            .await;
+
+            let mut stalled_body = TcpStream::connect(addr).await.unwrap();
+            stalled_body
+                .write_all(
+                    b"POST /stop HTTP/1.1\r\nHost: localhost\r\nContent-Length: 64\r\nConnection: close\r\n\r\nhi",
+                )
+                .await
+                .unwrap();
+            stalled_body.flush().await.unwrap();
+            let mut timeout_bytes = Vec::new();
+            stalled_body.read_to_end(&mut timeout_bytes).await.unwrap();
+            let timeout_response = String::from_utf8(timeout_bytes).unwrap();
+
+            let stop = send_http(
+                addr,
+                "POST /stop HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+            )
+            .await;
+            (addr, health, timeout_response, stop)
+        });
+
+        let started = Instant::now();
+        assert_eq!(runner.run_async(&mut app).await, AppExit::Success);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let (addr, health, timeout_response, stop) = client.await.unwrap();
+        assert!(health.starts_with("HTTP/1.1 200 OK\r\n"), "{health}");
+        assert!(
+            timeout_response.starts_with("HTTP/1.1 408 Request Timeout\r\n"),
+            "{timeout_response}"
+        );
+        assert!(stop.starts_with("HTTP/1.1 200 OK\r\n"), "{stop}");
+        assert!(stop.ends_with("\r\n\r\nbye:ok"), "{stop}");
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(50)).is_err() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "server port stayed open");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+}
