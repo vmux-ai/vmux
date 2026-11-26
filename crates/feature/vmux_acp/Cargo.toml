@@ -10,7 +10,7 @@ publish = false
 default = ["app"]
 approvals = ["dep:bevy_app", "dep:bevy_ecs", "dep:vmux_ecs", "dep:vmux_job", "dep:vmux_session"]
 service = [
-    "vmux_ecs/host",
+    "vmux_ecs/headless-host",
     "dep:vmux_job",
     "dep:vmux_spawn",
     "dep:agent-client-protocol",

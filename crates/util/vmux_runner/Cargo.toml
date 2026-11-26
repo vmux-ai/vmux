@@ -7,7 +7,7 @@ publish = false
 
 [features]
 default = []
-host = ["vmux_ecs/host"]
+host = ["vmux_ecs/headless-host"]
 winit = ["dep:bevy_winit"]
 
 [dependencies]

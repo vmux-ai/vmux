@@ -10,13 +10,13 @@ pub use vmux_task::{
     AsyncTask, IoTask, IoTaskList, IoTaskPlugin, IoTaskSet, TaskApply, TaskError, TaskFailure,
     TaskPlugin, TaskResult, TaskSet, TaskToken, TaskWake, TaskWaker,
 };
-#[cfg(feature = "host")]
+#[cfg(feature = "headless-host")]
 pub use vmux_task::{TokioTask, TokioTaskOutcome};
 pub use vmux_time as time;
 #[cfg(all(host, feature = "watch"))]
 pub use vmux_watch as watch;
 
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
@@ -32,7 +32,7 @@ pub use dirty::{Dirty, DirtyPlugin, DirtySet};
 pub use external_identity::{
     ExternalIdentity, ExternalIdentityIndex, ExternalIdentityIndexPlugin, ExternalIdentityIndexSet,
 };
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "cef-ui"))]
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
 pub use generation::{
     AtGeneration, Generation, GenerationPlugin, GenerationSet, GlobalSequence, SequenceCounter,
@@ -42,14 +42,14 @@ pub use identity::{
     IdentityIndex, IdentityIndexPlugin, IdentityIndexSet, IdentityIndexWriter, IdentityLookupError,
 };
 pub use job_wake::JobWake;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub use launcher::{
     CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged,
     ContributedCommandChosen, HostsLauncher, InlineTransitionRequested, LauncherDismissRequest,
     RendersLauncherPanel, RestoreKeyboardToStack, StackInPaneChosen,
 };
 pub use lease::{LeaseGranted, LeaseMode, LeasePlugin, LeaseRequest, LeaseSet};
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 pub use operation::{
     Operation, OperationAdmitted, OperationBundle, OperationCompleted, OperationError,
@@ -58,11 +58,11 @@ pub use operation::{
     OperationTargetRevision, OperationTimeout, TargetedOperations,
 };
 pub use order::{Order, OrderPlugin, OrderPosition, OrderSet, ReorderRequest, Reordered};
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "cef-ui"))]
 pub use overlay::{Overlay, OverlayShownInline, OverlayState, WindowOverlay};
 #[cfg(feature = "contracts")]
 pub use page_metadata::{PageIdentity, PageMetadata};
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, any(feature = "headless-host", feature = "cef-ui")))]
 pub use page_open::{
     CefPageAttachRequest, PageNavigation, PageOpenDeferred, PageOpenError, PageOpenHandled,
     PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask, PageTransition,
@@ -70,7 +70,7 @@ pub use page_open::{
 pub use primitives::PrimitivesPlugin;
 #[cfg(feature = "contracts")]
 pub use process_id::ProcessId;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub use process_id::ProcessPresentationRequest;
 pub use profile_identity::{ProfileId, ProfileLabel};
 pub use rename::{Icon, RenamePlugin, RenameRequest, Renamed};
@@ -92,19 +92,19 @@ pub use timestamp::{
     LastVisitedAt, TimestampPlugin, Touch, UnarchiveRequest, UnixMillis, UpdatedAt,
 };
 pub use toggle::{Disabled, Toggle, TogglePlugin, Toggled, TogglesPlugin};
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "cef-ui"))]
 pub use ui_state::{UiState, UiStateFlushSet, UiStatePlugin, UiStateWrite, UiStateWriter};
 pub use workspace::WorkspaceKind;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};
 
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "cef-ui"))]
 pub mod address;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub mod agent;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 mod archive;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub mod browser;
 #[cfg(feature = "cli")]
 pub mod cli;
@@ -113,36 +113,36 @@ mod dirty;
 #[cfg(feature = "contracts")]
 pub mod event;
 mod external_identity;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "cef-ui"))]
 mod file_ui_state;
 mod generation;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, any(feature = "headless-host", feature = "cef-ui")))]
 pub mod host_spawn;
 mod identity;
 mod job_wake;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub mod launcher;
 mod lease;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub mod notify;
 mod operation;
 mod order;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "cef-ui"))]
 pub mod overlay;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "cef-ui"))]
 pub mod page;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "cef-ui"))]
 mod page_driver;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "cef-ui"))]
 pub mod page_location;
 #[cfg(feature = "contracts")]
 pub mod page_metadata;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, any(feature = "headless-host", feature = "cef-ui")))]
 pub mod page_open;
 mod primitives;
 #[cfg(feature = "contracts")]
 pub mod process_id;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub mod profile;
 mod profile_identity;
 #[cfg(feature = "records")]
@@ -151,10 +151,10 @@ mod rename;
 mod resource_path;
 pub mod revision;
 pub mod scroll;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub mod search;
 mod selection;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub mod service;
 mod shutdown;
 mod status;
@@ -174,12 +174,12 @@ pub mod store {
 }
 #[cfg(feature = "contracts")]
 pub mod team;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "headless-host"))]
 pub mod terminal;
 mod timestamp;
 mod toggle;
 pub mod types;
-#[cfg(all(host, feature = "host"))]
+#[cfg(all(host, feature = "cef-ui"))]
 mod ui_state;
 pub mod workspace;
 #[cfg(feature = "store")]

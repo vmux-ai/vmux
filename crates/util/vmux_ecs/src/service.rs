@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use bevy::prelude::*;
+use bevy_app::{App, Update};
+use bevy_ecs::prelude::{
+    Component, IntoScheduleConfigs, Message, MessageReader, MessageWriter, Resource, SystemSet,
+};
 use tokio::sync::mpsc;
 use vmux_api::protocol::{ClientMessage, ServiceMessage};
 pub use vmux_api::service::ServiceMessageSet;

@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy_ecs::prelude::Component;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HostSpawnRoute {

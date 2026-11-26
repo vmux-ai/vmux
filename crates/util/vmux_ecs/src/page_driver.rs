@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use bevy::asset::io::embedded::EmbeddedAssetRegistry;
+use bevy_asset::io::embedded::EmbeddedAssetRegistry;
 
 use crate::page::PageManifest;
 

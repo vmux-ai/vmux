@@ -1,5 +1,5 @@
 use std::fmt::{self, Write};
-#[cfg(not(feature = "host"))]
+#[cfg(not(feature = "headless-host"))]
 use std::path::Component;
 use std::path::{Path, PathBuf};
 
@@ -12,7 +12,7 @@ use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 pub struct FilePath(PathBuf);
 
 impl FilePath {
-    #[cfg(feature = "host")]
+    #[cfg(feature = "headless-host")]
     pub fn resolve(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref();
         if let Ok(canonical) = path.canonicalize() {
@@ -22,7 +22,7 @@ impl FilePath {
         Self(vmux_path::PathIdentity::resolve(lexical).into_path_buf())
     }
 
-    #[cfg(not(feature = "host"))]
+    #[cfg(not(feature = "headless-host"))]
     pub fn resolve(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref();
         if let Ok(canonical) = path.canonicalize() {
@@ -40,12 +40,12 @@ impl FilePath {
         Self(normalized)
     }
 
-    #[cfg(feature = "host")]
+    #[cfg(feature = "headless-host")]
     pub fn lexical(path: impl AsRef<Path>) -> Self {
         Self(vmux_path::PathIdentity::lexical(path).into_path_buf())
     }
 
-    #[cfg(not(feature = "host"))]
+    #[cfg(not(feature = "headless-host"))]
     pub fn lexical(path: impl AsRef<Path>) -> Self {
         Self(Self::normalize_lexical(path.as_ref()))
     }
@@ -58,7 +58,7 @@ impl FilePath {
         self.0
     }
 
-    #[cfg(not(feature = "host"))]
+    #[cfg(not(feature = "headless-host"))]
     fn normalize_lexical(path: &Path) -> PathBuf {
         let mut normalized = PathBuf::new();
         for component in path.components() {

@@ -1,5 +1,6 @@
+use bevy_ecs::prelude::{Component, Entity, Message, SystemSet};
+
 pub use crate::component::{PendingPrompt, PendingPromptAttachments};
-use bevy::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PageOpenId(pub [u8; 16]);

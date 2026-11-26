@@ -1,5 +1,8 @@
-use bevy::prelude::*;
+use bevy_app::{App, Plugin, PostUpdate};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use bevy_ecs::prelude::{
+    ChildOf, Commands, Component, Entity, IntoScheduleConfigs, On, Query, SystemSet, With,
+};
 use vmux_api::address::{
     AddressEffect, AddressIntent, AddressOption, PageAddress, PageAddressPublish,
     PageAddressUiState, PageAddressUiStatePatch,
@@ -253,6 +256,9 @@ fn activate(
 
 #[cfg(test)]
 mod tests {
+    use bevy_ecs::message::Messages;
+    use bevy_ecs::prelude::{ResMut, Resource};
+
     use super::*;
     use crate::page::PagePlacement;
 
@@ -274,7 +280,7 @@ mod tests {
     impl Trail {
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, AddressPlugin))
+            app.add_plugins(AddressPlugin)
                 .init_resource::<Effects>()
                 .add_observer(record);
             let stack = app.world_mut().spawn_empty().id();

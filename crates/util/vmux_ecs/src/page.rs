@@ -1,13 +1,12 @@
-use bevy::ecs::system::SystemParam;
-use bevy::{
-    asset::io::embedded::EmbeddedAssetRegistry,
-    prelude::{
-        App, Commands, Component, Entity, EntityEvent, IntoScheduleConfigs, Message, MessageReader,
-        MessageWriter, On, Plugin, Query, ResMut, Startup, SystemSet, Update, With,
-    },
-};
+use bevy_app::{App, Plugin, Startup, Update};
+use bevy_asset::io::embedded::EmbeddedAssetRegistry;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_cef_core::prelude::CefEmbeddedHost;
+use bevy_ecs::prelude::{
+    Commands, Component, Entity, EntityEvent, IntoScheduleConfigs, Message, MessageReader,
+    MessageWriter, On, Query, ResMut, SystemSet, With,
+};
+use bevy_ecs::system::SystemParam;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -720,11 +719,11 @@ fn embed_static_assets(
     for manifest in &manifests {
         let bundle_root = PageAssets::root(manifest, resources_dir.as_deref());
         if !bundle_root.is_dir() {
-            bevy::log::warn!("PagePlugin: skip {:?}: not a directory", bundle_root);
+            tracing::warn!("PagePlugin: skip {:?}: not a directory", bundle_root);
             continue;
         }
         if let Err(e) = PageAssets::embed(&mut reg, manifest, &bundle_root) {
-            bevy::log::error!("PagePlugin: failed to embed {:?}: {e}", bundle_root);
+            tracing::error!("PagePlugin: failed to embed {:?}: {e}", bundle_root);
         }
     }
 }
@@ -741,8 +740,9 @@ pub struct SpacesPageSpawnRequest {
 
 #[cfg(test)]
 mod host_history_tests {
+    use bevy_ecs::message::Messages;
+
     use super::*;
-    use bevy::ecs::message::Messages;
 
     struct HistoryHarness {
         app: App,
@@ -758,8 +758,7 @@ mod host_history_tests {
     impl HistoryHarness {
         fn new(urls: &[&str]) -> Self {
             let mut app = App::new();
-            app.add_plugins(bevy::MinimalPlugins)
-                .add_plugins(HostHistoryPlugin);
+            app.add_plugins(HostHistoryPlugin);
             let owner = app.world_mut().spawn(HostHistory::default()).id();
             let mut harness = Self { app, owner };
             for url in urls {
@@ -867,8 +866,7 @@ mod host_history_tests {
     #[test]
     fn a_step_names_the_webview_whose_history_moved() {
         let mut app = App::new();
-        app.add_plugins(bevy::MinimalPlugins)
-            .add_plugins(HostHistoryPlugin);
+        app.add_plugins(HostHistoryPlugin);
         let owner = app.world_mut().spawn(HostHistory::default()).id();
         for url in ["a", "b"] {
             app.world_mut().write_message(HostHistoryObserve {

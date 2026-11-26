@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy_ecs::prelude::{Component, Entity, EntityEvent, Message};
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct CommandBarContribution {
