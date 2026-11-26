@@ -13,8 +13,8 @@ bevy_reflect = { workspace = true }
 bevy_tasks = { workspace = true }
 moonshine-save = { workspace = true }
 tempfile = "3"
-vmux_app = { path = "../crates/util/vmux_app", features = ["contracts", "manifest", "hosting", "project", "jobs", "watch", "flex", "layout", "menu"] }
-vmux_ecs = { path = "../crates/util/vmux_ecs", features = ["store", "jobs", "watch"] }
+vmux_app = { path = "../crates/util/vmux_app", features = ["contracts", "manifest", "hosting", "project", "jobs", "watch", "store", "flex", "layout", "menu"] }
+vmux_ecs = { path = "../crates/util/vmux_ecs", features = ["store", "watch"] }
 
 [[example]]
 name = "selection"

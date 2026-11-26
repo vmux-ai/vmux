@@ -3,9 +3,8 @@ use std::time::{Duration, Instant};
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use vmux_app::VmuxPlugin;
-use vmux_app::ecs::{
-    Job, JobPlugin, JobRequest, JobResult, JobSet, Operation, OperationCompleted, OperationState,
-};
+use vmux_app::ecs::{Operation, OperationCompleted, OperationState};
+use vmux_app::job::{Job, JobPlugin, JobRequest, JobResult, JobSet};
 
 #[derive(Clone)]
 struct WordCount(String);
