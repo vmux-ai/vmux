@@ -1,9 +1,10 @@
-use std::future::pending;
+use std::future::{Future, pending};
 use std::sync::Arc;
 use std::task::{Wake, Waker};
 use std::time::{Duration, Instant};
 
-use bevy_app::{App, AppExit, PluginsState};
+use bevy_app::{App, AppExit, PluginsState, SubApp};
+use bevy_ecs::message::{MessageCursor, Messages};
 use bevy_ecs::prelude::{Entity, With};
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
@@ -157,18 +158,30 @@ impl HeadlessTokioRunner {
         move |mut app: App| self.run(&mut app)
     }
 
+    pub fn into_future(mut self, mut app: App) -> impl Future<Output = AppExit> + Send {
+        self.prepare_app(&mut app);
+        Self::finalize_plugins(&mut app);
+        let mut sub_app = std::mem::take(app.main_mut());
+        async move {
+            let _signals = self.install_os_signals();
+            loop {
+                sub_app.update();
+                if let Some(exit) = Self::sub_app_should_exit(&sub_app) {
+                    return self.finish_sub_app_async(&mut sub_app, exit).await;
+                }
+                if self.park_async(self.housekeeping_floor).await == ParkOutcome::Shutdown {
+                    return self
+                        .finish_sub_app_async(&mut sub_app, AppExit::Success)
+                        .await;
+                }
+            }
+        }
+    }
+
     pub fn run(&mut self, app: &mut App) -> AppExit {
         self.prepare_app(app);
         let _signals = self.install_os_signals();
-        while app.plugins_state() == PluginsState::Adding {
-            bevy_tasks::tick_global_task_pools_on_main_thread();
-        }
-        if app.plugins_state() == PluginsState::Ready {
-            app.finish();
-        }
-        if app.plugins_state() == PluginsState::Finished {
-            app.cleanup();
-        }
+        Self::finalize_plugins(app);
         loop {
             app.update();
             if let Some(exit) = app.should_exit() {
@@ -180,23 +193,41 @@ impl HeadlessTokioRunner {
         }
     }
 
-    pub fn park(&mut self, floor: Duration) -> ParkOutcome {
-        let outcome = self.runtime.block_on(async {
-            tokio::select! {
-                biased;
-                _ = self.internal_shutdown_rx.recv() => ParkOutcome::Shutdown,
-                _ = Self::recv_shutdown(&mut self.external_shutdown_rx) => ParkOutcome::Shutdown,
-                wake = Self::recv_wake(&mut self.external_wake_rx) => match wake {
-                    Some(()) => ParkOutcome::Woken,
-                    None => ParkOutcome::Shutdown,
-                },
-                wake = self.internal_wake_rx.recv() => match wake {
-                    Some(()) => ParkOutcome::Woken,
-                    None => ParkOutcome::Shutdown,
-                },
-                _ = tokio::time::sleep(floor) => ParkOutcome::TimedOut,
+    pub async fn run_async(&mut self, app: &mut App) -> AppExit {
+        self.prepare_app(app);
+        let _signals = self.install_os_signals();
+        Self::finalize_plugins_async(app).await;
+        loop {
+            app.update();
+            if let Some(exit) = app.should_exit() {
+                return self.finish_async(app, exit).await;
             }
-        });
+            if self.park_async(self.housekeeping_floor).await == ParkOutcome::Shutdown {
+                return self.finish_async(app, AppExit::Success).await;
+            }
+        }
+    }
+
+    pub fn park(&mut self, floor: Duration) -> ParkOutcome {
+        let runtime = self.runtime.clone();
+        runtime.block_on(self.park_async(floor))
+    }
+
+    pub async fn park_async(&mut self, floor: Duration) -> ParkOutcome {
+        let outcome = tokio::select! {
+            biased;
+            _ = self.internal_shutdown_rx.recv() => ParkOutcome::Shutdown,
+            _ = Self::recv_shutdown(&mut self.external_shutdown_rx) => ParkOutcome::Shutdown,
+            wake = Self::recv_wake(&mut self.external_wake_rx) => match wake {
+                Some(()) => ParkOutcome::Woken,
+                None => ParkOutcome::Shutdown,
+            },
+            wake = self.internal_wake_rx.recv() => match wake {
+                Some(()) => ParkOutcome::Woken,
+                None => ParkOutcome::Shutdown,
+            },
+            _ = tokio::time::sleep(floor) => ParkOutcome::TimedOut,
+        };
         if outcome == ParkOutcome::Woken {
             self.drain_wakes();
         }
@@ -276,33 +307,88 @@ impl HeadlessTokioRunner {
         let _ = tokio::signal::ctrl_c().await;
     }
 
-    fn finish(&mut self, app: &mut App, exit: AppExit) -> AppExit {
-        let exit = if let Some(mut state) = app.world_mut().get_resource_mut::<ShutdownState>() {
+    fn finalize_plugins(app: &mut App) {
+        while app.plugins_state() == PluginsState::Adding {
+            bevy_tasks::tick_global_task_pools_on_main_thread();
+        }
+        if app.plugins_state() == PluginsState::Ready {
+            app.finish();
+        }
+        if app.plugins_state() == PluginsState::Finished {
+            app.cleanup();
+        }
+    }
+
+    async fn finalize_plugins_async(app: &mut App) {
+        while app.plugins_state() == PluginsState::Adding {
+            bevy_tasks::tick_global_task_pools_on_main_thread();
+            tokio::task::yield_now().await;
+        }
+        if app.plugins_state() == PluginsState::Ready {
+            app.finish();
+        }
+        if app.plugins_state() == PluginsState::Finished {
+            app.cleanup();
+        }
+    }
+
+    fn sub_app_should_exit(sub_app: &SubApp) -> Option<AppExit> {
+        let mut reader = MessageCursor::default();
+        let messages = sub_app.world().get_resource::<Messages<AppExit>>()?;
+        let mut messages = reader.read(messages);
+        if messages.len() != 0 {
+            return Some(
+                messages
+                    .find(|exit| exit.is_error())
+                    .cloned()
+                    .unwrap_or(AppExit::Success),
+            );
+        }
+        None
+    }
+
+    fn begin_shutdown(&self, sub_app: &mut SubApp, exit: AppExit) -> (AppExit, Duration) {
+        let world = sub_app.world_mut();
+        let exit = if let Some(mut state) = world.get_resource_mut::<ShutdownState>() {
             state.begin(exit.clone());
             state.exit().unwrap_or(exit)
         } else {
             exit
         };
-        if let Err(error) = app.world_mut().try_run_schedule(Shutdown) {
+        if let Err(error) = world.try_run_schedule(Shutdown) {
             tracing::debug!(%error, "no shutdown schedule participants");
         }
         let timeout = self
             .shutdown_timeout
             .or_else(|| {
-                app.world()
+                world
                     .get_resource::<ShutdownTimeout>()
                     .map(|timeout| timeout.duration())
             })
             .unwrap_or(ShutdownTimeout::DEFAULT);
+        (exit, timeout)
+    }
+
+    fn complete_shutdown(sub_app: &mut SubApp) {
+        let world = sub_app.world_mut();
+        if let Some(mut state) = world.get_resource_mut::<ShutdownState>() {
+            state.finish();
+        }
+        if let Err(error) = world.try_run_schedule(ShutdownComplete) {
+            tracing::debug!(%error, "no final shutdown schedule participants");
+        }
+    }
+
+    fn finish(&mut self, app: &mut App, exit: AppExit) -> AppExit {
+        let (exit, timeout) = self.begin_shutdown(app.main_mut(), exit);
         let deadline = Instant::now() + timeout;
-        while Self::has_pending_shutdown(app) {
-            let now = Instant::now();
-            if now >= deadline {
+        while Self::has_pending_shutdown(app.main_mut()) {
+            if Instant::now() >= deadline {
                 tracing::warn!("shutdown drain timed out before all barriers and tasks completed");
                 break;
             }
             app.update();
-            if !Self::has_pending_shutdown(app) {
+            if !Self::has_pending_shutdown(app.main_mut()) {
                 break;
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -311,17 +397,58 @@ impl HeadlessTokioRunner {
             }
             self.park_drain(remaining.min(Self::DRAIN_POLL_INTERVAL));
         }
-        if let Some(mut state) = app.world_mut().get_resource_mut::<ShutdownState>() {
-            state.finish();
-        }
-        if let Err(error) = app.world_mut().try_run_schedule(ShutdownComplete) {
-            tracing::debug!(%error, "no final shutdown schedule participants");
-        }
+        Self::complete_shutdown(app.main_mut());
         exit
     }
 
-    fn has_pending_shutdown(app: &mut App) -> bool {
-        let world = app.world_mut();
+    async fn finish_async(&mut self, app: &mut App, exit: AppExit) -> AppExit {
+        let (exit, timeout) = self.begin_shutdown(app.main_mut(), exit);
+        let deadline = Instant::now() + timeout;
+        while Self::has_pending_shutdown(app.main_mut()) {
+            if Instant::now() >= deadline {
+                tracing::warn!("shutdown drain timed out before all barriers and tasks completed");
+                break;
+            }
+            app.update();
+            if !Self::has_pending_shutdown(app.main_mut()) {
+                break;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            self.park_drain_async(remaining.min(Self::DRAIN_POLL_INTERVAL))
+                .await;
+        }
+        Self::complete_shutdown(app.main_mut());
+        exit
+    }
+
+    async fn finish_sub_app_async(&mut self, sub_app: &mut SubApp, exit: AppExit) -> AppExit {
+        let (exit, timeout) = self.begin_shutdown(sub_app, exit);
+        let deadline = Instant::now() + timeout;
+        while Self::has_pending_shutdown(sub_app) {
+            if Instant::now() >= deadline {
+                tracing::warn!("shutdown drain timed out before all barriers and tasks completed");
+                break;
+            }
+            sub_app.update();
+            if !Self::has_pending_shutdown(sub_app) {
+                break;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            self.park_drain_async(remaining.min(Self::DRAIN_POLL_INTERVAL))
+                .await;
+        }
+        Self::complete_shutdown(sub_app);
+        exit
+    }
+
+    fn has_pending_shutdown(sub_app: &mut SubApp) -> bool {
+        let world = sub_app.world_mut();
         let has_barrier = world
             .query_filtered::<Entity, With<ShutdownBarrier>>()
             .iter(world)
@@ -351,13 +478,16 @@ impl HeadlessTokioRunner {
     }
 
     fn park_drain(&mut self, wait: Duration) {
-        self.runtime.block_on(async {
-            tokio::select! {
-                _ = self.internal_wake_rx.recv() => {}
-                Some(()) = Self::recv_wake(&mut self.external_wake_rx) => {}
-                _ = tokio::time::sleep(wait) => {}
-            }
-        });
+        let runtime = self.runtime.clone();
+        runtime.block_on(self.park_drain_async(wait));
+    }
+
+    async fn park_drain_async(&mut self, wait: Duration) {
+        tokio::select! {
+            _ = self.internal_wake_rx.recv() => {}
+            Some(()) = Self::recv_wake(&mut self.external_wake_rx) => {}
+            _ = tokio::time::sleep(wait) => {}
+        }
         self.drain_wakes();
     }
 
@@ -654,5 +784,103 @@ mod tests {
         assert_eq!(state.io_value, Some(42));
         assert_eq!(state.job_value, Some(42));
         assert!(updates.load(Ordering::SeqCst) >= 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn run_async_coalesces_wakes_and_drains_shutdown_inside_tokio_runtime() {
+        let (handle, mut runner) = HeadlessTokioRunner::handles(Handle::current());
+        runner = runner.with_housekeeping_floor(Duration::from_secs(30));
+        for _ in 0..6 {
+            handle.wake();
+        }
+        assert_eq!(
+            runner.park_async(Duration::from_secs(30)).await,
+            ParkOutcome::Woken
+        );
+        assert!(!runner.try_recv_wake());
+
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (start_tx, start_rx) = tokio::sync::oneshot::channel();
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        let task_finished = Arc::new(AtomicBool::new(false));
+        let task_flag = Arc::clone(&task_finished);
+        let wake_handle = handle.clone();
+        let task = TokioTask::spawn(&Handle::current(), async move {
+            start_rx.await.unwrap();
+            tokio::time::sleep(Duration::from_millis(15)).await;
+            let _ = done_tx.send(());
+            wake_handle.wake();
+            tokio::time::sleep(Duration::from_millis(15)).await;
+            task_flag.store(true, Ordering::SeqCst);
+        });
+
+        let mut app = App::new();
+        app.add_plugins(ShutdownPlugin)
+            .insert_resource(LifecycleLog(Arc::clone(&log)))
+            .insert_resource(BarrierRelease {
+                tx: Some(start_tx),
+                rx: Some(done_rx),
+            })
+            .add_systems(Shutdown, begin_barrier_drain)
+            .add_systems(Update, poll_barrier_release)
+            .add_systems(ShutdownComplete, record_complete);
+        app.world_mut().spawn((task, ShutdownPending));
+
+        let shutdown_handle = handle.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            shutdown_handle.shutdown_async().await;
+        });
+
+        let started = Instant::now();
+        let exit = runner.run_async(&mut app).await;
+        assert_eq!(exit, AppExit::Success);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(task_finished.load(Ordering::SeqCst));
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec!["shutdown", "barrier_released", "complete"]
+        );
+        assert!(app.world().resource::<ShutdownState>().is_complete());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn into_future_is_send_and_completes_on_handle_shutdown() {
+        let (handle, runner) = HeadlessTokioRunner::handles(Handle::current());
+        let runner = runner.with_housekeeping_floor(Duration::from_secs(30));
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (start_tx, start_rx) = tokio::sync::oneshot::channel();
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        let wake_handle = handle.clone();
+        tokio::spawn(async move {
+            start_rx.await.unwrap();
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            let _ = done_tx.send(());
+            wake_handle.wake();
+        });
+
+        let mut app = App::new();
+        app.add_plugins(ShutdownPlugin)
+            .insert_resource(LifecycleLog(Arc::clone(&log)))
+            .insert_resource(BarrierRelease {
+                tx: Some(start_tx),
+                rx: Some(done_rx),
+            })
+            .add_systems(Shutdown, begin_barrier_drain)
+            .add_systems(Update, poll_barrier_release)
+            .add_systems(ShutdownComplete, record_complete);
+
+        let started = Instant::now();
+        let task = tokio::spawn(runner.into_future(app));
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        handle.shutdown();
+
+        let exit = task.await.unwrap();
+        assert_eq!(exit, AppExit::Success);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec!["shutdown", "barrier_released", "complete"]
+        );
     }
 }
