@@ -16,7 +16,7 @@ use vmux_api::command_bar::{
     CommandBarRecentFile, CommandBarUiState, PathCompleteRequest, PathCompleteResponse, PathEntry,
 };
 use vmux_ecs::UiStateWrite;
-use vmux_ecs::wake::Wake;
+use vmux_runner::WinitWake;
 
 pub(super) struct CompletionPlugin;
 
@@ -183,7 +183,7 @@ struct RootWalkTask(Task<RootWalkResult>);
 impl RootWalkTask {
     fn spawn(root: &Path, proxy: Option<&EventLoopProxyWrapper>) -> Self {
         let walked = root.to_path_buf();
-        let wake = Wake::beside(proxy);
+        let wake = WinitWake::beside(proxy);
         Self(IoTaskPool::get().spawn(async move {
             let _wake = wake;
             RootWalkResult::scan(&walked)
@@ -769,7 +769,7 @@ fn start_paths(
     for (webview, request) in &requests {
         let query = request.query.clone();
         let request_id = request.request_id;
-        let wake = Wake::beside(proxy.as_deref());
+        let wake = WinitWake::beside(proxy.as_deref());
         let task = IoTaskPool::get().spawn(async move {
             let _wake = wake;
             PathCompletionRequest::list_directory(&query, request_id)

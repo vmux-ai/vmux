@@ -10,7 +10,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::Revision;
-use vmux_ecs::wake::Wake;
+use vmux_runner::WinitWake;
 use vmux_vm::{Container as DockerContainer, DockerClient, DockerPort, Settings};
 
 use crate::control::{
@@ -251,7 +251,7 @@ fn begin(
     for (entity, settings, observed, revision, inventory, next, task) in &mut engines {
         let (Some(mut inventory), Some(next)) = (inventory, next) else {
             let cache = Cache::new(settings);
-            let wake = Wake::beside(proxy.as_deref());
+            let wake = WinitWake::beside(proxy.as_deref());
             commands.entity(entity).insert((
                 Inventory::default(),
                 NextPoll(Instant::now()),
@@ -282,7 +282,7 @@ fn begin(
             continue;
         }
         let socket = settings.socket();
-        let wake = Wake::beside(proxy.as_deref());
+        let wake = WinitWake::beside(proxy.as_deref());
         commands.entity(entity).insert(SnapshotTask {
             revision: *revision,
             origin: Origin::Daemon,
@@ -394,7 +394,7 @@ fn begin_save(
     for (entity, settings, pending) in &engines {
         let cache = Cache::new(settings);
         let containers = pending.0.clone();
-        let wake = Wake::beside(proxy.as_deref());
+        let wake = WinitWake::beside(proxy.as_deref());
         commands
             .entity(entity)
             .remove::<PendingSave>()
@@ -580,7 +580,7 @@ fn begin_logs(
         let socket = settings.socket();
         let id = selection.id.clone();
         let request_id = id.clone();
-        let wake = Wake::beside(proxy.as_deref());
+        let wake = WinitWake::beside(proxy.as_deref());
         commands.entity(page).insert(LogTask {
             id,
             task: IoTaskPool::get().spawn(async move {

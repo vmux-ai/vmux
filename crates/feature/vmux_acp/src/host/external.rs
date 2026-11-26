@@ -2142,7 +2142,7 @@ fn scan(
         let reader = paths.reader(kind, hints);
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let started_at = Instant::now();
-        let Some(task) = workers.spawn(vmux_ecs::wake::Wake::optional_waker(wake), move || {
+        let Some(task) = workers.spawn(vmux_runner::WinitWake::optional_waker(wake), move || {
             reader.read()
         }) else {
             continue;
@@ -2501,7 +2501,7 @@ fn start_history_reads(
         let path = file.0.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let Some(task) = workers
-            .spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
+            .spawn_long(vmux_runner::WinitWake::optional_waker(wake), move || {
                 source.before(&path, page.before, &known)
             })
         else {
@@ -2588,7 +2588,7 @@ fn queue_initial_conversations(
         };
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let Some(task) = workers
-            .spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
+            .spawn_long(vmux_runner::WinitWake::optional_waker(wake), move || {
                 source.read(&paths, cursor, native, hint, known)
             })
         else {
@@ -2671,7 +2671,7 @@ fn queue_failed_conversations(
         };
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let Some(task) = workers
-            .spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
+            .spawn_long(vmux_runner::WinitWake::optional_waker(wake), move || {
                 source.read(&paths, cursor, native, hint, known)
             })
         else {
@@ -2747,7 +2747,7 @@ fn queue_conversation_refreshes(
         };
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let Some(task) = workers
-            .spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
+            .spawn_long(vmux_runner::WinitWake::optional_waker(wake), move || {
                 source.read(&paths, cursor, native, hint, known)
             })
         else {

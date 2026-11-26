@@ -24,10 +24,8 @@ impl Plugin for BranchesPlugin {
         if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
             app.add_plugins(vmux_ecs::OperationPlugin);
         }
-        if !app.is_plugin_added::<vmux_ecs::wake::WakePlugin>() {
-            app.add_plugins(vmux_ecs::wake::WakePlugin);
-        }
-        app.init_resource::<GitRuntime>()
+        app.add_plugins(vmux_runner::WinitWakePlugin)
+            .init_resource::<GitRuntime>()
             .add_plugins((
                 UiEventPlugin::<(StartBranchesRequest,)>::default(),
                 IoTaskPlugin::<(DiscoveryOutput, RefsOutput, RegistrationsOutput)>::default(),

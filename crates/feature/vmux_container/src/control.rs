@@ -8,8 +8,8 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use bevy_tasks::{IoTaskPool, Task, TaskPoolBuilder};
 use vmux_ecs::service::{Restarting, ShutdownSet};
-use vmux_ecs::wake::Wake;
 use vmux_ecs::{Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget};
+use vmux_runner::WinitWake;
 use vmux_vm::{DockerClient, EngineClient, Owner, Settings, Status};
 
 pub(crate) struct ControlPlugin;
@@ -25,10 +25,8 @@ impl Plugin for ControlPlugin {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
         }
-        if !app.is_plugin_added::<vmux_ecs::wake::WakePlugin>() {
-            app.add_plugins(vmux_ecs::wake::WakePlugin);
-        }
-        app.init_resource::<Lifetime>()
+        app.add_plugins(vmux_runner::WinitWakePlugin)
+            .init_resource::<Lifetime>()
             .add_observer(start)
             .add_observer(stop)
             .add_observer(inspect)
@@ -247,7 +245,7 @@ impl Admission<'_, '_> {
         target: &Target,
         name: &'static str,
         mutation: Option<Mutation>,
-    ) -> Option<(Entity, PathBuf, Owner, Wake)> {
+    ) -> Option<(Entity, PathBuf, Owner, WinitWake)> {
         if let Some(mutation) = mutation
             && let Ok(busy) = self.busy.get(entity)
         {
@@ -313,7 +311,7 @@ impl Admission<'_, '_> {
             operation,
             helper,
             owner,
-            Wake::beside(self.proxy.as_deref()),
+            WinitWake::beside(self.proxy.as_deref()),
         ))
     }
 }

@@ -32,6 +32,7 @@ bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 ignore = "0.4"
 vmux_flex = { path = "../../util/vmux_flex" }
+vmux_runner = { path = "../../util/vmux_runner", features = ["winit"] }
 vmux_tool = { path = "../vmux_tool" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 

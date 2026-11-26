@@ -22,13 +22,13 @@ use vmux_command::{
 #[cfg(target_os = "macos")]
 use vmux_ecs::page::BindsEditingChords;
 use vmux_ecs::team::User;
-use vmux_ecs::wake::Wake;
 use vmux_layout::stack::CloseRequest;
 use vmux_layout::tab::TabClosed;
 use vmux_menu::{
     About, Entry, MenuBar, MenuPlugin, MenuSet, MenuWake, NativeMenuPlugin, Predefined, Selection,
     Separator, Submenu,
 };
+use vmux_runner::WinitWake;
 use vmux_setting::{AppSettings, SettingsLoadSet};
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale, TranslationValue};
 
@@ -214,7 +214,7 @@ fn sync_wake(
     let waker = if let Some(job_wake) = job_wake {
         Some(job_wake.0.clone())
     } else {
-        Wake::optional_waker(proxy.as_deref().map(|proxy| (**proxy).clone()))
+        WinitWake::optional_waker(proxy.as_deref().map(|proxy| (**proxy).clone()))
     };
     let Some(waker) = waker else {
         return;

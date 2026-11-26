@@ -19284,7 +19284,7 @@ impl Inventory {
                 | "crates/util/vmux_ecs/src/identity.rs||struct:IdentityIndexPlugin"
                 | "crates/util/vmux_ecs/src/jobs.rs||struct:JobPlugin"
                 | "crates/util/vmux_ecs/src/operation.rs||struct:OperationPlugin"
-                | "crates/util/vmux_ecs/src/wake.rs||struct:WakePlugin"
+                | "crates/util/vmux_runner/src/winit.rs||struct:WinitWakePlugin"
                 | "crates/util/vmux_app/src/plugin.rs||struct:VmuxEcsPlugin"
                 | "patches/bevy_cef-0.5.2/src/common/ipc/ui_event.rs||struct:UiEventPlugin"
         )

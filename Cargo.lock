@@ -10339,6 +10339,7 @@ dependencies = [
  "vmux_mcp",
  "vmux_path",
  "vmux_process",
+ "vmux_runner",
  "vmux_session",
  "vmux_setting",
  "vmux_space",
@@ -10550,6 +10551,7 @@ dependencies = [
  "vmux_flex",
  "vmux_macro",
  "vmux_path",
+ "vmux_runner",
  "vmux_tool",
  "vmux_ui",
 ]
@@ -10576,6 +10578,7 @@ dependencies = [
  "vmux_feature",
  "vmux_page",
  "vmux_profile",
+ "vmux_runner",
  "vmux_ui",
  "vmux_vm",
 ]
@@ -10642,6 +10645,7 @@ dependencies = [
  "vmux_menu",
  "vmux_page",
  "vmux_profile",
+ "vmux_runner",
  "vmux_service",
  "vmux_setting",
  "vmux_simulator",
@@ -10774,6 +10778,7 @@ dependencies = [
  "vmux_page",
  "vmux_path",
  "vmux_project",
+ "vmux_runner",
  "vmux_session",
  "vmux_setting",
  "vmux_space",
@@ -10910,6 +10915,7 @@ dependencies = [
  "vmux_feature",
  "vmux_page",
  "vmux_path",
+ "vmux_runner",
  "vmux_syntax",
  "vmux_ui",
 ]
@@ -11262,6 +11268,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_tasks",
+ "bevy_winit",
  "tokio",
  "tracing",
  "vmux_ecs",
@@ -11352,6 +11359,7 @@ dependencies = [
  "vmux_git",
  "vmux_page",
  "vmux_path",
+ "vmux_runner",
  "vmux_tool",
  "vmux_ui",
 ]
@@ -11402,6 +11410,7 @@ dependencies = [
  "vmux_input",
  "vmux_layout",
  "vmux_page",
+ "vmux_runner",
  "vmux_setting",
  "vmux_ui",
 ]
@@ -11501,6 +11510,7 @@ dependencies = [
  "vmux_git",
  "vmux_layout",
  "vmux_page",
+ "vmux_runner",
  "vmux_space",
  "vmux_ui",
 ]
@@ -11632,6 +11642,7 @@ dependencies = [
  "vmux_page",
  "vmux_path",
  "vmux_profile",
+ "vmux_runner",
  "vmux_ui",
  "zeroize",
 ]

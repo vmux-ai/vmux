@@ -16,7 +16,6 @@ use vmux_command::{
     Shortcut,
 };
 use vmux_ecs::page::PageReady;
-use vmux_ecs::wake::Wake;
 use vmux_ecs::workspace::ComputeFocusSet;
 use vmux_ecs::{
     CollectionView, PageOpenSet, PageOpenTask, UiState, UiStatePlugin, UiStateWrite, UnixMillis,
@@ -27,6 +26,7 @@ use vmux_layout::hosted_page::HostedUiPlugin;
 use vmux_layout::space::{Space, SpaceHierarchy};
 use vmux_layout::stack::{CloseStackRequest, FocusedStack};
 use vmux_layout::window::WindowHierarchy;
+use vmux_runner::WinitWake;
 use vmux_ui::i18n::Locale;
 
 #[vmux_page::page]
@@ -741,7 +741,7 @@ fn capture_native_keys(
             *phase = ProbeMatch::Idle;
             pending_at.0 = None;
             {
-                let _wake = Wake::beside(proxy.as_deref());
+                let _wake = WinitWake::beside(proxy.as_deref());
                 close_requests.write(CloseStackRequest::by_user(parent.parent()));
             }
             continue;

@@ -105,6 +105,7 @@ vmux_layout = { path = "../../feature/vmux_layout", features = ["host"] }
 vmux_menu = { path = "../../util/vmux_menu", features = ["native"] }
 vmux_page = { path = "../../util/vmux_page" }
 vmux_profile = { path = "../../util/vmux_profile" }
+vmux_runner = { path = "../../util/vmux_runner", features = ["winit"] }
 vmux_service = { path = "../../feature/vmux_service" }
 vmux_setting = { path = "../../feature/vmux_setting" }
 vmux_start = { path = "../../feature/vmux_start" }

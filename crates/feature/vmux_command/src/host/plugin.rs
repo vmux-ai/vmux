@@ -24,11 +24,9 @@ impl Plugin for CommandPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        if !app.is_plugin_added::<vmux_ecs::wake::WakePlugin>() {
-            app.add_plugins(vmux_ecs::wake::WakePlugin);
-        }
-        app.init_resource::<Settle>();
-        app.add_agent_request::<AgentInvokeCommand>()
+        app.add_plugins(vmux_runner::WinitWakePlugin)
+            .init_resource::<Settle>()
+            .add_agent_request::<AgentInvokeCommand>()
             .add_plugins((UiStatePlugin, crate::CommandToolPlugin))
             .add_observer(resolve)
             .add_systems(Update, invoke.after(AgentRequestRouteSet))

@@ -25,10 +25,8 @@ pub(crate) struct ToolHostPlugin;
 
 impl Plugin for ToolHostPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_ecs::wake::WakePlugin>() {
-            app.add_plugins(vmux_ecs::wake::WakePlugin);
-        }
         app.add_plugins((
+            vmux_runner::WinitWakePlugin,
             crate::McpConnectionPlugin,
             crate::presentation::ToolPagePlugin,
             crate::open::ToolOpenPlugin,

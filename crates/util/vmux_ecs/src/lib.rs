@@ -177,6 +177,4 @@ mod toggle;
 pub mod types;
 #[cfg(all(host, feature = "host"))]
 mod ui_state;
-#[cfg(all(host, feature = "host"))]
-pub mod wake;
 pub mod workspace;

@@ -259,7 +259,7 @@ fn breadcrumb(
     });
     commands.entity(entity).insert((
         AsyncTask::new(task),
-        TaskWaker::new(vmux_ecs::wake::Wake::waker(proxy.as_deref())),
+        TaskWaker::new(vmux_runner::WinitWake::waker(proxy.as_deref())),
         BreadcrumbPath(request_path),
     ));
 }
