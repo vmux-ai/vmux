@@ -16425,6 +16425,7 @@ impl Inventory {
                         matches!(
                             attr.key.as_str(),
                             "crates/util/vmux_macro/src/lib.rs||fn:store"
+                                | "crates/util/vmux_macro/src/lib.rs||fn:ecs_store"
                                 | "crates/util/vmux_macro/src/lib.rs||fn:types"
                         ) && attr.reference_paths.contains("proc_macro_attribute")
                     })
@@ -16441,7 +16442,11 @@ impl Inventory {
                     &mut BTreeSet::new(),
                 )
                 .is_some_and(|target| {
-                    target.key == "crates/util/vmux_ecs/src/store.rs||struct:Types"
+                    matches!(
+                        target.key.as_str(),
+                        "crates/util/vmux_store/src/schema.rs||struct:Types"
+                            | "crates/util/vmux_ecs/src/store.rs||struct:Types"
+                    )
                 })
             && let Some(last) = path.path.segments.last()
             && let syn::PathArguments::AngleBracketed(arguments) = &last.arguments
@@ -19280,6 +19285,7 @@ impl Inventory {
             target.key.as_str(),
             "crates/util/vmux_ecs/src/ui_state.rs||struct:UiStatePlugin"
                 | "crates/feature/vmux_feature/src/manifest.rs||struct:FeaturePlugin"
+                | "crates/util/vmux_store/src/schema.rs||struct:SchemaPlugin"
                 | "crates/util/vmux_ecs/src/store.rs||struct:SchemaPlugin"
                 | "crates/util/vmux_ecs/src/identity.rs||struct:IdentityIndexPlugin"
                 | "crates/util/vmux_ecs/src/jobs.rs||struct:JobPlugin"

@@ -2,15 +2,21 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
-use syn::{Data, DeriveInput, Fields, Ident, Token, Type};
+use syn::{Data, DeriveInput, Fields, Ident, Path, Token, Type};
 
 pub(crate) struct Declaration {
     item: DeriveInput,
+    crate_path: Path,
     args: Arguments,
 }
 
 impl Declaration {
-    pub(crate) fn parse(args: TokenStream, item: DeriveInput) -> syn::Result<Self> {
+    pub(crate) fn parse(
+        args: TokenStream,
+        item: DeriveInput,
+        default_crate: &str,
+    ) -> syn::Result<Self> {
+        let crate_path = syn::parse_str::<Path>(default_crate)?;
         if !matches!(&item.data, Data::Struct(data) if matches!(&data.fields, Fields::Unit)) {
             return Err(syn::Error::new_spanned(
                 &item,
@@ -30,12 +36,16 @@ impl Declaration {
                 "a store schema must declare at least one type",
             ));
         }
-        Ok(Self { item, args })
+        Ok(Self {
+            item,
+            crate_path,
+            args,
+        })
     }
 
     pub(crate) fn parse_types(args: TokenStream, item: DeriveInput) -> syn::Result<Self> {
         Punctuated::<Type, Token![,]>::parse_terminated.parse2(args.clone())?;
-        Self::parse(args, item)
+        Self::parse(args, item, "::vmux_ecs::store")
     }
 
     pub(crate) fn expand_types(&self) -> TokenStream {
@@ -56,6 +66,7 @@ impl Declaration {
     pub(crate) fn expand(&self) -> TokenStream {
         let item = &self.item;
         let name = &item.ident;
+        let crate_path = &self.crate_path;
         let types = &self.args.types;
         let domain = match &self.args.domain {
             Some(domain) => quote!(#domain),
@@ -63,12 +74,12 @@ impl Declaration {
         };
         let filter = match &self.args.filter {
             Some(filter) => quote!(#filter),
-            None => quote!(::vmux_ecs::store::With<::vmux_ecs::store::Save>),
+            None => quote!(#crate_path::With<#crate_path::Save>),
         };
         let tracking = if self.args.track {
             quote! {
-                fn track(app: &mut ::vmux_ecs::store::App) {
-                    use ::vmux_ecs::store::StoreAppExt;
+                fn track(app: &mut #crate_path::App) {
+                    use #crate_path::StoreAppExt;
                     #(app.track_domain::<#domain, #filter, #types>();)*
                 }
             }
@@ -79,19 +90,19 @@ impl Declaration {
         quote! {
             #item
 
-            impl ::vmux_ecs::store::Schema for #name #clause {
-                fn register(registry: &mut ::vmux_ecs::store::TypeRegistry) {
+            impl #crate_path::Schema for #name #clause {
+                fn register(registry: &mut #crate_path::TypeRegistry) {
                     #(
                         registry.register::<#types>();
                         registry.register_type_data::<
                             #types,
-                            ::vmux_ecs::store::StoreDomain<#domain>,
+                            #crate_path::StoreDomain<#domain>,
                         >();
                     )*
                 }
 
-                fn filter(registry: &::vmux_ecs::store::TypeRegistry) -> ::vmux_ecs::store::WorldFilter {
-                    ::vmux_ecs::store::StoreDomain::<#domain>::filter(registry)
+                fn filter(registry: &#crate_path::TypeRegistry) -> #crate_path::WorldFilter {
+                    #crate_path::StoreDomain::<#domain>::filter(registry)
                 }
 
                 #tracking
@@ -244,7 +255,7 @@ mod tests {
             ),
         ];
         for (args, item) in cases {
-            assert!(Declaration::parse(args, item).is_err());
+            assert!(Declaration::parse(args, item, "::vmux_ecs::store").is_err());
         }
     }
 
@@ -255,17 +266,33 @@ mod tests {
             parse_quote!(
                 struct NotesStore;
             ),
+            "::vmux_ecs::store",
         )
         .unwrap();
         let expanded = standalone.expand().to_string();
         assert!(expanded.contains("track_domain :: < Self , :: vmux_ecs :: store :: With < :: vmux_ecs :: store :: Save > , Name >"));
         assert!(expanded.contains("track_domain :: < Self , :: vmux_ecs :: store :: With < :: vmux_ecs :: store :: Save > , Title >"));
 
+        let direct = Declaration::parse(
+            quote!(track; Name, Title),
+            parse_quote!(
+                struct DirectNotesStore;
+            ),
+            "::vmux_store",
+        )
+        .unwrap();
+        let expanded = direct.expand().to_string();
+        assert!(expanded.contains("impl :: vmux_store :: Schema for DirectNotesStore"));
+        assert!(expanded.contains(
+            "track_domain :: < Self , :: vmux_store :: With < :: vmux_store :: Save > , Name >"
+        ));
+
         let filtered = Declaration::parse(
             quote!(filter = BookmarkFilter, track; Pin, Name),
             parse_quote!(
                 struct BookmarkStore;
             ),
+            "::vmux_ecs::store",
         )
         .unwrap();
         let expanded = filtered.expand().to_string();

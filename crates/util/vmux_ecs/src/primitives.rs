@@ -39,6 +39,11 @@ impl Plugin for PrimitivesPlugin {
         app.register_type::<crate::PageMetadata>()
             .register_type::<vmux_api::PageIcon>()
             .register_type::<vmux_api::BuiltinIcon>();
+        #[cfg(all(host, feature = "host"))]
+        app.configure_sets(
+            bevy_app::Last,
+            vmux_store::AutoSaveSet::Flush.before(crate::service::ShutdownSet),
+        );
     }
 }
 

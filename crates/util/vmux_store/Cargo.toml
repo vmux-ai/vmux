@@ -1,0 +1,19 @@
+[package]
+name = "vmux_store"
+description = "Schema-driven ECS persistence, dirty tracking, and debounced auto-save"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+bevy_world_serialization = { workspace = true }
+moonshine-save = { workspace = true }
+vmux_macro = { path = "../vmux_macro" }
+vmux_time = { path = "../vmux_time" }
+web-time = { workspace = true }
+
+[lints]
+workspace = true

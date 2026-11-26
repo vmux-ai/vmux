@@ -56,7 +56,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: .vmux/cargo
-        key: dx-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_channel/**', 'crates/util/vmux_task/**', 'crates/util/vmux_time/**', 'crates/util/vmux_watch/**', 'crates/util/vmux_macro/**', 'crates/build_*.rs') }}
+        key: dx-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_channel/**', 'crates/util/vmux_store/**', 'crates/util/vmux_task/**', 'crates/util/vmux_time/**', 'crates/util/vmux_watch/**', 'crates/util/vmux_macro/**', 'crates/build_*.rs') }}
         restore-keys: |
           dx-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-
 
@@ -65,7 +65,7 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: .vmux/cargo
-        key: dx-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_channel/**', 'crates/util/vmux_task/**', 'crates/util/vmux_time/**', 'crates/util/vmux_watch/**', 'crates/util/vmux_macro/**', 'crates/build_*.rs') }}
+        key: dx-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'crates/app/vmux_cli/**', 'crates/feature/vmux_dx/**', '!crates/feature/vmux_dx/lints/**', 'crates/feature/vmux_feature/**', 'crates/util/vmux_ecs/**', 'crates/util/vmux_api/**', 'crates/util/vmux_channel/**', 'crates/util/vmux_store/**', 'crates/util/vmux_task/**', 'crates/util/vmux_time/**', 'crates/util/vmux_watch/**', 'crates/util/vmux_macro/**', 'crates/build_*.rs') }}
         restore-keys: |
           dx-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.channel }}-compile${{ env.VMUX_CI_FAST_RUST }}-
 

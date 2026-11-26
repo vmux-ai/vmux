@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use moonshine_save::prelude::*;
+use vmux_store::Save;
 
 use crate::WorkspaceKind;
 use crate::terminal::TerminalLaunch;

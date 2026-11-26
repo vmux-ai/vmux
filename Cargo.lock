@@ -10414,6 +10414,7 @@ dependencies = [
  "vmux_simulator",
  "vmux_space",
  "vmux_start",
+ "vmux_store",
  "vmux_team",
  "vmux_terminal",
  "vmux_tool",
@@ -10697,8 +10698,6 @@ dependencies = [
  "bevy_cef_core",
  "bevy_ecs",
  "bevy_reflect",
- "bevy_world_serialization",
- "moonshine-save",
  "rkyv",
  "ron 0.12.1",
  "serde",
@@ -10715,6 +10714,7 @@ dependencies = [
  "vmux_macro",
  "vmux_path",
  "vmux_profile",
+ "vmux_store",
  "vmux_task",
  "vmux_time",
  "vmux_transport",
@@ -11513,6 +11513,20 @@ dependencies = [
  "vmux_runner",
  "vmux_space",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_store"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_reflect",
+ "bevy_world_serialization",
+ "moonshine-save",
+ "vmux_macro",
+ "vmux_time",
+ "web-time",
 ]
 
 [[package]]

@@ -49,7 +49,7 @@ impl<'tcx> Ownership<'tcx> {
                 ("bevy_reflect", "FromType") => "from_type",
                 ("bevy_reflect", "Reflect") => "reflect",
                 ("vmux_ecs", "Job") => "job",
-                ("vmux_ecs", "Schema") => "schema",
+                ("vmux_ecs" | "vmux_store", "Schema") => "schema",
                 ("vmux_page", "Page" | "PageComponent") => "page",
                 ("vmux_feature", "FeatureManifestSource") => "manifest",
                 ("vmux_api", "UiState" | "UiEvent" | "Contract" | "UiStateProjection") => {

@@ -31,6 +31,8 @@ pub use vmux_profile as host;
 pub use vmux_project as project;
 #[cfg(feature = "runner")]
 pub use vmux_runner as runner;
+#[cfg(feature = "store")]
+pub use vmux_store as store;
 
 #[cfg(feature = "release-flags")]
 mod feature_flags;

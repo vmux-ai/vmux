@@ -204,6 +204,10 @@ impl Plugin for ServicePlugin {
             )
                 .chain(),
         )
+        .configure_sets(
+            Last,
+            vmux_ecs::store::AutoSaveSet::Flush.before(ShutdownSet),
+        )
         .add_systems(
             Last,
             (queue_requests, send_requests).chain().before(ShutdownSet),

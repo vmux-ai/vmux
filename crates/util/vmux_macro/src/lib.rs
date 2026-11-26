@@ -68,7 +68,16 @@ pub fn types(args: TokenStream, input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn store(args: TokenStream, input: TokenStream) -> TokenStream {
     let item = parse_macro_input!(input as DeriveInput);
-    match store::Declaration::parse(args.into(), item) {
+    match store::Declaration::parse(args.into(), item, "::vmux_store") {
+        Ok(declaration) => declaration.expand().into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn ecs_store(args: TokenStream, input: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(input as DeriveInput);
+    match store::Declaration::parse(args.into(), item, "::vmux_ecs::store") {
         Ok(declaration) => declaration.expand().into(),
         Err(error) => error.to_compile_error().into(),
     }
