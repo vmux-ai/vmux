@@ -134,9 +134,29 @@ Select Cargo features to make a capability available, then enable it through `Vm
 For example, `layout` makes the renderer-independent layout core available; `layout-runtime`
 adds the native product adapter. Compiling an adapter does not install it in a core-only app.
 
+### Compose shared ECS lifecycles
+
+Core entity vocabulary and execution lifecycles compose independently of any desktop renderer.
+Universal entity state and policies (naming, ordering, toggles, status, timestamps, file paths,
+scoped identity, operations, leases, generations, dirty/selection, and graceful shutdown) live in
+`vmux_app::ecs` (`vmux_ecs`), which also links its companion crates `vmux_channel`, `vmux_time`,
+and `vmux_task` whenever `ecs` is enabled (their plugins remain opt-in to install). Cargo-optional
+runtime crates (`vmux_watch`, `vmux_store`, `vmux_job`, `vmux_runner`, `vmux_http`) stay isolated
+so headless and embedded consumers compile only the capabilities they enable.
+
+All reactive framework crates wake the host event loop through a runner-agnostic `Waker`
+(`vmux_app::ecs::JobWake`), which synchronizes channel, task, and deadline wakes automatically.
+Headless services compose `vmux_app::runner::HeadlessTokioRunner` (optionally with
+`vmux_app::http::HttpServerPlugin`), while desktop hosts bridge their `winit` event loop with
+`vmux_app::runner::WinitWakePlugin`.
+
 | Public namespace | Cargo feature | Available behavior |
 |---|---|---|
-| `vmux_app::ecs` | `ecs`; optionally `jobs` and `contracts` | Shared components, scoped identity, operations and owned jobs. Store remains opt-in on its owning crate. |
+| `vmux_app::ecs` | `ecs`; optionally `watch` and `contracts` | Core entity vocabulary (naming, ordering, toggles, status, timestamps, paths), scoped identity, `OperationPlugin` policies, leases, generations, dirty/selection, `ShutdownPlugin`, `IoTaskPlugin`/`TaskPlugin`, `channel`, `time`, and optional `watch` (non-iOS host targets only). |
+| `vmux_app::job` | `jobs` | Bounded multi-lane blocking worker pools and owned `JobPlugin` lifecycle. |
+| `vmux_app::store` | `store` | Declarative `#[store]` schemas, world serialization, validation, and `AutoSavePlugin` (debounce, periodic flush, backoff retry, exit flush). |
+| `vmux_app::runner` | `runner` (plus `winit` via `runtime`) | Wake-driven `HeadlessTokioRunner` with graceful shutdown drain and optional `WinitWakePlugin` desktop bridge. |
+| `vmux_app::http` | `http-server` | ECS-native `HttpServerPlugin` with channel-backed request entities, safe responders, and `ShutdownPlugin` drain. |
 | `vmux_app::project` | `project` | Project registration, archive and persistence requests; optional filesystem adapter. |
 | `vmux_app::flex` | `flex` | Renderer-independent geometry; an explicit window viewport adapter. |
 | `vmux_app::layout` | `layout` | Owner-scoped pane topology and selection; native adapters require `layout-runtime`. |
