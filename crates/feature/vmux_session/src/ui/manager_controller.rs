@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::event::{
     ManagerCategorySelected, ManagerDateFilterAdded, ManagerFilterAdded, ManagerFilterRemoved,
@@ -152,15 +152,33 @@ impl SessionControls {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct SessionMutations(Option<Signal<ManagerUiState>>);
+pub(super) struct SessionMutations {
+    state: Option<Signal<ManagerUiState>>,
+    optimistic_archived: Option<Signal<HashMap<String, bool>>>,
+    optimistic_leaving: Option<Signal<HashSet<String>>>,
+}
 
 impl SessionMutations {
-    pub fn new(state: Signal<ManagerUiState>) -> Self {
-        Self(Some(state))
+    pub fn new(
+        state: Signal<ManagerUiState>,
+        optimistic_archived: Signal<HashMap<String, bool>>,
+        optimistic_leaving: Signal<HashSet<String>>,
+    ) -> Self {
+        Self {
+            state: Some(state),
+            optimistic_archived: Some(optimistic_archived),
+            optimistic_leaving: Some(optimistic_leaving),
+        }
     }
+
     pub fn collection() -> Self {
-        Self(None)
+        Self {
+            state: None,
+            optimistic_archived: None,
+            optimistic_leaving: None,
+        }
     }
+
     pub fn change(self, target: StageTarget, stage: String) {
         let _ = send(&SessionsStageChange {
             id: target.id,
@@ -169,35 +187,147 @@ impl SessionMutations {
             stage,
         });
     }
+
     pub fn set_archived(self, targets: Vec<ArchiveTarget>, archived: bool) {
-        let _ = send(&SessionsArchive {
-            ids: targets.into_iter().map(|target| target.id).collect(),
-            archived,
-        });
+        let ids = targets
+            .into_iter()
+            .map(|target| target.id)
+            .collect::<Vec<_>>();
+        if ids.len() > 1 {
+            if let Some(mut pending) = self.optimistic_archived {
+                let mut map = pending.write();
+                for id in &ids {
+                    map.insert(id.clone(), archived);
+                }
+            }
+        } else if let Some(id) = ids.first()
+            && let Some(mut leaving) = self.optimistic_leaving
+        {
+            leaving.write().insert(id.clone());
+        }
+        let _ = send(&SessionsArchive { ids, archived });
     }
+
     pub fn archive(self, targets: Vec<ArchiveTarget>) {
         self.set_archived(targets, true);
     }
+
     pub fn restore(self, targets: Vec<ArchiveTarget>) {
         self.set_archived(targets, false);
     }
-    pub fn is_leaving(self, id: &str) -> bool {
-        self.0
-            .is_some_and(|state| state.read().leaving_ids.contains(id))
+
+    pub fn reconcile(self, snapshot: &ManagerUiState) {
+        if let Some(mut pending) = self.optimistic_archived
+            && !pending.peek().is_empty()
+        {
+            let mut next = pending.peek().clone();
+            next.retain(|id, desired| {
+                snapshot
+                    .snapshot
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == *id)
+                    .is_some_and(|session| {
+                        (session.archived_at > 0) != *desired || snapshot.leaving_ids.contains(id)
+                    })
+            });
+            if next != *pending.peek() {
+                pending.set(next);
+            }
+        }
+        if let Some(mut leaving) = self.optimistic_leaving
+            && !leaving.peek().is_empty()
+        {
+            let mut next = leaving.peek().clone();
+            next.retain(|id| {
+                snapshot.visible_ids.contains(id) && !snapshot.leaving_ids.contains(id)
+            });
+            if next != *leaving.peek() {
+                leaving.set(next);
+            }
+        }
     }
+
+    pub fn apply_optimistic(self, presentation: &mut ManagerUiState) {
+        let Some(pending) = self.optimistic_archived else {
+            return;
+        };
+        let overrides = pending.read();
+        if overrides.is_empty() {
+            return;
+        }
+        let mut hidden = HashSet::new();
+        let mut archived_delta: isize = 0;
+        for (id, &desired) in overrides.iter() {
+            let current_archived = presentation
+                .snapshot
+                .sessions
+                .iter()
+                .find(|session| session.id == *id)
+                .map(|session| session.archived_at > 0);
+            if let Some(current_archived) = current_archived
+                && current_archived != desired
+            {
+                archived_delta += if desired { 1 } else { -1 };
+            }
+            if (!presentation.selected_archived && desired)
+                || (presentation.selected_archived && !desired)
+            {
+                hidden.insert(id.as_str());
+            }
+        }
+        presentation.archived_count = presentation
+            .archived_count
+            .saturating_add_signed(archived_delta);
+        if hidden.is_empty() {
+            return;
+        }
+        for group in &mut presentation.groups {
+            group
+                .sessions
+                .retain(|session| !hidden.contains(session.id.as_str()));
+        }
+        for group in &mut presentation.category_groups {
+            group
+                .sessions
+                .retain(|session| !hidden.contains(session.id.as_str()));
+        }
+        presentation
+            .visible_ids
+            .retain(|id| !hidden.contains(id.as_str()));
+        presentation
+            .selected_ids
+            .retain(|id| !hidden.contains(id.as_str()));
+        presentation
+            .leaving_ids
+            .retain(|id| !hidden.contains(id.as_str()));
+        presentation.visible_sessions = !presentation.visible_ids.is_empty();
+    }
+
+    pub fn is_leaving(self, id: &str) -> bool {
+        self.state
+            .is_some_and(|state| state.read().leaving_ids.contains(id))
+            || self
+                .optimistic_leaving
+                .is_some_and(|leaving| leaving.read().contains(id))
+    }
+
     pub fn cleanup(self, target: DeleteTarget) {
         self.cleanup_many(vec![target]);
     }
+
     pub fn cleanup_many(self, targets: Vec<DeleteTarget>) {
         let _ = send(&SessionsCleanup {
             ids: targets.into_iter().map(|target| target.id).collect(),
         });
     }
+
     pub fn deleted_provider_count(self) -> usize {
-        self.0.map_or(0, |state| state.read().restorable.len())
+        self.state.map_or(0, |state| state.read().restorable.len())
     }
+
     pub fn restore_deleted(self) {
-        let Some(state) = self.0 else {
+        let Some(state) = self.state else {
             return;
         };
         let _ = send(&SessionsRestoreDeleted {

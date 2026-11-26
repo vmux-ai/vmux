@@ -1,4 +1,7 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 use dioxus::prelude::component;
 use dioxus::prelude::*;
@@ -48,10 +51,16 @@ pub fn SessionsManager() -> Element {
     let ui = use_ui_state::<ManagerUiState>();
     let controls = SessionControls(ui.state);
     let filter_picker = SessionFilterPicker::use_state();
+    let optimistic_archived = use_signal(HashMap::<String, bool>::new);
+    let optimistic_leaving = use_signal(HashSet::<String>::new);
     let presentation = ui.use_selector(|state| state.clone());
-    let state = presentation();
+    let mut state = presentation();
     let stage_catalog = use_memo(move || presentation.read().snapshot.stages.clone());
-    let mutations = SessionMutations::new(ui.state);
+    let mutations = SessionMutations::new(ui.state, optimistic_archived, optimistic_leaving);
+    use_effect(move || {
+        mutations.reconcile(&presentation.read());
+    });
+    mutations.apply_optimistic(&mut state);
     let selection = SessionSelection(ui.state);
     use_context_provider(|| mutations);
     use_context_provider(|| selection);
@@ -983,13 +992,18 @@ fn SessionItem(
     let presentation = SessionPresentation::new(&session, repository, &stages, &stage);
     let resume = ResumeTarget::from(&session);
     let menu_title = presentation.title.clone();
+    let collapse_class = if leaving {
+        "pointer-events-none".to_string()
+    } else {
+        String::new()
+    };
     rsx! {
-        Collapse { leaving,
+        Collapse { leaving, class: collapse_class,
             SessionRowMenu { session: session.clone(), title: menu_title,
             if view == ManagerView::List {
-                SessionListItem { session, presentation, resume, repository_ready, selection }
+                SessionListItem { session, presentation, resume, repository_ready, selection, leaving }
             } else {
-                SessionBoardItem { session, presentation, resume, repository_ready, selection }
+                SessionBoardItem { session, presentation, resume, repository_ready, selection, leaving }
             }
             }
         }
@@ -1026,12 +1040,17 @@ fn SessionListItem(
     resume: ResumeTarget,
     repository_ready: bool,
     selection: Option<SessionSelection>,
+    leaving: bool,
 ) -> Element {
     let open_session = resume.clone();
     rsx! {
         div {
             class: "group relative flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2.5 py-1 text-xs transition-colors hover:bg-foreground/[0.03]",
-            onclick: move |event| open_session.click(&event),
+            onclick: move |event| {
+                if !leaving {
+                    open_session.click(&event);
+                }
+            },
             if let Some(selection) = selection {
                 SessionSelectionToggle { selection, id: session.id.clone(), size: "size-4".to_string() }
             }
@@ -1086,12 +1105,17 @@ fn SessionBoardItem(
     resume: ResumeTarget,
     repository_ready: bool,
     selection: Option<SessionSelection>,
+    leaving: bool,
 ) -> Element {
     let open_session = resume.clone();
     rsx! {
         article {
             class: "glass group relative cursor-pointer rounded-md px-2.5 py-2.5 transition-colors hover:bg-glass-hover",
-            onclick: move |event| open_session.click(&event),
+            onclick: move |event| {
+                if !leaving {
+                    open_session.click(&event);
+                }
+            },
             div { class: "flex items-start gap-2",
                 if let Some(selection) = selection {
                     SessionSelectionToggle { selection, id: session.id.clone(), size: "size-5".to_string() }
@@ -1881,6 +1905,12 @@ mod tests {
         for index in 0..90 {
             assert!(archived.contains(&format!("session-{index}")));
         }
+        drop(archived);
+        fixture.dom.render_immediate_to_vec();
+        let html = dioxus_ssr::render(&fixture.dom);
+        assert!(!html.contains("aria-busy"));
+        assert!(!html.contains("Task 0"));
+        assert!(html.contains(&translate("sessions-inbox-empty")));
     }
 
     #[test]
