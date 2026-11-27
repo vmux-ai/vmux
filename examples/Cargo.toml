@@ -5,14 +5,30 @@ edition.workspace = true
 publish = false
 description = "Runnable Bevy-style examples for Vmux Framework"
 
+[features]
+default = []
+window = [
+    "dep:dioxus",
+    "dep:rkyv",
+    "dep:serde",
+    "dep:vmux_api",
+    "vmux_app/window-native",
+    "vmux_app/menu-native",
+    "vmux_app/ui",
+]
+
 [dependencies]
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_math = { workspace = true }
 bevy_reflect = { workspace = true }
 bevy_tasks = { workspace = true }
+dioxus = { workspace = true, optional = true }
 moonshine-save = { workspace = true }
+rkyv = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 tempfile = "3"
+vmux_api = { path = "../crates/util/vmux_api", optional = true }
 vmux_app = { path = "../crates/util/vmux_app", features = ["contracts", "manifest", "hosting", "project", "jobs", "watch", "store", "flex", "layout", "menu"] }
 vmux_ecs = { path = "../crates/util/vmux_ecs", features = ["store", "watch"] }
 
@@ -83,3 +99,23 @@ path = "manifest/external_feature.rs"
 [[example]]
 name = "web_host"
 path = "manifest/web_host.rs"
+
+[[example]]
+name = "window_counter"
+path = "window/counter.rs"
+required-features = ["window"]
+
+[[example]]
+name = "window_notes"
+path = "window/notes.rs"
+required-features = ["window"]
+
+[[example]]
+name = "window_split_workspace"
+path = "window/split_workspace.rs"
+required-features = ["window"]
+
+[[example]]
+name = "window_web_host"
+path = "window/web_host.rs"
+required-features = ["window"]
