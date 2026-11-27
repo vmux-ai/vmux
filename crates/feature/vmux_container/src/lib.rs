@@ -28,5 +28,7 @@ mod control;
 mod host;
 #[cfg(host)]
 mod inventory;
+#[cfg(host)]
+mod logs_io;
 #[cfg(ui)]
 pub mod ui;

@@ -1434,7 +1434,7 @@ fn load_settings(
         migrate_projects = partial.needs_project_ids();
     }
     let (settings, config_path) = match config_path {
-        Some(path) => AppSettings::read_and_path(&defaults.0, path),
+        Some(path) => SettingsFileIo::read_and_path(&defaults.0, path),
         None => (defaults.0.clone(), None),
     };
     if migrate_projects {
@@ -1556,21 +1556,9 @@ fn sync_search_engine(
     }
 }
 
-impl AppSettings {
-    fn parse_with_defaults(
-        text: &str,
-        defaults: &AppSettings,
-    ) -> Result<AppSettings, ron::error::SpannedError> {
-        ron::Options::default()
-            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
-            .from_str::<PartialAppSettings>(text)
-            .map(|partial| {
-                let mut settings = defaults.clone();
-                partial.apply_to(&mut settings);
-                settings
-            })
-    }
+struct SettingsFileIo;
 
+impl SettingsFileIo {
     fn read_and_path(
         defaults: &AppSettings,
         path: std::path::PathBuf,
@@ -1580,7 +1568,7 @@ impl AppSettings {
             .is_some_and(|parent| std::fs::create_dir_all(parent).is_ok());
         if parent_ready {
             let settings = match std::fs::read_to_string(&path) {
-                Ok(text) => match Self::parse_with_defaults(&text, defaults) {
+                Ok(text) => match AppSettings::parse_with_defaults(&text, defaults) {
                     Ok(settings) => settings,
                     Err(error) => {
                         bevy::log::warn!(
@@ -1596,6 +1584,22 @@ impl AppSettings {
         } else {
             (defaults.clone(), None)
         }
+    }
+}
+
+impl AppSettings {
+    fn parse_with_defaults(
+        text: &str,
+        defaults: &AppSettings,
+    ) -> Result<AppSettings, ron::error::SpannedError> {
+        ron::Options::default()
+            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+            .from_str::<PartialAppSettings>(text)
+            .map(|partial| {
+                let mut settings = defaults.clone();
+                partial.apply_to(&mut settings);
+                settings
+            })
     }
 
     fn section_ron<T: Serialize>(value: &T) -> Result<String, String> {

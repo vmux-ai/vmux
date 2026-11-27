@@ -58,6 +58,12 @@ rustc_session::declare_lint! {
     "ECS runtime inputs belong to systems, local helpers, or SystemParam methods"
 }
 
+rustc_session::declare_lint! {
+    pub VMUX_ECS_DRIVER_IO,
+    Warn,
+    "direct filesystem, process, or network IO must live in a driver or IO adapter file, not on ECS components or domain modules"
+}
+
 #[unsafe(no_mangle)]
 pub fn register_lints(_: &rustc_session::Session, store: &mut rustc_lint::LintStore) {
     store.register_lints(&[
@@ -66,11 +72,12 @@ pub fn register_lints(_: &rustc_session::Session, store: &mut rustc_lint::LintSt
         VMUX_PLUGIN_NAME,
         VMUX_ECS_OWNERSHIP,
         VMUX_ECS_RUNTIME,
+        VMUX_ECS_DRIVER_IO,
     ]);
     store.register_late_lint_pass(Box::new(|_| Box::new(VmuxExportedSystem::default())));
 }
 
-rustc_session::impl_lint_pass!(VmuxExportedSystem<'_> => [VMUX_EXPORTED_SYSTEM, VMUX_SYSTEM_NAME, VMUX_PLUGIN_NAME, VMUX_ECS_OWNERSHIP, VMUX_ECS_RUNTIME]);
+rustc_session::impl_lint_pass!(VmuxExportedSystem<'_> => [VMUX_EXPORTED_SYSTEM, VMUX_SYSTEM_NAME, VMUX_PLUGIN_NAME, VMUX_ECS_OWNERSHIP, VMUX_ECS_RUNTIME, VMUX_ECS_DRIVER_IO]);
 
 #[derive(Default)]
 struct VmuxExportedSystem<'tcx> {
