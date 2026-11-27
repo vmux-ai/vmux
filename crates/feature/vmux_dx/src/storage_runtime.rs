@@ -35,65 +35,68 @@ impl bevy_app::Plugin for StorageRuntimePlugin {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
         }
-        app.add_plugins((
-            IoPlugin::<Inspect>::default(),
-            IoPlugin::<Canonicalize>::default(),
-            IoPlugin::<ReadDirectoryBatch>::default(),
-            IoPlugin::<ReadFile>::default(),
-            IoPlugin::<Open>::default(),
-            IoPlugin::<Remove>::default(),
-            IoPlugin::<Capture>::default(),
-        ))
-        .configure_sets(
-            Update,
-            (
-                Stage::Collect,
-                Stage::Decide,
-                Stage::Admit,
-                Stage::Submit,
-                Stage::Release,
-            )
-                .chain()
-                .in_set(JobSet::Apply)
-                .after(crate::Stage::Execute),
-        )
-        .add_systems(PreUpdate, cancel)
-        .add_systems(
-            Update,
-            (
-                status,
-                initialize,
-                cancel,
-                validate,
-                capacity,
+        app.add_message::<crate::tui::StorageReported>()
+            .add_message::<crate::tui::Notice>()
+            .add_message::<crate::tui::CleanPreviewed>()
+            .add_plugins((
+                IoPlugin::<Inspect>::default(),
+                IoPlugin::<Canonicalize>::default(),
+                IoPlugin::<ReadDirectoryBatch>::default(),
+                IoPlugin::<ReadFile>::default(),
+                IoPlugin::<Open>::default(),
+                IoPlugin::<Remove>::default(),
+                IoPlugin::<Capture>::default(),
+            ))
+            .configure_sets(
+                Update,
                 (
-                    directory,
-                    scan_roots,
-                    scan_profiles,
-                    scan_caches,
-                    collect_caches,
+                    Stage::Collect,
+                    Stage::Decide,
+                    Stage::Admit,
+                    Stage::Submit,
+                    Stage::Release,
                 )
-                    .chain(),
-                processes,
-                (collect_usage, usage).chain(),
-                protect,
-                locks,
-                evict,
-                (select, collect_deps, select_caches, retain_apps).chain(),
-                (collect_removals, remove).chain(),
-                report,
-                wake,
+                    .chain()
+                    .in_set(JobSet::Apply)
+                    .after(crate::Stage::Execute),
             )
-                .chain()
-                .in_set(Stage::Decide),
-        )
-        .add_systems(Update, prune.in_set(Stage::Admit))
-        .add_systems(Update, (release, finish).chain().in_set(Stage::Release));
+            .add_systems(PreUpdate, cancel)
+            .add_systems(
+                Update,
+                (
+                    status,
+                    initialize,
+                    cancel,
+                    validate,
+                    capacity,
+                    (
+                        directory,
+                        scan_roots,
+                        scan_profiles,
+                        scan_caches,
+                        collect_caches,
+                    )
+                        .chain(),
+                    processes,
+                    (collect_usage, usage).chain(),
+                    protect,
+                    locks,
+                    evict,
+                    (select, collect_deps, select_caches, retain_apps).chain(),
+                    (collect_removals, remove).chain(),
+                    report,
+                    wake,
+                )
+                    .chain()
+                    .in_set(Stage::Decide),
+            )
+            .add_systems(Update, prune.in_set(Stage::Admit))
+            .add_systems(Update, (release, finish).chain().in_set(Stage::Release));
     }
 }
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Stage {
+pub(crate) enum Stage {
     Collect,
     Decide,
     Admit,
@@ -353,11 +356,43 @@ struct Anchor(PathBuf);
 #[derive(SystemParam)]
 struct IoWriter<'w, 's> {
     commands: Commands<'w, 's>,
+    notices: MessageWriter<'w, crate::tui::Notice>,
 }
 
 impl IoWriter<'_, '_> {
     fn fail(&mut self, entity: Entity, failure: Failure) {
         self.commands.entity(entity).insert(Failed(failure));
+    }
+
+    fn notice(&mut self, root: Entity, tone: crate::tui::NoticeTone, text: String) {
+        self.notices.write(crate::tui::Notice {
+            root: Some(root),
+            tone,
+            text,
+        });
+    }
+
+    fn removal_notice(
+        &mut self,
+        root: Entity,
+        path: &std::path::Path,
+        apply: bool,
+        artifact: bool,
+        dep_file: bool,
+    ) {
+        let text = if !apply {
+            if dep_file {
+                return;
+            }
+            format!("Build storage: would remove {}", path.display())
+        } else if artifact {
+            format!("Build storage: removing old local app {}", path.display())
+        } else if !dep_file {
+            format!("Build storage: removing {}", path.display())
+        } else {
+            return;
+        };
+        self.notice(root, crate::tui::NoticeTone::Stdout, text);
     }
 
     fn request<J: StorageJob>(&mut self, job: J, root: Entity, purpose: Purpose) {
@@ -938,6 +973,7 @@ fn capacity(
     facts: Facts,
     anchors: Query<&Anchor>,
     receipts: Receipts,
+    mut reports: MessageWriter<crate::tui::StorageReported>,
     mut io: IoWriter,
 ) {
     for (entity, request, captured, mut phase) in &mut requests {
@@ -980,13 +1016,20 @@ fn capacity(
                 match request.kind {
                     RequestKind::Check | RequestKind::Guard => {
                         if matches!(request.kind, RequestKind::Check) {
-                            println!("Build storage: {:.1} GiB free", value as f64 / GIB as f64);
-                            if value < policy.warning {
-                                eprintln!(
+                            let warning = (value < policy.warning).then(|| {
+                                format!(
                                     "Build storage: warning, less than {} GiB free",
                                     policy.warning as f64 / GIB as f64
-                                );
-                            }
+                                )
+                            });
+                            reports.write(crate::tui::StorageReported {
+                                root: captured.root,
+                                free_bytes: value,
+                                cache_bytes: None,
+                                warning,
+                                phase: crate::tui::StoragePhase::Check,
+                                profile: None,
+                            });
                         }
                         if let Err(error) = policy.check(value) {
                             io.fail(entity, Failure::from_error(error));
@@ -1048,7 +1091,11 @@ fn directory(mut requests: Requests, facts: Facts, receipts: Receipts, mut io: I
                             request.kind,
                             RequestKind::Preflight | RequestKind::Clean | RequestKind::Finish
                         ) {
-                            println!("Build storage: no Cargo cache tag; cache deletion skipped");
+                            io.notice(
+                                captured.root,
+                                crate::tui::NoticeTone::Stdout,
+                                "Build storage: no Cargo cache tag; cache deletion skipped".into(),
+                            );
                         }
                         *phase = Phase::Roots;
                     }
@@ -1078,8 +1125,11 @@ fn directory(mut requests: Requests, facts: Facts, receipts: Receipts, mut io: I
                                 request.kind,
                                 RequestKind::Preflight | RequestKind::Clean | RequestKind::Finish
                             ) {
-                                println!(
+                                io.notice(
+                                    captured.root,
+                                    crate::tui::NoticeTone::Stdout,
                                     "Build storage: no Cargo cache tag; cache deletion skipped"
+                                        .into(),
                                 );
                             }
                         }
@@ -2218,19 +2268,11 @@ fn remove(
                 continue;
             }
         }
+        io.removal_notice(captured.root, &path.0, apply, artifact, dep_file);
+        io.commands.entity(target).insert(Queued);
         if !apply {
-            if !dep_file {
-                println!("Build storage: would remove {}", path.0.display());
-            }
-            io.commands.entity(target).insert(Queued);
             continue;
         }
-        if artifact {
-            println!("Build storage: removing old local app {}", path.0.display());
-        } else if !dep_file {
-            println!("Build storage: removing {}", path.0.display());
-        }
-        io.commands.entity(target).insert(Queued);
         io.request(
             Remove {
                 path: path.0.clone(),
@@ -2243,15 +2285,49 @@ fn remove(
     }
 }
 
-fn report(
-    requests: ReportRequests,
-    facts: Facts,
-    capacities: Query<&Capacity>,
-    usages: Query<&Usage>,
-    dep_files: QueuedDepFiles,
-    paths: Query<&Cwd>,
-    mut commands: Commands,
-) {
+#[derive(SystemParam)]
+struct ReportData<'w, 's> {
+    capacities: Query<'w, 's, &'static Capacity>,
+    usages: Query<'w, 's, &'static Usage>,
+    dep_files: QueuedDepFiles<'w, 's>,
+    paths: Query<'w, 's, &'static Cwd>,
+    queued: Query<'w, 's, &'static Root, With<Queued>>,
+}
+
+impl ReportData<'_, '_> {
+    fn dep_notices(&self, entity: Entity, apply: bool) -> Vec<String> {
+        let mut deps = BTreeMap::<&std::path::Path, usize>::new();
+        for (root, parent) in &self.dep_files {
+            if root.0 == entity
+                && let Ok(directory) = self.paths.get(parent.parent())
+            {
+                *deps.entry(directory.0.as_path()).or_insert(0) += 1;
+            }
+        }
+        let mut out = Vec::new();
+        for (directory, count) in deps {
+            let line = if apply {
+                format!(
+                    "Build storage: removed {count} cached files from {}",
+                    directory.display()
+                )
+            } else {
+                format!(
+                    "Build storage: would remove {count} cached files in {}",
+                    directory.display()
+                )
+            };
+            out.push(line);
+        }
+        out
+    }
+
+    fn queued_count(&self, entity: Entity) -> usize {
+        self.queued.iter().filter(|root| root.0 == entity).count()
+    }
+}
+
+fn report(requests: ReportRequests, facts: Facts, data: ReportData, mut commands: Commands) {
     for (entity, request, captured, phase) in &requests {
         if *phase != Phase::Reporting {
             continue;
@@ -2259,71 +2335,90 @@ fn report(
         let Ok((_, _, storage, _)) = facts.get(captured.root) else {
             continue;
         };
-        let Ok(capacity) = capacities.get(entity) else {
+        let Ok(capacity) = data.capacities.get(entity) else {
             continue;
         };
         let apply =
             matches!(request.kind, RequestKind::Preflight | RequestKind::Finish) || request.apply;
-        let mut deps = BTreeMap::<&std::path::Path, usize>::new();
-        for (root, parent) in &dep_files {
-            if root.0 == entity
-                && let Ok(directory) = paths.get(parent.parent())
-            {
-                *deps.entry(directory.0.as_path()).or_insert(0) += 1;
-            }
-        }
-        for (directory, count) in deps {
-            if apply {
-                println!(
-                    "Build storage: removed {count} cached files from {}",
-                    directory.display()
-                );
-            } else {
-                println!(
-                    "Build storage: would remove {count} cached files in {}",
-                    directory.display()
-                );
-            }
+        for text in data.dep_notices(entity, apply) {
+            commands.write_message(crate::tui::Notice {
+                root: Some(captured.root),
+                tone: crate::tui::NoticeTone::Stdout,
+                text,
+            });
         }
         let policy = storage.policy();
         match request.kind {
             RequestKind::Preflight => {
-                println!(
-                    "Build storage: {:.1} GiB free",
-                    capacity.0 as f64 / GIB as f64
-                );
                 if capacity.0 < policy.minimum {
-                    commands.entity(entity).insert(Failed(Failure::message(format!("Insufficient build space: need {} GiB free; stop unused apps/builds and run vmux cache clean --apply", policy.minimum as f64 / GIB as f64))));
+                    commands.write_message(crate::tui::StorageReported {
+                        root: captured.root,
+                        free_bytes: capacity.0,
+                        cache_bytes: None,
+                        warning: None,
+                        phase: crate::tui::StoragePhase::Preflight,
+                        profile: None,
+                    });
+                    commands.entity(entity).insert(Failed(Failure::message(format!(
+                        "Insufficient build space: need {} GiB free; stop unused apps/builds and run vmux cache clean --apply",
+                        policy.minimum as f64 / GIB as f64
+                    ))));
                     continue;
                 }
-                if capacity.0 < policy.warning {
-                    eprintln!(
+                let warning = (capacity.0 < policy.warning).then(|| {
+                    format!(
                         "Build storage: warning, less than {} GiB free",
                         policy.warning as f64 / GIB as f64
-                    );
-                }
+                    )
+                });
+                commands.write_message(crate::tui::StorageReported {
+                    root: captured.root,
+                    free_bytes: capacity.0,
+                    cache_bytes: None,
+                    warning,
+                    phase: crate::tui::StoragePhase::Preflight,
+                    profile: None,
+                });
             }
             RequestKind::Finish => {
-                let profile = request.profile.as_deref().unwrap();
-                println!(
-                    "Build storage: {:.1} GiB free after {profile} build",
-                    capacity.0 as f64 / GIB as f64
-                );
-                if capacity.0 < policy.warning {
-                    eprintln!(
-                        "Build storage: free space remains low; active profiles and distribution artifacts were kept"
-                    );
-                }
+                let profile = request.profile.clone();
+                let warning = (capacity.0 < policy.warning).then(|| {
+                    "Build storage: free space remains low; active profiles and distribution artifacts were kept".into()
+                });
+                commands.write_message(crate::tui::StorageReported {
+                    root: captured.root,
+                    free_bytes: capacity.0,
+                    cache_bytes: None,
+                    warning,
+                    phase: crate::tui::StoragePhase::Finish,
+                    profile,
+                });
             }
             RequestKind::Clean | RequestKind::Report => {
-                let Ok(usage) = usages.get(entity) else {
+                let Ok(usage) = data.usages.get(entity) else {
                     continue;
                 };
-                println!(
-                    "Build storage: {:.1} GiB free, {:.1} GiB of compile caches",
-                    capacity.0 as f64 / GIB as f64,
-                    usage.0 as f64 / GIB as f64
-                );
+                let phase = match request.kind {
+                    RequestKind::Report => crate::tui::StoragePhase::Report,
+                    RequestKind::Clean if request.apply => crate::tui::StoragePhase::CleanApplied,
+                    _ => crate::tui::StoragePhase::CleanPreview,
+                };
+                commands.write_message(crate::tui::StorageReported {
+                    root: captured.root,
+                    free_bytes: capacity.0,
+                    cache_bytes: Some(usage.0),
+                    warning: None,
+                    phase,
+                    profile: None,
+                });
+                if matches!(request.kind, RequestKind::Clean) && !request.apply {
+                    commands.write_message(crate::tui::CleanPreviewed {
+                        root: captured.root,
+                        reclaimable_count: data.queued_count(entity),
+                        free_bytes: capacity.0,
+                        cache_bytes: usage.0,
+                    });
+                }
             }
             _ => {}
         }
@@ -2469,6 +2564,7 @@ fn finish(
     requests: FinishRequests,
     rows: Query<&Root>,
     mut completions: MessageWriter<Completion>,
+    mut notices: MessageWriter<crate::tui::Notice>,
     wake: Res<JobWake>,
     mut commands: Commands,
 ) {
@@ -2480,10 +2576,14 @@ fn finish(
             Some(failed)
                 if matches!(request.kind, RequestKind::Finish) && Signals::pending().is_none() =>
             {
-                eprintln!(
-                    "Build storage: cleanup skipped after successful build: {}",
-                    failed.0
-                );
+                notices.write(crate::tui::Notice {
+                    root: Some(captured.root),
+                    tone: crate::tui::NoticeTone::Warning,
+                    text: format!(
+                        "Build storage: cleanup skipped after successful build: {}",
+                        failed.0
+                    ),
+                });
                 Ok(())
             }
             Some(failed) => Err(failed.0.clone()),

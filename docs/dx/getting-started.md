@@ -62,6 +62,23 @@ the current checkout; select `vmux desktop main` when you intend main. Use
 `vmux build <branch>` to build without launching. `vmux run` remains available for
 explicit platform selection, including mobile and web.
 
+## Interactive TUI and themes
+
+In an interactive terminal, developer commands show live step progress, elapsed time,
+summaries, and recovery hints, and `vmux cache clean` offers an inline confirmation when
+reclaimable caches are found. Run `vmux tui` to open the interactive multi-pane developer
+cockpit for picking a worktree, build profile, command, and color theme:
+
+```sh
+vmux tui
+vmux tui --list-themes
+vmux tui --theme tokyo-night
+```
+
+Themes match the desktop app's built-in color schemes and persist between invocations
+(`VMUX_TUI_THEME` overrides per shell). Non-TTY sessions, `CI`, and `VMUX_NO_TUI=1`
+automatically fall back to concise single-line plain-text output without prompting.
+
 ## CLI updates
 
 The development CLI refreshes from the selected checkout when its source changes.

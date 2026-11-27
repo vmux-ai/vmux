@@ -1,5 +1,7 @@
 #[cfg(host)]
 pub use host::{ShortcutCaptureSet, ShortcutPlugin};
+#[cfg(host)]
+pub use input::{PendingPrefix, ShortcutInputPlugin};
 
 pub(crate) struct Feature;
 

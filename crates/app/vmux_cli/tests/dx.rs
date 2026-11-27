@@ -2882,6 +2882,77 @@ assert (app/'LaunchScreen.storyboardc').is_file()
     }
 }
 
+#[test]
+fn tui_lists_and_persists_desktop_themes_and_refuses_non_tty_interactive_launch() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("tui.json");
+    Command::cargo_bin("vmux")
+        .unwrap()
+        .env("VMUX_CLI_TUI_CONFIG", &config)
+        .env_remove("VMUX_TUI_THEME")
+        .args(["tui", "--list-themes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("catppuccin-mocha"))
+        .stdout(predicate::str::contains("tokyo-night"))
+        .stdout(predicate::str::contains("dracula"))
+        .stdout(predicate::str::contains("rose-pine"))
+        .stdout(predicate::str::contains("kanagawa"));
+    Command::cargo_bin("vmux")
+        .unwrap()
+        .env("VMUX_CLI_TUI_CONFIG", &config)
+        .env_remove("VMUX_TUI_THEME")
+        .args(["tui", "--theme", "tokyo-night"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tokyo-night"));
+    let saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+    assert_eq!(saved["theme"], "tokyo-night");
+    Command::cargo_bin("vmux")
+        .unwrap()
+        .env("VMUX_CLI_TUI_CONFIG", &config)
+        .env_remove("VMUX_TUI_THEME")
+        .args(["tui", "--list-themes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("★").and(predicate::str::contains("tokyo-night")));
+    Command::cargo_bin("vmux")
+        .unwrap()
+        .env("VMUX_CLI_TUI_CONFIG", &config)
+        .args(["tui"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Interactive TUI requires a terminal",
+        ));
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn build_storage_free_space_is_not_printed_twice_during_preflight() {
+    let fixture = Fixture::new();
+    let output = fixture
+        .command()
+        .args(["build", "-p", "dev"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let free_lines = stdout
+        .lines()
+        .filter(|line| line.starts_with("Build storage:") && line.ends_with("GiB free"))
+        .count();
+    assert_eq!(
+        free_lines, 1,
+        "expected one preflight storage line:\n{stdout}"
+    );
+}
+
 #[cfg(all(unix, feature = "ci-syntax"))]
 mod ci_native {
     use std::process::{Command, Output};

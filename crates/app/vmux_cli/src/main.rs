@@ -14,10 +14,14 @@ fn main() -> AppExit {
         };
     }
     #[cfg(feature = "dx")]
-    if vmux_dx::DxPlugin::selected(std::env::args_os().skip(1)) {
-        let mut app = App::new();
-        app.add_plugins((vmux_dx::DxPlugin, command::CliRuntimePlugin));
-        return app.run();
+    {
+        let mut args = std::env::args_os().skip(1).peekable();
+        let tui_runtime = cfg!(feature = "runtime") && args.peek().is_some_and(|arg| arg == "tui");
+        if !tui_runtime && vmux_dx::DxPlugin::selected(args) {
+            let mut app = App::new();
+            app.add_plugins((vmux_dx::DxPlugin, command::CliRuntimePlugin));
+            return app.run();
+        }
     }
     run()
 }

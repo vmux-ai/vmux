@@ -10475,6 +10475,7 @@ dependencies = [
  "vmux_dx",
  "vmux_ecs",
  "vmux_feature",
+ "vmux_tui",
 ]
 
 [[package]]
@@ -11717,6 +11718,37 @@ dependencies = [
  "vmux_profile",
  "webpki-roots",
  "zeroize",
+]
+
+[[package]]
+name = "vmux_tui"
+version = "0.0.35"
+dependencies = [
+ "bevy",
+ "bevy_app",
+ "bevy_cef",
+ "bevy_ecs",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "vmux_api",
+ "vmux_app",
+ "vmux_command",
+ "vmux_ecs",
+ "vmux_flex",
+ "vmux_history",
+ "vmux_input",
+ "vmux_layout",
+ "vmux_process",
+ "vmux_profile",
+ "vmux_project",
+ "vmux_setting",
+ "vmux_shortcut",
+ "vmux_space",
+ "vmux_terminal",
+ "vmux_transport",
 ]
 
 [[package]]

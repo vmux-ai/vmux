@@ -118,6 +118,12 @@ mod tooling;
 #[cfg(feature = "development")]
 mod tooling_io;
 #[cfg(feature = "development")]
+mod tui;
+#[cfg(feature = "development")]
+mod tui_io;
+#[cfg(feature = "development")]
+mod tui_render;
+#[cfg(feature = "development")]
 mod update_io;
 #[cfg(feature = "development")]
 pub mod updates;
@@ -227,6 +233,7 @@ impl bevy_app::Plugin for DxPlugin {
             package::PackagePlugin,
             reset::ResetPlugin,
             tooling::ToolingPlugin,
+            tui::TuiPlugin,
             NativeStepsPlugin,
         ))
         .configure_sets(
@@ -504,7 +511,12 @@ type Finishing<'w, 's> = Query<
     'w,
     's,
     (Entity, &'static Children, &'static OperationState),
-    (With<Accepted>, Without<AutoBuild>, Without<CliResult>),
+    (
+        With<Accepted>,
+        Without<AutoBuild>,
+        Without<tui::CleanConfirming>,
+        Without<CliResult>,
+    ),
 >;
 
 #[cfg(feature = "development")]
@@ -646,7 +658,7 @@ fn resolve(requests: Incoming, providers: Query<&workspace::Provider>, mut comma
         if invocation.command.starts_with("dx.ci.") {
             continue;
         }
-        if invocation.is("dx.update") {
+        if invocation.is("dx.update") || invocation.is("dx.tui") {
             continue;
         }
         let provider = dispatch.and_then(|dispatch| providers.get(dispatch.provider).ok());
@@ -655,7 +667,7 @@ fn resolve(requests: Incoming, providers: Query<&workspace::Provider>, mut comma
         }
         if invocation.is("dx.help") {
             println!(
-                "Vmux development commands: build, run, serve, stop, test, lint, doctor, cache\nUse vmux <command> --help."
+                "Vmux development commands: tui, desktop, build, run, serve, stop, test, lint, doctor, cache\nUse vmux <command> --help."
             );
             commands.entity(entity).insert(CliResult::default());
             continue;
@@ -936,6 +948,16 @@ impl Plans<'_, '_> {
         self.push(owner, tail, (Name::new(name), work));
     }
 
+    fn passthrough_step<W: Component>(
+        &mut self,
+        owner: Entity,
+        tail: &mut Tail,
+        name: &'static str,
+        work: W,
+    ) {
+        self.push(owner, tail, (Name::new(name), tui::PassthroughStep, work));
+    }
+
     fn request<T: Component + Clone>(
         &mut self,
         owner: Entity,
@@ -944,6 +966,17 @@ impl Plans<'_, '_> {
         request: T,
     ) {
         let entity = self.push(owner, tail, Name::new(name));
+        self.commands.trigger(debug::Requested { entity, request });
+    }
+
+    fn passthrough_request<T: Component + Clone>(
+        &mut self,
+        owner: Entity,
+        tail: &mut Tail,
+        name: &'static str,
+        request: T,
+    ) {
+        let entity = self.push(owner, tail, (Name::new(name), tui::PassthroughStep));
         self.commands.trigger(debug::Requested { entity, request });
     }
 }
@@ -1096,16 +1129,16 @@ fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
         );
         plans.step(entity, &mut tail, "Prepare CEF helper", HelperStep);
         plans.request(entity, &mut tail, "Invalidate old artifact", debug::Clear);
-        plans.request(
+        plans.passthrough_request(
             entity,
             &mut tail,
-            "Run Cargo",
+            "Build CLI & VM binaries",
             cargo::Run::new(&["build", "-p", "vmux_cli", "-p", "vmux_vm"]),
         );
-        plans.request(
+        plans.passthrough_request(
             entity,
             &mut tail,
-            "Run Cargo",
+            "Build service daemon",
             cargo::Run::new(&[
                 "build",
                 "-p",
@@ -1135,10 +1168,10 @@ fn plan_desktop_dev(mut operations: Planning, mut plans: Plans) {
         if cfg!(target_os = "macos") {
             args.extend(["--", "-C", "link-arg=-Wl,-headerpad,1000"].map(OsString::from));
         }
-        plans.request(
+        plans.passthrough_request(
             entity,
             &mut tail,
-            "Run Cargo",
+            "Build desktop app",
             cargo::Run { arguments: args },
         );
         if cfg!(target_os = "macos") {
@@ -1185,7 +1218,7 @@ fn plan_desktop_package(mut operations: Planning, mut plans: Plans) {
             "Prepare signing identity",
             debug::IdentityRequest { print: false },
         );
-        plans.step(
+        plans.passthrough_step(
             entity,
             &mut tail,
             "Package app",
@@ -1421,16 +1454,29 @@ fn plan_run(mut operations: Planning, mut plans: Plans) {
                 plans.step(entity, &mut tail, "Prepare simulator", SimulatorStep);
             }
         }
-        plans.request(
-            entity,
-            &mut tail,
-            "Run artifact",
-            debug::Run {
-                profile: profile.into(),
-                platform: platform.into(),
-                allow_build: platform == "desktop" && !no_build,
-            },
-        );
+        if platform == "desktop" {
+            plans.request(
+                entity,
+                &mut tail,
+                "Launch desktop app",
+                debug::Run {
+                    profile: profile.into(),
+                    platform: platform.into(),
+                    allow_build: !no_build,
+                },
+            );
+        } else {
+            plans.passthrough_request(
+                entity,
+                &mut tail,
+                "Run artifact",
+                debug::Run {
+                    profile: profile.into(),
+                    platform: platform.into(),
+                    allow_build: false,
+                },
+            );
+        }
 
         plans.commands.entity(entity).insert(Planned);
     }
@@ -1491,7 +1537,7 @@ fn plan_test(mut operations: Planning, mut plans: Plans) {
             args.extend(["--features".into(), features.to_owned()]);
         }
         args.append(&mut forwarded);
-        plans.request(
+        plans.passthrough_request(
             entity,
             &mut tail,
             "Run Cargo",
@@ -1522,10 +1568,10 @@ fn plan_lint(mut operations: Planning, mut plans: Plans) {
             debug::Acquire { inherit: true },
         );
         plans.step(entity, &mut tail, "Seed target cache", SeedStep);
-        plans.request(
+        plans.passthrough_request(
             entity,
             &mut tail,
-            "Run Cargo",
+            "Check formatting",
             cargo::Run::new(&["fmt", "--all", "--", "--check"]),
         );
         let mut args = vec![
@@ -1542,14 +1588,14 @@ fn plan_lint(mut operations: Planning, mut plans: Plans) {
         args.append(&mut forwarded);
         let compiler_arguments = args[1..].to_vec();
         args.extend(["--".into(), "-D".into(), "warnings".into()]);
-        plans.request(
+        plans.passthrough_request(
             entity,
             &mut tail,
-            "Run Cargo",
+            "Run Clippy",
             cargo::Run { arguments: args },
         );
 
-        plans.request(
+        plans.passthrough_request(
             entity,
             &mut tail,
             "Run compiler ownership lints",
@@ -1569,7 +1615,7 @@ fn plan_doctor(mut operations: Planning, mut plans: Plans) {
         if !(dispatch.is_none() && invocation.is("dx.doctor")) {
             continue;
         }
-        plans.step(entity, &mut tail, "Inspect tools", DoctorStep);
+        plans.passthrough_step(entity, &mut tail, "Inspect tools", DoctorStep);
         plans.commands.entity(entity).insert(Planned);
     }
 }
@@ -2759,6 +2805,29 @@ impl Replies<'_, '_> {
     fn send(&mut self, entity: Entity, result: CliResult) {
         self.commands.entity(entity).insert(result);
     }
+
+    fn fail_step(&mut self, root: Entity, step: Entity, error: &Failure) {
+        self.commands
+            .entity(root)
+            .insert(tui::FailedDiagnostic(error.to_string()));
+        self.commands
+            .entity(step)
+            .remove::<Running>()
+            .insert((Completed, OperationState::Failed));
+        self.send(root, CliResult(Ok(error.code() as u8)));
+    }
+
+    fn request_auto_build(&mut self, root: Entity) {
+        self.commands.write_message(tui::Notice {
+            root: Some(root),
+            tone: tui::NoticeTone::Info,
+            text: "No up-to-date desktop build for this commit; building before launch".into(),
+        });
+        self.commands
+            .entity(root)
+            .insert(AutoBuild)
+            .remove::<Planned>();
+    }
 }
 
 #[cfg(feature = "development")]
@@ -2927,11 +2996,7 @@ fn apply(
                         settings.0.set(tool_path.key, &tool_path.path);
                     }
                     if missing {
-                        replies
-                            .commands
-                            .entity(parent.parent())
-                            .insert(AutoBuild)
-                            .remove::<Planned>();
+                        replies.request_auto_build(parent.parent());
                         mailbox.wake.unpark();
                     }
                 }
@@ -2947,13 +3012,7 @@ fn apply(
                 } else {
                     OperationState::Failed
                 };
-                eprintln!("vmux: {error}");
-                replies
-                    .commands
-                    .entity(entity)
-                    .remove::<Running>()
-                    .insert((Completed, OperationState::Failed));
-                replies.send(parent.parent(), CliResult(Ok(error.code() as u8)));
+                replies.fail_step(parent.parent(), entity, error);
             }
         }
         replies.commands.entity(entity).remove::<Receipt>();
@@ -2985,7 +3044,6 @@ fn finish(
     drains: Drains,
     origins: Query<&Started>,
     completed: Query<Entity, With<Completed>>,
-    artifacts: Query<&Artifact, With<vmux_ecs::Ready>>,
     mut commands: Commands,
 ) {
     for (entity, children, state) in &operations {
@@ -3004,11 +3062,6 @@ fn finish(
             }
         }
         if ready {
-            for child in children.iter() {
-                if let Ok(artifact) = artifacts.get(child) {
-                    println!("Ready artifact: {}", artifact.0.display());
-                }
-            }
             commands
                 .entity(entity)
                 .insert((OperationState::Succeeded, CliResult::default()));

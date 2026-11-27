@@ -1,0 +1,76 @@
+[package]
+name = "vmux_tui"
+description = "Interactive terminal UI and shared TUI primitives for Vmux"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+runtime = [
+    "dep:bevy",
+    "dep:bevy_app",
+    "dep:bevy_cef",
+    "dep:bevy_ecs",
+    "dep:tokio",
+    "dep:vmux_api",
+    "dep:vmux_app",
+    "dep:vmux_command",
+    "dep:vmux_ecs",
+    "dep:vmux_flex",
+    "dep:vmux_history",
+    "dep:vmux_input",
+    "dep:vmux_layout",
+    "dep:vmux_process",
+    "dep:vmux_profile",
+    "dep:vmux_project",
+    "dep:vmux_setting",
+    "dep:vmux_shortcut",
+    "dep:vmux_space",
+    "dep:vmux_terminal",
+    "dep:vmux_transport",
+]
+
+[dependencies]
+libc = "0.2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+bevy = { workspace = true, optional = true }
+bevy_app = { workspace = true, optional = true }
+bevy_cef = { workspace = true, optional = true }
+bevy_ecs = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+vmux_api = { path = "../vmux_api", optional = true }
+vmux_app = { path = "../vmux_app", features = [
+    "ecs",
+    "jobs",
+    "flex",
+    "runtime",
+    "setting",
+    "command",
+    "history",
+    "layout",
+    "layout-runtime",
+    "space",
+    "shortcut",
+], optional = true }
+vmux_command = { path = "../../feature/vmux_command", optional = true }
+vmux_ecs = { path = "../vmux_ecs", features = ["cli", "host"], optional = true }
+vmux_flex = { path = "../vmux_flex", optional = true }
+vmux_input = { path = "../../feature/vmux_input", optional = true }
+vmux_layout = { path = "../../feature/vmux_layout", features = ["host"], optional = true }
+vmux_history = { path = "../../feature/vmux_history", optional = true }
+vmux_process = { path = "../vmux_process", optional = true }
+vmux_profile = { path = "../vmux_profile", optional = true }
+vmux_project = { path = "../../feature/vmux_project", features = ["filesystem"], optional = true }
+vmux_setting = { path = "../../feature/vmux_setting", optional = true }
+vmux_shortcut = { path = "../../feature/vmux_shortcut", optional = true }
+vmux_space = { path = "../../feature/vmux_space", optional = true }
+vmux_terminal = { path = "../../feature/vmux_terminal", optional = true }
+vmux_transport = { path = "../vmux_transport", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

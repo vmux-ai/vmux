@@ -23,51 +23,57 @@ pub(crate) struct ToolingPlugin;
 
 impl bevy_app::Plugin for ToolingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            IoPlugin::<Inspect>::default(),
-            IoPlugin::<SourceKey>::default(),
-            IoPlugin::<CreateDirectory>::default(),
-            IoPlugin::<Acquire>::default(),
-            IoPlugin::<Capture>::default(),
-            IoPlugin::<Handoff>::default(),
-        ))
-        .configure_sets(
-            Update,
-            (Stage::Collect, Stage::Decide, Stage::Submit, Stage::Finish)
-                .chain()
-                .in_set(JobSet::Apply)
-                .after(crate::Stage::Execute),
-        )
-        .add_observer(accept)
-        .add_systems(PreUpdate, cancel)
-        .add_systems(
-            Update,
-            (
-                cancel,
-                guard,
-                (
-                    observe_input,
-                    observe_compiler,
-                    prepare_input,
-                    check,
-                    compile,
-                    handoff,
-                )
-                    .chain(),
+        app.add_message::<crate::tui::Notice>()
+            .add_plugins((
+                IoPlugin::<Inspect>::default(),
+                IoPlugin::<SourceKey>::default(),
+                IoPlugin::<CreateDirectory>::default(),
+                IoPlugin::<Acquire>::default(),
+                IoPlugin::<Capture>::default(),
+                IoPlugin::<Handoff>::default(),
+            ))
+            .configure_sets(
+                Update,
+                (Stage::Collect, Stage::Decide, Stage::Submit, Stage::Finish)
+                    .chain()
+                    .in_set(JobSet::Apply)
+                    .after(crate::Stage::Execute),
             )
-                .chain()
-                .in_set(Stage::Decide),
-        )
-        .add_systems(Update, finish.in_set(Stage::Finish));
+            .add_observer(accept)
+            .add_systems(PreUpdate, cancel)
+            .add_systems(
+                Update,
+                (
+                    cancel,
+                    guard,
+                    (
+                        observe_input,
+                        observe_compiler,
+                        prepare_input,
+                        check,
+                        compile,
+                        handoff,
+                    )
+                        .chain(),
+                )
+                    .chain()
+                    .in_set(Stage::Decide),
+            )
+            .add_systems(Update, finish.in_set(Stage::Finish));
     }
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum Stage {
+pub(crate) enum Stage {
     Collect,
     Decide,
     Submit,
     Finish,
+}
+
+#[derive(Component)]
+pub(crate) struct Compiling {
+    pub started: std::time::Instant,
 }
 
 #[derive(Component)]
@@ -586,7 +592,12 @@ fn check(mut requests: AdvanceRequests, scope: Scope, wake: Res<JobWake>, mut co
     }
 }
 
-fn compile(mut requests: AdvanceRequests, scope: Scope, mut commands: Commands) {
+fn compile(
+    mut requests: AdvanceRequests,
+    scope: Scope,
+    mut notices: MessageWriter<crate::tui::Notice>,
+    mut commands: Commands,
+) {
     for (entity, checkout, settings, _arguments, phase) in &mut requests {
         if scope.pending.iter().any(|owner| owner.0 == entity)
             || scope.guards.iter().any(|owner| owner.0 == entity)
@@ -617,7 +628,14 @@ fn compile(mut requests: AdvanceRequests, scope: Scope, mut commands: Commands) 
                     argv.push(OsString::from(value));
                 }
                 argv.push(checkout.target.clone().into_os_string());
-                eprintln!("Updating the development CLI for the selected checkout");
+                notices.write(crate::tui::Notice {
+                    root: None,
+                    tone: crate::tui::NoticeTone::Info,
+                    text: "Updating the development CLI for the selected checkout".into(),
+                });
+                commands.entity(entity).insert(Compiling {
+                    started: std::time::Instant::now(),
+                });
                 commands.spawn((
                     Io,
                     Owner(entity),
@@ -632,6 +650,7 @@ fn compile(mut requests: AdvanceRequests, scope: Scope, mut commands: Commands) 
                 ));
             }
             Phase::Binary => {
+                commands.entity(entity).remove::<Compiling>();
                 commands.spawn((
                     Io,
                     Owner(entity),
@@ -755,10 +774,10 @@ fn finish(
         };
         match failed {
             Some(failed) => {
-                commands
-                    .entity(caller.0)
-                    .insert(CliResult(Ok(failed.0.code() as u8)));
-                eprintln!("vmux: {}", failed.0);
+                commands.entity(caller.0).insert((
+                    crate::tui::FailedDiagnostic(failed.0.to_string()),
+                    CliResult(Ok(failed.0.code() as u8)),
+                ));
             }
             None => {
                 commands.entity(caller.0).insert(Checked);

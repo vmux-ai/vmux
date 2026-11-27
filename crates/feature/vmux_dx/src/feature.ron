@@ -1,5 +1,10 @@
 (
     cli: Some((commands: [
+        (id: "dx.tui", name: "tui", about: Some("Open the interactive playful Vmux developer TUI"), arguments: [
+            (id: "root", long: Some("root"), value_name: Some("PATH")),
+            (id: "theme", long: Some("theme"), short: Some('t'), value_name: Some("THEME"), values: ["catppuccin-mocha", "catppuccin-latte", "catppuccin-frappe", "catppuccin-macchiato", "tokyo-night", "dracula", "rose-pine", "kanagawa", "nord", "gruvbox-dark", "one-dark", "github-dark", "github-light", "solarized-dark", "solarized-light"], help: Some("Select and persist the CLI TUI color theme")),
+            (id: "list-themes", long: Some("list-themes"), flag: true, help: Some("List available CLI TUI color themes")),
+        ]),
         (id: "dx.update", name: "update", about: Some("Update the standalone CLI and select its release channel"), arguments: [
             (id: "channel", long: Some("channel"), short: Some('c'), values: ["stable", "preview"]),
             (id: "auto", long: Some("auto"), values: ["on", "off"]),
