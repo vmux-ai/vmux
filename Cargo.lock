@@ -10370,6 +10370,7 @@ dependencies = [
  "vmux_store",
  "vmux_team",
  "vmux_terminal",
+ "vmux_test",
  "vmux_tool",
  "vmux_transport",
  "vmux_vault",
@@ -11614,6 +11615,19 @@ dependencies = [
  "vmux_tool",
  "vmux_transport",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_test"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "rkyv",
+ "serde",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_time",
 ]
 
 [[package]]
