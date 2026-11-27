@@ -14,6 +14,7 @@ contracts = ["ecs", "vmux_ecs/contracts", "vmux_project?/contracts", "vmux_layou
 test-harness = ["contracts", "vmux_ecs/ui", "dep:vmux_test"]
 page = ["contracts", "dep:vmux_page"]
 page-host = ["page", "vmux_ecs/ui", "flex", "vmux_page/host"]
+page-hot-reload = ["page-host", "vmux_page/hot-reload"]
 page-host-native = ["page-host", "vmux_page/native"]
 window = ["page-host", "runner", "dep:vmux_window"]
 window-native = ["window", "page-host-native", "vmux_window/native"]

@@ -5,6 +5,8 @@ pub use host::{
     HostedPage, PageAppearance, PageBounds, PageFocusRequest, PageHostMode, PageHostPlugin,
     PageHostSet, PageLifecycle, PageRoot, PageScriptRequest, PageStylesheet,
 };
+#[cfg(feature = "hot-reload")]
+pub use host_hot_reload::{HotReloadPlugin, HotReloadStylesheet, StylesheetReloaded};
 pub use instance::{Instance, PageScope};
 pub use page::Page;
 pub use page_dom::{PageComponent, PageDom};
@@ -21,6 +23,8 @@ mod event_request;
 mod history_swipe;
 #[cfg(feature = "host")]
 pub mod host;
+#[cfg(feature = "hot-reload")]
+mod host_hot_reload;
 #[cfg(all(feature = "native", target_os = "macos"))]
 mod host_native;
 mod instance;
