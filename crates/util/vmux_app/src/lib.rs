@@ -37,6 +37,8 @@ pub use vmux_quic as quic;
 pub use vmux_runner as runner;
 #[cfg(feature = "store")]
 pub use vmux_store as store;
+#[cfg(feature = "test-harness")]
+pub use vmux_test as testing;
 
 #[cfg(feature = "release-flags")]
 mod feature_flags;
