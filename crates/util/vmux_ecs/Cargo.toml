@@ -12,9 +12,10 @@ records = ["bevy_ecs/serialize", "bevy_ecs/reflect_auto_register"]
 cli = []
 watch = ["dep:vmux_watch"]
 contracts = ["dep:rkyv", "dep:vmux_api"]
+ui = ["contracts"]
 store = ["dep:vmux_store"]
-cef-ui = [
-    "contracts",
+cef = [
+    "ui",
     "dep:bevy_asset",
     "dep:bevy_cef",
     "dep:bevy_cef_core",
@@ -33,7 +34,7 @@ headless-host = [
     "dep:vmux_transport",
     "dep:tracing",
 ]
-host = ["headless-host", "cef-ui"]
+host = ["headless-host", "cef"]
 
 [dependencies]
 bevy_app = { workspace = true }
