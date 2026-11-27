@@ -27,6 +27,8 @@ pub use vmux_job as job;
 pub use vmux_layout as layout;
 #[cfg(feature = "lsp")]
 pub use vmux_lsp as lsp;
+#[cfg(feature = "page")]
+pub use vmux_page as page;
 #[cfg(feature = "host")]
 pub use vmux_profile as host;
 #[cfg(feature = "project")]
