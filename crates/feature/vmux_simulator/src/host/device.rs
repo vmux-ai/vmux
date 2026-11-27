@@ -1,8 +1,7 @@
 use crate::url::{IosVersion, SimulatorRoute};
-use std::fs;
 use std::option::Option;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::string::String;
 
 #[derive(bevy::prelude::Component)]
@@ -78,42 +77,11 @@ impl SimulatorDevice {
     }
 
     pub fn pixel_size(&self, axe: &Axe) -> Option<(u32, u32)> {
-        let path = std::env::temp_dir().join(format!(
-            "vmux-simulator-{}-{}.png",
-            std::process::id(),
-            uuid::Uuid::new_v4().simple()
-        ));
-        let status = axe
-            .command()
-            .args(["screenshot", "--udid", &self.udid, "--output"])
-            .arg(&path)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .ok()?;
-        if !status.success() {
-            let _ = fs::remove_file(path);
-            return None;
-        }
-        let bytes = fs::read(&path);
-        let _ = fs::remove_file(path);
-        Self::png_size(&bytes.ok()?)
+        super::device_driver::SimulatorDeviceDriver::pixel_size(self, axe)
     }
 
     pub fn screenshot(&self, axe: &Axe, path: &std::path::Path) -> Result<Vec<u8>, String> {
-        let output = axe
-            .command()
-            .args(["screenshot", "--udid", &self.udid, "--output"])
-            .arg(path)
-            .output()
-            .map_err(|error| format!("could not capture simulator screenshot: {error}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "could not capture simulator screenshot: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
-        fs::read(path).map_err(|error| format!("could not read simulator screenshot: {error}"))
+        super::device_driver::SimulatorDeviceDriver::screenshot(self, axe, path)
     }
 
     pub(crate) fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {

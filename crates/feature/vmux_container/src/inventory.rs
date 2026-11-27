@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 use std::io;
-use std::io::Write;
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use bevy::ecs::system::SystemParam;
@@ -22,6 +20,7 @@ use crate::event::{
     ContainerInspectRequest, ContainerPort,
 };
 use crate::host::{ContainerSet, EngineView, Observed, PageView};
+use crate::inventory_io::Cache;
 
 pub(crate) struct InventoryPlugin;
 
@@ -71,55 +70,6 @@ struct PendingSave(Vec<DockerContainer>);
 
 #[derive(Component)]
 struct SaveTask(Task<io::Result<()>>);
-
-struct Cache(PathBuf);
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct SavedInventory {
-    version: u32,
-    containers: Vec<DockerContainer>,
-}
-
-impl Cache {
-    fn new(settings: &Settings) -> Self {
-        Self(settings.directory.join("inventory.json"))
-    }
-
-    fn load(&self) -> io::Result<Vec<DockerContainer>> {
-        let bytes = std::fs::read(&self.0)?;
-        let saved: SavedInventory = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
-        if saved.version != 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "unsupported inventory cache version",
-            ));
-        }
-        Ok(saved.containers)
-    }
-
-    fn save(&self, mut containers: Vec<DockerContainer>) -> io::Result<()> {
-        for container in &mut containers {
-            container.status.clear();
-        }
-        let saved = SavedInventory {
-            version: 1,
-            containers,
-        };
-        let bytes = serde_json::to_vec(&saved).map_err(io::Error::other)?;
-        if std::fs::read(&self.0).is_ok_and(|current| current == bytes) {
-            return Ok(());
-        }
-        let directory = self
-            .0
-            .parent()
-            .ok_or_else(|| io::Error::other("missing inventory cache directory"))?;
-        let mut file = tempfile::NamedTempFile::new_in(directory)?;
-        file.write_all(&bytes)?;
-        file.as_file().sync_data()?;
-        file.persist(&self.0).map_err(|error| error.error)?;
-        Ok(())
-    }
-}
 
 #[derive(Component)]
 struct Entry;

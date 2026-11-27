@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 use vmux_api::protocol::ProcessId;
 use vmux_profile::ServicePaths;
 
-use crate::shell_integration::{ShellInput, ShellIntegration};
+use crate::shell_integration::{ShellInput, ShellIntegrationIo};
 
 #[derive(Component)]
 pub(crate) struct ProcessPty(pub(crate) SyncCell<NativePty>);
@@ -137,7 +137,7 @@ impl NativePty {
         wake_tx: mpsc::UnboundedSender<()>,
         reader_send_delay: Duration,
     ) -> Result<SpawnedPty, String> {
-        ShellIntegration::inject(
+        ShellIntegrationIo::inject(
             command,
             &mut args,
             &mut env,

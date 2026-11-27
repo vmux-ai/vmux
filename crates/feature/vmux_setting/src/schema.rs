@@ -24,18 +24,7 @@ impl SettingsSchema {
             .find(|field| SettingsPath::from(field.path.as_str()).matches(&path))
     }
 
-    pub(crate) fn localize(&mut self, locale: &Locale, directory: Option<&std::path::Path>) {
-        if let Some(directory) = directory {
-            let tag = locale.as_str();
-            for tag in [tag, tag.split('-').next().unwrap_or(tag)] {
-                let Ok(source) = std::fs::read_to_string(directory.join(format!("{tag}.ftl")))
-                else {
-                    continue;
-                };
-                let _ = locale.register_catalog(&source);
-                break;
-            }
-        }
+    pub(crate) fn localize(&mut self, locale: &Locale) {
         for section in &mut self.sections {
             section.title = locale.translate(&section.title);
             if let Some(description) = &mut section.description {

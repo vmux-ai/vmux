@@ -92,14 +92,22 @@ struct ApplicationOwner(PathBuf);
 #[derive(Component)]
 struct Published(State);
 
-impl Published {
-    fn write(&self, settings: &Settings) -> io::Result<()> {
-        let bytes = serde_json::to_vec(&self.0).map_err(io::Error::other)?;
+struct PublishedIo;
+
+impl PublishedIo {
+    fn write(state: &State, settings: &Settings) -> io::Result<()> {
+        let bytes = serde_json::to_vec(state).map_err(io::Error::other)?;
         let file = tempfile::NamedTempFile::new_in(&settings.directory)?;
         std::fs::write(file.path(), bytes)?;
         file.persist(settings.directory.join("engine-state.json"))
             .map_err(io::Error::other)?;
         Ok(())
+    }
+}
+
+impl Published {
+    fn write(&self, settings: &Settings) -> io::Result<()> {
+        PublishedIo::write(&self.0, settings)
     }
 }
 

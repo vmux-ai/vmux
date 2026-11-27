@@ -20,7 +20,8 @@ mod attachment;
 #[cfg(target_os = "macos")]
 mod core_simulator;
 mod device;
-mod hid;
+mod device_driver;
+mod hid_driver;
 mod input;
 mod stream;
 mod tool;
