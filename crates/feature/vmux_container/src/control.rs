@@ -1,4 +1,4 @@
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io;
 use std::path::{Path, PathBuf};
 
 use bevy::winit::EventLoopProxyWrapper;
@@ -399,7 +399,7 @@ fn logs(trigger: On<ReadLogs>, mut admission: Admission) {
         .commands
         .entity(entity)
         .insert(ControlTask(IoTaskPool::get().spawn(async move {
-            let result = ReadLogs::read(&settings).map(LogText);
+            let result = crate::logs_io::EngineLogsIo::read(&settings).map(LogText);
             drop(wake);
             result
         })));
@@ -427,26 +427,6 @@ fn configure(trigger: On<Configure>, mut admission: Admission) {
             drop(wake);
             result
         })));
-}
-
-impl ReadLogs {
-    fn read(settings: &Settings) -> io::Result<String> {
-        let mut logs = String::new();
-        for path in [settings.log(), settings.directory.join("guest.log")] {
-            let mut file = match std::fs::File::open(&path) {
-                Ok(file) => file,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error),
-            };
-            file.seek(SeekFrom::Start(
-                file.metadata()?.len().saturating_sub(65536),
-            ))?;
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes)?;
-            logs.push_str(&String::from_utf8_lossy(&bytes));
-        }
-        Ok(logs)
-    }
 }
 
 fn start_containers(trigger: On<StartContainers>, mut admission: Admission) {
@@ -655,7 +635,7 @@ fn poll<R: Component + Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::time::Duration;
 
     #[test]

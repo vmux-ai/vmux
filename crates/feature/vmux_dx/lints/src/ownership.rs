@@ -7,7 +7,7 @@ use rustc_hir::{Expr, ExprKind};
 use rustc_lint::LateContext;
 use rustc_middle::ty::{GenericArgsRef, Ty, TyKind};
 
-use crate::VMUX_ECS_OWNERSHIP;
+use crate::{VMUX_ECS_DRIVER_IO, VMUX_ECS_OWNERSHIP};
 
 #[derive(Default)]
 pub(super) struct Ownership<'tcx> {
@@ -21,6 +21,7 @@ pub(super) struct Ownership<'tcx> {
     used: HashSet<DefId>,
     type_refs: HashMap<DefId, HashSet<DefId>>,
     io_adapters: HashSet<DefId>,
+    state_io_methods: HashSet<(DefId, DefId)>,
     ui_callers: HashSet<DefId>,
     owners: HashMap<DefId, HashSet<DefId>>,
     reported: HashSet<(DefId, String)>,
@@ -163,6 +164,9 @@ impl<'tcx> Ownership<'tcx> {
                 || Self::is_external_io_call(cx, function, krate_str)
             {
                 self.record_io_caller(cx, caller);
+                if Self::is_direct_blocking_io(cx, function, krate_str) {
+                    self.record_state_io_method(cx, caller);
+                }
             } else if krate_str == "dioxus" || krate_str.starts_with("dioxus_") {
                 self.ui_callers.insert(caller);
             }
@@ -251,6 +255,57 @@ impl<'tcx> Ownership<'tcx> {
                 self.io_adapters.insert(owner.did());
             }
         }
+    }
+
+    fn record_state_io_method(&mut self, cx: &LateContext<'tcx>, caller: DefId) {
+        let Some(implementation) = cx.tcx.impl_of_assoc(caller) else {
+            return;
+        };
+        if cx.tcx.impl_opt_trait_ref(implementation).is_some() {
+            return;
+        }
+        let ty = cx
+            .tcx
+            .type_of(implementation)
+            .instantiate_identity()
+            .skip_norm_wip();
+        if let TyKind::Adt(owner, _) = ty.kind()
+            && owner.did().is_local()
+        {
+            self.state_io_methods.insert((owner.did(), caller));
+        }
+    }
+
+    fn is_direct_blocking_io(cx: &LateContext<'tcx>, function: DefId, krate: &str) -> bool {
+        if !matches!(krate, "std" | "tokio") {
+            return false;
+        }
+        let path = cx.tcx.def_path(function).to_string_no_crate_verbose();
+        if [
+            "::fs::Metadata::",
+            "::fs::FileType::",
+            "::fs::Permissions::",
+            "::fs::DirEntry::",
+            "::os::unix::fs::MetadataExt::",
+            "::os::unix::fs::PermissionsExt::",
+            "::os::unix::fs::FileTypeExt::",
+        ]
+        .iter()
+        .any(|seg| path.contains(seg))
+        {
+            return false;
+        }
+        [
+            "::fs::",
+            "::process::Command::",
+            "::net::TcpListener::",
+            "::net::TcpStream::",
+            "::net::UdpSocket::",
+            "::unix::net::UnixListener::",
+            "::unix::net::UnixStream::",
+        ]
+        .iter()
+        .any(|seg| path.contains(seg))
     }
 
     fn is_external_io_call(cx: &LateContext<'tcx>, function: DefId, krate: &str) -> bool {
@@ -547,11 +602,13 @@ impl<'tcx> Ownership<'tcx> {
                 .as_str()
                 .to_owned()
         });
+        let local_crate = cx.tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE);
+        let cargo_crate = std::env::var("CARGO_CRATE_NAME").unwrap_or_default();
         if cx.tcx.sess.opts.test
             || !package.starts_with("vmux_")
             || package == "vmux_macro"
-            || cx.tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).as_str() == "build_script_build"
-            || std::env::var("CARGO_CRATE_NAME").as_deref() == Ok("build_script_build")
+            || local_crate.as_str().starts_with("build_script_")
+            || cargo_crate.starts_with("build_script_")
         {
             return;
         }
@@ -610,6 +667,83 @@ impl<'tcx> Ownership<'tcx> {
                 "declaration has no unique resolved registered ECS owner",
             );
         }
+        let state_io_methods: Vec<(DefId, DefId)> = self.state_io_methods.iter().copied().collect();
+        for (owner, method) in state_io_methods {
+            if cx.tcx.def_span(method).from_expansion() || self.has_role(owner, "job") {
+                continue;
+            }
+            if self.has_role(owner, "resource") || self.has_role(owner, "message") {
+                self.report(
+                    cx,
+                    method,
+                    "canonical ECS state performs direct filesystem, process, or network IO; move IO into a driver or IO adapter file",
+                );
+            } else if self.has_role(owner, "component") {
+                self.report_driver_io(
+                    cx,
+                    method,
+                    "canonical ECS component performs direct filesystem, process, or network IO; move IO into a driver or IO adapter file",
+                );
+            } else if !Self::is_dedicated_io_crate(&package) && !Self::is_driver_file(cx, method) {
+                self.report_driver_io(
+                    cx,
+                    method,
+                    "direct filesystem, process, or network IO impl must live in a driver or IO adapter file (e.g. driver.rs, *_driver.rs, io.rs, *_io.rs, native.rs, *_native.rs)",
+                );
+            }
+        }
+    }
+
+    fn is_dedicated_io_crate(package: &str) -> bool {
+        matches!(
+            package,
+            "vmux_path"
+                | "vmux_profile"
+                | "vmux_vm"
+                | "vmux_transport"
+                | "vmux_process"
+                | "vmux_watch"
+                | "vmux_http"
+                | "vmux_quic"
+                | "vmux_store"
+                | "vmux_clipboard"
+                | "vmux_spawn"
+        )
+    }
+
+    fn is_driver_file(cx: &LateContext<'_>, def_id: DefId) -> bool {
+        let span = cx.tcx.def_span(def_id);
+        let file_name = cx.tcx.sess.source_map().span_to_filename(span);
+        let rustc_span::FileName::Real(real) = file_name else {
+            return true;
+        };
+        let Some(path) = real.local_path() else {
+            return true;
+        };
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        if stem == "driver"
+            || stem.ends_with("_driver")
+            || stem == "io"
+            || stem.ends_with("_io")
+            || stem == "native"
+            || stem.ends_with("_native")
+            || matches!(stem, "macos" | "linux" | "windows" | "unix")
+        {
+            return true;
+        }
+        path.parent().is_some_and(|parent| {
+            parent.components().any(|component| {
+                let Some(name) = component.as_os_str().to_str() else {
+                    return false;
+                };
+                matches!(
+                    name,
+                    "driver" | "drivers" | "io" | "native" | "platform" | "storage"
+                ) || name.ends_with("_driver")
+                    || name.ends_with("_io")
+                    || name.ends_with("_native")
+            })
+        })
     }
 
     fn is_exempt_declaration(
@@ -1228,6 +1362,26 @@ impl<'tcx> Ownership<'tcx> {
             DiagDecorator(|diagnostic| {
                 diagnostic.primary_message(message);
                 diagnostic.help("use canonical entities and registered typed systems; external adapters need their own proven contract");
+            }),
+        );
+    }
+
+    fn report_driver_io(
+        &mut self,
+        cx: &LateContext<'_>,
+        definition: DefId,
+        message: &'static str,
+    ) {
+        if !definition.is_local() || !self.reported.insert((definition, message.into())) {
+            return;
+        }
+        cx.tcx.emit_node_span_lint(
+            VMUX_ECS_DRIVER_IO,
+            cx.tcx.local_def_id_to_hir_id(definition.expect_local()),
+            cx.tcx.def_span(definition),
+            DiagDecorator(|diagnostic| {
+                diagnostic.primary_message(message);
+                diagnostic.help("isolate direct filesystem, process, or network IO in a dedicated driver or *_io.rs adapter file");
             }),
         );
     }

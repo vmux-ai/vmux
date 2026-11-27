@@ -81,7 +81,7 @@ impl Fixture {
         )
         .unwrap();
         let output = Command::new("cargo")
-            .env("DYLINT_RUSTFLAGS", "-A vmux_ecs_runtime")
+            .env("DYLINT_RUSTFLAGS", "-A vmux_ecs_runtime -A vmux_ecs_driver_io")
             .current_dir(self.directory.path())
             .args([
                 "dylint",
@@ -96,6 +96,36 @@ impl Fixture {
             .output()
             .expect("run the prepared Dylint compiler");
         self.verify(name, output, expected, "vmux_ecs_ownership");
+    }
+
+    fn check_driver_io(&self, name: &str, source: &str, expected: &[&str]) {
+        std::fs::write(
+            self.directory
+                .path()
+                .join("examples")
+                .join(format!("{name}.rs")),
+            source,
+        )
+        .unwrap();
+        let output = Command::new("cargo")
+            .env(
+                "DYLINT_RUSTFLAGS",
+                "-A vmux_ecs_runtime -A vmux_ecs_ownership",
+            )
+            .current_dir(self.directory.path())
+            .args([
+                "dylint",
+                "--path",
+                self.library.to_str().unwrap(),
+                "--",
+                "--locked",
+                "--example",
+                name,
+                "--message-format=json",
+            ])
+            .output()
+            .expect("run the prepared Dylint compiler");
+        self.verify(name, output, expected, "vmux_ecs_driver_io");
     }
 
     fn check_ownership_default(&self, name: &str, source: &str, expected: &[&str]) {
@@ -213,7 +243,7 @@ impl Fixture {
                 "{name}: {message}"
             );
             let mut diagnostic = message["message"].as_str().unwrap().to_owned();
-            if code == "vmux_ecs_ownership" {
+            if matches!(code, "vmux_ecs_ownership" | "vmux_ecs_driver_io") {
                 let primary = spans
                     .iter()
                     .find(|span| span["is_primary"] == true)
@@ -537,7 +567,39 @@ fn compiler_proves_registered_ownership_and_rejects_hidden_or_unused_models() {
                 "declaration has no unique resolved registered ECS owner @ 29:1-29:23",
             ][..],
         ),
+        (
+            "state_io",
+            include_str!("../ui/state_io.rs"),
+            &[
+                "canonical ECS state performs direct filesystem, process, or network IO; move IO into a driver or IO adapter file @ 12:5-12:50",
+                "canonical ECS state performs direct filesystem, process, or network IO; move IO into a driver or IO adapter file @ 25:5-25:50",
+            ][..],
+        ),
     ] {
         fixture.check_ownership(name, source, expected);
+    }
+}
+
+#[test]
+fn driver_io_isolates_direct_io_from_components_and_domain_modules() {
+    let fixture = Fixture::new();
+    for (name, source, expected) in [
+        (
+            "driver_isolation",
+            include_str!("../ui/driver_isolation.rs"),
+            &[
+                "canonical ECS component performs direct filesystem, process, or network IO; move IO into a driver or IO adapter file @ 12:5-12:50",
+                "direct filesystem, process, or network IO impl must live in a driver or IO adapter file (e.g. driver.rs, *_driver.rs, io.rs, *_io.rs, native.rs, *_native.rs) @ 22:5-22:50",
+            ][..],
+        ),
+        (
+            "asset_driver",
+            include_str!("../ui/asset_driver.rs"),
+            &[
+                "canonical ECS component performs direct filesystem, process, or network IO; move IO into a driver or IO adapter file @ 12:5-12:50",
+            ][..],
+        ),
+    ] {
+        fixture.check_driver_io(name, source, expected);
     }
 }
