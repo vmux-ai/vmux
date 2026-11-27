@@ -85,7 +85,7 @@ impl Plugin for LayoutStateSourcePlugin {
             )
             .add_systems(
                 PostUpdate,
-                (mark_computed_dirty, push_layout)
+                (mark_computed_dirty, push_geometry)
                     .chain()
                     .before(UiStateFlushSet)
                     .after(LayoutSystems::Layout)
@@ -800,7 +800,7 @@ fn mark_computed_dirty(
     }
 }
 
-fn push_layout(
+fn push_geometry(
     mut projection: LayoutProjection<LayoutGeometry>,
     geometry_revision: Single<&LayoutGeometryRevision>,
     header_q: Query<(Entity, Has<Open>, Option<&ComputedNode>), With<Header>>,
@@ -1350,7 +1350,30 @@ fn push_tabs(mut projection: LayoutProjection<TabListState>, tabs: TabProjection
 }
 
 #[derive(Component)]
-pub struct UpdateNoticeReceipt(UpdateState);
+pub struct UpdateNoticeReceipt {
+    stage: UpdateStage,
+    version: String,
+    downloaded: u64,
+    total: u64,
+}
+
+impl UpdateNoticeReceipt {
+    fn from_state(state: &UpdateState) -> Self {
+        Self {
+            stage: state.stage,
+            version: state.version.clone(),
+            downloaded: state.downloaded,
+            total: state.total,
+        }
+    }
+
+    fn matches(&self, state: &UpdateState) -> bool {
+        self.stage == state.stage
+            && self.version == state.version
+            && self.downloaded == state.downloaded
+            && self.total == state.total
+    }
+}
 
 fn retire_update_notice(removed: On<Remove, LayoutCef>, mut commands: Commands) {
     commands
@@ -1376,7 +1399,7 @@ fn push_update_notice(
     }
     let unchanged = receipts
         .get(cef_e)
-        .is_ok_and(|previous| previous.0 == **state);
+        .is_ok_and(|previous| previous.matches(&state));
     if unchanged && (!page_ready_changed || state.is_idle()) {
         return;
     }
@@ -1420,7 +1443,7 @@ fn push_update_notice(
     }
     commands
         .entity(cef_e)
-        .insert(UpdateNoticeReceipt((*state).clone()));
+        .insert(UpdateNoticeReceipt::from_state(&state));
 }
 
 #[cfg(test)]
