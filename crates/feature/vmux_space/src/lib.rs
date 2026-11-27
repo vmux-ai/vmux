@@ -10,8 +10,8 @@ pub use host::{
     AgentCreateWorktreeOnBranch, AgentListSpaces, AgentPrepareWorktree, AgentSpaceCreate,
     AgentSpaceDelete, AgentSpaceRename, ExpandedProjectDirs, PendingProject,
     RepositoryNeedsWorktree, SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest,
-    SpaceOpenPageRequest, SpacePlugin, SpaceProjects, SpaceRenameRequest, SpaceToolPlugin, Spaces,
-    WorkspaceCwd,
+    SpaceOpenPageRequest, SpacePlugin, SpaceProjectProjectionPlugin, SpaceProjects,
+    SpaceRenameRequest, SpaceToolPlugin, Spaces, WorkspaceCwd,
 };
 pub use vmux_api::space as event;
 

@@ -606,16 +606,17 @@ fn broadcast_spaces_to_views(
             Option<&mut SpaceSelection>,
             Option<&SpacesPageSnapshot>,
             Has<SpacesListSent>,
+            Has<vmux_ecs::surface::SurfaceReady>,
         ),
         (With<PageReady>, Or<(With<Spaces>, With<LayoutCef>)>),
     >,
-    browsers: NonSend<Browsers>,
+    browsers: Option<NonSend<Browsers>>,
     space_window: SpaceWindow,
     layout_ui: Query<(), With<LayoutUiStateUpdates>>,
     spaces_ui: Query<(), With<vmux_ecs::UiState<SpacesUiState>>>,
     mut commands: Commands,
 ) {
-    for (entity, selection, snapshot, sent) in &mut views {
+    for (entity, selection, snapshot, sent, surface_ready) in &mut views {
         let main = space_window
             .window_of(entity)
             .and_then(|window| space_window.main(window));
@@ -641,7 +642,11 @@ fn broadcast_spaces_to_views(
         if sent && snapshot.is_some_and(|snapshot| snapshot.0 == payload) {
             continue;
         }
-        if !browsers.can_emit_to(&entity) {
+        let can_emit = surface_ready
+            || browsers
+                .as_ref()
+                .is_some_and(|browsers| browsers.can_emit_to(&entity));
+        if !can_emit {
             continue;
         }
         if layout_ui.contains(entity) {

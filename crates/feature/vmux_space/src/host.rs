@@ -6,6 +6,7 @@ pub use agent::{
 pub use cwd::WorkspaceCwd;
 pub use plugin::SpacePlugin;
 pub use project::{ExpandedProjectDirs, SpaceProjects};
+pub use project_projection::SpaceProjectProjectionPlugin;
 pub use spaces::Spaces;
 pub use tool::SpaceToolPlugin;
 pub use vmux_api::space::{
@@ -22,6 +23,7 @@ mod identity;
 mod key;
 mod plugin;
 mod project;
+mod project_projection;
 mod restored;
 mod snapshot_updater;
 mod space_io;

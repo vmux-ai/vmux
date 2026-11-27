@@ -26,6 +26,9 @@ impl Plugin for SpaceProjectPlugin {
         if !app.is_plugin_added::<vmux_project::ProjectPlugin>() {
             app.add_plugins(vmux_project::ProjectPlugin);
         }
+        if !app.is_plugin_added::<super::project_projection::SpaceProjectProjectionPlugin>() {
+            app.add_plugins(super::project_projection::SpaceProjectProjectionPlugin);
+        }
         app.add_systems(Startup, spawn_repository_roots)
             .init_resource::<vmux_git::GitRuntime>()
             .register_stored::<ExpandedProjectDirs>()

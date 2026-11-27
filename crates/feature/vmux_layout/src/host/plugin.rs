@@ -6,6 +6,7 @@ use vmux_flex::prelude::*;
 use super::agent::LayoutAgentPlugin;
 use super::command::LayoutRequestPlugin;
 use super::projection::LayoutUiProjectionPlugin;
+use super::state_source::LayoutStateSourcePlugin;
 use super::store::LayoutStorePlugin;
 use crate::active_pane::ActivePanePlugin;
 use crate::archive::ArchivePlugin;
@@ -67,6 +68,7 @@ impl Plugin for LayoutRuntimePlugin {
             .add_plugins((
                 apply::LayoutApplyPlugin,
                 crate::tool::LayoutToolPlugin,
+                LayoutStateSourcePlugin,
                 LayoutUiProjectionPlugin,
                 LayoutOverlayPlugin,
                 SpaceLayoutPlugin,
