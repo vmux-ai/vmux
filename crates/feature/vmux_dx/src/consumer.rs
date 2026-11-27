@@ -145,6 +145,7 @@ impl Consumer {
         for (package, features, lib) in [
             ("vmux_ecs", "", true),
             ("vmux_ecs", "contracts", true),
+            ("vmux_ecs", "ui", true),
             ("vmux_ecs", "store", true),
             ("vmux_job", "", true),
             ("vmux_project", "contracts,filesystem", true),

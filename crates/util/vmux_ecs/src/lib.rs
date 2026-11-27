@@ -32,7 +32,7 @@ pub use dirty::{Dirty, DirtyPlugin, DirtySet};
 pub use external_identity::{
     ExternalIdentity, ExternalIdentityIndex, ExternalIdentityIndexPlugin, ExternalIdentityIndexSet,
 };
-#[cfg(all(host, feature = "cef-ui"))]
+#[cfg(feature = "ui")]
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
 pub use generation::{
     AtGeneration, Generation, GenerationPlugin, GenerationSet, GlobalSequence, SequenceCounter,
@@ -58,11 +58,11 @@ pub use operation::{
     OperationTargetRevision, OperationTimeout, TargetedOperations,
 };
 pub use order::{Order, OrderPlugin, OrderPosition, OrderSet, ReorderRequest, Reordered};
-#[cfg(all(host, feature = "cef-ui"))]
+#[cfg(all(host, feature = "cef"))]
 pub use overlay::{Overlay, OverlayShownInline, OverlayState, WindowOverlay};
 #[cfg(feature = "contracts")]
 pub use page_metadata::{PageIdentity, PageMetadata};
-#[cfg(all(host, any(feature = "headless-host", feature = "cef-ui")))]
+#[cfg(all(host, any(feature = "headless-host", feature = "cef")))]
 pub use page_open::{
     CefPageAttachRequest, PageNavigation, PageOpenDeferred, PageOpenError, PageOpenHandled,
     PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask, PageTransition,
@@ -92,13 +92,21 @@ pub use timestamp::{
     LastVisitedAt, TimestampPlugin, Touch, UnarchiveRequest, UnixMillis, UpdatedAt,
 };
 pub use toggle::{Disabled, Toggle, TogglePlugin, Toggled, TogglesPlugin};
-#[cfg(all(host, feature = "cef-ui"))]
-pub use ui_state::{UiState, UiStateFlushSet, UiStatePlugin, UiStateWrite, UiStateWriter};
+#[cfg(feature = "ui")]
+pub use ui::{
+    UiEmitEvent, UiEmitReceipt, UiIpcBlocked, UiIpcEpoch, UiIpcEventPlugin, UiIpcGeneration,
+    UiIpcInput, UiIpcNavigationRevision, UiIpcPlugin, UiIpcReady, UiIpcSet, UiPageActivated,
+    UiPageReady, UiReceiveRaw,
+};
+#[cfg(feature = "ui")]
+pub use ui_state::{
+    UiState, UiStateEmitSet, UiStateFlushSet, UiStatePlugin, UiStateWrite, UiStateWriter,
+};
 pub use workspace::WorkspaceKind;
 #[cfg(all(host, feature = "headless-host"))]
 pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};
 
-#[cfg(all(host, feature = "cef-ui"))]
+#[cfg(all(host, feature = "cef"))]
 pub mod address;
 #[cfg(all(host, feature = "headless-host"))]
 pub mod agent;
@@ -106,6 +114,8 @@ pub mod agent;
 mod archive;
 #[cfg(all(host, feature = "headless-host"))]
 pub mod browser;
+#[cfg(all(host, feature = "cef"))]
+mod cef_bridge;
 #[cfg(feature = "cli")]
 pub mod cli;
 mod component;
@@ -113,10 +123,10 @@ mod dirty;
 #[cfg(feature = "contracts")]
 pub mod event;
 mod external_identity;
-#[cfg(all(host, feature = "cef-ui"))]
+#[cfg(feature = "ui")]
 mod file_ui_state;
 mod generation;
-#[cfg(all(host, any(feature = "headless-host", feature = "cef-ui")))]
+#[cfg(all(host, any(feature = "headless-host", feature = "cef")))]
 pub mod host_spawn;
 mod identity;
 mod job_wake;
@@ -127,17 +137,17 @@ mod lease;
 pub mod notify;
 mod operation;
 mod order;
-#[cfg(all(host, feature = "cef-ui"))]
+#[cfg(all(host, feature = "cef"))]
 pub mod overlay;
-#[cfg(all(host, feature = "cef-ui"))]
+#[cfg(all(host, feature = "cef"))]
 pub mod page;
-#[cfg(all(host, feature = "cef-ui"))]
+#[cfg(all(host, feature = "cef"))]
 mod page_driver;
-#[cfg(all(host, feature = "cef-ui"))]
+#[cfg(all(host, feature = "cef"))]
 pub mod page_location;
 #[cfg(feature = "contracts")]
 pub mod page_metadata;
-#[cfg(all(host, any(feature = "headless-host", feature = "cef-ui")))]
+#[cfg(all(host, any(feature = "headless-host", feature = "cef")))]
 pub mod page_open;
 mod primitives;
 #[cfg(feature = "contracts")]
@@ -179,7 +189,9 @@ pub mod terminal;
 mod timestamp;
 mod toggle;
 pub mod types;
-#[cfg(all(host, feature = "cef-ui"))]
+#[cfg(feature = "ui")]
+pub mod ui;
+#[cfg(feature = "ui")]
 mod ui_state;
 pub mod workspace;
 #[cfg(feature = "store")]

@@ -1,11 +1,11 @@
 use bevy_ecs::prelude::{Component, Entity, Message, ReflectComponent};
 use bevy_reflect::Reflect;
 
-#[cfg(feature = "cef-ui")]
+#[cfg(feature = "cef")]
 pub type TerminalUiStateUpdates = super::UiState<crate::event::TerminalUiState>;
 
 #[derive(Component)]
-#[cfg_attr(feature = "cef-ui", require(TerminalUiStateUpdates))]
+#[cfg_attr(feature = "cef", require(TerminalUiStateUpdates))]
 pub struct Terminal;
 
 #[derive(Component)]

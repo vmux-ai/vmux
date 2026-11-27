@@ -36,6 +36,26 @@ pub struct BinHostEmitEvent {
 }
 
 impl BinHostEmitEvent {
+    pub fn from_raw(
+        webview: Entity,
+        id: &'static str,
+        permission: &'static str,
+        payload: Arc<[u8]>,
+        authority: (u64, u64, u64),
+    ) -> Self {
+        let (surface_generation, navigation_revision, ipc_epoch) = authority;
+        Self {
+            webview,
+            id,
+            permission,
+            payload,
+            surface_generation,
+            navigation_revision,
+            ipc_epoch,
+            receipt: BinHostEmitReceipt::default(),
+        }
+    }
+
     fn from_bytes<T>(webview: Entity, payload: Vec<u8>, authority: Option<(u64, u64, u64)>) -> Self
     where
         T: HostEvent,

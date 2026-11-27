@@ -2,13 +2,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::marker::PhantomData;
 
 use bevy_app::{App, Last, Plugin, PostUpdate};
-use bevy_cef::prelude::{
-    BinHostEmitEvent, BinIpcBlocked, BinIpcEpoch, BinIpcNavigationRevision,
-    BinIpcSurfaceGeneration, Browsers,
-};
 use bevy_ecs::prelude::{
-    Add, Commands, Component, DetectChangesMut, Entity, EntityEvent, IntoScheduleConfigs, Mut,
-    NonSend, On, Query, Remove, ResMut, Resource, SystemSet, With, World,
+    Add, Commands, Component, DetectChangesMut, Entity, EntityEvent, IntoScheduleConfigs, Mut, On,
+    Query, Remove, ResMut, Resource, SystemSet, With, World,
 };
 use bevy_ecs::schedule::ApplyDeferred;
 use bevy_ecs::system::{Command, SystemParam};
@@ -17,10 +13,18 @@ use rkyv::ser::allocator::ArenaHandle;
 use rkyv::util::AlignedVec;
 use vmux_api::{UiEventPermissions, UiState as UiStateContract, UiStateFrame};
 
+use crate::ui::{
+    UiEmitEvent, UiIpcBlocked, UiIpcEpoch, UiIpcGeneration, UiIpcNavigationRevision, UiIpcPlugin,
+    UiIpcReady, UiPageActivated, UiPageReady,
+};
+
 pub struct UiStatePlugin<S> {
     post_update: bool,
     state: PhantomData<fn() -> S>,
 }
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct UiStateEmitSet;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UiStateFlushSet;
@@ -50,15 +54,23 @@ where
         for<'a> rkyv::Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>>,
 {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<UiIpcPlugin>() {
+            app.add_plugins(UiIpcPlugin);
+        }
+        #[cfg(all(host, feature = "cef"))]
+        if !app.is_plugin_added::<crate::cef_bridge::CefUiBridgePlugin>() {
+            app.add_plugins(crate::cef_bridge::CefUiBridgePlugin);
+        }
         app.init_resource::<UiStateCache<S>>()
             .init_resource::<UiStateDirty<S>>()
             .add_observer(collect::<S>)
             .add_observer(replay::<S>)
             .add_observer(replay_activated::<S>)
+            .add_observer(retry_ready::<S>)
             .add_observer(retry_unblocked::<S>)
             .add_observer(retry_permission::<S>)
             .add_observer(cache_removed::<S>)
-            .add_systems(Last, emit::<S>);
+            .add_systems(Last, emit::<S>.in_set(UiStateEmitSet));
         if self.post_update {
             app.add_systems(
                 PostUpdate,
@@ -151,7 +163,7 @@ impl<S: UiStateContract> UiStateCache<S> {
 pub struct UiState<S: UiStateContract> {
     updates: Vec<S::Update>,
     retained: Option<S>,
-    pending: Option<BinHostEmitEvent>,
+    pending: Option<UiEmitEvent>,
     pending_snapshot: bool,
     replay: bool,
     synced: bool,
@@ -272,7 +284,7 @@ impl<S: UiStateContract> UiState<S> {
 struct UiStateDelivery<S> {
     entity: Entity,
     authority: (u64, u64, u64),
-    event: BinHostEmitEvent,
+    event: UiEmitEvent,
     state: PhantomData<fn() -> S>,
 }
 
@@ -280,8 +292,9 @@ impl<S: UiStateContract> Command for UiStateDelivery<S> {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        let receipt = self.event.receipt();
+        let receipt = self.event.receipt.clone();
         world.trigger(self.event);
+        world.flush();
         let retry = world
             .get_mut::<UiState<S>>(self.entity)
             .is_some_and(|mut state| state.finish_delivery(self.authority, receipt.delivered()));
@@ -372,14 +385,14 @@ fn collect<S: UiStateContract>(trigger: On<UiStateWrite<S>>, mut writer: UiState
 }
 
 fn replay<S: UiStateContract>(
-    trigger: On<bevy_cef::prelude::UiInput<vmux_api::PageReady>>,
+    trigger: On<UiPageReady>,
     metadata: Query<&crate::PageMetadata>,
     mut cache: ResMut<UiStateCache<S>>,
     mut dirty: ResMut<UiStateDirty<S>>,
     mut updates: Query<&mut UiState<S>>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event().webview;
+    let entity = trigger.event().page;
 
     let key = metadata.get(entity).ok().and_then(UiStateCache::<S>::key);
     if let Ok(mut updates) = updates.get_mut(entity) {
@@ -408,14 +421,14 @@ fn replay<S: UiStateContract>(
 }
 
 fn replay_activated<S: UiStateContract>(
-    trigger: On<crate::page::PageActivated>,
+    trigger: On<UiPageActivated>,
     metadata: Query<&crate::PageMetadata>,
     mut cache: ResMut<UiStateCache<S>>,
     mut dirty: ResMut<UiStateDirty<S>>,
     mut updates: Query<&mut UiState<S>>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event().webview();
+    let entity = trigger.event().page;
     let key = metadata.get(entity).ok().and_then(UiStateCache::<S>::key);
     if let Ok(mut updates) = updates.get_mut(entity) {
         updates.bind(key, &mut cache);
@@ -440,8 +453,19 @@ fn replay_activated<S: UiStateContract>(
     dirty.mark(entity);
 }
 
+fn retry_ready<S: UiStateContract>(
+    trigger: On<Add, UiIpcReady>,
+    states: Query<(), With<UiState<S>>>,
+    mut dirty: ResMut<UiStateDirty<S>>,
+) {
+    let entity = trigger.event_target();
+    if states.contains(entity) {
+        dirty.mark(entity);
+    }
+}
+
 fn retry_unblocked<S: UiStateContract>(
-    trigger: On<Remove, BinIpcBlocked>,
+    trigger: On<Remove, UiIpcBlocked>,
     states: Query<(), With<UiState<S>>>,
     mut dirty: ResMut<UiStateDirty<S>>,
 ) {
@@ -504,45 +528,41 @@ struct UiStateStore<'w, S: UiStateContract> {
 fn emit<S>(
     mut updates: Query<&mut UiState<S>>,
     authority: Query<(
-        &BinIpcSurfaceGeneration,
-        &BinIpcNavigationRevision,
-        &BinIpcEpoch,
+        &UiIpcGeneration,
+        &UiIpcNavigationRevision,
+        &UiIpcEpoch,
         &crate::PageMetadata,
     )>,
-    blocked: Query<(), With<BinIpcBlocked>>,
+    ready: Query<(), With<UiIpcReady>>,
+    blocked: Query<(), With<UiIpcBlocked>>,
     permissions: Query<&UiEventPermissions>,
     mut store: UiStateStore<S>,
-    browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) where
     S: UiStateContract,
     UiStateFrame<S, S::Update>:
         for<'a> rkyv::Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>>,
 {
-    let Some(browsers) = browsers else {
-        return;
-    };
     let entities = std::mem::take(&mut store.dirty.entities);
     for entity in entities {
         let Ok(mut updates) = updates.get_mut(entity) else {
             continue;
         };
-        let Ok((surface_generation, navigation_revision, ipc_epoch, metadata)) =
-            authority.get(entity)
+        let Ok((generation, navigation_revision, ipc_epoch, metadata)) = authority.get(entity)
         else {
             continue;
         };
         let updates = updates.bypass_change_detection();
         updates.bind(UiStateCache::<S>::key(metadata), &mut store.cache);
 
-        if surface_generation.0 == 0
+        if generation.0 == 0
             || navigation_revision.0 == 0
             || ipc_epoch.0 == 0
             || !UiEventPermissions::allows_page(permissions.iter(), &metadata.url, S::PERMISSION)
         {
             continue;
         }
-        let authority = (surface_generation.0, navigation_revision.0, ipc_epoch.0);
+        let authority = (generation.0, navigation_revision.0, ipc_epoch.0);
         if updates.authority != Some(authority) {
             updates.pending = None;
             updates.pending_snapshot = false;
@@ -566,9 +586,7 @@ fn emit<S>(
                 }
                 let frame = UiStateFrame::<S, S::Update>::Snapshot(retained.clone());
                 updates.navigation_pending = false;
-                updates.pending = Some(BinHostEmitEvent::from_payload_at::<S, _>(
-                    entity, authority, &frame,
-                ));
+                updates.pending = Some(UiEmitEvent::encode::<S, _>(entity, authority, &frame));
                 updates.pending_snapshot = true;
             } else if send_snapshot {
                 let mut state = S::from_updates(updates.retained.take(), pending);
@@ -579,17 +597,13 @@ fn emit<S>(
                 }
                 updates.navigation_pending = false;
                 let frame = UiStateFrame::<S, S::Update>::Snapshot(state.clone());
-                updates.pending = Some(BinHostEmitEvent::from_payload_at::<S, _>(
-                    entity, authority, &frame,
-                ));
+                updates.pending = Some(UiEmitEvent::encode::<S, _>(entity, authority, &frame));
                 updates.pending_snapshot = true;
                 state.retain();
                 updates.retained = Some(state);
             } else {
                 let frame = UiStateFrame::<S, S::Update>::Updates(pending);
-                updates.pending = Some(BinHostEmitEvent::from_payload_at::<S, _>(
-                    entity, authority, &frame,
-                ));
+                updates.pending = Some(UiEmitEvent::encode::<S, _>(entity, authority, &frame));
                 let UiStateFrame::Updates(pending) = frame else {
                     unreachable!();
                 };
@@ -598,7 +612,7 @@ fn emit<S>(
                 updates.retained = Some(state);
             }
         }
-        if blocked.contains(entity) || !browsers.can_emit_to(&entity) {
+        if blocked.contains(entity) || !ready.contains(entity) {
             continue;
         }
         if let Some(event) = updates.pending.clone() {
@@ -640,8 +654,91 @@ impl<S: UiStateContract> UiStateWrite<S> {
 }
 
 #[cfg(test)]
+mod ui_ipc_tests {
+    use super::*;
+    use vmux_api::BinEvent;
+
+    #[vmux_api::ui_state(Default, Eq)]
+    struct CounterUiState {
+        count: i32,
+    }
+
+    #[derive(Resource, Default)]
+    struct Recorded {
+        frames: Vec<UiStateFrame<CounterUiState, CounterUiState>>,
+    }
+
+    fn record_emit(trigger: On<UiEmitEvent>, mut recorded: ResMut<Recorded>) {
+        if trigger.event().id != CounterUiState::id() {
+            return;
+        }
+        trigger.event().receipt.mark_delivered();
+        let frame = rkyv::from_bytes::<
+            UiStateFrame<CounterUiState, CounterUiState>,
+            rkyv::rancor::Error,
+        >(&trigger.event().payload)
+        .unwrap();
+        recorded.frames.push(frame);
+    }
+
+    #[test]
+    fn ui_state_plugin_emits_and_replays_without_cef() {
+        let mut app = App::new();
+        app.add_plugins(UiStatePlugin::<CounterUiState>::default())
+            .init_resource::<Recorded>()
+            .add_observer(record_emit);
+        let page = app
+            .world_mut()
+            .spawn((
+                UiIpcGeneration(1),
+                UiIpcNavigationRevision(1),
+                UiIpcEpoch(1),
+                UiIpcReady,
+                UiIpcBlocked,
+                crate::PageMetadata {
+                    url: "app://counter".into(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        app.world_mut().spawn(UiEventPermissions {
+            url: "app://counter",
+            owns_subtree: false,
+            permissions: &[CounterUiState::PERMISSION],
+        });
+        app.world_mut()
+            .trigger(UiStateWrite::<CounterUiState>::from_event(
+                page,
+                &CounterUiState { count: 4 },
+            ));
+        app.update();
+        assert!(app.world().resource::<Recorded>().frames.is_empty());
+
+        app.world_mut().entity_mut(page).remove::<UiIpcBlocked>();
+        app.update();
+        assert_eq!(app.world().resource::<Recorded>().frames.len(), 1);
+        assert_eq!(
+            app.world().resource::<Recorded>().frames[0],
+            UiStateFrame::Snapshot(CounterUiState { count: 4 })
+        );
+
+        app.world_mut().trigger(UiPageReady { page });
+        app.update();
+        assert_eq!(app.world().resource::<Recorded>().frames.len(), 2);
+        assert_eq!(
+            app.world().resource::<Recorded>().frames[1],
+            UiStateFrame::Snapshot(CounterUiState { count: 4 })
+        );
+    }
+}
+
+#[cfg(all(test, host, feature = "cef"))]
 mod tests {
     use bevy_app::Update;
+    use bevy_cef::prelude::{
+        BinHostEmitEvent, BinIpcBlocked, BinIpcEpoch, BinIpcNavigationRevision,
+        BinIpcSurfaceGeneration, Browsers, UiInput,
+    };
     use bevy_ecs::prelude::Res;
 
     use crate::event::{
@@ -650,7 +747,6 @@ mod tests {
 
     use super::*;
     use crate::event::{FileDirtyEvent, FileUiState};
-    use bevy_cef::prelude::UiInput;
     use vmux_api::git::FileGitState;
     use vmux_api::{BinEvent, UiEventPermissions};
 
