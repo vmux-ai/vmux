@@ -15,6 +15,8 @@ test-harness = ["contracts", "vmux_ecs/ui", "dep:vmux_test"]
 page = ["contracts", "dep:vmux_page"]
 page-host = ["page", "vmux_ecs/ui", "flex", "vmux_page/host"]
 page-host-native = ["page-host", "vmux_page/native"]
+window = ["page-host", "runner", "dep:vmux_window"]
+window-native = ["window", "page-host-native", "vmux_window/native"]
 manifest = ["ecs", "vmux_ecs/cli"]
 hosting = ["manifest", "vmux_feature/hosting"]
 conformance = ["extension", "vmux_extension/conformance"]
@@ -189,6 +191,7 @@ vmux_start = { path = "../../feature/vmux_start", optional = true }
 vmux_store = { path = "../vmux_store", optional = true }
 vmux_test = { path = "../vmux_test", optional = true }
 vmux_page = { path = "../vmux_page", optional = true }
+vmux_window = { path = "../vmux_window", optional = true }
 vmux_team = { path = "../../feature/vmux_team", optional = true }
 vmux_terminal = { path = "../../feature/vmux_terminal", optional = true }
 vmux_tool = { path = "../../feature/vmux_tool", optional = true }

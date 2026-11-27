@@ -10375,6 +10375,7 @@ dependencies = [
  "vmux_tool",
  "vmux_transport",
  "vmux_vault",
+ "vmux_window",
 ]
 
 [[package]]
@@ -11793,6 +11794,27 @@ dependencies = [
  "tracing",
  "vmux_channel",
  "vmux_path",
+]
+
+[[package]]
+name = "vmux_window"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_input",
+ "bevy_math",
+ "bevy_window",
+ "bevy_winit",
+ "dioxus",
+ "serde",
+ "tracing",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_flex",
+ "vmux_menu",
+ "vmux_page",
+ "vmux_runner",
 ]
 
 [[package]]

@@ -41,6 +41,8 @@ pub use vmux_runner as runner;
 pub use vmux_store as store;
 #[cfg(feature = "test-harness")]
 pub use vmux_test as testing;
+#[cfg(feature = "window")]
+pub use vmux_window as window;
 
 #[cfg(feature = "release-flags")]
 mod feature_flags;
