@@ -44,8 +44,13 @@ fn Hero() -> Element {
                 div { class: "mt-9 flex flex-wrap justify-center gap-3",
                     Link {
                         class: "rounded-xl bg-accent px-6 py-3 font-semibold text-black no-underline hover:bg-accent-hover",
-                        to: Route::DocsIndex {},
-                        "Read the architecture"
+                        to: Route::DocPage { slug: "framework-quickstart".into() },
+                        "5-minute quickstart"
+                    }
+                    Link {
+                        class: "rounded-xl border border-border px-6 py-3 font-semibold text-text no-underline hover:border-accent hover:text-accent",
+                        to: Route::DocPage { slug: "framework".into() },
+                        "Read framework docs"
                     }
                     a {
                         class: "rounded-xl border border-border px-6 py-3 font-semibold text-text no-underline hover:border-accent hover:text-accent",
@@ -176,11 +181,11 @@ fn LearningPath() -> Element {
                     "Start with a running build, learn the UI and state model, then follow one feature change."
                 }
                 ol { class: "mt-10 divide-y divide-border border-y border-border",
-                    LearningStep { number: "01", title: "Build and run Vmux", href: "/docs/getting-started" }
-                    LearningStep { number: "02", title: "Connect React ideas to Dioxus and Bevy", href: "/docs/architecture#from-react-to-vmux" }
-                    LearningStep { number: "03", title: "Follow a request through the app", href: "/docs/architecture#follow-one-interaction" }
-                    LearningStep { number: "04", title: "Find and change a feature", href: "/docs/feature-development#find-the-feature" }
-                    LearningStep { number: "05", title: "Test and share the build", href: "/docs/validation-and-release" }
+                    LearningStep { number: "01", title: "Run your first desktop window or headless example", href: "/docs/framework-quickstart" }
+                    LearningStep { number: "02", title: "Learn the eight primitives and core ECS plugins", href: "/docs/framework-core-concepts" }
+                    LearningStep { number: "03", title: "Compose WindowHostPlugin, PageHostPlugin, UiState, and menus", href: "/docs/framework-windows-and-pages" }
+                    LearningStep { number: "04", title: "Test headlessly and package external feature plugins", href: "/docs/framework-testing-and-plugins" }
+                    LearningStep { number: "05", title: "Look up crates, Cargo features, and attribute macros", href: "/docs/framework-reference" }
                 }
             }
         }

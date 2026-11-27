@@ -142,10 +142,45 @@ pub const DOCS: &[Doc] = &[
     },
     Doc {
         slug: "framework",
-        title: "Reuse features in another app",
-        group: "DX",
-        section: "Optional",
+        title: "Overview",
+        group: "Framework",
+        section: "Get started",
         content: include_str!("../../docs/dx/framework.md"),
+    },
+    Doc {
+        slug: "framework-quickstart",
+        title: "Quickstart",
+        group: "Framework",
+        section: "Get started",
+        content: include_str!("../../docs/dx/framework/framework-quickstart.md"),
+    },
+    Doc {
+        slug: "framework-core-concepts",
+        title: "Core concepts",
+        group: "Framework",
+        section: "Guides",
+        content: include_str!("../../docs/dx/framework/framework-core-concepts.md"),
+    },
+    Doc {
+        slug: "framework-windows-and-pages",
+        title: "Windows, pages, and menus",
+        group: "Framework",
+        section: "Guides",
+        content: include_str!("../../docs/dx/framework/framework-windows-and-pages.md"),
+    },
+    Doc {
+        slug: "framework-testing-and-plugins",
+        title: "Testing and plugin authoring",
+        group: "Framework",
+        section: "Guides",
+        content: include_str!("../../docs/dx/framework/framework-testing-and-plugins.md"),
+    },
+    Doc {
+        slug: "framework-reference",
+        title: "Crates and macros reference",
+        group: "Framework",
+        section: "Reference",
+        content: include_str!("../../docs/dx/framework/framework-reference.md"),
     },
 ];
 
