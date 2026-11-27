@@ -34,11 +34,11 @@ ignore = "0.4"
 vmux_flex = { path = "../../util/vmux_flex" }
 vmux_runner = { path = "../../util/vmux_runner", features = ["winit"] }
 vmux_tool = { path = "../vmux_tool" }
-vmux_ui = { path = "../../util/vmux_ui", default-features = false }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false, features = ["product"] }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
-vmux_ui = { path = "../../util/vmux_ui", default-features = false }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false, features = ["product"] }
 
 [dev-dependencies]
 tempfile = "3"

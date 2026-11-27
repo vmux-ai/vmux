@@ -1,9 +1,70 @@
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub(crate) struct Bundle;
+use sha2::{Digest, Sha256};
+
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    emit_platform_cfg();
+    generate_i18n_catalogs();
+    Bundle::build();
+}
+
+fn emit_platform_cfg() {
+    println!("cargo::rustc-check-cfg=cfg(host)");
+    println!("cargo::rustc-check-cfg=cfg(ui)");
+    let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let phone = os == "ios";
+    if phone || os == "macos" {
+        println!("cargo::rustc-cfg=ui");
+    }
+    if !phone {
+        println!("cargo::rustc-cfg=host");
+    }
+}
+
+fn generate_i18n_catalogs() {
+    let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let locales_dir = manifest_dir.join("locales");
+    println!("cargo:rerun-if-changed={}", locales_dir.display());
+    let mut locales = fs::read_dir(&locales_dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "ftl"))
+        .filter_map(|path| {
+            println!("cargo:rerun-if-changed={}", path.display());
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_string)
+        })
+        .collect::<Vec<_>>();
+    locales.sort();
+    assert!(locales.iter().any(|locale| locale == "en-US"));
+
+    let catalogs = locales
+        .iter()
+        .map(|locale| {
+            format!(
+                "    (\"{locale}\", include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/locales/{locale}.ftl\"))),\n"
+            )
+        })
+        .collect::<String>();
+    let available = locales
+        .iter()
+        .map(|locale| format!("    \"{locale}\",\n"))
+        .collect::<String>();
+    let generated = format!(
+        "pub const EMBEDDED_CATALOGS: &[(&str, &str)] = &[\n{catalogs}];\n\npub const AVAILABLE_LOCALES: &[&str] = &[\n{available}];\n"
+    );
+    let output = PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("i18n_catalogs.rs");
+    if fs::read_to_string(&output).ok().as_deref() != Some(generated.as_str()) {
+        fs::write(output, generated).unwrap();
+    }
+}
+
+struct Bundle;
 
 impl Bundle {
     const SKIP_ENV: &str = "VMUX_SKIP_DX_BUILD";
@@ -14,26 +75,29 @@ impl Bundle {
         "../../feature/vmux_service/src",
     ];
 
-    pub(crate) fn build() {
+    fn build() {
         let skip_env = Self::SKIP_ENV;
         println!("cargo:rerun-if-env-changed={skip_env}");
         if std::env::var_os(Self::SKIP_ENV).is_some() {
             return;
         }
         let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-
+        let feature_bucket = manifest_dir.join("../../feature");
+        if !feature_bucket.is_dir() {
+            return;
+        }
         println!("cargo:rerun-if-changed=assets/index.css");
         println!("cargo:rerun-if-changed=assets/theme.css");
         println!("cargo:rerun-if-changed=assets/favicons");
         println!("cargo:rerun-if-changed=assets/agent-logos");
         println!("cargo:rerun-if-changed=../../feature/vmux_terminal/assets/fonts");
         for scanned in Self::SCANNED {
-            println!(
-                "cargo:rerun-if-changed={}",
-                manifest_dir.join(scanned).display()
-            );
+            let path = manifest_dir.join(scanned);
+            if path.exists() {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
         }
-        for source in Self::feature_crate_sources(&manifest_dir) {
+        for source in Self::feature_crate_sources(&feature_bucket) {
             println!("cargo:rerun-if-changed={}", source.display());
         }
 
@@ -52,10 +116,10 @@ impl Bundle {
             &manifest_dir.join("assets/agent-logos"),
             &assets.join("agent-logos"),
         );
-        Self::copy_dir(
-            &manifest_dir.join("../../feature/vmux_terminal/assets/fonts"),
-            &assets.join("fonts"),
-        );
+        let fonts = manifest_dir.join("../../feature/vmux_terminal/assets/fonts");
+        if fonts.is_dir() {
+            Self::copy_dir(&fonts, &assets.join("fonts"));
+        }
         Self::write_bundle_stamp(&manifest_dir.join("dist"));
     }
 
@@ -89,9 +153,8 @@ impl Bundle {
         }
     }
 
-    fn feature_crate_sources(manifest_dir: &Path) -> Vec<PathBuf> {
-        let bucket = manifest_dir.join("../../feature");
-        let entries = fs::read_dir(&bucket).unwrap_or_else(|error| {
+    fn feature_crate_sources(bucket: &Path) -> Vec<PathBuf> {
+        let entries = fs::read_dir(bucket).unwrap_or_else(|error| {
             panic!("cannot read crate bucket {}: {error}", bucket.display())
         });
         let mut sources = Vec::new();
@@ -120,7 +183,8 @@ impl Bundle {
                 panic!(
                     "{} not runnable ({error}) — install the Tailwind v4 CLI, set TAILWINDCSS, or set \
                      {} to build without the stylesheet",
-                    tailwind.display(), Self::SKIP_ENV
+                    tailwind.display(),
+                    Self::SKIP_ENV
                 )
             });
         assert!(status.success(), "tailwindcss exited with {status}");

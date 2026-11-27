@@ -11,6 +11,8 @@ pub use plugin::{VmuxPlugin, VmuxPluginBuilder, VmuxPluginOptions};
 pub use tool::VmuxToolPlugin;
 #[cfg(feature = "account")]
 pub use vmux_account as account;
+#[cfg(feature = "contracts")]
+pub use vmux_api as api;
 #[cfg(feature = "ecs")]
 pub use vmux_ecs as ecs;
 #[cfg(any(feature = "extension-core", feature = "extension"))]
@@ -41,8 +43,16 @@ pub use vmux_runner as runner;
 pub use vmux_store as store;
 #[cfg(feature = "test-harness")]
 pub use vmux_test as testing;
+#[cfg(feature = "ui")]
+pub use vmux_ui as ui;
 #[cfg(feature = "window")]
 pub use vmux_window as window;
+
+pub mod bevy {
+    pub use bevy_app as app;
+    #[cfg(feature = "ecs")]
+    pub use vmux_ecs::bevy_ecs as ecs;
+}
 
 #[cfg(feature = "release-flags")]
 mod feature_flags;
