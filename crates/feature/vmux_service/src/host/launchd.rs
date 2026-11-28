@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use super::LaunchAgent;
 use vmux_profile::ServicePaths;
@@ -64,8 +63,8 @@ impl LaunchAgent {
 
     pub fn install(&self, binary_path: &Path) -> std::io::Result<PathBuf> {
         let plist = self.plist_path();
-        std::fs::create_dir_all(ServicePaths::dir())?;
-        std::fs::create_dir_all(ServicePaths::log_dir())?;
+        super::service_io::ServiceFsIo::create_dir_all(&ServicePaths::dir())?;
+        super::service_io::ServiceFsIo::create_dir_all(&ServicePaths::log_dir())?;
         let log = ServicePaths::current().log();
         self.reconcile_plist_at(&plist, binary_path, &log)?;
         self.bootstrap(&plist)?;
@@ -76,7 +75,7 @@ impl LaunchAgent {
         let plist = self.plist_path();
         if plist.exists() {
             let _ = self.bootout();
-            std::fs::remove_file(&plist)?;
+            super::service_io::ServiceFsIo::remove_file(&plist)?;
         }
         Ok(())
     }
@@ -84,9 +83,11 @@ impl LaunchAgent {
     pub fn bootout(&self) -> std::io::Result<()> {
         let uid = self.uid();
         let label = self.label();
-        let status = Command::new("launchctl")
-            .args(["bootout", &format!("gui/{uid}/{label}")])
-            .status()?;
+        let target = format!("gui/{uid}/{label}");
+        let status = super::service_io::ServiceFsIo::run_launchctl(&[
+            std::ffi::OsStr::new("bootout"),
+            std::ffi::OsStr::new(&target),
+        ])?;
         if !status.success() {
             tracing::warn!(code = ?status.code(), "launchctl bootout exited nonzero");
         }
@@ -94,8 +95,8 @@ impl LaunchAgent {
     }
 
     pub fn ensure_running(&self, binary_path: &Path) -> std::io::Result<()> {
-        std::fs::create_dir_all(ServicePaths::dir())?;
-        std::fs::create_dir_all(ServicePaths::log_dir())?;
+        super::service_io::ServiceFsIo::create_dir_all(&ServicePaths::dir())?;
+        super::service_io::ServiceFsIo::create_dir_all(&ServicePaths::log_dir())?;
         let plist = self.plist_path();
         let log = ServicePaths::current().log();
         let rewrote = self.reconcile_plist_at(&plist, binary_path, &log)?;
@@ -113,7 +114,7 @@ impl LaunchAgent {
         log_path: &Path,
     ) -> std::io::Result<bool> {
         let desired = self.plist_xml(binary_path, log_path);
-        let current = match std::fs::read_to_string(plist) {
+        let current = match super::service_io::ServiceFsIo::read_to_string(plist) {
             Ok(s) => Some(s),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(e),
@@ -122,18 +123,21 @@ impl LaunchAgent {
             return Ok(false);
         }
         if let Some(parent) = plist.parent() {
-            std::fs::create_dir_all(parent)?;
+            super::service_io::ServiceFsIo::create_dir_all(parent)?;
         }
-        std::fs::write(plist, desired)?;
+        super::service_io::ServiceFsIo::write(plist, desired)?;
         Ok(true)
     }
 
     pub fn kickstart(&self) -> std::io::Result<()> {
         let uid = self.uid();
         let label = self.label();
-        let status = Command::new("launchctl")
-            .args(["kickstart", "-k", &format!("gui/{uid}/{label}")])
-            .status()?;
+        let target = format!("gui/{uid}/{label}");
+        let status = super::service_io::ServiceFsIo::run_launchctl(&[
+            std::ffi::OsStr::new("kickstart"),
+            std::ffi::OsStr::new("-k"),
+            std::ffi::OsStr::new(&target),
+        ])?;
         if !status.success() {
             tracing::warn!(code = ?status.code(), "launchctl kickstart exited nonzero");
         }
@@ -146,10 +150,12 @@ impl LaunchAgent {
 
     fn bootstrap(&self, plist: &Path) -> std::io::Result<()> {
         let uid = self.uid();
-        let status = Command::new("launchctl")
-            .args(["bootstrap", &format!("gui/{uid}")])
-            .arg(plist)
-            .status()?;
+        let domain = format!("gui/{uid}");
+        let status = super::service_io::ServiceFsIo::run_launchctl(&[
+            std::ffi::OsStr::new("bootstrap"),
+            std::ffi::OsStr::new(&domain),
+            plist.as_os_str(),
+        ])?;
         if !status.success() {
             tracing::warn!(code = ?status.code(), "launchctl bootstrap exited nonzero");
         }
@@ -161,6 +167,7 @@ impl LaunchAgent {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::process::Command;
 
     #[test]
     fn launchd_parses_paths_with_xml_metacharacters_without_changing_arguments() {

@@ -418,7 +418,7 @@ impl Workspace {
             }
             let current = root.join(file);
             if current.is_file() {
-                let bytes = std::fs::read(&current)?;
+                let bytes = crate::fs_io::DxFsIo::read(&current)?;
                 if Selection::mentions_macos_cfg(&bytes) {
                     selection.macos_lint = true;
                     return Ok(());

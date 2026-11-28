@@ -179,43 +179,24 @@ impl ServiceStop {
     fn current() -> std::io::Result<()> {
         let paths = ServicePaths::current();
         let data = vmux_profile::ProfilePaths::current().shared_data();
-        std::fs::create_dir_all(&data)?;
-        let desktop = std::fs::OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(data.join("desktop.lock"))?;
-        desktop.try_lock().map_err(|error| {
-            std::io::Error::new(
-                std::io::ErrorKind::WouldBlock,
-                format!("Quit Vmux before stopping its service: {error}"),
-            )
-        })?;
+        let _desktop =
+            super::service_io::ServiceFsIo::lock_desktop_exclusive(&data.join("desktop.lock"))?;
         #[cfg(target_os = "macos")]
         if !ServiceStart::detached() {
             LaunchAgent::current().bootout()?;
         }
-        if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(paths.socket()) {
+        if let Ok(mut stream) = super::service_io::ServiceFsIo::connect_unix(&paths.socket()) {
             stream.set_read_timeout(Some(Duration::from_secs(5)))?;
             stream.set_write_timeout(Some(Duration::from_secs(1)))?;
             ServiceCodec::write_client_blocking(&mut stream, &ClientMessage::Shutdown)?;
             let mut reader = std::io::BufReader::new(&mut stream);
             let _ = ServiceCodec::read_service_blocking(&mut reader)?;
         }
-        std::fs::create_dir_all(ServicePaths::dir())?;
-        let lock = std::fs::OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(paths.daemon_lock())?;
+        let lock = super::service_io::ServiceFsIo::open_lock_file(&paths.daemon_lock())?;
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
-            match lock.try_lock() {
-                Ok(()) => return Ok(()),
-                Err(std::fs::TryLockError::WouldBlock) => {}
-                Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            if super::service_io::ServiceFsIo::try_lock_and_unlock(&lock)? {
+                return Ok(());
             }
             if std::time::Instant::now() >= deadline {
                 return Err(std::io::Error::new(
@@ -453,13 +434,13 @@ impl StatusInfo {
     }
 
     fn pid() -> Option<i32> {
-        std::fs::read_to_string(ServicePaths::current().pid())
+        super::service_io::ServiceFsIo::read_to_string(&ServicePaths::current().pid())
             .ok()
             .and_then(|value| value.trim().parse().ok())
     }
 
     fn identity_short() -> Option<String> {
-        std::fs::read_to_string(ServicePaths::current().identity())
+        super::service_io::ServiceFsIo::read_to_string(&ServicePaths::current().identity())
             .ok()
             .map(|value| {
                 let mut hash: u64 = 5381;
@@ -473,7 +454,8 @@ impl StatusInfo {
 
     fn live() -> Option<(u64, u32)> {
         let result = (|| {
-            let stream = std::os::unix::net::UnixStream::connect(ServicePaths::current().socket())?;
+            let stream =
+                super::service_io::ServiceFsIo::connect_unix(&ServicePaths::current().socket())?;
             stream.set_read_timeout(Some(Duration::from_secs(2)))?;
             stream.set_write_timeout(Some(Duration::from_secs(2)))?;
             let mut stream = stream;

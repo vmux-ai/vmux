@@ -1,5 +1,3 @@
-#[cfg(unix)]
-use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -16,26 +14,16 @@ impl RuntimeHandoff {
         timeout: Duration,
     ) -> std::io::Result<()> {
         let deadline = Instant::now() + timeout;
-        let mut options = std::fs::OpenOptions::new();
-        options.read(true).write(true);
-        #[cfg(unix)]
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-        let lock = match options.open(lock) {
-            Ok(lock) => lock,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Self::shutdown(socket, deadline);
-            }
-            Err(error) => return Err(error),
+        let Some(lock) = super::service_io::ServiceFsIo::open_nonblocking_lock(lock)? else {
+            return Self::shutdown(socket, deadline);
         };
-        if !lock.metadata()?.is_file() {
+        if !super::service_io::ServiceFsIo::lock_is_file(&lock)? {
             return Err(std::io::Error::other("invalid service lock"));
         }
         Self::shutdown(socket, deadline)?;
         loop {
-            match lock.try_lock() {
-                Ok(()) => return lock.unlock(),
-                Err(std::fs::TryLockError::WouldBlock) => {}
-                Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            if super::service_io::ServiceFsIo::try_lock_and_unlock(&lock)? {
+                return Ok(());
             }
             if Instant::now() >= deadline {
                 return Err(std::io::Error::new(
@@ -85,8 +73,7 @@ impl RuntimeHandoff {
             return Ok(());
         }
         let prefix = format!("vmux-{build}");
-        for entry in std::fs::read_dir(directory)? {
-            let path = entry?.path();
+        for path in super::service_io::ServiceFsIo::read_dir_paths(directory)? {
             if path.extension().and_then(|extension| extension.to_str()) != Some("sock") {
                 continue;
             }
@@ -102,11 +89,10 @@ impl RuntimeHandoff {
     }
 
     fn shutdown(socket: &Path, deadline: Instant) -> std::io::Result<()> {
-        match std::fs::symlink_metadata(socket) {
-            Ok(metadata) if metadata.file_type().is_socket() => {}
-            Ok(_) => return Err(std::io::Error::other("invalid service socket")),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error),
+        match super::service_io::ServiceFsIo::is_socket(socket)? {
+            Some(true) => {}
+            Some(false) => return Err(std::io::Error::other("invalid service socket")),
+            None => return Ok(()),
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {

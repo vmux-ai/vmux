@@ -11,7 +11,10 @@ impl RemoteExposure {
     }
 
     fn read(path: &std::path::Path) -> Self {
-        Self(std::fs::read_to_string(path).is_ok_and(|state| state.trim() == "enabled"))
+        Self(
+            super::file_driver::RemoteFs::read_to_string(path)
+                .is_ok_and(|state| state.trim() == "enabled"),
+        )
     }
 }
 

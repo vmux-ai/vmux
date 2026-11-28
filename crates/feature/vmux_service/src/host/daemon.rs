@@ -5,8 +5,6 @@ use bevy::prelude::Component;
 
 use vmux_profile::{Product, ServicePaths};
 
-use std::os::unix::process::CommandExt;
-
 #[derive(Component, Clone, Debug, Eq, PartialEq)]
 pub struct DaemonBinary(PathBuf);
 
@@ -51,31 +49,7 @@ impl DaemonBinary {
 
     #[cfg(unix)]
     pub(crate) fn spawn_detached(&self) -> std::io::Result<std::process::Child> {
-        let log_dir = ServicePaths::log_dir();
-        let _ = std::fs::create_dir_all(&log_dir);
-        let stderr = match std::fs::File::create(ServicePaths::current().log()) {
-            Ok(file) => std::process::Stdio::from(file),
-            Err(error) => {
-                tracing::warn!(%error, "could not create service log; stderr will be discarded");
-                std::process::Stdio::null()
-            }
-        };
-        let mut command = std::process::Command::new(self.path());
-        vmux_spawn::Descriptors::isolate(&mut command)?;
-        let child = unsafe {
-            command
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(stderr)
-                .pre_exec(|| {
-                    if libc::setsid() < 0 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                })
-                .spawn()?
-        };
-        Ok(child)
+        super::service_io::ServiceFsIo::spawn_detached(self.path())
     }
 
     pub fn identity(&self) -> std::io::Result<DaemonIdentity> {
@@ -83,8 +57,8 @@ impl DaemonBinary {
     }
 
     pub fn record_identity(&self) -> std::io::Result<()> {
-        std::fs::write(
-            ServicePaths::current().identity(),
+        super::service_io::ServiceFsIo::write(
+            &ServicePaths::current().identity(),
             self.identity()?.as_str(),
         )
     }

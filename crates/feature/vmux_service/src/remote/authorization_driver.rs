@@ -46,15 +46,15 @@ impl AccountRelayCredential {
     }
 
     pub fn read_at(path: &Path) -> Option<Self> {
-        let contents = std::fs::read_to_string(path).ok()?;
+        let contents = super::file_driver::RemoteFs::read_to_string(path).ok()?;
         Self::parse(&contents)
     }
 
     pub fn write_current(device_id: &DeviceId, assertion: &str) -> std::io::Result<()> {
         let paths = RemotePaths::current();
         Self::write_at(&paths.relay_assertion(), device_id, assertion)?;
-        let _ = std::fs::remove_file(paths.relay_token());
-        let _ = std::fs::remove_file(paths.relay_device());
+        let _ = super::file_driver::RemoteFs::remove_file(&paths.relay_token());
+        let _ = super::file_driver::RemoteFs::remove_file(&paths.relay_device());
         Ok(())
     }
 
@@ -71,9 +71,9 @@ impl AccountRelayCredential {
 
     pub fn clear_current() {
         let paths = RemotePaths::current();
-        let _ = std::fs::remove_file(paths.relay_assertion());
-        let _ = std::fs::remove_file(paths.relay_token());
-        let _ = std::fs::remove_file(paths.relay_device());
+        let _ = super::file_driver::RemoteFs::remove_file(&paths.relay_assertion());
+        let _ = super::file_driver::RemoteFs::remove_file(&paths.relay_token());
+        let _ = super::file_driver::RemoteFs::remove_file(&paths.relay_device());
     }
 
     pub fn wait(timeout: Duration) -> std::io::Result<Self> {
