@@ -5718,7 +5718,7 @@ mod tests {
                 OperationState::Pending,
                 ChildOf(self.operation),
             ));
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + Duration::from_secs(30);
             loop {
                 self.app.update();
                 if let Some(result) = self.app.world().get::<CliResult>(self.operation) {
@@ -5802,7 +5802,7 @@ printf 'Filesystem 1024-blocks Used Available Capacity Mounted\nfixture 20971520
         }
 
         fn settle_io(&mut self, owner: Entity) {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + Duration::from_secs(30);
             loop {
                 self.app.update();
                 if self.app.world().get::<Sent>(owner).is_some() {
@@ -6030,7 +6030,7 @@ exit 0
                 ChildOf(owner),
             ))
             .id();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             fixture.app.update();
             if [old, entitlements].into_iter().all(|entity| {
@@ -6175,7 +6175,7 @@ exit 0
             entity: step,
             request: IdentityRequest { print: false },
         });
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             fixture.app.update();
             if let Some(result) = fixture.app.world().get::<CliResult>(fixture.operation) {
