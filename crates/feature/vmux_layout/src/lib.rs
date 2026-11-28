@@ -26,8 +26,8 @@ pub use host::{
     TabLayoutSpawnRequest, TerminalLayoutSpawnRequest, UpdateStage, UpdateState, active,
     active_pane, apply, archive, bookmark, cef, contract, hosted_page, overlay, page_context,
     page_slot, pane, placement, plugin, presentation, profile, projection, settings, side_sheet,
-    snapshot, space, stack, tab, target, toggle, tool, warm_page, window, workspace_snapshot,
-    workspace_snapshot_publish, worktree,
+    snapshot, space, stack, state_source, tab, target, toggle, tool, warm_page, window,
+    workspace_snapshot, workspace_snapshot_publish, worktree,
 };
 
 pub const PANE_GAP_PX: f32 = 4.0;

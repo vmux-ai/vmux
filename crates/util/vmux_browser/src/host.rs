@@ -9,11 +9,12 @@ use bevy_cef_core::prelude::CommandLineConfig;
 use std::sync::{LazyLock, Mutex};
 use vmux_command::CommandBarPanelActive;
 use vmux_flex::prelude::*;
+#[cfg(test)]
+pub(crate) use vmux_layout::state_source::{LayoutFixedOffsets, LayoutWindowPadding};
 use vmux_layout::{
     Header, Open, bookmark::BookmarkContextMenuActive, overlay::LayoutOverlayActive,
     side_sheet::SideSheet,
 };
-use vmux_setting::AppSettings;
 
 use vmux_api::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
 use vmux_ecs::service::ServiceRequest;
@@ -182,67 +183,6 @@ impl CommandBarRoute {
 
 pub(crate) static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
     LazyLock::new(|| Mutex::new(CommandBarRoute::default()));
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct LayoutWindowPadding {
-    pub(crate) top: f32,
-    pub(crate) right: f32,
-    pub(crate) bottom: f32,
-    pub(crate) left: f32,
-}
-
-impl LayoutWindowPadding {
-    pub(crate) fn from_node(node: &Node) -> Self {
-        Self {
-            top: Self::px(node.padding.top),
-            right: Self::px(node.padding.right),
-            bottom: Self::px(node.padding.bottom),
-            left: Self::px(node.padding.left),
-        }
-    }
-
-    pub(crate) fn from_settings(settings: &AppSettings) -> Self {
-        Self {
-            top: settings.layout.window.pad_top(),
-            right: settings.layout.window.pad_right(),
-            bottom: settings.layout.window.pad_bottom(),
-            left: settings.layout.window.pad_left(),
-        }
-    }
-
-    fn px(value: Val) -> f32 {
-        match value {
-            Val::Px(px) => px,
-            _ => 0.0,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct LayoutFixedOffsets {
-    pub(crate) left: f32,
-    pub(crate) top: f32,
-    pub(crate) right: f32,
-    pub(crate) height: f32,
-}
-
-impl LayoutFixedOffsets {
-    pub(crate) fn from_node(rect: &ComputedNode, window_width_px: f32) -> Option<Self> {
-        if rect.is_empty() || window_width_px <= 0.0 {
-            return None;
-        }
-
-        let logical = rect.to_logical();
-        let window_width = window_width_px * rect.inverse_scale_factor.max(1.0e-6);
-
-        Some(Self {
-            left: logical.min().x,
-            top: logical.min().y,
-            right: window_width - logical.max().x,
-            height: logical.size.y,
-        })
-    }
-}
 
 #[derive(Component, Clone, Debug)]
 pub(crate) struct PageOpenFallbackDeferred;

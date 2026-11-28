@@ -1259,19 +1259,19 @@ fn apply_process_start(
 
 fn apply_viewport_updates(
     mut updates: MessageReader<TerminalViewportUpdate>,
-    terminals: Query<(), ServiceTerminalFilter>,
+    terminals: Query<Has<vmux_ecs::ui::UiIpcReady>, ServiceTerminalFilter>,
     process_index: Single<&TerminalProcessIndex>,
     output_seen: Query<(), With<ShellOutputSeen>>,
-    browsers: NonSend<Browsers>,
+    browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
     for update in updates.read() {
         let Some(entity) = process_index.get(&update.process_id) else {
             continue;
         };
-        if !terminals.contains(entity) {
+        let Ok(surface_ready) = terminals.get(entity) else {
             continue;
-        }
+        };
         if !output_seen.contains(entity) {
             let has_content = update
                 .patch
@@ -1282,7 +1282,11 @@ fn apply_viewport_updates(
                 commands.entity(entity).insert(ShellOutputSeen);
             }
         }
-        if !browsers.can_emit_to(&entity) {
+        let can_emit = surface_ready
+            || browsers
+                .as_ref()
+                .is_some_and(|browsers| browsers.can_emit_to(&entity));
+        if !can_emit {
             if update.request_snapshot_if_hidden {
                 commands.entity(entity).insert(PendingTerminalSnapshot);
             }
@@ -2178,14 +2182,14 @@ fn apply_osc_title(
     mut reader: MessageReader<OscTitleChanged>,
     mut commands: Commands,
     process_index: Single<&TerminalProcessIndex>,
-    terminals: Query<Option<&PageIdentity>, With<Terminal>>,
+    terminals: Query<(Option<&PageIdentity>, Has<vmux_ecs::ui::UiIpcReady>), With<Terminal>>,
     browsers: Option<NonSend<Browsers>>,
 ) {
     for ev in reader.read() {
         let Some(entity) = process_index.get(&ev.process_id) else {
             continue;
         };
-        let Ok(current) = terminals.get(entity) else {
+        let Ok((current, surface_ready)) = terminals.get(entity) else {
             continue;
         };
         if ev.title.is_empty() {
@@ -2198,10 +2202,11 @@ fn apply_osc_title(
                 .entity(entity)
                 .insert(PageIdentity::from(ev.title.clone()));
         }
-        if browsers
-            .as_ref()
-            .is_some_and(|browsers| browsers.can_emit_to(&entity))
-        {
+        let can_emit = surface_ready
+            || browsers
+                .as_ref()
+                .is_some_and(|browsers| browsers.can_emit_to(&entity));
+        if can_emit {
             commands.trigger(UiStateWrite::<TerminalUiState>::from_event(
                 entity,
                 &TermTitleEvent {

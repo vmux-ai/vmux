@@ -39,6 +39,7 @@ pub mod side_sheet;
 pub mod snapshot;
 pub mod space;
 pub mod stack;
+pub mod state_source;
 mod store;
 pub mod tab;
 pub mod target;

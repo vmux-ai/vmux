@@ -56,8 +56,11 @@ fn term_ready(
 }
 
 fn request_snapshot(
-    pending: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingTerminalSnapshot>)>,
-    browsers: NonSend<Browsers>,
+    pending: Query<
+        (Entity, &ProcessId, Has<vmux_ecs::ui::UiIpcReady>),
+        (With<Terminal>, With<PendingTerminalSnapshot>),
+    >,
+    browsers: Option<NonSend<Browsers>>,
     connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -65,8 +68,12 @@ fn request_snapshot(
     if connected.is_none() {
         return;
     }
-    for (entity, process_id) in &pending {
-        if !browsers.can_emit_to(&entity) {
+    for (entity, process_id, surface_ready) in &pending {
+        let can_emit = surface_ready
+            || browsers
+                .as_ref()
+                .is_some_and(|browsers| browsers.can_emit_to(&entity));
+        if !can_emit {
             continue;
         }
         service_requests.write(ServiceRequest(ClientMessage::RequestSnapshot {
