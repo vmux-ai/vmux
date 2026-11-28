@@ -31,6 +31,8 @@ impl bevy_app::Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CleanupQueue>()
             .init_resource::<Inheritance>()
+            .add_message::<crate::tui::Notice>()
+            .add_message::<crate::tui::ArtifactObserved>()
             .add_plugins((
                 (
                     crate::cargo::CargoPlugin,
@@ -3091,7 +3093,13 @@ fn publish_check(
     }
 }
 
-fn publish_done(mut requests: PublishRequests, facts: Facts, wake: Res<JobWake>, mut io: IoWriter) {
+fn publish_done(
+    mut requests: PublishRequests,
+    facts: Facts,
+    captured: Query<&Captured>,
+    wake: Res<JobWake>,
+    mut io: IoWriter,
+) {
     for (entity, _, checkout, settings, phase, _sequence) in &mut requests {
         if !matches!(*phase, PublishPhase::Done) {
             continue;
@@ -3103,7 +3111,17 @@ fn publish_done(mut requests: PublishRequests, facts: Facts, wake: Res<JobWake>,
         let previous_phase = *phase;
         let debug = checkout.directory("debug");
 
-        println!("Debug build ready: {}\nRun: vmux run", debug.display());
+        let root = captured.get(entity).ok().map(|value| value.root);
+        io.commands.write_message(crate::tui::Notice {
+            root,
+            tone: crate::tui::NoticeTone::Stdout,
+            text: format!("Debug build ready: {}", debug.display()),
+        });
+        io.commands.write_message(crate::tui::Notice {
+            root,
+            tone: crate::tui::NoticeTone::Stdout,
+            text: "Run: vmux run".to_owned(),
+        });
         let path = if cfg!(target_os = "macos") {
             let product = match settings.0.product(&checkout.root) {
                 Ok(product) => product,
@@ -3118,6 +3136,13 @@ fn publish_done(mut requests: PublishRequests, facts: Facts, wake: Res<JobWake>,
         } else {
             debug.join("vmux_desktop")
         };
+        if let Some(root) = root {
+            io.commands.write_message(crate::tui::ArtifactObserved {
+                root,
+                path: path.clone(),
+                commit: None,
+            });
+        }
         io.commands
             .entity(entity)
             .insert((Complete, ProducedArtifacts(vec![path])));
@@ -3713,6 +3738,7 @@ fn run_select(
     mut requests: RunRequests,
     facts: Facts,
     entries: Query<(&crate::local::Entry, &ChildOf)>,
+    captured: Query<&Captured>,
     wake: Res<JobWake>,
     mut io: IoWriter,
 ) {
@@ -3740,9 +3766,8 @@ fn run_select(
         };
 
         let prefix = format!("{} (", product.value("VMUX_HOST_NAME"));
-        let expected = facts
-            .command_output::<CommitSlot>(entity)
-            .map(|head| format!("{prefix}{head}).app"));
+        let commit = facts.command_output::<CommitSlot>(entity);
+        let expected = commit.as_ref().map(|head| format!("{prefix}{head}).app"));
         let mut latest = None;
         for (entry, parent) in &entries {
             if parent.parent() != entity || !entry.directory || entry.symlink {
@@ -3769,6 +3794,13 @@ fn run_select(
             wake.0.wake_by_ref();
             continue;
         };
+        if let Ok(captured) = captured.get(entity) {
+            io.commands.write_message(crate::tui::ArtifactObserved {
+                root: captured.root,
+                path: latest.path.clone(),
+                commit,
+            });
+        }
         io.commands
             .entity(entity)
             .insert(Target(latest.path.clone()));

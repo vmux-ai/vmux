@@ -108,6 +108,7 @@ fn request(requests: Incoming, mut commands: Commands) {
         if !invocation.command.starts_with("dx.")
             || invocation.is("dx.help")
             || invocation.is("dx.update")
+            || invocation.is("dx.tui")
         {
             continue;
         }

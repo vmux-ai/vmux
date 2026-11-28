@@ -8,12 +8,12 @@ use vmux_command::{KeyCombo, Keymap, Modifiers};
 use vmux_input::NativeKeyCapture;
 use vmux_setting::{AppSettings, SettingsLoadSet};
 
-pub(crate) struct InputPlugin;
+pub struct ShortcutInputPlugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct Initialize;
 
-impl Plugin for InputPlugin {
+impl Plugin for ShortcutInputPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(retire_prefix)
             .add_systems(PreUpdate, (initialize_prefix, ApplyDeferred).chain())
@@ -135,9 +135,15 @@ impl PressedKeys<'_> {
 }
 
 #[derive(Component, Default)]
-struct PendingPrefix {
+pub struct PendingPrefix {
     accepted: Option<(vmux_input::NativeKey, Instant)>,
     window: Option<Entity>,
+}
+
+impl PendingPrefix {
+    pub fn is_active(&self) -> bool {
+        self.accepted.is_some()
+    }
 }
 
 fn initialize_prefix(
@@ -264,7 +270,7 @@ mod tests {
                 CommandPlugin,
                 PaneCommandPlugin,
                 TabCommandPlugin,
-                InputPlugin,
+                ShortcutInputPlugin,
             ))
             .insert_resource(ButtonInput::<KeyCode>::default());
             for source in [

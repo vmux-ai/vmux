@@ -39,7 +39,7 @@ impl Plugin for ShortcutPlugin {
         app.add_plugins(crate::ui::ShortcutPage::plugin());
         app.add_plugins((
             crate::claim::ClaimPlugin,
-            crate::input::InputPlugin,
+            crate::input::ShortcutInputPlugin,
             HostedUiPlugin::<Shortcuts>::new(Self::manifest()),
             UiEventPlugin::<(
                 ShortcutProbePressRequest,
