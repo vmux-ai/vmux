@@ -14,7 +14,7 @@ impl LogForward {
 
     pub(crate) fn file_layer(_app: &mut App) -> Option<BoxedLayer> {
         let dir = ServicePaths::log_dir();
-        std::fs::create_dir_all(&dir).ok()?;
+        crate::fs_io::DesktopFsIo::create_dir_all(&dir).ok()?;
         let appender = tracing_appender::rolling::Builder::new()
             .rotation(tracing_appender::rolling::Rotation::DAILY)
             .filename_prefix(format!("vmux-{}", ServicePaths::build_profile()))

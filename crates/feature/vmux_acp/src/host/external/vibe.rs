@@ -1,4 +1,3 @@
-use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -71,7 +70,7 @@ impl Reader {
         if path.symlink_metadata().ok()?.file_type().is_symlink() {
             return None;
         }
-        let file = File::open(path).ok()?;
+        let file = super::fs_io::ExternalFsIo::open(path).ok()?;
         let mut meta = VibeMeta::default();
         for line in BoundedLines::new(BufReader::new(file)).take(160) {
             let line = line.trim();
@@ -120,13 +119,13 @@ impl ProviderReader for Reader {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(error) => return Err(error.to_string()),
         };
-        let entries = match std::fs::read_dir(root) {
+        let entries = match super::fs_io::ExternalFsIo::read_dir(&root) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(error) => return Err(error.to_string()),
         };
         let mut sessions = Vec::new();
-        for (index, entry) in entries.flatten().enumerate() {
+        for (index, entry) in entries.into_iter().flatten().enumerate() {
             if index >= Self::MAX_SESSIONS {
                 break;
             }

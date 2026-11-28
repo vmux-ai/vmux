@@ -55,6 +55,7 @@ mod archive;
 mod claude;
 mod codex;
 mod conversation;
+mod fs_io;
 mod vibe;
 
 pub(super) struct ExternalPlugin;
@@ -1578,7 +1579,7 @@ struct ConversationStamp {
 
 impl ConversationStamp {
     fn read(path: &Path) -> Option<Self> {
-        let metadata = std::fs::symlink_metadata(path).ok()?;
+        let metadata = fs_io::ExternalFsIo::symlink_metadata(path).ok()?;
         if !metadata.file_type().is_file() {
             return None;
         }

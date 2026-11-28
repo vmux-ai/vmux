@@ -326,7 +326,7 @@ mod capture {
             if let Some(c) = crop {
                 rgba = image::imageops::crop_imm(&rgba, c.x, c.y, c.w, c.h).to_image();
             }
-            if let Err(e) = std::fs::create_dir_all(&dir) {
+            if let Err(e) = crate::fs_io::DesktopFsIo::create_dir_all(&dir) {
                 return ScreenshotBridge::err_response(
                     request_id,
                     format!("cannot create {}: {e}", dir.display()),

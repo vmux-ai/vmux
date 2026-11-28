@@ -24,6 +24,7 @@ mod plugin;
 mod project;
 mod restored;
 mod snapshot_updater;
+mod space_io;
 mod spaces;
 mod store;
 mod tool;

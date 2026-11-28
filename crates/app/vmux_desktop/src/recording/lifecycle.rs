@@ -1082,27 +1082,27 @@ struct Filesystem;
 
 impl Filesystem {
     fn ensure(path: &std::path::Path) -> std::io::Result<()> {
-        std::fs::create_dir_all(path)
+        crate::fs_io::DesktopFsIo::create_dir_all(path)
     }
 
     fn reserve(path: &std::path::Path) -> std::io::Result<()> {
-        std::fs::create_dir(path)
+        crate::fs_io::DesktopFsIo::create_dir(path)
     }
 
     fn relocate(source: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
-        std::fs::rename(source, target)
+        crate::fs_io::DesktopFsIo::rename(source, target)
     }
 
     fn size(path: &std::path::Path) -> std::io::Result<u64> {
-        std::fs::metadata(path).map(|metadata| metadata.len())
+        crate::fs_io::DesktopFsIo::file_size(path)
     }
 
     fn remove_file(path: &std::path::Path) -> std::io::Result<()> {
-        std::fs::remove_file(path)
+        crate::fs_io::DesktopFsIo::remove_file(path)
     }
 
     fn remove_directory(path: &std::path::Path) -> std::io::Result<()> {
-        std::fs::remove_dir(path)
+        crate::fs_io::DesktopFsIo::remove_dir(path)
     }
 }
 

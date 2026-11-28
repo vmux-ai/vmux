@@ -80,7 +80,7 @@ struct BookmarkStore;
 
 impl BookmarkStore {
     fn load(path: &Path) -> std::io::Result<LoadWorld<BookmarkFilter>> {
-        let mut source = std::fs::read_to_string(path)?;
+        let mut source = crate::store_io::StoreIo::read_to_string(path)?;
         for (legacy, current) in [
             (
                 "vmux_desktop::bookmark_persistence::OfferedBookmarkDefaults",

@@ -1,5 +1,3 @@
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::panic::PanicHookInfo;
 use vmux_profile::ServicePaths;
 
@@ -36,14 +34,11 @@ impl PanicHook {
     }
 
     fn write_crash(record: &str) {
-        let _ = std::fs::create_dir_all(ServicePaths::log_dir());
-        if let Ok(mut file) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(ServicePaths::current().current_log())
-        {
-            let _ = file.write_all(record.as_bytes());
-        }
+        crate::fs_io::DesktopFsIo::append_crash(
+            &ServicePaths::log_dir(),
+            &ServicePaths::current().current_log(),
+            record,
+        );
     }
 
     fn format_crash_record(

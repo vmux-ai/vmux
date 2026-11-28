@@ -11,4 +11,5 @@ impl vmux_feature::manifest::FeatureManifestSource for Feature {
 
 mod menu;
 mod store;
+mod store_io;
 mod tool;

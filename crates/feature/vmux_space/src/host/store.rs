@@ -1546,16 +1546,7 @@ impl SnapshotWriter {
     }
 
     fn write_snapshot(path: &Path, data: &str) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let pending = path.with_extension(format!("ron.{}.pending", std::process::id()));
-        std::fs::write(&pending, data)?;
-        if let Err(error) = std::fs::rename(&pending, path) {
-            let _ = std::fs::remove_file(pending);
-            return Err(error);
-        }
-        Ok(())
+        super::space_io::SpaceFsIo::write_snapshot(path, data)
     }
 
     fn write_schema_version(path: &Path) -> std::io::Result<()> {
@@ -2016,7 +2007,8 @@ impl DecodeSnapshot {
                 return super::restored::Snapshot(snapshot).recover();
             }
             Some(LoadInput::File(path)) => {
-                bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+                bytes =
+                    super::space_io::SpaceFsIo::read(&path).map_err(|error| error.to_string())?;
             }
             Some(LoadInput::Stream(mut stream)) => {
                 stream
@@ -2127,10 +2119,10 @@ impl RestoreFailure {
     }
 
     fn copy(path: &Path, backup: &Path) -> std::io::Result<()> {
-        let body = std::fs::read(path)?;
+        let body = super::space_io::SpaceFsIo::read(path)?;
         vmux_path::AtomicFile::write(backup, &body)?;
         let version = Self::store_version(path);
-        match std::fs::read(version) {
+        match super::space_io::SpaceFsIo::read(&version) {
             Ok(version) => vmux_path::AtomicFile::write(Self::version(backup), &version),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error),
@@ -2150,48 +2142,17 @@ impl RestoreFailure {
     }
 
     fn schema_version(path: &Path) -> Option<u32> {
-        std::fs::read_to_string(Self::store_version(path))
+        super::space_io::SpaceFsIo::read_to_string(&Self::store_version(path))
             .ok()
             .and_then(|value| value.trim().parse::<u32>().ok())
     }
 
     fn backup_for_reset(path: &Path) -> std::io::Result<PathBuf> {
-        for sequence in 0.. {
-            let backup = path.with_extension(format!("ron.pre-v{STORE_SCHEMA_VERSION}.{sequence}"));
-            let mut destination = match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&backup)
-            {
-                Ok(file) => file,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error),
-            };
-            let mut source = std::fs::File::open(path)?;
-            std::io::copy(&mut source, &mut destination)?;
-            destination.sync_all()?;
-            match std::fs::File::open(Self::store_version(path)) {
-                Ok(mut version) => {
-                    let mut name = backup.as_os_str().to_owned();
-                    name.push(".version");
-                    let mut destination = std::fs::OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .open(PathBuf::from(name))?;
-                    std::io::copy(&mut version, &mut destination)?;
-                    destination.sync_all()?;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
-            }
-            #[cfg(unix)]
-            if let Some(parent) = backup.parent() {
-                std::fs::File::open(parent)?.sync_all()?;
-            }
-            std::fs::remove_file(path)?;
-            return Ok(backup);
-        }
-        unreachable!()
+        super::space_io::SpaceFsIo::backup_for_reset(
+            path,
+            &Self::store_version(path),
+            STORE_SCHEMA_VERSION,
+        )
     }
 }
 
@@ -2199,13 +2160,13 @@ struct WorkspaceStoreSource<'a>(&'a str);
 
 impl WorkspaceStoreSource<'_> {
     fn normalize_if_needed(path: &Path) {
-        let Ok(body) = std::fs::read_to_string(path) else {
+        let Ok(body) = super::space_io::SpaceFsIo::read_to_string(path) else {
             return;
         };
         let Some(normalized) = WorkspaceStoreSource(&body).without_resources() else {
             return;
         };
-        if let Err(error) = std::fs::write(path, normalized) {
+        if let Err(error) = super::space_io::SpaceFsIo::write(path, normalized) {
             warn!(
                 "Failed to remove legacy workspace resources from {:?}: {error}",
                 path
