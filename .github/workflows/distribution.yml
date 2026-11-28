@@ -143,18 +143,18 @@ jobs:
           fast-rust: "true"
       - name: Test DX lifecycle and platform adapters
         if: needs.plan.outputs.macos_tooling == 'true'
-        run: cargo test --locked -p vmux_dx --features ci-syntax --lib --target-dir .build-tools/cargo
+        run: cargo test --locked -p vmux_dx --features ci-syntax --lib --target-dir .vmux/cargo
       - name: Test native CLI resource and signing contracts
         if: needs.plan.outputs.macos_tooling == 'true'
-        run: cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx --target-dir .build-tools/cargo
+        run: cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx --target-dir .vmux/cargo
       - name: Record the CLI identity
-        run: vmux-ci artifact-publish .build-tools/bin/vmux .build-tools/artifact
+        run: vmux-ci artifact-publish .vmux/bin/vmux .vmux/artifact
       - uses: actions/upload-artifact@v6
         with:
           name: dx-cli-${{ runner.os }}-${{ runner.arch }}
           overwrite: true
           include-hidden-files: true
-          path: .build-tools/artifact
+          path: .vmux/artifact
           if-no-files-found: error
           retention-days: 1
       - uses: ./.github/actions/report-compiler-cache
