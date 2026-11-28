@@ -13,7 +13,7 @@ use vmux_api::bookmark::{
 use vmux_api::{PageIcon, VmuxRoute};
 use vmux_ecs::notify::AgentDoneUnseen;
 use vmux_ecs::page::{HostHistory, PageReady};
-use vmux_ecs::surface::SurfaceReady;
+use vmux_ecs::ui::UiIpcReady;
 use vmux_ecs::{
     Active, Bookmark, BookmarkOrder, Collapsed, Folder, PageIdentity, PageMetadata, Pin,
     UiStateFlushSet, UiStateWrite, Uuid,
@@ -400,7 +400,7 @@ impl BookmarkFolders {
 #[derive(SystemParam)]
 pub struct LayoutDelivery<'w, 's> {
     browsers: Option<NonSend<'w, Browsers>>,
-    layouts: Query<'w, 's, Has<SurfaceReady>, With<LayoutCef>>,
+    layouts: Query<'w, 's, Has<UiIpcReady>, With<LayoutCef>>,
 }
 
 impl LayoutDelivery<'_, '_> {
@@ -570,7 +570,7 @@ type LayoutMarkerChanged = Or<(
     Changed<Header>,
     Changed<LayoutCef>,
     Changed<PageReady>,
-    Changed<SurfaceReady>,
+    Changed<UiIpcReady>,
     Changed<SideSheet>,
     Changed<VmuxWindow>,
     Changed<Stack>,
@@ -1572,7 +1572,7 @@ mod tests {
         let window = app.world_mut().spawn((Window::default(), Active)).id();
         let root = app.world_mut().spawn(HostWindow(window)).id();
         app.world_mut()
-            .spawn((LayoutCef, PageReady {}, SurfaceReady, ChildOf(root)));
+            .spawn((LayoutCef, PageReady {}, UiIpcReady, ChildOf(root)));
         let tab = app
             .world_mut()
             .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))

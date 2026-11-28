@@ -57,7 +57,7 @@ fn term_ready(
 
 fn request_snapshot(
     pending: Query<
-        (Entity, &ProcessId, Has<vmux_ecs::surface::SurfaceReady>),
+        (Entity, &ProcessId, Has<vmux_ecs::ui::UiIpcReady>),
         (With<Terminal>, With<PendingTerminalSnapshot>),
     >,
     browsers: Option<NonSend<Browsers>>,

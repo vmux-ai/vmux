@@ -606,7 +606,7 @@ fn broadcast_spaces_to_views(
             Option<&mut SpaceSelection>,
             Option<&SpacesPageSnapshot>,
             Has<SpacesListSent>,
-            Has<vmux_ecs::surface::SurfaceReady>,
+            Has<vmux_ecs::ui::UiIpcReady>,
         ),
         (With<PageReady>, Or<(With<Spaces>, With<LayoutCef>)>),
     >,

@@ -1259,7 +1259,7 @@ fn apply_process_start(
 
 fn apply_viewport_updates(
     mut updates: MessageReader<TerminalViewportUpdate>,
-    terminals: Query<Has<vmux_ecs::surface::SurfaceReady>, ServiceTerminalFilter>,
+    terminals: Query<Has<vmux_ecs::ui::UiIpcReady>, ServiceTerminalFilter>,
     process_index: Single<&TerminalProcessIndex>,
     output_seen: Query<(), With<ShellOutputSeen>>,
     browsers: Option<NonSend<Browsers>>,
@@ -2182,7 +2182,7 @@ fn apply_osc_title(
     mut reader: MessageReader<OscTitleChanged>,
     mut commands: Commands,
     process_index: Single<&TerminalProcessIndex>,
-    terminals: Query<(Option<&PageIdentity>, Has<vmux_ecs::surface::SurfaceReady>), With<Terminal>>,
+    terminals: Query<(Option<&PageIdentity>, Has<vmux_ecs::ui::UiIpcReady>), With<Terminal>>,
     browsers: Option<NonSend<Browsers>>,
 ) {
     for ev in reader.read() {
