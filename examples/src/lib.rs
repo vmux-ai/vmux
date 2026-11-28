@@ -27,4 +27,8 @@ pub const FEATURE_EXAMPLES: &[(&str, &str)] = &[
     ("web", "client_web"),
     ("mobile", "client_mobile"),
     ("service", "client_service"),
+    ("feature-project", "feature_project"),
+    ("feature-account", "feature_account"),
+    ("feature-extension", "feature_extension"),
+    ("feature-session", "feature_session"),
 ];

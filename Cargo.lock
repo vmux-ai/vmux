@@ -10763,6 +10763,7 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
+ "uuid",
  "vmux_api",
  "vmux_app",
  "vmux_ecs",

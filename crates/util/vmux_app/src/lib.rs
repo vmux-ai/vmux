@@ -45,6 +45,8 @@ pub use vmux_project as project;
 pub use vmux_quic as quic;
 #[cfg(feature = "runner")]
 pub use vmux_runner as runner;
+#[cfg(any(feature = "session", feature = "session-core"))]
+pub use vmux_session as session;
 #[cfg(feature = "store")]
 pub use vmux_store as store;
 #[cfg(feature = "test-harness")]

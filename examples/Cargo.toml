@@ -38,6 +38,23 @@ service = [
     "vmux_app/http-server",
     "vmux_app/runner",
 ]
+feature-project = [
+    "window",
+    "vmux_app/project-filesystem",
+]
+feature-account = [
+    "window",
+    "dep:uuid",
+    "vmux_app/account-local",
+]
+feature-extension = [
+    "window",
+    "vmux_app/extension-core",
+]
+feature-session = [
+    "window",
+    "vmux_app/session-core",
+]
 
 [dependencies]
 bevy_app = { workspace = true }
@@ -52,6 +69,7 @@ rkyv = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 tempfile = "3"
 tokio = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 vmux_api = { path = "../crates/util/vmux_api", optional = true }
 vmux_app = { path = "../crates/util/vmux_app", features = ["contracts", "manifest", "hosting", "project", "jobs", "watch", "store", "flex", "layout", "menu"] }
 vmux_ecs = { path = "../crates/util/vmux_ecs", features = ["store", "watch"] }
@@ -162,3 +180,23 @@ required-features = ["mobile"]
 name = "client_service"
 path = "clients/service_daemon.rs"
 required-features = ["service"]
+
+[[example]]
+name = "feature_project"
+path = "features/project.rs"
+required-features = ["feature-project"]
+
+[[example]]
+name = "feature_account"
+path = "features/account.rs"
+required-features = ["feature-account"]
+
+[[example]]
+name = "feature_extension"
+path = "features/extension.rs"
+required-features = ["feature-extension"]
+
+[[example]]
+name = "feature_session"
+path = "features/session.rs"
+required-features = ["feature-session"]

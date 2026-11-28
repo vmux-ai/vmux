@@ -41,6 +41,19 @@ Run any example from the repository root (`cargo run -p vmux_examples ...`) or f
 
 ---
 
+## Feature Crates (Interactive Standalone Apps)
+
+Each feature example boots its own interactive CEF-free desktop app with `DefaultPlugins` + `.run()` (no manual `app.update()` loops), exercising individual `crates/feature/*` plugins without `vmux_desktop` or `bevy_cef`. Pass `VMUX_EXAMPLE_HEADLESS=1` for a headless smoke run.
+
+| Example | File | What it demonstrates | Command |
+|---|---|---|---|
+| Project Manager | [`features/project.rs`](features/project.rs) | `DefaultPlugins` + `ProjectPlugin` + `FilesystemPlugin`: interactive registration, rename, and `.projects.ron` persistence. | `cargo run -p vmux_examples --features feature-project --example feature_project` |
+| Accounts & Profiles | [`features/account.rs`](features/account.rs) | `DefaultPlugins` + `AccountPlugin` + `local::LocalPlugin`: interactive SQLite-backed local profile creation and rename. | `cargo run -p vmux_examples --features feature-account --example feature_account` |
+| Extension Catalog | [`features/extension.rs`](features/extension.rs) | `DefaultPlugins` + `ExtensionPlugin`: interactive permission-approved enable/disable and pin toggles. | `cargo run -p vmux_examples --features feature-extension --example feature_extension` |
+| Sessions & Queue | [`features/session.rs`](features/session.rs) | `DefaultPlugins` + `SessionDomainPlugin` + `QueuePlugin`: interactive session creation, stage transitions, and FIFO prompt queue. | `cargo run -p vmux_examples --features feature-session --example feature_session` |
+
+---
+
 ## Low-Level Primitives & Util Reference
 
 Small focused examples isolating individual ECS, concurrency, layout, menu, and manifest plugins.
