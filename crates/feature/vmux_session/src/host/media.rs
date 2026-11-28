@@ -2,7 +2,6 @@ use base64::Engine;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use ignore::WalkBuilder;
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
@@ -64,7 +63,7 @@ struct ChatAttachmentTask {
 #[derive(Default)]
 struct AttachmentResult {
     attachments: Vec<ChatAttachment>,
-    videos: std::collections::HashMap<String, super::video::Source>,
+    videos: std::collections::HashMap<String, super::video_io::Source>,
 }
 
 #[derive(Clone, Copy)]
@@ -97,11 +96,11 @@ impl AttachmentTasks<'_, '_> {
                     && vmux_api::media::MediaKind::from_path(&path.to_string_lossy())
                         == Some(vmux_api::media::MediaKind::Video)
                 {
-                    let local = super::video::Source::path(&path.to_string_lossy());
+                    let local = super::video_io::Source::path(&path.to_string_lossy());
                     let Some(mut attachment) = ChatAttachmentTask::attachment(local.clone()) else {
                         continue;
                     };
-                    let Ok(source) = super::video::Source::open(&local) else {
+                    let Ok(source) = super::video_io::Source::open(&local) else {
                         continue;
                     };
                     attachment.path = path.to_string_lossy().into_owned();
@@ -232,35 +231,16 @@ impl ComposerFileQuery {
             .trim_start_matches("./")
             .to_ascii_lowercase();
         let mut hits = Vec::new();
-        let walk = WalkBuilder::new(&self.root)
-            .hidden(true)
-            .parents(true)
-            .git_ignore(true)
-            .git_global(true)
-            .git_exclude(true)
-            .follow_links(false)
-            .build();
-        for entry in walk.take(Self::MAX_SCAN) {
-            let Ok(entry) = entry else {
-                continue;
-            };
-            if entry.depth() == 0 {
-                continue;
-            }
-            let Some(kind) = entry.file_type() else {
-                continue;
-            };
-            let Ok(relative) = entry.path().strip_prefix(&self.root) else {
-                continue;
-            };
-            let relative = relative.to_string_lossy().into_owned();
-            let Some(rank) = ComposerFileHit::rank(&relative, kind.is_dir(), &query) else {
+        for (path, relative, is_dir) in
+            super::media_io::MediaFsIo::walk_composer_files(&self.root, Self::MAX_SCAN)
+        {
+            let Some(rank) = ComposerFileHit::rank(&relative, is_dir, &query) else {
                 continue;
             };
             hits.push(ComposerFileHit {
-                path: entry.path().to_path_buf(),
+                path,
                 relative,
-                is_dir: kind.is_dir(),
+                is_dir,
                 rank,
             });
         }
@@ -580,17 +560,14 @@ impl ChatAttachmentTask {
     }
 
     fn attachment(path: PathBuf) -> Option<ChatAttachment> {
-        let metadata = std::fs::metadata(&path).ok()?;
-        if !metadata.is_file() {
-            return None;
-        }
+        let size = super::media_io::MediaFsIo::file_size(&path)?;
         let name = path.file_name()?.to_string_lossy().into_owned();
         let mime_type = Self::mime(&path);
         Some(ChatAttachment {
             path: path.to_string_lossy().into_owned(),
             name,
             mime_type,
-            size: metadata.len(),
+            size,
             preview_data_url: String::new(),
             media_url: String::new(),
         })
@@ -606,7 +583,7 @@ impl ChatAttachmentTask {
         if mime == "image/svg+xml" || mime == "image/avif" {
             return String::new();
         }
-        let Ok(bytes) = std::fs::read(path) else {
+        let Some(bytes) = super::media_io::MediaFsIo::read_bytes(path) else {
             return String::new();
         };
         let Ok(image) = image::load_from_memory(&bytes) else {

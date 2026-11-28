@@ -53,6 +53,8 @@ pub(crate) mod manager_fixture;
 mod manager_operations;
 #[cfg(host)]
 mod media;
+#[cfg(host)]
+mod media_io;
 mod model;
 mod presentation;
 mod projection;
@@ -67,7 +69,7 @@ mod tool;
 #[cfg(host)]
 mod transcript;
 #[cfg(host)]
-mod video;
+mod video_io;
 
 #[vmux_page::page]
 pub struct SessionClientPlugin;

@@ -8,7 +8,6 @@ use bevy::prelude::{Changed, Commands};
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
-use ignore::WalkBuilder;
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -225,37 +224,14 @@ impl RootWalkResult {
     }
 
     fn scan(root: &Path) -> Self {
-        let mut walked = Self::default();
-        let walk = WalkBuilder::new(root)
-            .hidden(true)
-            .parents(true)
-            .git_ignore(true)
-            .git_global(true)
-            .git_exclude(true)
-            .follow_links(false)
-            .build();
-        for entry in walk {
-            if walked.paths.len() >= Self::MAX_INDEXED_PATHS {
-                walked.partial = true;
-                break;
-            }
-            let Ok(entry) = entry else {
-                continue;
-            };
-            if entry.depth() == 0 {
-                continue;
-            }
-            let Some(kind) = entry.file_type() else {
-                continue;
-            };
-            let Ok(relative) = entry.path().strip_prefix(root) else {
-                continue;
-            };
-            walked.push_capped(
-                relative.to_string_lossy().into_owned(),
-                kind.is_dir(),
-                Self::MAX_INDEXED_PATHS,
-            );
+        let (entries, partial) =
+            super::fs_io::CommandBarFsIo::walk_root(root, Self::MAX_INDEXED_PATHS);
+        let mut walked = Self {
+            paths: Vec::with_capacity(entries.len()),
+            partial,
+        };
+        for (relative, is_dir) in entries {
+            walked.push_capped(relative, is_dir, Self::MAX_INDEXED_PATHS);
         }
         walked
     }
@@ -362,71 +338,11 @@ struct PathCompletionRequest {
 
 impl PathCompletionRequest {
     fn list_directory(query: &str, request_id: u64) -> PathCompleteResponse {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-        let (parent, prefix) = if let Some(position) = query.rfind('/') {
-            (&query[..=position], &query[position + 1..])
-        } else {
-            ("", query)
-        };
-        let resolved_parent = if parent.starts_with("~/") || parent == "~/" {
-            PathBuf::from(&home).join(&parent[2..])
-        } else if parent.starts_with('/') {
-            PathBuf::from(parent)
-        } else if parent.is_empty() {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(&home))
-        } else {
-            PathBuf::from(&home).join(parent)
-        };
-        let Ok(entries) = std::fs::read_dir(&resolved_parent) else {
-            return PathCompleteResponse {
-                request_id,
-                completions: Vec::new(),
-                truncated: false,
-                total: 0,
-            };
-        };
-        let prefix_lower = prefix.to_lowercase();
-        let mut results = Vec::new();
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
-            if !prefix.is_empty() && !name.to_lowercase().starts_with(&prefix_lower) {
-                continue;
-            }
-            let display_name = if is_dir {
-                format!("{name}/")
-            } else {
-                name.clone()
-            };
-            let child = resolved_parent.join(&name);
-            let full_path = if is_dir {
-                format!("{}/", child.display())
-            } else {
-                child.display().to_string()
-            };
-            results.push(PathEntry {
-                name: display_name,
-                is_dir,
-                full_path,
-                project: String::new(),
-            });
-        }
-        results.sort_by(|a, b| {
-            let a_hidden = a.name.starts_with('.');
-            let b_hidden = b.name.starts_with('.');
-            b.is_dir
-                .cmp(&a.is_dir)
-                .then(a_hidden.cmp(&b_hidden))
-                .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-        });
-        let total = u32::try_from(results.len()).unwrap_or(u32::MAX);
-        results.truncate(CompletionIndex::MAX_RESULTS);
-        PathCompleteResponse {
+        super::fs_io::CommandBarFsIo::list_directory(
+            query,
             request_id,
-            completions: results,
-            truncated: false,
-            total,
-        }
+            CompletionIndex::MAX_RESULTS,
+        )
     }
 }
 

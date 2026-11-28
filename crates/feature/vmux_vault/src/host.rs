@@ -18,6 +18,7 @@ pub(crate) mod key;
 mod key_io;
 mod operation;
 mod reconcile;
+mod reconcile_io;
 mod runtime;
 mod sync;
 mod vault_io;

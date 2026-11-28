@@ -25,26 +25,7 @@ impl WorkDirectoryCache {
     const ENTRIES_CAP: usize = 40;
 
     fn read_entries(cwd: &str) -> Vec<CommandBarWorkDir> {
-        let Ok(read) = std::fs::read_dir(cwd) else {
-            return Vec::new();
-        };
-        let mut rows = Vec::new();
-        for entry in read.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let is_dir = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
-            let path = entry.path().to_string_lossy().to_string();
-            rows.push((name, is_dir, path));
-        }
-        rows.sort_by(|a, b| {
-            let a_hidden = a.0.starts_with('.');
-            let b_hidden = b.0.starts_with('.');
-            b.1.cmp(&a.1)
-                .then(a_hidden.cmp(&b_hidden))
-                .then(a.0.to_lowercase().cmp(&b.0.to_lowercase()))
-        });
-        rows.into_iter()
-            .map(|(_, is_dir, path)| CommandBarWorkDir { path, is_dir })
-            .collect()
+        super::fs_io::CommandBarFsIo::read_work_entries(cwd)
     }
 }
 

@@ -93,19 +93,12 @@ struct NotePatch {
 
 impl NotePatch {
     fn apply(&self, source: &Path) -> io::Result<()> {
-        let mut text = std::fs::read_to_string(source)?;
-        let mut replacements = self.replacements.clone();
-        replacements.sort_by_key(|replacement| std::cmp::Reverse(replacement.start));
-        for replacement in replacements {
-            if text.get(replacement.start..replacement.end) != Some(replacement.expected.as_str()) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Knowledge note changed before its link rewrite",
-                ));
-            }
-            text.replace_range(replacement.start..replacement.end, &replacement.text);
-        }
-        std::fs::write(source, text)
+        let replacements: Vec<(usize, usize, &str, &str)> = self
+            .replacements
+            .iter()
+            .map(|r| (r.start, r.end, r.expected.as_str(), r.text.as_str()))
+            .collect();
+        crate::rename_io::RenameIo::apply(source, &replacements)
     }
 }
 

@@ -746,7 +746,7 @@ pub struct ChatAttachmentProjection {
     pub previews: std::collections::HashMap<String, ChatAttachment>,
     pub pending: std::collections::HashSet<String>,
     pub resolved: std::collections::HashSet<String>,
-    pub(crate) videos: std::collections::HashMap<String, super::video::Source>,
+    pub(crate) videos: std::collections::HashMap<String, super::video_io::Source>,
 }
 
 #[derive(Component, Default)]

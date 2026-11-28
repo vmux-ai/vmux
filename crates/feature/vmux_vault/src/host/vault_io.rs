@@ -103,57 +103,44 @@ impl ProcessOutcome {
 #[derive(Component)]
 pub(super) struct GitProcessTask(pub(super) Task<Result<ProcessOutcome, String>>);
 
-impl GitProcessTask {
-    pub(super) fn spawn(wake: &VaultWake, directory: PathBuf, args: Vec<String>) -> Self {
-        Self(wake.spawn(move || Self::run_in(&directory, &args)))
-    }
+struct GitProcessIo;
 
-    pub(super) fn spawn_global(wake: &VaultWake, args: Vec<String>) -> Self {
-        Self(wake.spawn(move || Self::run_global(&args)))
+impl GitProcessIo {
+    fn run_gh(directory: Option<PathBuf>, args: Vec<String>) -> Result<ProcessOutcome, String> {
+        let (executable, config_dir) =
+            GitProcessTask::find_gh().ok_or_else(|| "GitHub CLI is not installed".to_string())?;
+        std::fs::create_dir_all(&config_dir)
+            .map_err(|error| format!("failed to create GitHub config directory: {error}"))?;
+        let mut command = Command::new(executable);
+        GitProcessTask::scrub_gh_env(&mut command);
+        command
+            .env("GH_CONFIG_DIR", config_dir)
+            .env("GH_NO_UPDATE_NOTIFIER", "1");
+        if let Some(directory) = directory {
+            command.current_dir(directory);
+        }
+        let output = command
+            .args(&args)
+            .output()
+            .map_err(|error| format!("failed to run gh: {error}"))?;
+        Ok(ProcessOutcome::from_output(output))
     }
-
-    pub(super) fn spawn_gh(
-        wake: &VaultWake,
-        directory: Option<PathBuf>,
-        args: Vec<String>,
-    ) -> Self {
-        Self(wake.spawn(move || {
-            let (executable, config_dir) =
-                Self::find_gh().ok_or_else(|| "GitHub CLI is not installed".to_string())?;
-            std::fs::create_dir_all(&config_dir)
-                .map_err(|error| format!("failed to create GitHub config directory: {error}"))?;
-            let mut command = Command::new(executable);
-            Self::scrub_gh_env(&mut command);
-            command
-                .env("GH_CONFIG_DIR", config_dir)
-                .env("GH_NO_UPDATE_NOTIFIER", "1");
-            if let Some(directory) = directory {
-                command.current_dir(directory);
-            }
-            let output = command
-                .args(&args)
-                .output()
-                .map_err(|error| format!("failed to run gh: {error}"))?;
-            Ok(ProcessOutcome::from_output(output))
-        }))
-    }
-
     fn run_in(directory: &Path, args: &[String]) -> Result<ProcessOutcome, String> {
         let mut command = Command::new("git");
         command
             .current_dir(directory)
             .env("GIT_TERMINAL_PROMPT", "0");
-        if let Some((executable, config_dir)) = Self::find_gh() {
+        if let Some((executable, config_dir)) = GitProcessTask::find_gh() {
             let quoted = format!("'{}'", executable.to_string_lossy().replace('\'', "'\\''"));
             let helper =
                 format!("credential.https://github.com.helper=!{quoted} auth git-credential");
             command
                 .args(["-c", "credential.https://github.com.helper=", "-c", &helper])
                 .env("GH_CONFIG_DIR", &config_dir);
-            Self::scrub_gh_tokens(&mut command);
+            GitProcessTask::scrub_gh_tokens(&mut command);
         }
         command.args(args);
-        Self::scrub_git_env(&mut command);
+        GitProcessTask::scrub_git_env(&mut command);
         let output = command
             .output()
             .map_err(|error| format!("failed to run git: {error}"))?;
@@ -163,11 +150,29 @@ impl GitProcessTask {
     fn run_global(args: &[String]) -> Result<ProcessOutcome, String> {
         let mut command = Command::new("git");
         command.env("GIT_TERMINAL_PROMPT", "0").args(args);
-        Self::scrub_git_env(&mut command);
+        GitProcessTask::scrub_git_env(&mut command);
         let output = command
             .output()
             .map_err(|error| format!("failed to run git: {error}"))?;
         Ok(ProcessOutcome::from_output(output))
+    }
+}
+
+impl GitProcessTask {
+    pub(super) fn spawn(wake: &VaultWake, directory: PathBuf, args: Vec<String>) -> Self {
+        Self(wake.spawn(move || GitProcessIo::run_in(&directory, &args)))
+    }
+
+    pub(super) fn spawn_global(wake: &VaultWake, args: Vec<String>) -> Self {
+        Self(wake.spawn(move || GitProcessIo::run_global(&args)))
+    }
+
+    pub(super) fn spawn_gh(
+        wake: &VaultWake,
+        directory: Option<PathBuf>,
+        args: Vec<String>,
+    ) -> Self {
+        Self(wake.spawn(move || GitProcessIo::run_gh(directory, args)))
     }
 
     fn find_gh() -> Option<(PathBuf, PathBuf)> {
