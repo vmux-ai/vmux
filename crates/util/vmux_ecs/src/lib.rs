@@ -1,5 +1,7 @@
 extern crate self as vmux_ecs;
 
+pub use bevy_ecs;
+
 pub use vmux_macro::ecs_channels as channels;
 pub use vmux_macro::types;
 

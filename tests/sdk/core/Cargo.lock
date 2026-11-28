@@ -3517,6 +3517,7 @@ name = "vmux_app"
 version = "0.0.35"
 dependencies = [
  "bevy_app",
+ "vmux_api",
  "vmux_ecs",
  "vmux_extension",
  "vmux_feature",

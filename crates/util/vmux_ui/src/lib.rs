@@ -1,5 +1,6 @@
 pub use language_icon::LanguageIconPath;
 
+#[cfg(feature = "product")]
 pub mod agent_accent;
 pub mod agent_icon;
 pub mod animation;
@@ -26,11 +27,14 @@ pub mod motion;
 
 pub mod i18n;
 pub mod ime;
+#[cfg(feature = "product")]
 pub mod matrix_rain;
 
 pub mod navigation;
 
+#[cfg(feature = "product")]
 pub mod prompt_ghost;
+#[cfg(feature = "product")]
 pub mod prompt_recall;
 
 pub mod theme;

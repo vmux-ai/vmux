@@ -10,8 +10,9 @@ repository.workspace = true
 [features]
 default = []
 host = ["dep:vmux_profile"]
-contracts = ["ecs", "vmux_ecs/contracts", "vmux_project?/contracts", "vmux_layout?/contracts"]
+contracts = ["ecs", "dep:vmux_api", "vmux_ecs/contracts", "vmux_project?/contracts", "vmux_layout?/contracts"]
 test-harness = ["contracts", "vmux_ecs/ui", "dep:vmux_test"]
+ui = ["contracts", "vmux_ecs/ui", "dep:vmux_ui"]
 page = ["contracts", "dep:vmux_page"]
 page-host = ["page", "vmux_ecs/ui", "flex", "vmux_page/host"]
 page-host-native = ["page-host", "vmux_page/native"]
@@ -191,6 +192,7 @@ vmux_start = { path = "../../feature/vmux_start", optional = true }
 vmux_store = { path = "../vmux_store", optional = true }
 vmux_test = { path = "../vmux_test", optional = true }
 vmux_page = { path = "../vmux_page", optional = true }
+vmux_ui = { path = "../vmux_ui", default-features = false, optional = true }
 vmux_window = { path = "../vmux_window", optional = true }
 vmux_team = { path = "../../feature/vmux_team", optional = true }
 vmux_terminal = { path = "../../feature/vmux_terminal", optional = true }
