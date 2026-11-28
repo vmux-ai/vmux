@@ -177,7 +177,7 @@ impl ServiceHandle {
             return false;
         }
         let pid_file = paths.pid();
-        let pid_str = match std::fs::read_to_string(&pid_file) {
+        let pid_str = match super::service_io::ServiceFsIo::read_to_string(&pid_file) {
             Ok(s) => s,
             Err(_) => {
                 tracing::warn!("socket exists but no PID file, cleaning up");
@@ -207,14 +207,15 @@ impl ServiceHandle {
                 return false;
             }
         };
-        let service_identity = match std::fs::read_to_string(paths.identity()) {
-            Ok(identity) => DaemonIdentity::recorded(&identity),
-            Err(_) => {
-                tracing::warn!("service identity missing, cleaning up");
-                ServiceRuntimeFiles::remove();
-                return false;
-            }
-        };
+        let service_identity =
+            match super::service_io::ServiceFsIo::read_to_string(&paths.identity()) {
+                Ok(identity) => DaemonIdentity::recorded(&identity),
+                Err(_) => {
+                    tracing::warn!("service identity missing, cleaning up");
+                    ServiceRuntimeFiles::remove();
+                    return false;
+                }
+            };
         if !service_identity.matches(&current_identity) {
             tracing::warn!(pid, "service identity mismatch, replacing running daemon");
             let outcome = RunningDaemon::new(pid).replace(|| {

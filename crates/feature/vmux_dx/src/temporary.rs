@@ -1,5 +1,4 @@
-use std::fs::{self, Permissions};
-use std::os::unix::fs::PermissionsExt;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
@@ -18,8 +17,7 @@ impl Temporary {
     pub fn create(parent: &Path, name: &str) -> Result<Self> {
         let time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let path = parent.join(format!("{name}-{}-{time}", std::process::id()));
-        fs::create_dir(&path)?;
-        fs::set_permissions(&path, Permissions::from_mode(0o700))?;
+        crate::fs_io::DxFsIo::create_private_dir(&path)?;
         Ok(Self {
             path,
             retained: Arc::new(AtomicBool::new(false)),

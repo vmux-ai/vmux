@@ -110,8 +110,8 @@ impl IdentityStore {
         let cert_path = self.0.certificate();
         let key_path = self.0.key();
         if let (Ok(certificate_pem), Ok(private_key_pem)) = (
-            std::fs::read_to_string(&cert_path),
-            std::fs::read_to_string(&key_path),
+            super::file_driver::RemoteFs::read_to_string(&cert_path),
+            super::file_driver::RemoteFs::read_to_string(&key_path),
         ) && !certificate_pem.trim().is_empty()
             && !private_key_pem.trim().is_empty()
         {
@@ -123,10 +123,7 @@ impl IdentityStore {
 
         let identity =
             SelfSignedIdentity::generate(Self::names()).map_err(std::io::Error::other)?;
-        if let Some(parent) = cert_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&cert_path, &identity.certificate_pem)?;
+        super::file_driver::RemoteFs::write(&cert_path, &identity.certificate_pem)?;
         PrivateFile::new(key_path).write(&identity.private_key_pem)?;
         self.persist_fingerprint(&identity.fingerprint)?;
         Ok(identity)
@@ -134,13 +131,12 @@ impl IdentityStore {
 
     fn persist_fingerprint(&self, fingerprint: &str) -> std::io::Result<()> {
         let path = self.0.fingerprint();
-        if std::fs::read_to_string(&path).is_ok_and(|existing| existing.trim() == fingerprint) {
+        if super::file_driver::RemoteFs::read_to_string(&path)
+            .is_ok_and(|existing| existing.trim() == fingerprint)
+        {
             return Ok(());
         }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, fingerprint)
+        super::file_driver::RemoteFs::write(&path, fingerprint)
     }
 
     fn names() -> Vec<String> {

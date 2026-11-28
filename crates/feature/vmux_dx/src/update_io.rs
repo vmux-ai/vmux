@@ -29,6 +29,216 @@ pub(crate) struct Installation {
     pub(crate) environment: Environment,
 }
 
+struct InstallationIo;
+
+impl InstallationIo {
+    fn directory(root: &Path) -> Result<()> {
+        if !root.is_absolute() {
+            return Err("CLI update storage must be an absolute path".into());
+        }
+        if fs::symlink_metadata(root).is_ok_and(|metadata| metadata.is_symlink()) {
+            return Err("CLI update storage must not be a symlink".into());
+        }
+        fs::create_dir_all(root)?;
+        fs::set_permissions(root, Permissions::from_mode(0o700))?;
+        Ok(())
+    }
+
+    fn lock(root: &Path, nonblocking: bool) -> Result<Option<Guard>> {
+        Self::directory(root)?;
+        let path = root.join("update.lock");
+        if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_symlink()) {
+            return Err("CLI update lock must not be a symlink".into());
+        }
+        let file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)?;
+        loop {
+            Signals::check()?;
+            match file.try_lock() {
+                Ok(()) => return Ok(Some(Guard(file))),
+                Err(TryLockError::WouldBlock) if nonblocking => return Ok(None),
+                Err(TryLockError::WouldBlock) => thread::sleep(Duration::from_millis(20)),
+                Err(TryLockError::Error(error)) => return Err(error.into()),
+            }
+        }
+    }
+
+    fn load(root: &Path) -> Result<Preferences> {
+        let path = root.join("update.json");
+        if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_symlink()) {
+            return Err("CLI update preferences must not be a symlink".into());
+        }
+        match File::open(&path) {
+            Ok(file) => {
+                let mut bytes = Vec::new();
+                file.take(16385).read_to_end(&mut bytes)?;
+                if bytes.len() > 16384 {
+                    return Err("CLI update preferences exceed 16 KiB".into());
+                }
+                Ok(serde_json::from_slice(&bytes)?)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(Preferences::default())
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn save(root: &Path, preferences: &Preferences) -> Result<()> {
+        Self::directory(root)?;
+        let temporary = Temporary::create(root, ".preferences")?;
+        let source = temporary.path().join("update.json");
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&source)?;
+        file.write_all(&serde_json::to_vec(preferences)?)?;
+        file.sync_all()?;
+        fs::rename(source, root.join("update.json"))?;
+        Ok(())
+    }
+
+    fn download(
+        installation: &Installation,
+        version: &str,
+        download: &Download,
+    ) -> Result<Verified> {
+        if !installation.trusted() {
+            return Err("This source-built CLI has no release verification key; use a signed standalone CLI release or rebuild with VMUX_UPDATE_PUBLIC_KEY".into());
+        }
+        let parent = installation
+            .executable
+            .parent()
+            .ok_or("Missing CLI installation directory")?;
+        let temporary = Arc::new(Temporary::create(parent, ".vmux-cli-update")?);
+        let archive = temporary.path().join("cli.tar.gz");
+        let mut command = installation.environment.command(
+            installation
+                .environment
+                .get("CURL_BIN")
+                .unwrap_or(std::ffi::OsStr::new("curl")),
+            &installation.root,
+        );
+        command
+            .args([
+                "--fail",
+                "--silent",
+                "--show-error",
+                "--location",
+                "--proto",
+                "=https",
+                "--proto-redir",
+                "=https",
+                "--connect-timeout",
+                "5",
+                "--max-time",
+                "300",
+                "--max-filesize",
+                "67108864",
+                "--output",
+            ])
+            .arg(&archive)
+            .args(["--", &download.url]);
+        unsafe {
+            command.pre_exec(|| {
+                let size = libc::rlimit {
+                    rlim_cur: 64 * 1024 * 1024,
+                    rlim_max: 64 * 1024 * 1024,
+                };
+                let core = libc::rlimit {
+                    rlim_cur: 0,
+                    rlim_max: 0,
+                };
+                if libc::setrlimit(libc::RLIMIT_FSIZE, &size) != 0
+                    || libc::setrlimit(libc::RLIMIT_CORE, &core) != 0
+                {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        Execution::new(command).run()?;
+        let mut bytes = Vec::new();
+        File::open(&archive)?
+            .take(64 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > 64 * 1024 * 1024 {
+            return Err("CLI release archive exceeds 64 MiB".into());
+        }
+        let signature = String::from_utf8(STANDARD.decode(download.signature.trim())?)?;
+        let signature = minisign_verify::Signature::decode(&signature)?;
+        let key_bytes = STANDARD.decode(installation.key.trim())?;
+        let key_text = String::from_utf8(key_bytes)?;
+        let key = minisign_verify::PublicKey::decode(&key_text)?;
+        key.verify(&bytes, &signature, false)?;
+        let path = temporary.path().join("vmux");
+        Self::extract(&bytes, &path)?;
+        fs::set_permissions(&path, Permissions::from_mode(0o755))?;
+        let mut probe = installation.environment.command(&path, temporary.path());
+        probe.arg("--version").env("VMUX_CLI_UPDATE_HANDOFF", "1");
+        let output = Execution::new(probe).output(None)?;
+        let expected = format!("vmux {}", version.trim_start_matches('v'));
+        if std::str::from_utf8(&output.stdout)?.trim() != expected {
+            return Err("CLI archive executable does not match its release version".into());
+        }
+        Ok(Verified {
+            path,
+            temporary,
+            version: version.into(),
+        })
+    }
+
+    fn extract(bytes: &[u8], destination: &Path) -> Result<()> {
+        let reader = GzDecoder::new(bytes).take(65 * 1024 * 1024);
+        let mut archive = tar::Archive::new(reader);
+        let mut found = false;
+        for entry in archive.entries()? {
+            let mut entry = entry?;
+            if found
+                || entry.path()?.as_ref() != Path::new("vmux")
+                || !entry.header().entry_type().is_file()
+            {
+                return Err("CLI archive must contain exactly one regular file named vmux".into());
+            }
+            if entry.size() == 0 || entry.size() > 64 * 1024 * 1024 {
+                return Err("CLI archive executable has an invalid size".into());
+            }
+            let mut file = OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(destination)?;
+            std::io::copy(&mut entry, &mut file)?;
+            file.sync_all()?;
+            found = true;
+        }
+        if !found {
+            return Err("CLI release archive contains no executable".into());
+        }
+        Ok(())
+    }
+
+    fn publish(installation: &Installation, verified: &Verified) -> Result<Published> {
+        Signals::check()?;
+        if fs::symlink_metadata(&installation.executable)?.is_symlink() {
+            return Err("CLI installation changed to a symlink during update".into());
+        }
+        let backup = verified.temporary.path().join("previous");
+        fs::copy(&installation.executable, &backup)?;
+        File::open(&backup)?.sync_all()?;
+        Signals::check()?;
+        fs::rename(&verified.path, &installation.executable)?;
+        Ok(Published {
+            executable: installation.executable.clone(),
+            backup,
+            temporary: verified.temporary.clone(),
+            version: verified.version.clone(),
+        })
+    }
+}
+
 impl Installation {
     pub(crate) fn current() -> Result<Self> {
         let environment = Environment::current();
@@ -90,73 +300,16 @@ impl Installation {
         !self.key.trim().is_empty()
     }
 
-    fn directory(&self) -> Result<()> {
-        if !self.root.is_absolute() {
-            return Err("CLI update storage must be an absolute path".into());
-        }
-        if fs::symlink_metadata(&self.root).is_ok_and(|metadata| metadata.is_symlink()) {
-            return Err("CLI update storage must not be a symlink".into());
-        }
-        fs::create_dir_all(&self.root)?;
-        fs::set_permissions(&self.root, Permissions::from_mode(0o700))?;
-        Ok(())
-    }
-
     pub(crate) fn lock(&self, nonblocking: bool) -> Result<Option<Guard>> {
-        self.directory()?;
-        let path = self.root.join("update.lock");
-        if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_symlink()) {
-            return Err("CLI update lock must not be a symlink".into());
-        }
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(false)
-            .open(&path)?;
-        loop {
-            Signals::check()?;
-            match file.try_lock() {
-                Ok(()) => return Ok(Some(Guard(file))),
-                Err(TryLockError::WouldBlock) if nonblocking => return Ok(None),
-                Err(TryLockError::WouldBlock) => thread::sleep(Duration::from_millis(20)),
-                Err(TryLockError::Error(error)) => return Err(error.into()),
-            }
-        }
+        InstallationIo::lock(&self.root, nonblocking)
     }
 
     pub(crate) fn load(&self) -> Result<Preferences> {
-        let path = self.root.join("update.json");
-        if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_symlink()) {
-            return Err("CLI update preferences must not be a symlink".into());
-        }
-        match File::open(&path) {
-            Ok(file) => {
-                let mut bytes = Vec::new();
-                file.take(16385).read_to_end(&mut bytes)?;
-                if bytes.len() > 16384 {
-                    return Err("CLI update preferences exceed 16 KiB".into());
-                }
-                Ok(serde_json::from_slice(&bytes)?)
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(Preferences::default())
-            }
-            Err(error) => Err(error.into()),
-        }
+        InstallationIo::load(&self.root)
     }
 
     pub(crate) fn save(&self, preferences: &Preferences) -> Result<()> {
-        self.directory()?;
-        let temporary = Temporary::create(&self.root, ".preferences")?;
-        let source = temporary.path().join("update.json");
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&source)?;
-        file.write_all(&serde_json::to_vec(preferences)?)?;
-        file.sync_all()?;
-        fs::rename(source, self.root.join("update.json"))?;
-        Ok(())
+        InstallationIo::save(&self.root, preferences)
     }
 
     pub(crate) fn check(&self, channel: Channel) -> Result<Manifest> {
@@ -196,135 +349,11 @@ impl Installation {
     }
 
     pub(crate) fn download(&self, version: &str, download: &Download) -> Result<Verified> {
-        if !self.trusted() {
-            return Err("This source-built CLI has no release verification key; use a signed standalone CLI release or rebuild with VMUX_UPDATE_PUBLIC_KEY".into());
-        }
-        let parent = self
-            .executable
-            .parent()
-            .ok_or("Missing CLI installation directory")?;
-        let temporary = Arc::new(Temporary::create(parent, ".vmux-cli-update")?);
-        let archive = temporary.path().join("cli.tar.gz");
-        let mut command = self.environment.command(
-            self.environment
-                .get("CURL_BIN")
-                .unwrap_or(std::ffi::OsStr::new("curl")),
-            &self.root,
-        );
-        command
-            .args([
-                "--fail",
-                "--silent",
-                "--show-error",
-                "--location",
-                "--proto",
-                "=https",
-                "--proto-redir",
-                "=https",
-                "--connect-timeout",
-                "5",
-                "--max-time",
-                "300",
-                "--max-filesize",
-                "67108864",
-                "--output",
-            ])
-            .arg(&archive)
-            .args(["--", &download.url]);
-        unsafe {
-            command.pre_exec(|| {
-                let size = libc::rlimit {
-                    rlim_cur: 64 * 1024 * 1024,
-                    rlim_max: 64 * 1024 * 1024,
-                };
-                let core = libc::rlimit {
-                    rlim_cur: 0,
-                    rlim_max: 0,
-                };
-                if libc::setrlimit(libc::RLIMIT_FSIZE, &size) != 0
-                    || libc::setrlimit(libc::RLIMIT_CORE, &core) != 0
-                {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-        Execution::new(command).run()?;
-        let mut bytes = Vec::new();
-        File::open(&archive)?
-            .take(64 * 1024 * 1024 + 1)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() > 64 * 1024 * 1024 {
-            return Err("CLI release archive exceeds 64 MiB".into());
-        }
-        let signature = String::from_utf8(STANDARD.decode(download.signature.trim())?)?;
-        let signature = minisign_verify::Signature::decode(&signature)?;
-        let key_bytes = STANDARD.decode(self.key.trim())?;
-        let key_text = String::from_utf8(key_bytes)?;
-        let key = minisign_verify::PublicKey::decode(&key_text)?;
-        key.verify(&bytes, &signature, false)?;
-        let path = temporary.path().join("vmux");
-        Self::extract(&bytes, &path)?;
-        fs::set_permissions(&path, Permissions::from_mode(0o755))?;
-        let mut probe = self.environment.command(&path, temporary.path());
-        probe.arg("--version").env("VMUX_CLI_UPDATE_HANDOFF", "1");
-        let output = Execution::new(probe).output(None)?;
-        let expected = format!("vmux {}", version.trim_start_matches('v'));
-        if std::str::from_utf8(&output.stdout)?.trim() != expected {
-            return Err("CLI archive executable does not match its release version".into());
-        }
-        Ok(Verified {
-            path,
-            temporary,
-            version: version.into(),
-        })
-    }
-
-    fn extract(bytes: &[u8], destination: &Path) -> Result<()> {
-        let reader = GzDecoder::new(bytes).take(65 * 1024 * 1024);
-        let mut archive = tar::Archive::new(reader);
-        let mut found = false;
-        for entry in archive.entries()? {
-            let mut entry = entry?;
-            if found
-                || entry.path()?.as_ref() != Path::new("vmux")
-                || !entry.header().entry_type().is_file()
-            {
-                return Err("CLI archive must contain exactly one regular file named vmux".into());
-            }
-            if entry.size() == 0 || entry.size() > 64 * 1024 * 1024 {
-                return Err("CLI archive executable has an invalid size".into());
-            }
-            let mut file = OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(destination)?;
-            std::io::copy(&mut entry, &mut file)?;
-            file.sync_all()?;
-            found = true;
-        }
-        if !found {
-            return Err("CLI release archive contains no executable".into());
-        }
-        Ok(())
+        InstallationIo::download(self, version, download)
     }
 
     pub(crate) fn publish(&self, verified: &Verified) -> Result<Published> {
-        Signals::check()?;
-        if fs::symlink_metadata(&self.executable)?.is_symlink() {
-            return Err("CLI installation changed to a symlink during update".into());
-        }
-        let backup = verified.temporary.path().join("previous");
-        fs::copy(&self.executable, &backup)?;
-        File::open(&backup)?.sync_all()?;
-        Signals::check()?;
-        fs::rename(&verified.path, &self.executable)?;
-        Ok(Published {
-            executable: self.executable.clone(),
-            backup,
-            temporary: verified.temporary.clone(),
-            version: verified.version.clone(),
-        })
+        InstallationIo::publish(self, verified)
     }
 
     pub(crate) fn handoff(&self, published: &Published) -> Result<u8> {
@@ -438,7 +467,7 @@ mod tests {
             encoder.write_all(&bytes).unwrap();
             let archive = encoder.finish().unwrap();
             let destination = directory.path().join(format!("vmux-{length}-{duplicate}"));
-            assert!(Installation::extract(&archive, &destination).is_err());
+            assert!(InstallationIo::extract(&archive, &destination).is_err());
         }
     }
 

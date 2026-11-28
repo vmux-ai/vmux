@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
-#[cfg(feature = "development")]
-use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -54,7 +52,7 @@ impl Environment {
 
     #[cfg(feature = "development")]
     pub fn load(&mut self, root: &Path) -> Result<()> {
-        let text = match fs::read_to_string(root.join(".env")) {
+        let text = match crate::fs_io::DxFsIo::read_to_string(&root.join(".env")) {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error.into()),

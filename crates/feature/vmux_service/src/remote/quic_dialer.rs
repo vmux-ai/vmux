@@ -252,7 +252,7 @@ impl RegisteredDevice {
     }
 
     fn remove(path: &Path) {
-        match std::fs::remove_file(path) {
+        match super::file_driver::RemoteFs::remove_file(path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => tracing::warn!(

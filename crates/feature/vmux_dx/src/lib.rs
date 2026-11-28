@@ -64,6 +64,7 @@ mod debug;
 mod debug_io;
 mod environment;
 mod execution;
+mod fs_io;
 #[cfg(feature = "development")]
 mod local;
 #[cfg(feature = "development")]
@@ -97,6 +98,8 @@ mod reset_io;
 mod signals;
 #[cfg(feature = "development")]
 mod source;
+#[cfg(feature = "development")]
+mod source_io;
 #[cfg(feature = "development")]
 mod steps;
 #[cfg(feature = "development")]

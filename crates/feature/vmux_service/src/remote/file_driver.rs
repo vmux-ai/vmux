@@ -15,3 +15,22 @@ impl PrivateFile {
         Ok(())
     }
 }
+
+pub(super) struct RemoteFs;
+
+impl RemoteFs {
+    pub(super) fn read_to_string(path: &std::path::Path) -> std::io::Result<String> {
+        std::fs::read_to_string(path)
+    }
+
+    pub(super) fn write(path: &std::path::Path, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, contents)
+    }
+
+    pub(super) fn remove_file(path: &std::path::Path) -> std::io::Result<()> {
+        std::fs::remove_file(path)
+    }
+}

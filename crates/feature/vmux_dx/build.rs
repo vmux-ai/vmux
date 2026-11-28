@@ -1,6 +1,9 @@
 #[path = "src/source.rs"]
 #[cfg(feature = "development")]
 mod source;
+#[path = "src/source_io.rs"]
+#[cfg(feature = "development")]
+mod source_io;
 
 fn main() {
     println!(

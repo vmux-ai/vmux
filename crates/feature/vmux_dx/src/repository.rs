@@ -1,5 +1,4 @@
 use std::ffi::{OsStr, OsString};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use bevy_ecs::prelude::*;
@@ -66,7 +65,7 @@ impl Checkout {
         };
         let path = std::path::absolute(path)?;
         let parent = path.parent().ok_or("Missing target parent")?;
-        fs::create_dir_all(parent)?;
+        crate::fs_io::DxFsIo::create_dir_all(parent)?;
         let path = parent
             .canonicalize()?
             .join(path.file_name().ok_or("Missing target name")?);
@@ -85,13 +84,10 @@ impl Checkout {
             return self.root.clone();
         }
         let dot_git = self.root.join(".git");
-        let Ok(metadata) = fs::symlink_metadata(&dot_git) else {
-            return self.root.clone();
-        };
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
+        if !crate::fs_io::DxFsIo::is_regular_non_symlink_file(&dot_git) {
             return self.root.clone();
         }
-        let Ok(text) = fs::read_to_string(&dot_git) else {
+        let Ok(text) = crate::fs_io::DxFsIo::read_to_string(&dot_git) else {
             return self.root.clone();
         };
         let Some(gitdir) = text.trim().strip_prefix("gitdir:").map(str::trim) else {
@@ -106,13 +102,10 @@ impl Checkout {
             return self.root.clone();
         };
         let commondir_file = gitdir.join("commondir");
-        let Ok(commondir_meta) = fs::symlink_metadata(&commondir_file) else {
-            return self.root.clone();
-        };
-        if !commondir_meta.is_file() || commondir_meta.file_type().is_symlink() {
+        if !crate::fs_io::DxFsIo::is_regular_non_symlink_file(&commondir_file) {
             return self.root.clone();
         }
-        let Ok(commondir) = fs::read_to_string(&commondir_file) else {
+        let Ok(commondir) = crate::fs_io::DxFsIo::read_to_string(&commondir_file) else {
             return self.root.clone();
         };
         let commondir = commondir.trim();
@@ -139,14 +132,10 @@ impl Checkout {
     fn primary_root(common: &Path) -> Option<PathBuf> {
         if common.file_name() == Some(OsStr::new(".git")) {
             let parent = common.parent()?;
-            let metadata = fs::symlink_metadata(parent).ok()?;
-            if metadata.is_dir() && !metadata.file_type().is_symlink() {
-                return parent.canonicalize().ok();
-            }
-            return None;
+            return crate::fs_io::DxFsIo::canonical_non_symlink_dir(parent);
         }
         for name in ["config.worktree", "config"] {
-            let Ok(text) = fs::read_to_string(common.join(name)) else {
+            let Ok(text) = crate::fs_io::DxFsIo::read_to_string(&common.join(name)) else {
                 continue;
             };
             let mut in_core = false;
@@ -175,12 +164,7 @@ impl Checkout {
                 } else {
                     common.join(value)
                 };
-                let Ok(metadata) = fs::symlink_metadata(&candidate) else {
-                    continue;
-                };
-                if metadata.is_dir()
-                    && !metadata.file_type().is_symlink()
-                    && let Ok(canonical) = candidate.canonicalize()
+                if let Some(canonical) = crate::fs_io::DxFsIo::canonical_non_symlink_dir(&candidate)
                 {
                     return Some(canonical);
                 }
@@ -192,6 +176,8 @@ impl Checkout {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use crate::debug_io::{Guard, Task};
     use crate::repository_io::Read;
     use std::process::Command;

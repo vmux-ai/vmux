@@ -76,9 +76,9 @@ pub(crate) struct ServiceRuntimeFiles;
 impl ServiceRuntimeFiles {
     pub(crate) fn remove() {
         let paths = crate::ServicePaths::current();
-        let _ = std::fs::remove_file(paths.socket());
-        let _ = std::fs::remove_file(paths.pid());
-        let _ = std::fs::remove_file(paths.identity());
+        let _ = super::service_io::ServiceFsIo::remove_file(&paths.socket());
+        let _ = super::service_io::ServiceFsIo::remove_file(&paths.pid());
+        let _ = super::service_io::ServiceFsIo::remove_file(&paths.identity());
     }
 }
 

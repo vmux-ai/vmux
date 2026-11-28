@@ -16,9 +16,7 @@ impl LegacyRegistrations {
         if !dir.exists() {
             return Ok(Self(paths));
         }
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
+        for path in super::service_io::ServiceFsIo::read_dir_paths(dir)? {
             let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
@@ -58,7 +56,7 @@ impl LegacyRegistrations {
     pub fn remove_files(self) -> std::io::Result<usize> {
         let count = self.0.len();
         for path in self.0 {
-            match std::fs::remove_file(path) {
+            match super::service_io::ServiceFsIo::remove_file(&path) {
                 Ok(_) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error),
@@ -70,8 +68,10 @@ impl LegacyRegistrations {
     #[cfg(target_os = "macos")]
     fn bootout(label: &str) {
         let uid = unsafe { libc::getuid() };
-        let _ = std::process::Command::new("launchctl")
-            .args(["bootout", &format!("gui/{uid}/{label}")])
-            .status();
+        let target = format!("gui/{uid}/{label}");
+        let _ = super::service_io::ServiceFsIo::run_launchctl(&[
+            std::ffi::OsStr::new("bootout"),
+            std::ffi::OsStr::new(&target),
+        ]);
     }
 }

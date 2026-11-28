@@ -1,5 +1,4 @@
 use std::ffi::OsString;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -72,16 +71,16 @@ impl Consumer {
             Directory::copy(&source.join("src"), &temporary.path().join("src"))?;
         }
         Directory::copy(&source.join("tests"), &temporary.path().join("tests"))?;
-        fs::copy(
-            source.join("Cargo.lock"),
-            temporary.path().join("Cargo.lock"),
+        crate::fs_io::DxFsIo::copy(
+            &source.join("Cargo.lock"),
+            &temporary.path().join("Cargo.lock"),
         )?;
         let manifest = GitManifest::pin(
-            &fs::read_to_string(source.join("Cargo.toml"))?,
+            &crate::fs_io::DxFsIo::read_to_string(&source.join("Cargo.toml"))?,
             &repository,
             &revision,
         )?;
-        fs::write(temporary.path().join("Cargo.toml"), manifest)?;
+        crate::fs_io::DxFsIo::write(&temporary.path().join("Cargo.toml"), manifest)?;
         let mut command = self.cargo(&["metadata", "--format-version", "1"]);
         command
             .arg("--manifest-path")
@@ -134,7 +133,10 @@ impl Consumer {
         let output = Execution::new(command).output(None)?;
         Graph::host(&String::from_utf8(output.stdout)?)?;
         if let Some(revision) = revision {
-            GitLock::check(&fs::read_to_string(directory.join("Cargo.lock"))?, revision)?;
+            GitLock::check(
+                &crate::fs_io::DxFsIo::read_to_string(&directory.join("Cargo.lock"))?,
+                revision,
+            )?;
             println!("Host consumer uses one immutable Git SDK revision");
         }
         println!("Host consumer keeps product namespaces isolated without renderer dependencies");
@@ -187,7 +189,10 @@ impl Consumer {
         let output = Execution::new(command).output(None)?;
         Graph::check(&String::from_utf8(output.stdout)?)?;
         if let Some(revision) = revision {
-            GitLock::check(&fs::read_to_string(directory.join("Cargo.lock"))?, revision)?;
+            GitLock::check(
+                &crate::fs_io::DxFsIo::read_to_string(&directory.join("Cargo.lock"))?,
+                revision,
+            )?;
             println!("All SDK packages use the same immutable Git revision");
         }
         println!("Framework consumer uses the public core without Profile or UI dependencies");
@@ -217,17 +222,7 @@ struct Directory;
 
 impl Directory {
     fn copy(source: &Path, destination: &Path) -> Result<()> {
-        fs::create_dir(destination)?;
-        for entry in fs::read_dir(source)? {
-            let entry = entry?;
-            let target = destination.join(entry.file_name());
-            if entry.file_type()?.is_dir() {
-                Self::copy(&entry.path(), &target)?;
-            } else {
-                fs::copy(entry.path(), target)?;
-            }
-        }
-        Ok(())
+        crate::fs_io::DxFsIo::copy_dir_recursive(source, destination)
     }
 }
 
