@@ -28,17 +28,22 @@ fn catalog_matches_cargo_manifest_and_readme() {
         }
     }
 
-    let listed = vmux_examples::EXAMPLES
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(declared, listed);
-
-    for name in &listed {
+    let mut listed = BTreeSet::new();
+    for name in vmux_examples::EXAMPLES {
+        listed.insert((*name).to_string());
         let command = format!("cargo run -p vmux_examples --example {name}");
         assert!(
             readme.contains(&command),
             "examples/README.md is missing `{command}`"
         );
     }
+    for name in vmux_examples::WINDOW_EXAMPLES {
+        listed.insert((*name).to_string());
+        let command = format!("cargo run -p vmux_examples --features window --example {name}");
+        assert!(
+            readme.contains(&command),
+            "examples/README.md is missing `{command}`"
+        );
+    }
+    assert_eq!(declared, listed);
 }

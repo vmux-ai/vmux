@@ -56,6 +56,17 @@ cargo run --example <name>
 | External Feature | [`manifest/external_feature.rs`](manifest/external_feature.rs) | Registering RON feature manifests and validating dependencies/permissions via `FeaturePlugin` and `CompositionPlugin`. | `cargo run -p vmux_examples --example external_feature` |
 | Web Host Package | [`manifest/web_host.rs`](manifest/web_host.rs) | Validating a pinned web application envelope and observing `HostedApplicationReady` via `WebHostPlugin`. | `cargo run -p vmux_examples --example web_host` |
 
+## Desktop Windows (CEF-free `vmux_window` + `vmux_page`)
+
+Run any windowed example on macOS with `--features window` (pass `VMUX_EXAMPLE_HEADLESS=1` for a headless smoke run without opening an OS window):
+
+| Example | File | What it demonstrates | Command |
+|---|---|---|---|
+| Counter Window | [`window/counter.rs`](window/counter.rs) | Minimal desktop window with `WindowHostPlugin`, `#[ui_state]`, `#[ui_event]`, and Dioxus `Page`. | `cargo run -p vmux_examples --features window --example window_counter` |
+| Notes Window | [`window/notes.rs`](window/notes.rs) | Persistent multi-note desktop app combining `WindowHostPlugin`, `IdentityIndexPlugin`, and `AutoSavePlugin`. | `cargo run -p vmux_examples --features window --example window_notes` |
+| Split Workspace | [`window/split_workspace.rs`](window/split_workspace.rs) | Multi-pane workspace combining `WindowHostPlugin`, `vmux_layout`, `vmux_flex`, and declarative `#[app_menu]`. | `cargo run -p vmux_examples --features window --example window_split_workspace` |
+| Web Host Window | [`window/web_host.rs`](window/web_host.rs) | `WindowHostPlugin` + `WebHostPlugin` + linked Rust native plugin (`PingRequest`). | `cargo run -p vmux_examples --features window --example window_web_host` |
+
 ## Containers
 
 | Example | Directory | What it demonstrates |

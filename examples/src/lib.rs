@@ -17,3 +17,10 @@ pub const EXAMPLES: &[&str] = &[
     "external_feature",
     "web_host",
 ];
+
+pub const WINDOW_EXAMPLES: &[&str] = &[
+    "window_counter",
+    "window_notes",
+    "window_split_workspace",
+    "window_web_host",
+];

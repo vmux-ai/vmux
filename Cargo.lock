@@ -10756,8 +10756,12 @@ dependencies = [
  "bevy_math",
  "bevy_reflect",
  "bevy_tasks",
+ "dioxus",
  "moonshine-save",
+ "rkyv",
+ "serde",
  "tempfile",
+ "vmux_api",
  "vmux_app",
  "vmux_ecs",
 ]
