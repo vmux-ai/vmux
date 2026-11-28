@@ -74,7 +74,7 @@ impl McpDoctor {
             ".mcp.json",
         ] {
             let path = home.join(relative);
-            let Ok(source) = std::fs::read_to_string(&path) else {
+            let Ok(source) = crate::io::fs::LocalFs::read_to_string(&path) else {
                 continue;
             };
             let Ok(document) = McpConfigDocument::parse(&source) else {

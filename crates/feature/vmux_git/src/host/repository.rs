@@ -1,9 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::os::unix::fs::OpenOptionsExt;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -1343,28 +1341,7 @@ impl GitRepository {
     }
 
     fn separate_diff_spool(output: &mut std::fs::File) -> Result<(), GitError> {
-        let len = output
-            .metadata()
-            .map_err(|error| GitError(format!("failed to inspect diff spool: {error}")))?
-            .len();
-        let mut last = [b'\n'];
-        if len > 0 {
-            output
-                .seek(SeekFrom::End(-1))
-                .and_then(|_| output.read_exact(&mut last))
-                .map_err(|error| {
-                    GitError(format!("failed to inspect diff spool ending: {error}"))
-                })?;
-        }
-        output
-            .seek(SeekFrom::End(0))
-            .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
-        if last[0] != b'\n' {
-            output
-                .write_all(b"\n")
-                .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
-        }
-        Ok(())
+        super::git_io::GitFsIo::separate_diff_spool(output)
     }
 
     fn append_untracked_diff(
@@ -1447,39 +1424,13 @@ impl GitRepository {
         if !parent.starts_with(&root) {
             return Err(GitError("branch diff path escapes repository".to_string()));
         }
-        let metadata = std::fs::symlink_metadata(&absolute)
-            .map_err(|error| GitError(format!("failed to inspect diff file: {error}")))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-            return Err(GitError("branch diff only reads regular files".to_string()));
+        match super::git_io::GitFsIo::read_regular_file(&absolute, GitCommand::MAX_DIFF_FILE_BYTES)?
+        {
+            Ok(bytes) => Ok(DiffFileContent::from_text(
+                String::from_utf8_lossy(&bytes).into_owned(),
+            )),
+            Err(size) => Ok(DiffFileContent::too_large(size)),
         }
-        if metadata.len() > GitCommand::MAX_DIFF_FILE_BYTES {
-            return Ok(DiffFileContent::too_large(metadata.len()));
-        }
-        let mut file = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(&absolute)
-            .map_err(|error| GitError(format!("failed to open diff file: {error}")))?;
-        let opened = file
-            .metadata()
-            .map_err(|error| GitError(format!("failed to inspect opened diff file: {error}")))?;
-        if !opened.file_type().is_file() {
-            return Err(GitError("branch diff only reads regular files".to_string()));
-        }
-        if opened.len() > GitCommand::MAX_DIFF_FILE_BYTES {
-            return Ok(DiffFileContent::too_large(opened.len()));
-        }
-        let mut bytes = Vec::with_capacity(opened.len() as usize);
-        Read::by_ref(&mut file)
-            .take(GitCommand::MAX_DIFF_FILE_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|error| GitError(format!("failed to read diff file: {error}")))?;
-        if bytes.len() as u64 > GitCommand::MAX_DIFF_FILE_BYTES {
-            return Ok(DiffFileContent::too_large(bytes.len() as u64));
-        }
-        Ok(DiffFileContent::from_text(
-            String::from_utf8_lossy(&bytes).into_owned(),
-        ))
     }
 
     fn safe_relative_path(path: &Path) -> bool {
@@ -2098,24 +2049,7 @@ impl GitCommand {
         if super::runtime::GitRuntime::canceled() {
             return Err(GitError("git command canceled".to_string()));
         }
-        file.seek(SeekFrom::End(0))
-            .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
-        let stdout = file
-            .try_clone()
-            .map_err(|error| GitError(format!("failed to open diff spool: {error}")))?;
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::from(stdout))
-            .stderr(Stdio::piped());
-        #[cfg(unix)]
-        {
-            command.process_group(0);
-        }
-        let mut child = GitChild::new(
-            command
-                .spawn()
-                .map_err(|error| GitError(format!("failed to run git: {error}")))?,
-        );
+        let mut child = GitChild::new(super::git_io::GitFsIo::clone_and_spawn(command, file)?);
         let stderr = child
             .child
             .stderr

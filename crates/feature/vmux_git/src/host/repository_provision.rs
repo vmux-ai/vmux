@@ -102,11 +102,7 @@ impl RepositoryStaging {
         let parent = destination
             .parent()
             .ok_or_else(|| "repository destination has no parent".to_string())?;
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        let directory = tempfile::Builder::new()
-            .prefix(".vmux-project-")
-            .tempdir_in(parent)
-            .map_err(|error| error.to_string())?;
+        let directory = super::git_io::GitFsIo::create_staging_dir(parent)?;
         Ok(Self {
             destination: destination.to_path_buf(),
             directory,

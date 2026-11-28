@@ -94,7 +94,8 @@ impl ToolsManifest {
         if !path.is_file() {
             return Ok(Self::default());
         }
-        let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+        let source =
+            crate::io::fs::LocalFs::read_to_string(path).map_err(|error| error.to_string())?;
         let mut manifest: Self = toml::from_str(&source).map_err(|error| error.to_string())?;
         if manifest.version != Self::VERSION {
             return Err(format!(

@@ -16,7 +16,7 @@ pub use links::{CleanupPath, LinkPath, PathChanged, PathReceipt, UnlinkPath};
 pub use temporary::{CloseTemporary, CreateTemporary, TemporaryDirectory, TemporaryTransfer};
 
 mod files;
-mod fs;
+pub(crate) mod fs;
 mod http;
 mod links;
 mod temporary;

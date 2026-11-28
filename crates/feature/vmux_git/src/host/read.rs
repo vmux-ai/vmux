@@ -1,4 +1,3 @@
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -64,22 +63,11 @@ impl SourceIdentity {
     }
 
     fn metadata(path: &Path) -> Option<(u64, u64)> {
-        let metadata = std::fs::metadata(path).ok()?;
-        Some((metadata.dev(), metadata.ino()))
+        super::git_io::GitFsIo::source_metadata(path)
     }
 
     fn marker(path: &Path) -> Option<(u64, u64, u64, i64, i64)> {
-        let metadata = std::fs::metadata(path).ok()?;
-        if metadata.is_file() {
-            return Some((
-                metadata.dev(),
-                metadata.ino(),
-                metadata.len(),
-                metadata.mtime(),
-                metadata.mtime_nsec(),
-            ));
-        }
-        Some((metadata.dev(), metadata.ino(), 0, 0, 0))
+        super::git_io::GitFsIo::source_marker(path)
     }
 
     pub fn matches(&self, path: &Path) -> bool {
@@ -579,6 +567,7 @@ fn evict(
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::MetadataExt;
     use std::sync::mpsc;
     use std::time::Duration;
 

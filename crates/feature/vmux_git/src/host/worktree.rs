@@ -1,6 +1,6 @@
 use std::{
     ffi::OsString,
-    fs::{File, OpenOptions},
+    fs::File,
     os::fd::AsRawFd,
     os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
@@ -373,20 +373,7 @@ impl RepositoryWorktreeLock {
         let path = CheckoutInfo::try_from(root)?
             .common_dir
             .join("vmux-worktrees.lock");
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&path)
-            .map_err(|error| GitError(format!("failed to open worktree lock: {error}")))?;
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-            return Err(GitError(format!(
-                "failed to acquire worktree lock: {}",
-                std::io::Error::last_os_error()
-            )));
-        }
-        Ok(Self(file))
+        Ok(Self(super::git_io::GitFsIo::open_worktree_lock(&path)?))
     }
 }
 
@@ -951,44 +938,15 @@ impl RepoLabel {
     }
 
     fn git_dir_of(dir: &Path) -> Option<PathBuf> {
-        for base in dir.ancestors() {
-            let dot = base.join(".git");
-            let Ok(meta) = std::fs::symlink_metadata(&dot) else {
-                continue;
-            };
-            if meta.is_dir() {
-                return Some(dot);
-            }
-            if !meta.is_file() {
-                continue;
-            }
-            let text = std::fs::read_to_string(&dot).ok()?;
-            let named = text.lines().find_map(|line| line.strip_prefix("gitdir:"))?;
-            let named = PathBuf::from(named.trim());
-            if named.is_absolute() {
-                return Some(named);
-            }
-            return Some(base.join(named));
-        }
-        None
+        super::git_io::GitFsIo::git_dir_of(dir)
     }
 
     fn common_dir_of(git_dir: &Path) -> PathBuf {
-        let Ok(text) = std::fs::read_to_string(git_dir.join("commondir")) else {
-            return git_dir.to_path_buf();
-        };
-        let named = PathBuf::from(text.trim());
-        if named.is_absolute() {
-            return named;
-        }
-        let joined = git_dir.join(named);
-        joined.canonicalize().unwrap_or(joined)
+        super::git_io::GitFsIo::common_dir_of(git_dir)
     }
 
     fn branch_in(git_dir: &Path) -> Option<String> {
-        let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
-        let named = head.trim().strip_prefix("ref: refs/heads/")?;
-        (!named.is_empty()).then(|| named.to_string())
+        super::git_io::GitFsIo::branch_in(git_dir)
     }
 }
 
@@ -1208,6 +1166,7 @@ impl ValidatedLinkedWorkspace {
 mod tests {
     use super::*;
     use crate::host::repository::test_repo;
+    use std::fs::OpenOptions;
 
     fn commit_initial(repo: &Path) {
         test_repo::write(repo, "seed.txt", "seed\n");

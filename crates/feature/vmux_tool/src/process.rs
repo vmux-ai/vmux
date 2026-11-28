@@ -2,7 +2,6 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
@@ -47,18 +46,8 @@ impl Execute {
             .unwrap_or_else(|_| std::env::var_os("PATH").unwrap_or_default())
     }
 
-    #[cfg(unix)]
     fn is_executable(path: &Path) -> bool {
-        path.is_file()
-            && path
-                .metadata()
-                .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
-                .unwrap_or(false)
-    }
-
-    #[cfg(not(unix))]
-    fn is_executable(path: &Path) -> bool {
-        path.is_file()
+        crate::io::fs::LocalFs::is_executable(path)
     }
 }
 

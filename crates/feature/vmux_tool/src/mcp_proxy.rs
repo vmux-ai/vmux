@@ -599,36 +599,40 @@ impl McpProxy {
     ) -> Result<(McpResolvedServer, Option<PathBuf>), String> {
         let workspace = cwd.and_then(crate::McpWorkspaceRoot::resolve);
         let mut input = crate::McpLayerInput::default();
-        if let Ok(text) = std::fs::read_to_string(config_dir.join("tools").join("tools.toml"))
+        if let Ok(text) =
+            crate::io::fs::LocalFs::read_to_string(&config_dir.join("tools").join("tools.toml"))
             && let Ok(manifest) = toml::from_str::<crate::ToolsManifest>(&text)
         {
             input.legacy = crate::McpConfigFile::from_legacy(&manifest.mcp);
         }
-        if let Ok(text) = std::fs::read_to_string(config_dir.join("mcp.ron")) {
+        if let Ok(text) = crate::io::fs::LocalFs::read_to_string(&config_dir.join("mcp.ron")) {
             input.global = crate::McpConfigFile::parse(&text)?;
         }
         if profile_dir != config_dir
-            && let Ok(text) = std::fs::read_to_string(profile_dir.join("mcp.ron"))
+            && let Ok(text) = crate::io::fs::LocalFs::read_to_string(&profile_dir.join("mcp.ron"))
         {
             input.profile = crate::McpConfigFile::parse(&text)?;
         }
-        if let Ok(text) = std::fs::read_to_string(profile_dir.join("mcp-trust.ron")) {
+        if let Ok(text) = crate::io::fs::LocalFs::read_to_string(&profile_dir.join("mcp-trust.ron"))
+        {
             input.trust = crate::McpTrustStore::parse(&text)?;
         }
         let checkout_root = if let Some(workspace) = &workspace {
             input.repo_root = Some(workspace.primary_root.to_string_lossy().into_owned());
-            if let Ok(text) = std::fs::read_to_string(workspace.checkout_root.join(".vmux/mcp.ron"))
-            {
+            if let Ok(text) = crate::io::fs::LocalFs::read_to_string(
+                &workspace.checkout_root.join(".vmux/mcp.ron"),
+            ) {
                 input.project = crate::McpConfigFile::parse(&text)?;
             }
-            if let Ok(text) =
-                std::fs::read_to_string(workspace.primary_root.join(".vmux/mcp.local.ron"))
-            {
+            if let Ok(text) = crate::io::fs::LocalFs::read_to_string(
+                &workspace.primary_root.join(".vmux/mcp.local.ron"),
+            ) {
                 input.primary_local = crate::McpConfigFile::parse(&text)?;
             }
             if workspace.checkout_root != workspace.primary_root
-                && let Ok(text) =
-                    std::fs::read_to_string(workspace.checkout_root.join(".vmux/mcp.local.ron"))
+                && let Ok(text) = crate::io::fs::LocalFs::read_to_string(
+                    &workspace.checkout_root.join(".vmux/mcp.local.ron"),
+                )
             {
                 input.worktree_local = crate::McpConfigFile::parse(&text)?;
             }

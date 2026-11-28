@@ -15,7 +15,7 @@ impl Paths {
     }
 
     pub(super) fn read_manifest(&self) -> Result<ManifestBytes, String> {
-        match std::fs::read_to_string(self.root.join("tools.toml")) {
+        match crate::io::fs::LocalFs::read_to_string(&self.root.join("tools.toml")) {
             Ok(source) => Ok(ManifestBytes(Some(source))),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ManifestBytes(None)),
             Err(error) => Err(error.to_string()),
@@ -27,7 +27,8 @@ impl Paths {
         Ok(Brewfile {
             exists: path.exists(),
             is_file: path.is_file(),
-            source: std::fs::read_to_string(path).map_err(|error| error.to_string()),
+            source: crate::io::fs::LocalFs::read_to_string(&path)
+                .map_err(|error| error.to_string()),
         })
     }
 
@@ -69,7 +70,7 @@ impl MovePaths {
     }
 
     pub(super) fn rename(&self) -> Result<Moved, String> {
-        std::fs::rename(&self.source, &self.destination)
+        crate::io::fs::LocalFs::rename(&self.source, &self.destination)
             .map(|_| Moved)
             .map_err(|error| error.to_string())
     }

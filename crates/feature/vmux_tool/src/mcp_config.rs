@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fmt::Write;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use bevy_ecs::prelude::Component;
@@ -528,7 +527,7 @@ impl McpWorkspaceRoot {
         let mut current = if cwd.is_file() { cwd.parent()? } else { cwd };
         loop {
             let dot_git = current.join(".git");
-            if fs::symlink_metadata(&dot_git).is_ok() {
+            if crate::io::fs::LocalFs::symlink_metadata(&dot_git).is_ok() {
                 let checkout_root = current
                     .canonicalize()
                     .unwrap_or_else(|_| current.to_path_buf());
@@ -555,13 +554,10 @@ impl McpWorkspaceRoot {
 
     fn primary_for_checkout(checkout: &Path) -> PathBuf {
         let dot_git = checkout.join(".git");
-        let Ok(metadata) = fs::symlink_metadata(&dot_git) else {
-            return checkout.to_path_buf();
-        };
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
+        if !crate::io::fs::LocalFs::is_regular_non_symlink_file(&dot_git) {
             return checkout.to_path_buf();
         }
-        let Ok(text) = fs::read_to_string(&dot_git) else {
+        let Ok(text) = crate::io::fs::LocalFs::read_to_string(&dot_git) else {
             return checkout.to_path_buf();
         };
         let Some(gitdir) = text.trim().strip_prefix("gitdir:").map(str::trim) else {
@@ -572,13 +568,10 @@ impl McpWorkspaceRoot {
             return checkout.to_path_buf();
         };
         let commondir_file = gitdir.join("commondir");
-        let Ok(meta) = fs::symlink_metadata(&commondir_file) else {
-            return checkout.to_path_buf();
-        };
-        if !meta.is_file() || meta.file_type().is_symlink() {
+        if !crate::io::fs::LocalFs::is_regular_non_symlink_file(&commondir_file) {
             return checkout.to_path_buf();
         }
-        let Ok(commondir) = fs::read_to_string(&commondir_file) else {
+        let Ok(commondir) = crate::io::fs::LocalFs::read_to_string(&commondir_file) else {
             return checkout.to_path_buf();
         };
         let common = Self::resolve_relative(&gitdir, commondir.trim());
@@ -600,14 +593,10 @@ impl McpWorkspaceRoot {
     fn primary_from_common(common: &Path) -> Option<PathBuf> {
         if common.file_name() == Some(OsStr::new(".git")) {
             let parent = common.parent()?;
-            let metadata = fs::symlink_metadata(parent).ok()?;
-            if metadata.is_dir() && !metadata.file_type().is_symlink() {
-                return parent.canonicalize().ok();
-            }
-            return None;
+            return crate::io::fs::LocalFs::canonical_non_symlink_dir(parent);
         }
         for name in ["config.worktree", "config"] {
-            let Ok(text) = fs::read_to_string(common.join(name)) else {
+            let Ok(text) = crate::io::fs::LocalFs::read_to_string(&common.join(name)) else {
                 continue;
             };
             let mut in_core = false;
@@ -632,12 +621,8 @@ impl McpWorkspaceRoot {
                     continue;
                 }
                 let candidate = Self::resolve_relative(common, value);
-                let Ok(metadata) = fs::symlink_metadata(&candidate) else {
-                    continue;
-                };
-                if metadata.is_dir()
-                    && !metadata.file_type().is_symlink()
-                    && let Ok(canonical) = candidate.canonicalize()
+                if let Some(canonical) =
+                    crate::io::fs::LocalFs::canonical_non_symlink_dir(&candidate)
                 {
                     return Some(canonical);
                 }
@@ -826,6 +811,7 @@ impl McpLayerInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     impl McpServerSpec {
         fn test_http(url: &str) -> Self {
