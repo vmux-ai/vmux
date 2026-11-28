@@ -31,6 +31,8 @@ pub use vmux_flex as flex;
 pub use vmux_http as http;
 #[cfg(feature = "jobs")]
 pub use vmux_job as job;
+#[cfg(any(feature = "knowledge", feature = "knowledge-core"))]
+pub use vmux_knowledge as knowledge;
 #[cfg(feature = "layout")]
 pub use vmux_layout as layout;
 #[cfg(feature = "lsp")]

@@ -142,7 +142,8 @@ acp = [
     "dep:vmux_acp",
     "vmux_acp/app",
 ]
-knowledge = ["runtime", "dep:vmux_knowledge"]
+knowledge-core = ["ecs", "dep:vmux_knowledge"]
+knowledge = ["knowledge-core", "runtime", "vmux_knowledge/host"]
 history = ["runtime", "dep:vmux_history"]
 simulator = ["layout-runtime", "dep:vmux_simulator"]
 gallery = ["layout-runtime", "dep:vmux_gallery"]
@@ -176,7 +177,7 @@ vmux_history = { path = "../../feature/vmux_history", optional = true }
 vmux_http = { path = "../vmux_http", optional = true }
 vmux_input = { path = "../../feature/vmux_input", optional = true }
 vmux_job = { path = "../vmux_job", optional = true }
-vmux_knowledge = { path = "../../feature/vmux_knowledge", optional = true }
+vmux_knowledge = { path = "../../feature/vmux_knowledge", default-features = false, optional = true }
 vmux_layout = { path = "../../feature/vmux_layout", optional = true }
 vmux_lsp = { path = "../vmux_lsp", optional = true }
 vmux_mcp = { path = "../vmux_mcp", optional = true }

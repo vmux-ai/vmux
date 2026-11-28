@@ -10981,6 +10981,7 @@ name = "vmux_knowledge"
 version = "0.0.35"
 dependencies = [
  "bevy",
+ "bevy_app",
  "bevy_ecs",
  "bevy_reflect",
  "moonshine-save",

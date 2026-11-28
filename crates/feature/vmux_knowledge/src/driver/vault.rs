@@ -1,4 +1,4 @@
-use bevy::prelude::Component;
+use bevy_ecs::prelude::Component;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
 use std::path::{Component as PathComponent, Path, PathBuf};
@@ -127,6 +127,7 @@ impl KnowledgeVault {
         ["decisions", "runbooks", "research", "templates"];
     const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
 
+    #[cfg(feature = "host")]
     pub fn user() -> Self {
         Self::at(
             vmux_ecs::profile::ProfilePaths::current()
@@ -147,10 +148,12 @@ impl KnowledgeVault {
         self.root
     }
 
+    #[cfg_attr(not(feature = "host"), allow(dead_code))]
     pub(crate) fn ensure(&self) -> io::Result<()> {
         VaultIo::ensure(&self.root)
     }
 
+    #[cfg(feature = "host")]
     pub(crate) fn ensure_repository(&self) -> Result<(), String> {
         if !self.root.join(".git").exists() {
             vmux_git::worktree::CheckoutInfo::initialize(&self.root).map_err(|error| error.0)?;

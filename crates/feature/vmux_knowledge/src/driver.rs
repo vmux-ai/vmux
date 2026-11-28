@@ -4,7 +4,7 @@ pub use snapshot::{RawNote, RawSnapshot};
 #[cfg(host)]
 pub use vault::{Frontmatter, KnowledgeVault};
 
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 mod agent_config;
 mod markdown;
 #[cfg(host)]
