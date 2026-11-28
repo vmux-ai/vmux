@@ -34,3 +34,5 @@ mod tool;
 mod graph;
 #[cfg(host)]
 mod rename;
+#[cfg(host)]
+mod rename_io;

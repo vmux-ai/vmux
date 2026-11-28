@@ -24,18 +24,21 @@ struct AgentConfigPaths {
 
 impl KnowledgeVault {
     pub(crate) fn sync_agent_configs(&self) -> io::Result<()> {
-        let _access = AgentConfigPaths::lock()?;
-        self.memories().import_external()?;
-        let skills = self.skills().into_path();
-        let memories = self.memories().into_path();
-        std::fs::create_dir_all(&skills)?;
-        std::fs::create_dir_all(&memories)?;
-        let canonical = self.root().join("AGENTS.md");
-        AgentConfigPaths::from_env().sync(&skills, &memories, &canonical)
+        AgentConfigPaths::sync_vault(self)
     }
 }
 
 impl AgentConfigPaths {
+    fn sync_vault(vault: &KnowledgeVault) -> io::Result<()> {
+        let _access = Self::lock()?;
+        vault.memories().import_external()?;
+        let skills = vault.skills().into_path();
+        let memories = vault.memories().into_path();
+        std::fs::create_dir_all(&skills)?;
+        std::fs::create_dir_all(&memories)?;
+        let canonical = vault.root().join("AGENTS.md");
+        Self::from_env().sync(&skills, &memories, &canonical)
+    }
     const KNOWLEDGE_START: &'static str = "<!-- vmux-knowledge:start -->";
     const KNOWLEDGE_END: &'static str = "<!-- vmux-knowledge:end -->";
     const CODEX_SKILLS_START: &'static str = "# vmux-knowledge-skills:start";

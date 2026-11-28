@@ -13,13 +13,9 @@ pub struct KnowledgeVault {
     root: PathBuf,
 }
 
-impl KnowledgeVault {
-    const KNOWLEDGE_SECTIONS: [&'static str; 5] =
-        ["skills", "memories", "projects", "meetings", "handbook"];
-    const LEGACY_KNOWLEDGE_SECTIONS: [&'static str; 4] =
-        ["decisions", "runbooks", "research", "templates"];
-    const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
+struct VaultIo;
 
+impl VaultIo {
     #[cfg(unix)]
     fn apply_privacy(path: &Path, mode: u32) -> io::Result<()> {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
@@ -30,60 +26,22 @@ impl KnowledgeVault {
         Ok(())
     }
 
-    pub fn user() -> Self {
-        Self::at(
-            vmux_ecs::profile::ProfilePaths::current()
-                .config()
-                .join("knowledge"),
-        )
-    }
-
-    pub fn at(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
-    }
-
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    pub fn into_root(self) -> PathBuf {
-        self.root
-    }
-
-    pub(crate) fn ensure(&self) -> io::Result<()> {
-        std::fs::create_dir_all(&self.root)?;
-        Self::apply_privacy(&self.root, 0o700)?;
-        for directory in Self::KNOWLEDGE_SECTIONS {
-            let path = self.root.join(directory);
+    fn ensure(root: &Path) -> io::Result<()> {
+        std::fs::create_dir_all(root)?;
+        Self::apply_privacy(root, 0o700)?;
+        for directory in KnowledgeVault::KNOWLEDGE_SECTIONS {
+            let path = root.join(directory);
             std::fs::create_dir_all(&path)?;
             Self::apply_privacy(&path, 0o700)?;
         }
-        for directory in Self::LEGACY_KNOWLEDGE_SECTIONS {
-            let _ = std::fs::remove_dir(self.root.join(directory));
+        for directory in KnowledgeVault::LEGACY_KNOWLEDGE_SECTIONS {
+            let _ = std::fs::remove_dir(root.join(directory));
         }
         Ok(())
     }
 
-    pub(crate) fn ensure_repository(&self) -> Result<(), String> {
-        if !self.root.join(".git").exists() {
-            vmux_git::worktree::CheckoutInfo::initialize(&self.root).map_err(|error| error.0)?;
-        }
-        vmux_git::worktree::CheckoutInfo::try_from(self.root.as_path())
-            .map_err(|error| error.0)?
-            .ensure_initial_snapshot("Initialize Knowledge vault")
-            .map_err(|error| error.0)
-    }
-
-    pub fn skills(&self) -> SkillsDir {
-        SkillsDir(self.root.join("skills"))
-    }
-
-    pub fn memories(&self) -> MemoriesDir {
-        MemoriesDir(self.root.join("memories"))
-    }
-
-    pub fn write_note(
-        &self,
+    fn write_note(
+        root: &Path,
         path: Option<&str>,
         title: &str,
         content: &str,
@@ -96,11 +54,11 @@ impl KnowledgeVault {
         if content.is_empty() {
             return Err("knowledge content is empty".to_string());
         }
-        if content.len() > Self::MAX_NOTE_BYTES {
+        if content.len() > KnowledgeVault::MAX_NOTE_BYTES {
             return Err("knowledge content exceeds 2 MiB".to_string());
         }
         let note = NotePath::parse(path, title)?;
-        let destination = self.create_parents(&note)?.join(note.file_name());
+        let destination = Self::create_parents(root, &note)?.join(note.file_name());
         match std::fs::symlink_metadata(&destination) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err("knowledge file cannot be a symlink".to_string());
@@ -129,18 +87,13 @@ impl KnowledgeVault {
         Ok(destination)
     }
 
-    fn create_parents(&self, note: &NotePath) -> Result<PathBuf, String> {
-        if std::fs::symlink_metadata(&self.root)
-            .is_ok_and(|metadata| metadata.file_type().is_symlink())
-        {
+    fn create_parents(root: &Path, note: &NotePath) -> Result<PathBuf, String> {
+        if std::fs::symlink_metadata(root).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
             return Err("knowledge root cannot be a symlink".to_string());
         }
-        std::fs::create_dir_all(&self.root).map_err(|error| error.to_string())?;
-        Self::apply_privacy(&self.root, 0o700).map_err(|error| error.to_string())?;
-        let canonical_root = self
-            .root
-            .canonicalize()
-            .map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(root).map_err(|error| error.to_string())?;
+        Self::apply_privacy(root, 0o700).map_err(|error| error.to_string())?;
+        let canonical_root = root.canonicalize().map_err(|error| error.to_string())?;
         let mut parent = canonical_root.clone();
         for component in note.parents() {
             parent.push(component);
@@ -164,6 +117,65 @@ impl KnowledgeVault {
             }
         }
         Ok(parent)
+    }
+}
+
+impl KnowledgeVault {
+    const KNOWLEDGE_SECTIONS: [&'static str; 5] =
+        ["skills", "memories", "projects", "meetings", "handbook"];
+    const LEGACY_KNOWLEDGE_SECTIONS: [&'static str; 4] =
+        ["decisions", "runbooks", "research", "templates"];
+    const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
+
+    pub fn user() -> Self {
+        Self::at(
+            vmux_ecs::profile::ProfilePaths::current()
+                .config()
+                .join("knowledge"),
+        )
+    }
+
+    pub fn at(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn into_root(self) -> PathBuf {
+        self.root
+    }
+
+    pub(crate) fn ensure(&self) -> io::Result<()> {
+        VaultIo::ensure(&self.root)
+    }
+
+    pub(crate) fn ensure_repository(&self) -> Result<(), String> {
+        if !self.root.join(".git").exists() {
+            vmux_git::worktree::CheckoutInfo::initialize(&self.root).map_err(|error| error.0)?;
+        }
+        vmux_git::worktree::CheckoutInfo::try_from(self.root.as_path())
+            .map_err(|error| error.0)?
+            .ensure_initial_snapshot("Initialize Knowledge vault")
+            .map_err(|error| error.0)
+    }
+
+    pub fn skills(&self) -> SkillsDir {
+        SkillsDir(self.root.join("skills"))
+    }
+
+    pub fn memories(&self) -> MemoriesDir {
+        MemoriesDir(self.root.join("memories"))
+    }
+
+    pub fn write_note(
+        &self,
+        path: Option<&str>,
+        title: &str,
+        content: &str,
+    ) -> Result<PathBuf, String> {
+        VaultIo::write_note(&self.root, path, title, content)
     }
 }
 
@@ -493,7 +505,7 @@ impl ExternalMemories {
 
     fn import(&self) -> io::Result<usize> {
         std::fs::create_dir_all(&self.destination)?;
-        KnowledgeVault::apply_privacy(&self.destination, 0o700)?;
+        VaultIo::apply_privacy(&self.destination, 0o700)?;
 
         let mut imported = self.import_claude()?;
         imported += MemoryTree {

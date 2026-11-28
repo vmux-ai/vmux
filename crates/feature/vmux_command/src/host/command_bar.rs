@@ -12,6 +12,7 @@ pub use panel::CommandBarPanelActive;
 
 mod completion;
 mod controller;
+mod fs_io;
 mod palette;
 mod panel;
 mod work_snapshot;
