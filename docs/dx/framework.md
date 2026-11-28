@@ -14,15 +14,17 @@ Start with the [Framework quickstart](framework/framework-quickstart.md) to run 
 
 ## Run the examples
 
-Runnable Bevy-style examples live in [`examples/`](https://github.com/vmux-ai/vmux/blob/main/examples/README.md):
+Runnable Bevy-style client and primitive examples live in [`examples/`](https://github.com/vmux-ai/vmux/blob/main/examples/README.md):
 
 ```sh
-cargo run -p vmux_examples --example panes
-cargo run -p vmux_examples --example async_channel
 cargo run -p vmux_examples --features window --example window_counter
+cargo run -p vmux_examples --features web --example client_web
+cargo run -p vmux_examples --example client_tui
+cargo run -p vmux_examples --features mobile --example client_mobile
+cargo run -p vmux_examples --features service --example client_service
 ```
 
-Pass `VMUX_EXAMPLE_HEADLESS=1` to smoke-test any windowed example without opening an OS window.
+Pass `VMUX_EXAMPLE_HEADLESS=1` to smoke-test interactive client examples without opening a window or staying attached to a terminal/socket.
 
 ## Validate external SDK consumers
 

@@ -1,4 +1,5 @@
 pub const EXAMPLES: &[&str] = &[
+    "client_tui",
     "selection",
     "lease",
     "generation_dirty",
@@ -18,9 +19,12 @@ pub const EXAMPLES: &[&str] = &[
     "web_host",
 ];
 
-pub const WINDOW_EXAMPLES: &[&str] = &[
-    "window_counter",
-    "window_notes",
-    "window_split_workspace",
-    "window_web_host",
+pub const FEATURE_EXAMPLES: &[(&str, &str)] = &[
+    ("window", "window_counter"),
+    ("window", "window_notes"),
+    ("window", "window_split_workspace"),
+    ("window", "window_web_host"),
+    ("web", "client_web"),
+    ("mobile", "client_mobile"),
+    ("service", "client_service"),
 ];

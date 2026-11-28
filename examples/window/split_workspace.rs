@@ -30,11 +30,7 @@ struct WorkspaceDemoPlugin {
 
 impl Plugin for WorkspaceDemoPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            VmuxPlugin::builder().layout(true).build(),
-            MenuPlugin,
-            MenuActionPlugin::<WorkspaceMenuAction>::default(),
-        ));
+        app.add_plugins(MenuActionPlugin::<WorkspaceMenuAction>::default());
         if !self.headless {
             app.add_plugins(NativeMenuPlugin);
         }
@@ -93,6 +89,7 @@ fn setup_workspace(windows: Query<Entity, With<HostWindow>>, mut commands: Comma
 
 fn handle_menu_actions(
     mut selected: MessageReader<MenuActionSelected<WorkspaceMenuAction>>,
+    items: Query<&WorkspaceMenuAction>,
     roots: Query<Entity, With<Name>>,
     left: Query<Entity, With<LeftPane>>,
     right: Query<Entity, With<RightPane>>,
@@ -101,6 +98,9 @@ fn handle_menu_actions(
     let Some(root) = roots.iter().next() else {
         return;
     };
+    if items.is_empty() {
+        return;
+    }
     for MenuActionSelected(action) in selected.read() {
         match action {
             WorkspaceMenuAction::FocusLeft => {
@@ -150,7 +150,7 @@ fn main() {
     }
     let mut app = App::new();
     app.add_plugins((
-        WindowHostPlugin::new(config),
+        DefaultPlugins.set(WindowHostPlugin::new(config)),
         WorkspaceDemoPlugin { headless },
     ));
     if headless {

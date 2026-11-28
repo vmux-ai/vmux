@@ -35,7 +35,6 @@ impl Plugin for NotesPlugin {
     fn build(&self, app: &mut App) {
         app.register_required_components::<Note, Save>()
             .add_plugins((
-                VmuxEcsPlugin,
                 IdentityIndexPlugin::<NoteId, Note>::default(),
                 SchemaPlugin::<NotesStore>::default(),
                 AutoSavePlugin::<NotesStore>::default(),
@@ -195,7 +194,7 @@ fn main() {
     }
     app.add_plugins((
         bevy_app::TaskPoolPlugin::default(),
-        WindowHostPlugin::new(config),
+        DefaultPlugins.set(WindowHostPlugin::new(config)),
         NotesPlugin,
     ));
     for (index, title) in load_saved_titles(&store_path).into_iter().enumerate() {

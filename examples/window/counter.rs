@@ -92,7 +92,10 @@ fn main() {
         config = config.headless();
     }
     let mut app = App::new();
-    app.add_plugins((WindowHostPlugin::new(config), CounterPlugin));
+    app.add_plugins((
+        DefaultPlugins.set(WindowHostPlugin::new(config)),
+        CounterPlugin,
+    ));
     if headless {
         app.update();
         let page = app

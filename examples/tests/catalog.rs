@@ -37,9 +37,9 @@ fn catalog_matches_cargo_manifest_and_readme() {
             "examples/README.md is missing `{command}`"
         );
     }
-    for name in vmux_examples::WINDOW_EXAMPLES {
+    for (feature, name) in vmux_examples::FEATURE_EXAMPLES {
         listed.insert((*name).to_string());
-        let command = format!("cargo run -p vmux_examples --features window --example {name}");
+        let command = format!("cargo run -p vmux_examples --features {feature} --example {name}");
         assert!(
             readme.contains(&command),
             "examples/README.md is missing `{command}`"

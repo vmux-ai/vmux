@@ -2,25 +2,30 @@
 
 Get a Vmux Framework application running in minutes—either as a CEF-free native desktop window app or a renderer-free headless ECS service.
 
-## 1. Run an existing example
+## 1. Run an existing client example
 
-From a Vmux checkout, run any headless example directly:
-
-```sh
-cargo run -p vmux_examples --example selection
-cargo run -p vmux_examples --example operation_policy
-cargo run -p vmux_examples --example panes
-```
-
-On macOS, run a native desktop window example (`vmux_window` + `vmux_page`, zero Chromium/CEF):
+From a Vmux checkout, run a client example for the target you are building:
 
 ```sh
+# Desktop (macOS native window via vmux_window + vmux_page, zero CEF)
 cargo run -p vmux_examples --features window --example window_counter
 cargo run -p vmux_examples --features window --example window_notes
 cargo run -p vmux_examples --features window --example window_split_workspace
+
+# Web (ServerPlugins + HttpServerPlugin + Dioxus SSR)
+cargo run -p vmux_examples --features web --example client_web
+
+# TUI (MinimalPlugins + LayoutPlugin + FlexPlugin)
+cargo run -p vmux_examples --example client_tui
+
+# Mobile (MinimalPlugins + UiStatePlugin + Dioxus, zero desktop deps)
+cargo run -p vmux_examples --features mobile --example client_mobile
+
+# Service / Daemon (ServerPlugins + HeadlessTokioRunner + graceful shutdown)
+cargo run -p vmux_examples --features service --example client_service
 ```
 
-Set `VMUX_EXAMPLE_HEADLESS=1` to run the same windowed examples headlessly in CI or a terminal.
+Set `VMUX_EXAMPLE_HEADLESS=1` to run interactive examples as a deterministic one-shot smoke check in CI or a terminal.
 
 ## 2. Build a minimal desktop window app
 
@@ -118,11 +123,11 @@ static COUNTER_PAGE: Page = Page {
 fn main() {
     App::new()
         .add_plugins((
-            WindowHostPlugin::new(
+            DefaultPlugins.set(WindowHostPlugin::new(
                 WindowHostConfig::new("Counter")
                     .size(480, 320)
                     .page(&COUNTER_PAGE),
-            ),
+            )),
             CounterPlugin,
         ))
         .run();
@@ -131,22 +136,23 @@ fn main() {
 
 See the full runnable version in [`examples/window/counter.rs`](https://github.com/vmux-ai/vmux/blob/main/examples/window/counter.rs).
 
-## 3. Build a headless ECS service
+## 3. Build a headless, TUI, or server app
 
-Headless apps omit `window` and `ui` completely so zero windowing, WebView, or Chromium crates compile:
+Headless apps bootstrap with `MinimalPlugins` or `ServerPlugins` and omit `window` and `ui` completely so zero windowing, WebView, or Chromium crates compile:
 
 ```rust
 use vmux_app::prelude::*;
 
 let mut app = App::new();
 app.add_plugins((
-    VmuxPlugin::builder().layout(true).build(),
-    SelectionPlugin::<()>::default(),
+    MinimalPlugins,
+    LayoutPlugin,
+    FlexPlugin,
 ));
 app.update();
 ```
 
-For long-running background daemons and HTTP/QUIC servers, compose `vmux_app::runner::HeadlessTokioRunner` with `ShutdownPlugin`, `vmux_app::http::HttpServerPlugin`, or `vmux_app::quic::QuicServerPlugin`.
+For long-running background daemons and HTTP/QUIC web apps, compose `ServerPlugins` with `vmux_app::runner::HeadlessTokioRunner` (see `examples/clients/web_app.rs` and `examples/clients/service_daemon.rs`).
 
 ## Next steps
 
