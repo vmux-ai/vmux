@@ -11167,6 +11167,7 @@ dependencies = [
  "vmux_macro",
  "vmux_runner",
  "vmux_ui",
+ "vmux_watch",
  "wry",
 ]
 

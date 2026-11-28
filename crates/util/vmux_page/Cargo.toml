@@ -15,6 +15,7 @@ host = [
     "dep:vmux_flex",
 ]
 native = ["host", "dep:bevy_winit", "dep:vmux_runner"]
+hot-reload = ["host", "dep:vmux_watch"]
 
 [dependencies]
 base64 = "0.22"
@@ -37,6 +38,7 @@ vmux_ecs = { path = "../vmux_ecs", features = ["ui"], optional = true }
 vmux_flex = { path = "../vmux_flex", features = ["window"], optional = true }
 vmux_macro = { path = "../vmux_macro" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
+vmux_watch = { path = "../vmux_watch", optional = true }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy_winit = { workspace = true, optional = true }
