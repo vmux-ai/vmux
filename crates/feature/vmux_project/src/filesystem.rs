@@ -142,13 +142,16 @@ pub struct FileStore;
 
 impl FileStore {
     pub fn read(root: &Path) -> Result<Snapshot, Error> {
-        let stored: StoredSnapshot = match std::fs::read_to_string(root.join(".projects.ron")) {
-            Ok(source) => {
-                ron::from_str(&source).map_err(|error| Error::Unavailable(error.to_string()))?
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => StoredSnapshot::default(),
-            Err(error) => return Err(Error::Unavailable(error.to_string())),
-        };
+        let stored: StoredSnapshot =
+            match crate::filesystem_io::FilesystemIo::read_to_string(&root.join(".projects.ron")) {
+                Ok(source) => {
+                    ron::from_str(&source).map_err(|error| Error::Unavailable(error.to_string()))?
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    StoredSnapshot::default()
+                }
+                Err(error) => return Err(Error::Unavailable(error.to_string())),
+            };
         if stored.version > 1 {
             return Err(Error::Unavailable(
                 "unsupported project store version".to_string(),
@@ -160,7 +163,9 @@ impl FileStore {
             archived: stored.archived,
         };
         if stored.version == 0 {
-            let archive: LegacyArchive = match std::fs::read_to_string(root.join(".archive.ron")) {
+            let archive: LegacyArchive = match crate::filesystem_io::FilesystemIo::read_to_string(
+                &root.join(".archive.ron"),
+            ) {
                 Ok(source) => {
                     ron::from_str(&source).map_err(|error| Error::Unavailable(error.to_string()))?
                 }

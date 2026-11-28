@@ -8,6 +8,10 @@ impl ExternalFsIo {
         File::open(path)
     }
 
+    pub(super) fn file_metadata(file: &File) -> std::io::Result<Metadata> {
+        file.metadata()
+    }
+
     pub(super) fn metadata(path: &Path) -> std::io::Result<Metadata> {
         std::fs::metadata(path)
     }

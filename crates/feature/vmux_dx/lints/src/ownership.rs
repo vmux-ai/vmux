@@ -280,21 +280,22 @@ impl<'tcx> Ownership<'tcx> {
         if !matches!(krate, "std" | "tokio") {
             return false;
         }
-        let path = cx.tcx.def_path(function).to_string_no_crate_verbose();
+        let pretty = cx.tcx.def_path_str(function);
         if [
-            "::fs::Metadata::",
-            "::fs::FileType::",
-            "::fs::Permissions::",
-            "::fs::DirEntry::",
-            "::os::unix::fs::MetadataExt::",
-            "::os::unix::fs::PermissionsExt::",
-            "::os::unix::fs::FileTypeExt::",
+            "::Metadata::",
+            "::FileType::",
+            "::Permissions::",
+            "::DirEntry::",
+            "::MetadataExt::",
+            "::PermissionsExt::",
+            "::FileTypeExt::",
         ]
         .iter()
-        .any(|seg| path.contains(seg))
+        .any(|seg| pretty.contains(seg))
         {
             return false;
         }
+        let path = cx.tcx.def_path(function).to_string_no_crate_verbose();
         [
             "::fs::",
             "::process::Command::",

@@ -9,6 +9,24 @@ impl FilesystemIo {
         std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_symlink())
     }
 
+    pub(crate) fn exists_symlink_metadata(path: &Path) -> bool {
+        std::fs::symlink_metadata(path).is_ok()
+    }
+
+    pub(crate) fn create_dir_all(path: &Path) -> Result<(), Error> {
+        std::fs::create_dir_all(path).map_err(|error| Error::Unavailable(error.to_string()))
+    }
+
+    pub(crate) fn read_to_string(path: &Path) -> std::io::Result<String> {
+        std::fs::read_to_string(path)
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn symlink(original: &Path, link: &Path) -> Result<(), Error> {
+        std::os::unix::fs::symlink(original, link)
+            .map_err(|error| Error::Unavailable(error.to_string()))
+    }
+
     pub(crate) fn imported_aliases(
         root: &Path,
         imports: &Path,

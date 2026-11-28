@@ -175,8 +175,7 @@ impl RemoteArtifact {
             ));
         }
         file.flush().map_err(|error| error.to_string())?;
-        file.as_file()
-            .sync_all()
+        crate::host::fs_io::EditorFsIo::sync_all(file.as_file())
             .map_err(|error| error.to_string())?;
         if vmux_job::BlockingCancellation::canceled() {
             return Err("download canceled".into());

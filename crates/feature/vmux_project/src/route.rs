@@ -6,8 +6,7 @@ impl ProjectRoute {
         root: &std::path::Path,
         directory: &std::path::Path,
     ) -> Result<String, crate::Error> {
-        std::fs::create_dir_all(root)
-            .map_err(|error| crate::Error::Unavailable(error.to_string()))?;
+        crate::filesystem_io::FilesystemIo::create_dir_all(root)?;
         let root = root
             .canonicalize()
             .map_err(|error| crate::Error::Unavailable(error.to_string()))?;
@@ -21,8 +20,7 @@ impl ProjectRoute {
             return Ok(url);
         }
         let imports = root.join("imported");
-        std::fs::create_dir_all(&imports)
-            .map_err(|error| crate::Error::Unavailable(error.to_string()))?;
+        crate::filesystem_io::FilesystemIo::create_dir_all(&imports)?;
         let name = selected
             .file_name()
             .and_then(|name| name.to_str())
@@ -36,12 +34,11 @@ impl ProjectRoute {
             if candidate.canonicalize().ok().as_deref() == Some(&selected) {
                 return Self::from_path(&root, &candidate).ok_or(crate::Error::InvalidName);
             }
-            if std::fs::symlink_metadata(&candidate).is_ok() {
+            if crate::filesystem_io::FilesystemIo::exists_symlink_metadata(&candidate) {
                 continue;
             }
             #[cfg(unix)]
-            std::os::unix::fs::symlink(&selected, &candidate)
-                .map_err(|error| crate::Error::Unavailable(error.to_string()))?;
+            crate::filesystem_io::FilesystemIo::symlink(&selected, &candidate)?;
             #[cfg(not(unix))]
             return Err(crate::Error::Unavailable(
                 "directory attachments are unavailable on this platform".to_string(),

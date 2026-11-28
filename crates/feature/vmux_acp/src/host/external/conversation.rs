@@ -532,7 +532,8 @@ impl FileConversation {
         decoder: impl Decoder,
     ) -> Result<ReadResult, String> {
         let mut file = super::fs_io::ExternalFsIo::open(path).map_err(|error| error.to_string())?;
-        let metadata = file.metadata().map_err(|error| error.to_string())?;
+        let metadata =
+            super::fs_io::ExternalFsIo::file_metadata(&file).map_err(|error| error.to_string())?;
         let physical_length = metadata.len();
         let identity = Self::identity(path, &metadata)?;
         let length = Self::complete_length(&mut file, physical_length)?;
@@ -700,7 +701,8 @@ impl FileConversation {
         decoder: impl Decoder,
     ) -> Result<ReadResult, String> {
         let mut file = super::fs_io::ExternalFsIo::open(path).map_err(|error| error.to_string())?;
-        let metadata = file.metadata().map_err(|error| error.to_string())?;
+        let metadata =
+            super::fs_io::ExternalFsIo::file_metadata(&file).map_err(|error| error.to_string())?;
         let length = metadata.len();
         let identity = Self::identity(path, &metadata)?;
         let prefix = Self::read_prefix(&mut file)?;
