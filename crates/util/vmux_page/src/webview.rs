@@ -126,7 +126,7 @@ impl WebView {
                 url.starts_with("vmux://")
                     || PageRoutes::serves_document(&url, navigation_page.get())
             });
-        for scheme in ["vmux", "git"] {
+        for scheme in Self::custom_schemes(page) {
             let routes = routes.clone();
             builder = builder.with_asynchronous_custom_protocol(
                 scheme.into(),
@@ -169,6 +169,16 @@ impl WebView {
         surface.anchor_native_frame();
         surface.set_appearance(appearance);
         Ok(surface)
+    }
+
+    fn custom_schemes(page: &Page) -> Vec<&'static str> {
+        let mut schemes = vec!["vmux", "git"];
+        if let Some((scheme, _)) = page.document_url().split_once("://")
+            && !matches!(scheme, "vmux" | "git" | "http" | "https")
+        {
+            schemes.push(scheme);
+        }
+        schemes
     }
 
     pub fn navigate(&self, page: &'static Page, url: &str, instance: crate::Instance) -> bool {
@@ -235,6 +245,16 @@ impl WebView {
     pub fn set_visible(&self, visible: bool) {
         if let Err(error) = self.webview.set_visible(visible) {
             error!("vmux_page: set_visible failed: {error}");
+        }
+    }
+
+    pub fn focus(&self) -> bool {
+        match self.webview.focus() {
+            Ok(()) => true,
+            Err(error) => {
+                error!("vmux_page: focus failed: {error}");
+                false
+            }
         }
     }
 

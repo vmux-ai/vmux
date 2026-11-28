@@ -5,10 +5,24 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
+[features]
+default = []
+host = [
+    "dep:bevy_math",
+    "dep:bevy_window",
+    "dep:crossbeam-channel",
+    "dep:vmux_ecs",
+    "dep:vmux_flex",
+]
+native = ["host", "dep:bevy_winit", "dep:vmux_runner"]
+
 [dependencies]
 base64 = "0.22"
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
+bevy_math = { workspace = true, optional = true }
+bevy_window = { workspace = true, optional = true }
+crossbeam-channel = { workspace = true, optional = true }
 dioxus-core = "=0.7.9"
 dioxus-html = { version = "=0.7.9", features = ["serialize"] }
 dioxus-interpreter-js = { version = "=0.7.9", features = [
@@ -19,13 +33,21 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = "0.1"
 vmux_api = { path = "../vmux_api", features = ["bevy"] }
+vmux_ecs = { path = "../vmux_ecs", features = ["ui"], optional = true }
+vmux_flex = { path = "../vmux_flex", features = ["window"], optional = true }
 vmux_macro = { path = "../vmux_macro" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+bevy_winit = { workspace = true, optional = true }
+vmux_runner = { path = "../vmux_runner", features = ["winit"], optional = true }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 objc2-quartz-core = { version = "0.3", default-features = false, features = [
     "std",
     "CALayer",
+    "objc2-core-foundation",
+    "objc2-core-graphics",
 ] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 vmux_clipboard = { path = "../vmux_clipboard" }
@@ -35,6 +57,8 @@ wry = { version = "0.53", features = ["transparent"] }
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "std",
+    "objc2-core-graphics",
+    "objc2-quartz-core",
     "NSAppearance",
     "NSColor",
     "NSResponder",
@@ -60,6 +84,7 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = [
 [dev-dependencies]
 dioxus = { workspace = true }
 rkyv = { workspace = true }
+tempfile = "3"
 
 [lints]
 workspace = true
