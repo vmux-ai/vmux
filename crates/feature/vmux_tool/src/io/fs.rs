@@ -1,8 +1,8 @@
 use std::ffi::OsString;
 use std::fs::{FileType, OpenOptions};
-use std::io::{ErrorKind, Read};
+use std::io::{ErrorKind, Read, Write};
 #[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
 
 use bevy_ecs::prelude::Component;
@@ -70,6 +70,76 @@ impl Job for ReadFile {
 
 #[derive(Component)]
 pub struct FileBytes(pub Option<Vec<u8>>);
+
+pub(crate) struct LocalFs;
+
+impl LocalFs {
+    pub(crate) fn read(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+        std::fs::read(path)
+    }
+
+    pub(crate) fn read_to_string(path: &std::path::Path) -> std::io::Result<String> {
+        std::fs::read_to_string(path)
+    }
+
+    pub(crate) fn symlink_metadata(path: &std::path::Path) -> std::io::Result<std::fs::Metadata> {
+        std::fs::symlink_metadata(path)
+    }
+
+    pub(crate) fn is_regular_non_symlink_file(path: &std::path::Path) -> bool {
+        std::fs::symlink_metadata(path)
+            .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+    }
+
+    pub(crate) fn canonical_non_symlink_dir(path: &std::path::Path) -> Option<PathBuf> {
+        let metadata = std::fs::symlink_metadata(path).ok()?;
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            path.canonicalize().ok()
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn rename(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+        std::fs::rename(from, to)
+    }
+
+    pub(crate) fn remove_file(path: &std::path::Path) -> std::io::Result<()> {
+        std::fs::remove_file(path)
+    }
+
+    pub(crate) fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+        let parent = path.parent().ok_or("MCP credential path has no parent")?;
+        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+        let mut options = OpenOptions::new();
+        options.create(true).truncate(true).write(true);
+        #[cfg(unix)]
+        {
+            options.mode(0o600);
+        }
+        let mut file = options.open(path).map_err(|err| err.to_string())?;
+        #[cfg(unix)]
+        {
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))
+                .map_err(|err| err.to_string())?;
+        }
+        file.write_all(bytes).map_err(|err| err.to_string())
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn is_executable(path: &std::path::Path) -> bool {
+        path.is_file()
+            && path
+                .metadata()
+                .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+                .unwrap_or(false)
+    }
+
+    #[cfg(not(unix))]
+    pub(crate) fn is_executable(path: &std::path::Path) -> bool {
+        path.is_file()
+    }
+}
 
 #[derive(Clone)]
 pub struct ReadDirectory {

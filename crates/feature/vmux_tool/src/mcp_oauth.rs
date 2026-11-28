@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-#[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -297,7 +295,7 @@ impl McpOauthFlow {
     }
 
     fn read_fallback(&self, server_id: &str) -> Result<Option<McpOauthCredentials>, String> {
-        match std::fs::read(self.fallback_path(server_id)) {
+        match crate::io::fs::LocalFs::read(&self.fallback_path(server_id)) {
             Ok(bytes) => serde_json::from_slice(&bytes)
                 .map(Some)
                 .map_err(|err| err.to_string()),
@@ -327,22 +325,8 @@ impl McpOauthFlow {
             Ok(()) => Ok(()),
             Err(error) if Self::is_desktop_only_error(&error) => {
                 let path = self.fallback_path(server_id);
-                let parent = path.parent().ok_or("MCP credential path has no parent")?;
-                std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
                 let bytes = serde_json::to_vec(credentials).map_err(|err| err.to_string())?;
-                let mut options = std::fs::OpenOptions::new();
-                options.create(true).truncate(true).write(true);
-                #[cfg(unix)]
-                {
-                    options.mode(0o600);
-                }
-                let mut file = options.open(&path).map_err(|err| err.to_string())?;
-                #[cfg(unix)]
-                {
-                    file.set_permissions(std::fs::Permissions::from_mode(0o600))
-                        .map_err(|err| err.to_string())?;
-                }
-                file.write_all(&bytes).map_err(|err| err.to_string())
+                crate::io::fs::LocalFs::write_private(&path, &bytes)
             }
             Err(error) => Err(error),
         }
@@ -354,7 +338,7 @@ impl McpOauthFlow {
             Err(error) if Self::is_desktop_only_error(&error) => Ok(()),
             Err(error) => Err(error),
         };
-        let fallback = match std::fs::remove_file(self.fallback_path(server_id)) {
+        let fallback = match crate::io::fs::LocalFs::remove_file(&self.fallback_path(server_id)) {
             Ok(()) => Ok(()),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(err) => Err(err.to_string()),

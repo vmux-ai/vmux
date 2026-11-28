@@ -36,6 +36,7 @@ mod changes;
 mod controller;
 mod diff;
 mod directory;
+mod git_io;
 mod job;
 mod job_runner;
 mod read;

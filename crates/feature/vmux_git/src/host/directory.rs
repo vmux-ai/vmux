@@ -242,35 +242,7 @@ impl DirectoryListing {
     }
 
     fn read_entries(path: &Path) -> Vec<FileDirEntry> {
-        let Ok(read) = std::fs::read_dir(path) else {
-            return Vec::new();
-        };
-        let mut entries = Vec::new();
-        for entry in read.flatten() {
-            let path = entry.path();
-            let is_dir = entry
-                .file_type()
-                .map(|kind| {
-                    kind.is_dir()
-                        || kind.is_symlink()
-                            && std::fs::metadata(&path)
-                                .map(|metadata| metadata.is_dir())
-                                .unwrap_or(false)
-                })
-                .unwrap_or(false);
-            entries.push(FileDirEntry {
-                name: entry.file_name().to_string_lossy().into_owned(),
-                path: path.to_string_lossy().into_owned(),
-                is_dir,
-            });
-        }
-        entries.sort_by(|left, right| {
-            right
-                .is_dir
-                .cmp(&left.is_dir)
-                .then(left.name.to_lowercase().cmp(&right.name.to_lowercase()))
-        });
-        entries
+        super::git_io::GitFsIo::read_entries(path)
     }
 
     fn visible_entries(&self, show_hidden: bool) -> Vec<FileDirEntry> {
