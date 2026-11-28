@@ -12,6 +12,8 @@ mod renderer;
 mod service;
 #[cfg(feature = "runtime")]
 mod session;
+#[cfg(feature = "runtime")]
+mod settings;
 mod theme;
 #[cfg(feature = "runtime")]
 mod world;

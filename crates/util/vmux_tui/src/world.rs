@@ -44,9 +44,11 @@ use vmux_layout::tab::{CloseRequest as TabCloseRequest, Tab};
 use vmux_layout::{LayoutCef, LayoutRestoreRequest, LayoutStartupSet, SelectRequest};
 #[cfg(test)]
 use vmux_setting::TerminalSettings;
+use vmux_setting::event::{SettingsEditRequest, SettingsFilterRequest, SettingsRequest};
+use vmux_setting::state::SettingsUiState;
 use vmux_setting::{
-    AppSettings, ResolvedColorScheme, ResolvedScheme, SettingsLoadSet, SystemAppearance,
-    TerminalTheme,
+    AppSettings, ResolvedColorScheme, ResolvedScheme, Settings, SettingsLoadSet, SettingsPlugin,
+    SystemAppearance, TerminalTheme,
 };
 use vmux_shortcut::PendingPrefix;
 use vmux_space::Spaces;
@@ -167,6 +169,7 @@ impl DesktopConfig {
         settings.terminal = Some(TerminalSettings {
             shell: Some("/bin/sh".into()),
             confirm_close: false,
+            themes: vec![TerminalSettings::default().resolve_theme("default")],
             ..Default::default()
         });
         let cwd_text = cwd.to_string_lossy();
@@ -299,6 +302,7 @@ impl DesktopConfig {
 struct CommandTracker {
     dispatched: bool,
     space_picker_requested: bool,
+    settings_requested: bool,
     exit_requested: bool,
     prev_pages: usize,
 }
@@ -482,7 +486,12 @@ type FinishedPageOpens = (
 
 type PendingHeadlessSurfaces = (
     Without<SurfaceReadySent>,
-    Or<(With<LayoutCef>, With<Terminal>, With<Spaces>)>,
+    Or<(
+        With<LayoutCef>,
+        With<Terminal>,
+        With<Spaces>,
+        With<Settings>,
+    )>,
 );
 
 fn finish_page_opens(done: Query<Entity, FinishedPageOpens>, mut commands: Commands) {
@@ -561,6 +570,7 @@ fn mark_ready(surfaces: Query<Entity, PendingHeadlessSurfaces>, mut commands: Co
     for entity in &surfaces {
         commands.entity(entity).insert((
             SurfaceReadySent,
+            PageReady {},
             UiIpcReady,
             UiIpcGeneration(1),
             UiIpcNavigationRevision(1),
@@ -581,6 +591,8 @@ fn track_commands(
         tracker.dispatched = true;
         if invocation.id == "quit" {
             tracker.exit_requested = true;
+        } else if invocation.id == "open_settings" {
+            tracker.settings_requested = true;
         }
     }
 }
@@ -760,6 +772,97 @@ impl TuiWorld {
         let requested = tracker.space_picker_requested;
         tracker.space_picker_requested = false;
         requested
+    }
+
+    pub fn take_settings_requested(&mut self) -> bool {
+        let mut tracker = self.app.world_mut().resource_mut::<CommandTracker>();
+        let requested = tracker.settings_requested;
+        tracker.settings_requested = false;
+        requested
+    }
+
+    pub fn settings_ui(&mut self) -> Option<SettingsUiState> {
+        let entity = self.ensure_settings_entity();
+        if self
+            .app
+            .world()
+            .get::<UiState<SettingsUiState>>(entity)
+            .and_then(UiState::current)
+            .is_none()
+        {
+            self.app.update();
+            self.app.update();
+        }
+        self.app
+            .world()
+            .get::<UiState<SettingsUiState>>(entity)
+            .and_then(UiState::current)
+            .cloned()
+    }
+
+    pub fn send_settings_update(&mut self, path: String, value: serde_json::Value) {
+        let webview = self.ensure_settings_entity();
+        self.app.world_mut().trigger(UiInput {
+            webview,
+            payload: SettingsRequest {
+                path,
+                value: value.into(),
+            },
+        });
+        self.app.update();
+        self.sync_layout_settings();
+        self.app.update();
+    }
+
+    pub fn send_settings_edit(&mut self, path: String, draft: String) {
+        let webview = self.ensure_settings_entity();
+        self.app.world_mut().trigger(UiInput {
+            webview,
+            payload: SettingsEditRequest { path, draft },
+        });
+        self.app.update();
+        self.sync_layout_settings();
+        self.app.update();
+    }
+
+    pub fn send_settings_filter(&mut self, query: String) {
+        let webview = self.ensure_settings_entity();
+        self.app.world_mut().trigger(UiInput {
+            webview,
+            payload: SettingsFilterRequest { query },
+        });
+        self.app.update();
+        self.app.update();
+    }
+
+    fn ensure_settings_entity(&mut self) -> Entity {
+        let mut query = self
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<Settings>>();
+        if let Some(entity) = query.iter(self.app.world()).next() {
+            return entity;
+        }
+        let entity = self
+            .app
+            .world_mut()
+            .spawn((
+                Name::new("TUI settings"),
+                Settings,
+                PageMetadata {
+                    url: SettingsPlugin::url().to_string(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        self.app.update();
+        self.app.update();
+        entity
+    }
+
+    fn sync_layout_settings(&mut self) {
+        let layout = self.app.world().resource::<AppSettings>().layout.clone();
+        *self.app.world_mut().resource_mut::<LayoutSettings>() = layout;
     }
 
     pub fn exit_requested(&self) -> bool {
@@ -1644,5 +1747,25 @@ mod tests {
             world.tick();
         }
         assert!(!world.is_zoomed());
+    }
+
+    #[test]
+    fn headless_settings_ui_projects_sections_and_applies_live_updates() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = DesktopConfig::for_test(dir.path());
+        let mut world = TuiWorld::boot(100, 30, dir.path().to_path_buf(), config, false);
+        let ui = world
+            .settings_ui()
+            .expect("SettingsUiState must materialize headlessly");
+        assert!(ui.sections.iter().any(|section| section.id == "appearance"));
+        assert!(ui.sections.iter().any(|section| section.id == "terminal"));
+        assert!(ui.sections.iter().any(|section| section.id == "shortcuts"));
+        world.send_settings_update("layout.pane.gap".into(), serde_json::json!(12.0));
+        assert!(world.pane_gap());
+        world.send_settings_update(
+            "terminal.themes[0].color_scheme".into(),
+            serde_json::json!("tokyo-night"),
+        );
+        assert_eq!(world.configured_theme(), Some(ThemePreset::TokyoNight));
     }
 }

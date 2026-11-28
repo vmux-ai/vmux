@@ -8,7 +8,9 @@ use vmux_api::terminal::{
 };
 use vmux_ecs::event::TerminalViewportState;
 use vmux_layout::state::LayoutUiState;
+use vmux_setting::state::SettingsUiState;
 
+use crate::settings::SettingsModal;
 use crate::theme::{BarPosition, Palette, Rgb, Theme, ThemePreset};
 use crate::world::{Divider, PaneView, Rect, SplitAxis};
 
@@ -21,7 +23,12 @@ pub struct HitMap {
     pub sidebar_project_rows: Vec<(u16, String)>,
     pub sidebar_add_project_row: Option<u16>,
     pub sidebar_pane_rows: Vec<(u16, Entity)>,
+    pub sidebar_settings_row: Option<u16>,
     pub sidebar_x_end: u16,
+    pub settings_modal_rect: Option<Rect>,
+    pub settings_split_x: u16,
+    pub settings_section_rows: Vec<(u16, usize)>,
+    pub settings_field_rows: Vec<(u16, usize)>,
 }
 
 pub struct FrameSpec<'a> {
@@ -38,6 +45,7 @@ pub struct FrameSpec<'a> {
     pub rows: u16,
     pub leader: bool,
     pub space_picker: Option<usize>,
+    pub settings_modal: Option<(&'a SettingsModal, &'a SettingsUiState)>,
 }
 
 pub struct TuiRenderer;
@@ -155,6 +163,7 @@ impl TuiRenderer {
             }
             if pane.focused
                 && spec.space_picker.is_none()
+                && spec.settings_modal.is_none()
                 && pane.scroll_top.is_none()
                 && let Some(viewport) = &pane.viewport
             {
@@ -166,6 +175,9 @@ impl TuiRenderer {
         }
         if let Some(selected) = spec.space_picker {
             Self::draw_space_switcher(&mut out, workspace_rect, spec.ui, selected, theme);
+        }
+        if let Some((modal, settings_ui)) = spec.settings_modal {
+            modal.draw(&mut out, workspace_rect, settings_ui, theme, &mut hits);
         }
         if tab_bar_rect.is_none() && spec.leader {
             Self::draw_leader_overlay(&mut out, spec.cols, spec.rows, theme);
@@ -223,12 +235,19 @@ impl TuiRenderer {
         ));
         Self::push_active_session(&mut rows, rect.y, ui, inner, theme, hits);
         Self::push_sidebar_panes(&mut rows, rect.y, ui, inner, theme, hits);
+        let footer_row = rect.h.saturating_sub(1);
+        let settings_y = rect.y + footer_row;
+        hits.sidebar_settings_row = Some(settings_y);
+        let settings_label = format!(" ⚙ Settings  {}", theme.muted("^b,"));
         for row_idx in 0..rect.h {
             let y = rect.y + row_idx;
-            let raw = rows
-                .get(usize::from(row_idx))
-                .map(String::as_str)
-                .unwrap_or("");
+            let raw = if row_idx == footer_row {
+                settings_label.as_str()
+            } else {
+                rows.get(usize::from(row_idx))
+                    .map(String::as_str)
+                    .unwrap_or("")
+            };
             let line = theme.panel_row(raw, inner);
             let _ = write!(out, "\x1b[{y};{}H{line}", rect.x);
         }
@@ -464,7 +483,8 @@ impl TuiRenderer {
             theme.fg_bg(mode_bg, p.surface, "\u{e0b0}")
         );
         let mid_text = if spec.leader {
-            " %/\" split · s space · z zoom · b zen · u bar · g gap · x/q quit ".to_owned()
+            " , settings · %/\" split · s space · z zoom · b zen · u bar · g gap · t theme · q quit "
+                .to_owned()
         } else {
             let raw_url = spec
                 .panes
@@ -503,7 +523,7 @@ impl TuiRenderer {
         let text = format!(
             " {}  {}",
             theme.fg_bold(theme.palette().gold, "leader"),
-            theme.text("% vsplit · \" hsplit · s spaces · z zoom · b zen · u bar · g gap · t theme · x close · d detach")
+            theme.text(", settings · % vsplit · \" hsplit · s spaces · z zoom · b zen · u bar · g gap · t theme · x close · q quit")
         );
         let line = theme.header_row(&text, usize::from(cols));
         let _ = write!(out, "\x1b[{rows};1H{line}");
@@ -922,6 +942,7 @@ mod tests {
             rows: 5,
             leader: false,
             space_picker: None,
+            settings_modal: None,
         };
         let (frame, _) = TuiRenderer::render(&spec);
         assert!(frame.contains("Resize terminal"));

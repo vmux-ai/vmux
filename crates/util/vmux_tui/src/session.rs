@@ -10,6 +10,7 @@ use vmux_ecs::cli::{CliInvocation, CliResult};
 use crate::input::{DecodedKey, MouseEvent, RawGuard, TerminalIo};
 use crate::io::TuiFs;
 use crate::renderer::{FrameSpec, HitMap, TuiRenderer};
+use crate::settings::{SettingsModal, SettingsMutation};
 use crate::theme::{BarPosition, Theme, ThemePreset, ThemeStore};
 use crate::world::{DesktopConfig, KeyOutcome, PaneView, TuiWorld};
 
@@ -40,6 +41,7 @@ struct TuiSession {
     hits: HitMap,
     panes: Vec<PaneView>,
     space_picker: Option<usize>,
+    settings_modal: Option<SettingsModal>,
     bar_position: BarPosition,
     theme: ThemePreset,
     explicit_theme: bool,
@@ -135,6 +137,7 @@ impl TuiSession {
             hits: HitMap::default(),
             panes: Vec::new(),
             space_picker: None,
+            settings_modal: None,
             bar_position,
             theme,
             explicit_theme,
@@ -175,8 +178,12 @@ impl TuiSession {
                     .iter()
                     .position(|space| space.is_active)
                     .unwrap_or(0);
+                self.settings_modal = None;
                 self.space_picker = Some(active);
                 self.full_clear = true;
+            }
+            if self.world.take_settings_requested() {
+                self.open_settings_modal();
             }
             if self.world.exit_requested() {
                 break;
@@ -243,6 +250,12 @@ impl TuiSession {
         let palette = (!self.explicit_theme)
             .then(|| self.world.terminal_palette())
             .flatten();
+        let settings_ui = self
+            .settings_modal
+            .is_some()
+            .then(|| self.world.settings_ui())
+            .flatten();
+        let settings_modal = self.settings_modal.as_ref().zip(settings_ui.as_ref());
         let spec = FrameSpec {
             ui: &ui,
             panes: &panes,
@@ -257,6 +270,7 @@ impl TuiSession {
             rows: self.rows,
             leader: self.world.leader_active(),
             space_picker: self.space_picker,
+            settings_modal,
         };
         let (frame, hits) = TuiRenderer::render(&spec);
         self.hits = hits;
@@ -284,6 +298,10 @@ impl TuiSession {
             if let Some(mouse) = MouseEvent::parse(&bytes[idx..]) {
                 self.handle_mouse(&mouse);
                 idx += mouse.consumed;
+                continue;
+            }
+            if self.settings_modal.is_some() {
+                idx += self.handle_settings_key(&bytes[idx..]);
                 continue;
             }
             if self.space_picker.is_some() {
@@ -324,9 +342,63 @@ impl TuiSession {
         false
     }
 
+    fn open_settings_modal(&mut self) {
+        self.space_picker = None;
+        self.settings_modal = Some(SettingsModal::open());
+        let _ = self.world.settings_ui();
+        self.full_clear = true;
+    }
+
+    fn handle_settings_key(&mut self, bytes: &[u8]) -> usize {
+        let state = self.world.settings_ui().unwrap_or_default();
+        let Some(modal) = &mut self.settings_modal else {
+            return 1;
+        };
+        let (consumed, close, mutation) = modal.close_requested_on_key(bytes, &state);
+        if let Some(mutation) = mutation {
+            self.apply_settings_mutation(mutation);
+        }
+        if close {
+            self.settings_modal = None;
+        }
+        self.full_clear = true;
+        consumed
+    }
+
+    fn apply_settings_mutation(&mut self, mutation: SettingsMutation) {
+        match mutation {
+            SettingsMutation::Update { path, value } => {
+                let color_scheme = path
+                    .ends_with(".color_scheme")
+                    .then(|| value.as_str().and_then(ThemePreset::parse))
+                    .flatten();
+                let appearance_mode = path == "appearance.mode";
+                self.world.send_settings_update(path, value);
+                if let Some(preset) = color_scheme {
+                    self.theme = preset;
+                    self.explicit_theme = true;
+                    let _ = ThemeStore::save(preset);
+                } else if appearance_mode {
+                    self.theme = self.theme.for_scheme(self.world.is_light_mode());
+                }
+                self.focus_follows_mouse = self.world.focus_follows_mouse();
+            }
+            SettingsMutation::Edit { path, draft } => {
+                self.world.send_settings_edit(path, draft);
+                self.focus_follows_mouse = self.world.focus_follows_mouse();
+            }
+            SettingsMutation::Filter { query } => {
+                self.world.send_settings_filter(query);
+            }
+        }
+    }
+
     fn handle_tui_extra(&mut self, bytes: &[u8]) -> bool {
         match bytes {
             [b'd'] | [b'q'] => return true,
+            [b','] => {
+                self.open_settings_modal();
+            }
             [b'b'] => {
                 self.world.toggle_side_sheet();
                 self.full_clear = true;
@@ -401,6 +473,10 @@ impl TuiSession {
     }
 
     fn handle_mouse(&mut self, mouse: &MouseEvent) {
+        if self.settings_modal.is_some() {
+            self.handle_settings_mouse(mouse);
+            return;
+        }
         if mouse.button == 64 || mouse.button == 65 {
             let pane_gap = self.world.pane_gap();
             if let Some(pane) = self.pane_at(mouse.col, mouse.row)
@@ -468,6 +544,10 @@ impl TuiSession {
                 self.full_clear = true;
                 return;
             }
+            if Some(mouse.row) == self.hits.sidebar_settings_row {
+                self.open_settings_modal();
+                return;
+            }
             for (row, entity) in &self.hits.sidebar_pane_rows {
                 if *row == mouse.row {
                     self.world.select_pane(*entity);
@@ -481,6 +561,33 @@ impl TuiSession {
         {
             self.world.select_pane(pane.pane);
         }
+    }
+
+    fn handle_settings_mouse(&mut self, mouse: &MouseEvent) {
+        if mouse.button == 64 || mouse.button == 65 {
+            let state = self.world.settings_ui().unwrap_or_default();
+            if let Some(modal) = &mut self.settings_modal {
+                let delta = if mouse.button == 64 { -1 } else { 1 };
+                modal.handle_scroll(delta, &state);
+                self.full_clear = true;
+            }
+            return;
+        }
+        if !mouse.pressed || mouse.button != 0 {
+            return;
+        }
+        let state = self.world.settings_ui().unwrap_or_default();
+        let Some(modal) = &mut self.settings_modal else {
+            return;
+        };
+        let (close, mutation) = modal.handle_click(mouse.col, mouse.row, &self.hits, &state);
+        if let Some(mutation) = mutation {
+            self.apply_settings_mutation(mutation);
+        }
+        if close {
+            self.settings_modal = None;
+        }
+        self.full_clear = true;
     }
 
     fn pane_at(&self, col: u16, row: u16) -> Option<&PaneView> {
