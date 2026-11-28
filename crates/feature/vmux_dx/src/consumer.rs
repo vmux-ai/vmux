@@ -149,6 +149,7 @@ impl Consumer {
             ("vmux_ecs", "store", true),
             ("vmux_test", "", true),
             ("vmux_page", "host", true),
+            ("vmux_window", "", true),
             ("vmux_job", "", true),
             ("vmux_project", "contracts,filesystem", true),
             ("vmux_extension", "filesystem", true),
