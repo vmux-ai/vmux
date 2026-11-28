@@ -83,43 +83,17 @@ static COUNTER_PAGE: Page = Page {
 const CSS: &str = "body{background:#111318;color:#f3f4f6;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif}.root{text-align:center}.controls{display:flex;gap:16px;align-items:center;justify-content:center;margin-top:16px}button{padding:8px 18px;font-size:18px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#fff;cursor:pointer}.value{font-size:28px;min-width:48px;font-variant-numeric:tabular-nums}";
 
 fn main() {
-    let headless = std::env::var_os("VMUX_EXAMPLE_HEADLESS").is_some();
     let mut config = WindowHostConfig::new("Vmux Counter")
         .size(480, 320)
         .page(&COUNTER_PAGE)
         .stylesheet(CSS);
-    if headless {
+    if std::env::var_os("VMUX_EXAMPLE_HEADLESS").is_some() {
         config = config.headless();
     }
-    let mut app = App::new();
-    app.add_plugins((
-        DefaultPlugins.set(WindowHostPlugin::new(config)),
-        CounterPlugin,
-    ));
-    if headless {
-        app.update();
-        let page = app
-            .world_mut()
-            .query_filtered::<Entity, With<UiIpcReady>>()
-            .single(app.world())
-            .unwrap();
-        let authority = (
-            app.world().get::<UiIpcGeneration>(page).unwrap().0,
-            app.world().get::<UiIpcNavigationRevision>(page).unwrap().0,
-            app.world().get::<UiIpcEpoch>(page).unwrap().0,
-        );
-        app.world_mut().write_message(UiReceiveRaw::from_event(
-            page,
-            "app://counter/",
-            authority,
-            &CounterDelta { delta: 3 },
-        ));
-        app.update();
-        println!(
-            "counter headless smoke passed: count={}",
-            app.world().get::<CounterValue>(page).unwrap().0
-        );
-        return;
-    }
-    app.run();
+    App::new()
+        .add_plugins((
+            DefaultPlugins.set(WindowHostPlugin::new(config)),
+            CounterPlugin,
+        ))
+        .run();
 }

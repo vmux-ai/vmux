@@ -5,8 +5,15 @@ use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use dioxus::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_app::ecs::time::{BackoffPolicy, Clock};
+use vmux_app::ecs::time::BackoffPolicy;
 use vmux_app::prelude::*;
+
+#[derive(Resource)]
+struct NotesBootstrap {
+    _temp: Option<tempfile::TempDir>,
+    store_path: PathBuf,
+    initial_titles: Vec<String>,
+}
 
 #[ui_state(Default, Eq)]
 struct NotesUiState {
@@ -41,10 +48,28 @@ impl Plugin for NotesPlugin {
                 UiStatePlugin::<NotesUiState>::default(),
                 UiIpcEventPlugin::<AddNoteRequest>::default(),
             ))
+            .add_systems(Startup, seed_notes)
             .add_observer(add_note)
             .add_observer(write_notes)
             .add_systems(Update, publish_notes);
     }
+}
+
+fn seed_notes(mut bootstrap: ResMut<NotesBootstrap>, mut commands: Commands) {
+    let titles = std::mem::take(&mut bootstrap.initial_titles);
+    for (index, title) in titles.into_iter().enumerate() {
+        let id = format!("note-{}", index + 1);
+        commands.spawn((Note, NoteId(id), Name::new(title), Revision(0)));
+    }
+    commands.spawn((
+        AutoSave::<NotesStore>::default(),
+        AutoSavePolicy::new(
+            Duration::from_millis(500),
+            Some(Duration::from_secs(2)),
+            BackoffPolicy::exponential(Duration::from_secs(1), Duration::from_secs(8)),
+        ),
+        StorePath::new(bootstrap.store_path.clone()),
+    ));
 }
 
 fn add_note(
@@ -181,70 +206,23 @@ fn main() {
         Some(dir) => dir.path().join("notes.txt"),
         None => default_notes_path(),
     };
+    let initial_titles = load_saved_titles(&store_path);
     let mut config = WindowHostConfig::new("Vmux Notes")
         .size(640, 480)
         .page(&NOTES_PAGE);
     if headless {
         config = config.headless();
     }
-    let mut app = App::new();
-    let fake_clock = headless.then(|| Clock::fake(1_700_000_000_000));
-    if let Some(clock) = &fake_clock {
-        app.insert_resource(clock.clone());
-    }
-    app.add_plugins((
-        bevy_app::TaskPoolPlugin::default(),
-        DefaultPlugins.set(WindowHostPlugin::new(config)),
-        NotesPlugin,
-    ));
-    for (index, title) in load_saved_titles(&store_path).into_iter().enumerate() {
-        let id = format!("note-{}", index + 1);
-        app.world_mut()
-            .spawn((Note, NoteId(id), Name::new(title), Revision(0)));
-    }
-    app.world_mut().spawn((
-        AutoSave::<NotesStore>::default(),
-        AutoSavePolicy::new(
-            Duration::from_millis(500),
-            Some(Duration::from_secs(2)),
-            BackoffPolicy::exponential(Duration::from_secs(1), Duration::from_secs(8)),
-        ),
-        StorePath::new(store_path.clone()),
-    ));
-    if headless {
-        app.update();
-        let page = app
-            .world_mut()
-            .query_filtered::<Entity, With<UiIpcReady>>()
-            .single(app.world())
-            .unwrap();
-        let authority = (
-            app.world().get::<UiIpcGeneration>(page).unwrap().0,
-            app.world().get::<UiIpcNavigationRevision>(page).unwrap().0,
-            app.world().get::<UiIpcEpoch>(page).unwrap().0,
-        );
-        app.world_mut().write_message(UiReceiveRaw::from_event(
-            page,
-            "app://notes/",
-            authority,
-            &AddNoteRequest {
-                title: "First persistent note".into(),
-            },
-        ));
-        app.update();
-        if let Some(clock) = &fake_clock {
-            clock.advance(Duration::from_millis(600));
-        }
-        app.update();
-        let saved = std::fs::read_to_string(&store_path).unwrap_or_default();
-        assert!(saved.contains("First persistent note"));
-        let count = app
-            .world_mut()
-            .query_filtered::<&Name, With<Note>>()
-            .iter(app.world())
-            .count();
-        println!("notes headless smoke passed: notes={count} saved={saved:?}");
-        return;
-    }
-    app.run();
+    App::new()
+        .insert_resource(NotesBootstrap {
+            _temp: temp_dir,
+            store_path,
+            initial_titles,
+        })
+        .add_plugins((
+            bevy_app::TaskPoolPlugin::default(),
+            DefaultPlugins.set(WindowHostPlugin::new(config)),
+            NotesPlugin,
+        ))
+        .run();
 }

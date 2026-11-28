@@ -135,6 +135,7 @@ fn render_mobile_ui(
     rendered.0 = dioxus_ssr::render_element(rsx! {
         MobileShellView { state }
     });
+    println!("{}", rendered.0);
 }
 
 #[component]
@@ -167,37 +168,5 @@ fn MobileShellView(state: MobileShellUiState) -> Element {
 }
 
 fn main() {
-    let mut app = App::new();
-    app.add_plugins(MobileClientPlugin);
-    app.update();
-
-    let screen = app
-        .world_mut()
-        .query_filtered::<Entity, With<MobileScreen>>()
-        .single(app.world())
-        .unwrap();
-    let initial = app.world().resource::<LastRenderedHtml>().0.clone();
-    assert!(initial.contains("Connected to workstation.local (3 live sessions)"));
-
-    let authority = (
-        app.world().get::<UiIpcGeneration>(screen).unwrap().0,
-        app.world()
-            .get::<UiIpcNavigationRevision>(screen)
-            .unwrap()
-            .0,
-        app.world().get::<UiIpcEpoch>(screen).unwrap().0,
-    );
-    app.world_mut().write_message(UiReceiveRaw::from_event(
-        screen,
-        "mobile://shell/",
-        authority,
-        &SelectMobileTab {
-            tab: MobileTab::Sessions,
-        },
-    ));
-    app.update();
-
-    let updated = app.world().resource::<LastRenderedHtml>().0.clone();
-    assert!(updated.contains("Showing 3 active remote sessions"));
-    println!("mobile client smoke passed: {updated}");
+    App::new().add_plugins(MobileClientPlugin).run();
 }

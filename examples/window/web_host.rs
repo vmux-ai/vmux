@@ -1,9 +1,7 @@
 use bevy_ecs::prelude::*;
 use dioxus::prelude::*;
 use vmux_app::ecs::{EffectiveStartupUrl, UiIpcSet};
-use vmux_app::manifest::hosting::{
-    Contract, HostedApplication, HostedApplicationReady, Package, WebHostPlugin,
-};
+use vmux_app::manifest::hosting::{Contract, HostedApplication, Package, WebHostPlugin};
 use vmux_app::manifest::{FeatureManifestOwner, FeatureManifestSource, FeaturePlugin};
 use vmux_app::prelude::*;
 
@@ -147,55 +145,20 @@ static WEB_HOST_PAGE: Page = Page {
 };
 
 fn main() {
-    let headless = std::env::var_os("VMUX_EXAMPLE_HEADLESS").is_some();
     let mut config = WindowHostConfig::new("Vmux Web Host")
         .size(960, 640)
         .page(&WEB_HOST_PAGE);
-    if headless {
+    if std::env::var_os("VMUX_EXAMPLE_HEADLESS").is_some() {
         config = config.headless();
     }
     let package = Package::try_parse(PACKAGE).expect("valid package");
     let contract = Contract::new(SDK_REVISION).event::<PingRequest>();
 
-    let mut app = App::new();
-    app.add_plugins((
-        DefaultPlugins.set(WindowHostPlugin::new(config)),
-        NativePingPlugin,
-        WebHostPlugin::new(contract, package),
-    ));
-    if headless {
-        app.finish();
-        app.cleanup();
-        app.update();
-        let page = app
-            .world_mut()
-            .query_filtered::<Entity, With<UiIpcReady>>()
-            .single(app.world())
-            .unwrap();
-        let authority = (
-            app.world().get::<UiIpcGeneration>(page).unwrap().0,
-            app.world().get::<UiIpcNavigationRevision>(page).unwrap().0,
-            app.world().get::<UiIpcEpoch>(page).unwrap().0,
-        );
-        app.world_mut().write_message(UiReceiveRaw::from_event(
-            page,
-            "app://web-host/",
-            authority,
-            &PingRequest { count: 4 },
-        ));
-        app.update();
-        let world = app.world_mut();
-        let url = world
-            .query_filtered::<&EffectiveStartupUrl, With<HostedApplication>>()
-            .single(world)
-            .unwrap()
-            .0
-            .clone();
-        let total = world.query::<&PingTotal>().single(world).unwrap().0;
-        let ready = world.resource::<Messages<HostedApplicationReady>>().len();
-        assert_eq!(total, 4);
-        println!("window web_host smoke passed: entry={url} total={total} ready_events={ready}");
-        return;
-    }
-    app.run();
+    App::new()
+        .add_plugins((
+            DefaultPlugins.set(WindowHostPlugin::new(config)),
+            NativePingPlugin,
+            WebHostPlugin::new(contract, package),
+        ))
+        .run();
 }

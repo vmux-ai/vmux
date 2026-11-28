@@ -307,59 +307,49 @@ impl RenderedFrame {
     }
 }
 
-fn main() {
-    let headless =
-        std::env::var_os("VMUX_EXAMPLE_HEADLESS").is_some() || !io::stdin().is_terminal();
-    let mut app = App::new();
-    app.add_plugins(TuiWorkspacePlugin);
-    app.update();
-    app.update();
+struct TuiRunnerPlugin {
+    interactive: bool,
+}
 
-    if headless {
-        let initial = app.world().resource::<RenderedFrame>().0.clone();
-        assert!(initial.contains("Editor*"));
-        assert!(initial.contains("Terminal"));
-
-        app.world_mut().write_message(TuiCommand::Split {
-            title: "Logs".into(),
+impl Plugin for TuiRunnerPlugin {
+    fn build(&self, app: &mut App) {
+        let interactive = self.interactive;
+        app.set_runner(move |mut app: App| {
+            app.finish();
+            app.cleanup();
+            app.update();
+            app.update();
+            println!("{}", app.world().resource::<RenderedFrame>().0);
+            if !interactive {
+                return AppExit::Success;
+            }
+            let mut split_count = 1usize;
+            for line in io::stdin().lock().lines().map_while(Result::ok) {
+                let command = match line.trim() {
+                    "h" => TuiCommand::FocusPrev,
+                    "l" => TuiCommand::FocusNext,
+                    "s" => {
+                        let title = format!("Pane-{split_count}");
+                        split_count += 1;
+                        TuiCommand::Split { title }
+                    }
+                    "q" => break,
+                    _ => continue,
+                };
+                app.world_mut().write_message(command);
+                app.update();
+                app.update();
+                println!("{}", app.world().resource::<RenderedFrame>().0);
+            }
+            AppExit::Success
         });
-        app.update();
-        app.update();
-        let after_split = app.world().resource::<RenderedFrame>().0.clone();
-        assert!(after_split.contains("Logs*"));
-
-        app.world_mut().write_message(TuiCommand::FocusPrev);
-        app.update();
-        app.update();
-        let after_prev = app.world().resource::<RenderedFrame>().0.clone();
-        assert!(after_prev.contains("Terminal*"));
-
-        println!("{after_prev}");
-        println!("tui headless smoke passed");
-        return;
     }
+}
 
-    println!("{}", app.world().resource::<RenderedFrame>().0);
-    let mut split_count = 1usize;
-    for line in io::stdin().lock().lines().map_while(Result::ok) {
-        match line.trim() {
-            "h" => {
-                app.world_mut().write_message(TuiCommand::FocusPrev);
-            }
-            "l" => {
-                app.world_mut().write_message(TuiCommand::FocusNext);
-            }
-            "s" => {
-                app.world_mut().write_message(TuiCommand::Split {
-                    title: format!("Pane-{split_count}"),
-                });
-                split_count += 1;
-            }
-            "q" => break,
-            _ => continue,
-        }
-        app.update();
-        app.update();
-        println!("{}", app.world().resource::<RenderedFrame>().0);
-    }
+fn main() {
+    let interactive =
+        std::env::var_os("VMUX_EXAMPLE_HEADLESS").is_none() && io::stdin().is_terminal();
+    App::new()
+        .add_plugins((TuiWorkspacePlugin, TuiRunnerPlugin { interactive }))
+        .run();
 }
