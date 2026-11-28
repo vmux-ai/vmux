@@ -159,8 +159,7 @@ fn main() {
 
     let mut app = App::new();
     app.add_plugins((
-        WindowHostPlugin::new(config),
-        VmuxPlugin::builder().ecs(true).build(),
+        DefaultPlugins.set(WindowHostPlugin::new(config)),
         NativePingPlugin,
         WebHostPlugin::new(contract, package),
     ));
