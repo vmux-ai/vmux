@@ -152,7 +152,7 @@ impl Highlighter {
     }
 
     pub(crate) fn load_file(path: &Path, dark: bool) -> Result<HighlightedFile, LoadError> {
-        let meta = std::fs::metadata(path)
+        let meta = crate::host::fs_io::EditorFsIo::metadata(path)
             .map_err(|e| LoadError::Unreadable(format!("cannot open {}: {e}", path.display())))?;
         if !meta.is_file() {
             return Err(LoadError::Unreadable(format!(
@@ -167,7 +167,7 @@ impl Highlighter {
                 Self::MAX_VIEW_BYTES
             )));
         }
-        let bytes = std::fs::read(path)
+        let bytes = crate::host::fs_io::EditorFsIo::read(path)
             .map_err(|e| LoadError::Unreadable(format!("cannot read {}: {e}", path.display())))?;
         let Some(decoded) = crate::encoding::DecodedText::decode(&bytes) else {
             return Err(LoadError::Binary);

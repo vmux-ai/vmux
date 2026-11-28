@@ -95,13 +95,14 @@ impl TarLink {
 
     fn create(self, destination: &Path) -> Result<(), String> {
         if let Some(parent) = self.output.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            crate::host::fs_io::EditorFsIo::create_dir_all(parent)
+                .map_err(|error| error.to_string())?;
         }
         match self.kind {
             TarLinkKind::Symbolic => {
                 #[cfg(unix)]
                 {
-                    std::os::unix::fs::symlink(&self.target.0, &self.output)
+                    crate::host::fs_io::EditorFsIo::symlink(&self.target.0, &self.output)
                         .map_err(|error| error.to_string())
                 }
                 #[cfg(not(unix))]
@@ -109,8 +110,11 @@ impl TarLink {
                     Err("symbolic links are unsupported on this platform".to_string())
                 }
             }
-            TarLinkKind::Hard => std::fs::hard_link(self.target.join(destination), self.output)
-                .map_err(|error| error.to_string()),
+            TarLinkKind::Hard => crate::host::fs_io::EditorFsIo::hard_link(
+                self.target.join(destination),
+                self.output,
+            )
+            .map_err(|error| error.to_string()),
         }
     }
 }
@@ -161,37 +165,43 @@ impl ArchiveKind {
     }
 
     pub fn extract(self, file: &Path, destination: &Path, single_name: &str) -> Result<(), String> {
-        std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+        crate::host::fs_io::EditorFsIo::create_dir_all(destination)
+            .map_err(|error| error.to_string())?;
         match self {
             Self::Gz => {
                 let relative = ArchivePath::parse(Path::new(single_name))?;
-                let file = std::fs::File::open(file).map_err(|error| error.to_string())?;
+                let file = crate::host::fs_io::EditorFsIo::open(file)
+                    .map_err(|error| error.to_string())?;
                 let decoder = flate2::read::GzDecoder::new(file);
                 let output = relative.join(destination);
                 if let Some(parent) = output.parent() {
-                    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                    crate::host::fs_io::EditorFsIo::create_dir_all(parent)
+                        .map_err(|error| error.to_string())?;
                 }
-                let output = std::fs::File::create(output).map_err(|error| error.to_string())?;
+                let output = crate::host::fs_io::EditorFsIo::create(output)
+                    .map_err(|error| error.to_string())?;
                 ExpandedSize::copy(decoder, output)
             }
             Self::TarGz => Self::extract_tar_gz(file, destination),
             Self::Zip => Self::extract_zip(file, destination),
             Self::Raw => {
                 let relative = ArchivePath::parse(Path::new(single_name))?;
-                let input = std::fs::File::open(file).map_err(|error| error.to_string())?;
+                let input = crate::host::fs_io::EditorFsIo::open(file)
+                    .map_err(|error| error.to_string())?;
                 let output_path = relative.join(destination);
                 if let Some(parent) = output_path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                    crate::host::fs_io::EditorFsIo::create_dir_all(parent)
+                        .map_err(|error| error.to_string())?;
                 }
-                let output =
-                    std::fs::File::create(output_path).map_err(|error| error.to_string())?;
+                let output = crate::host::fs_io::EditorFsIo::create(output_path)
+                    .map_err(|error| error.to_string())?;
                 ExpandedSize::copy(input, output)
             }
         }
     }
 
     fn extract_tar_gz(file: &Path, destination: &Path) -> Result<(), String> {
-        let file = std::fs::File::open(file).map_err(|error| error.to_string())?;
+        let file = crate::host::fs_io::EditorFsIo::open(file).map_err(|error| error.to_string())?;
         let decoder = flate2::read::GzDecoder::new(file);
         let mut archive = tar::Archive::new(decoder);
         let entries = archive.entries().map_err(|error| error.to_string())?;
@@ -230,7 +240,8 @@ impl ArchiveKind {
                 continue;
             }
             if kind.is_dir() {
-                std::fs::create_dir_all(&output).map_err(|error| error.to_string())?;
+                crate::host::fs_io::EditorFsIo::create_dir_all(&output)
+                    .map_err(|error| error.to_string())?;
                 continue;
             }
             if !kind.is_file() {
@@ -238,7 +249,8 @@ impl ArchiveKind {
             }
             expanded.add(entry.header().size().map_err(|error| error.to_string())?)?;
             if let Some(parent) = output.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                crate::host::fs_io::EditorFsIo::create_dir_all(parent)
+                    .map_err(|error| error.to_string())?;
             }
             entry.unpack(&output).map_err(|error| error.to_string())?;
         }
@@ -249,8 +261,9 @@ impl ArchiveKind {
     }
 
     fn extract_zip(file: &Path, destination: &Path) -> Result<(), String> {
-        let mut headers = std::fs::File::open(file).map_err(|error| error.to_string())?;
-        let file = std::fs::File::open(file).map_err(|error| error.to_string())?;
+        let mut headers =
+            crate::host::fs_io::EditorFsIo::open(file).map_err(|error| error.to_string())?;
+        let file = crate::host::fs_io::EditorFsIo::open(file).map_err(|error| error.to_string())?;
         let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
         if archive.len() > Self::MAX_ENTRIES {
             return Err(format!(
@@ -274,21 +287,26 @@ impl ArchiveKind {
                 continue;
             }
             if entry.is_dir() {
-                std::fs::create_dir_all(&output).map_err(|error| error.to_string())?;
+                crate::host::fs_io::EditorFsIo::create_dir_all(&output)
+                    .map_err(|error| error.to_string())?;
                 continue;
             }
             expanded.add(entry.size())?;
             if let Some(parent) = output.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                crate::host::fs_io::EditorFsIo::create_dir_all(parent)
+                    .map_err(|error| error.to_string())?;
             }
-            let mut output_file =
-                std::fs::File::create(&output).map_err(|error| error.to_string())?;
+            let mut output_file = crate::host::fs_io::EditorFsIo::create(&output)
+                .map_err(|error| error.to_string())?;
             std::io::copy(&mut entry, &mut output_file).map_err(|error| error.to_string())?;
             output_file.flush().map_err(|error| error.to_string())?;
             #[cfg(unix)]
             if let Some(mode) = mode.0 {
-                std::fs::set_permissions(&output, std::fs::Permissions::from_mode(mode & 0o777))
-                    .map_err(|error| error.to_string())?;
+                crate::host::fs_io::EditorFsIo::set_permissions(
+                    &output,
+                    std::fs::Permissions::from_mode(mode & 0o777),
+                )
+                .map_err(|error| error.to_string())?;
             }
         }
         Ok(())

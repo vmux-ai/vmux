@@ -46,16 +46,19 @@ impl CrxArchive {
             };
             let output = destination.join(name);
             if file.is_dir() {
-                std::fs::create_dir_all(&output).map_err(|error| error.to_string())?;
+                crate::fs_io::ExtensionFsIo::create_dir_all(&output)
+                    .map_err(|error| error.to_string())?;
                 continue;
             }
             if let Some(parent) = output.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                crate::fs_io::ExtensionFsIo::create_dir_all(parent)
+                    .map_err(|error| error.to_string())?;
             }
             let mut bytes = Vec::new();
             file.read_to_end(&mut bytes)
                 .map_err(|error| error.to_string())?;
-            std::fs::write(&output, bytes).map_err(|error| error.to_string())?;
+            crate::fs_io::ExtensionFsIo::write(&output, bytes)
+                .map_err(|error| error.to_string())?;
         }
         Ok(())
     }

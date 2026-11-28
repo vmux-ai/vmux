@@ -570,7 +570,8 @@ impl ProjectDeletion {
         ProjectRoute::resolve(url, &root)
             .ok_or_else(|| vmux_ui::i18n::translate("error-page-not-found"))??;
         let imported = path.parent() == Some(root.join("imported").as_path())
-            && std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_symlink());
+            && crate::host::fs_io::EditorFsIo::symlink_metadata(&path)
+                .is_ok_and(|metadata| metadata.is_symlink());
         if !imported && !path.starts_with(&root) {
             return Err(vmux_ui::i18n::translate("error-page-not-found"));
         }
@@ -579,9 +580,11 @@ impl ProjectDeletion {
 
     fn remove(self) -> Result<(), String> {
         if self.imported {
-            std::fs::remove_file(self.path).map_err(|error| error.to_string())
+            crate::host::fs_io::EditorFsIo::remove_file(self.path)
+                .map_err(|error| error.to_string())
         } else {
-            std::fs::remove_dir_all(self.path).map_err(|error| error.to_string())
+            crate::host::fs_io::EditorFsIo::remove_dir_all(self.path)
+                .map_err(|error| error.to_string())
         }
     }
 }

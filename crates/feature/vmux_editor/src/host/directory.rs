@@ -543,8 +543,10 @@ impl FileDir {
     }
 
     pub(crate) fn try_read(path: &Path) -> Result<Vec<FileDirEntry>, String> {
-        let read = std::fs::read_dir(path).map_err(|error| error.to_string())?;
+        let read =
+            crate::host::fs_io::EditorFsIo::read_dir(path).map_err(|error| error.to_string())?;
         let mut entries: Vec<FileDirEntry> = read
+            .into_iter()
             .flatten()
             .map(|entry| {
                 let path = entry.path();
@@ -553,7 +555,7 @@ impl FileDir {
                     .map(|kind| {
                         kind.is_dir()
                             || kind.is_symlink()
-                                && std::fs::metadata(&path)
+                                && crate::host::fs_io::EditorFsIo::metadata(&path)
                                     .map(|metadata| metadata.is_dir())
                                     .unwrap_or(false)
                     })

@@ -111,7 +111,7 @@ impl Drop for StagingDirectory {
         let path = self.0.clone();
         IoTaskPool::get()
             .spawn(async move {
-                if let Err(error) = std::fs::remove_dir_all(&path)
+                if let Err(error) = crate::fs_io::ExtensionFsIo::remove_dir_all(&path)
                     && error.kind() != std::io::ErrorKind::NotFound
                 {
                     warn!(path = %path.display(), %error, "failed to remove extension staging");
@@ -206,7 +206,8 @@ impl Job for UnpackJob {
         {
             return Err("downloaded extension context changed".into());
         }
-        let bytes = std::fs::read(&self.downloaded.crx_path).map_err(|error| error.to_string())?;
+        let bytes = crate::fs_io::ExtensionFsIo::read(&self.downloaded.crx_path)
+            .map_err(|error| error.to_string())?;
         PackageInstaller {
             id: self.request.id,
             profile: self.request.profile,
@@ -243,7 +244,8 @@ impl ResolvedInstall {
     }
 
     fn download(self, progress: impl FnMut(u64, Option<u64>)) -> Result<DownloadedInstall, String> {
-        std::fs::create_dir_all(self.staging.path()).map_err(|error| error.to_string())?;
+        crate::fs_io::ExtensionFsIo::create_dir_all(self.staging.path())
+            .map_err(|error| error.to_string())?;
         download::Downloader::fetch(&self.download_url, &self.crx_path, progress)?;
         Ok(DownloadedInstall {
             id: self.id,
@@ -266,8 +268,9 @@ impl PackageInstaller {
         let public_key_b64 = Some(base64::engine::general_purpose::STANDARD.encode(public_key));
         let unpack_dir = self.staging.path().join("unpacked");
         archive.unpack(&unpack_dir)?;
-        let manifest_json = std::fs::read_to_string(unpack_dir.join("manifest.json"))
-            .map_err(|error| error.to_string())?;
+        let manifest_json =
+            crate::fs_io::ExtensionFsIo::read_to_string(unpack_dir.join("manifest.json"))
+                .map_err(|error| error.to_string())?;
         let manifest = driver::ExtensionManifest::parse(&manifest_json)?;
         let name = manifest.resolve_name(&unpack_dir);
         let icon = manifest
@@ -309,7 +312,7 @@ impl PackageInstaller {
     }
 
     fn icon_data_url(&self, directory: &Path, relative: &str) -> Option<String> {
-        let bytes = std::fs::read(directory.join(relative)).ok()?;
+        let bytes = crate::fs_io::ExtensionFsIo::read(directory.join(relative)).ok()?;
         let mime = if relative.ends_with(".svg") {
             "image/svg+xml"
         } else {

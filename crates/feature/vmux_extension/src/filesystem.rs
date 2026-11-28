@@ -114,10 +114,10 @@ impl FileStore {
 
     pub fn read_loaded_ids(directory: &Path, profile: &str) -> Vec<String> {
         let loaded_path = directory.join("loaded").join(format!("{profile}.txt"));
-        std::fs::read_to_string(loaded_path)
+        crate::fs_io::ExtensionFsIo::read_to_string(loaded_path)
             .or_else(|error| {
                 if error.kind() == std::io::ErrorKind::NotFound {
-                    std::fs::read_to_string(directory.join("loaded.txt"))
+                    crate::fs_io::ExtensionFsIo::read_to_string(directory.join("loaded.txt"))
                 } else {
                     Err(error)
                 }
@@ -134,12 +134,14 @@ impl FileStore {
     }
 
     pub fn write_loaded_ids(directory: &Path, profile: &str, ids: &[String]) -> Result<(), String> {
-        std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+        crate::fs_io::ExtensionFsIo::create_dir_all(directory)
+            .map_err(|error| error.to_string())?;
         let path = directory.join("loaded").join(format!("{profile}.txt"));
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            crate::fs_io::ExtensionFsIo::create_dir_all(parent)
+                .map_err(|error| error.to_string())?;
         }
-        std::fs::write(path, ids.join("\n")).map_err(|error| error.to_string())
+        crate::fs_io::ExtensionFsIo::write(path, ids.join("\n")).map_err(|error| error.to_string())
     }
 
     pub fn migrate_legacy_package(
@@ -162,29 +164,35 @@ impl FileStore {
             return Err(format!("legacy extension package not found: {id}"));
         }
         let parent = source.parent().ok_or("source directory has no parent")?;
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        crate::fs_io::ExtensionFsIo::create_dir_all(parent).map_err(|error| error.to_string())?;
         let temporary = parent.join("source.tmp");
         if temporary.exists() {
-            std::fs::remove_dir_all(&temporary).map_err(|error| error.to_string())?;
+            crate::fs_io::ExtensionFsIo::remove_dir_all(&temporary)
+                .map_err(|error| error.to_string())?;
         }
         Self::copy_legacy_tree(&legacy, &temporary)?;
         Self::restore_legacy_worker(&temporary)?;
         Self::validate_manifest_object(&temporary)?;
         Self::source_hash(&temporary)?;
-        std::fs::rename(&temporary, &source).map_err(|error| error.to_string())?;
+        crate::fs_io::ExtensionFsIo::rename(&temporary, &source)
+            .map_err(|error| error.to_string())?;
         Ok(source)
     }
 
     fn copy_legacy_tree(source: &Path, destination: &Path) -> Result<(), String> {
-        std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
-        for entry in std::fs::read_dir(source).map_err(|error| error.to_string())? {
+        crate::fs_io::ExtensionFsIo::create_dir_all(destination)
+            .map_err(|error| error.to_string())?;
+        for entry in
+            crate::fs_io::ExtensionFsIo::read_dir(source).map_err(|error| error.to_string())?
+        {
             let entry = entry.map_err(|error| error.to_string())?;
             let file_type = entry.file_type().map_err(|error| error.to_string())?;
             let target = destination.join(entry.file_name());
             if file_type.is_dir() {
                 Self::copy_legacy_tree(&entry.path(), &target)?;
             } else if file_type.is_file() {
-                std::fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
+                crate::fs_io::ExtensionFsIo::copy(entry.path(), target)
+                    .map_err(|error| error.to_string())?;
             } else {
                 return Err(format!(
                     "unsupported legacy package entry: {}",
@@ -203,13 +211,16 @@ impl FileStore {
     }
 
     fn remove_generated_shim_files(dir: &Path) -> Result<(), String> {
-        for entry in std::fs::read_dir(dir).map_err(|error| error.to_string())? {
+        for entry in
+            crate::fs_io::ExtensionFsIo::read_dir(dir).map_err(|error| error.to_string())?
+        {
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
             if path.is_dir() {
                 Self::remove_generated_shim_files(&path)?;
             } else if Self::is_generated_shim_file(&entry.file_name().to_string_lossy()) {
-                std::fs::remove_file(path).map_err(|error| error.to_string())?;
+                crate::fs_io::ExtensionFsIo::remove_file(path)
+                    .map_err(|error| error.to_string())?;
             }
         }
         Ok(())
@@ -219,7 +230,8 @@ impl FileStore {
         let sidecar_path = dir.join("vmux_shim.json");
         if sidecar_path.exists() {
             let sidecar: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&sidecar_path).map_err(|error| error.to_string())?,
+                &crate::fs_io::ExtensionFsIo::read_to_string(&sidecar_path)
+                    .map_err(|error| error.to_string())?,
             )
             .map_err(|error| error.to_string())?;
             let original = sidecar
@@ -231,7 +243,8 @@ impl FileStore {
             }
             let manifest_path = dir.join("manifest.json");
             let mut manifest: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?,
+                &crate::fs_io::ExtensionFsIo::read_to_string(&manifest_path)
+                    .map_err(|error| error.to_string())?,
             )
             .map_err(|error| error.to_string())?;
             let background = manifest
@@ -242,7 +255,7 @@ impl FileStore {
                 "service_worker".into(),
                 serde_json::Value::String(original.into()),
             );
-            std::fs::write(
+            crate::fs_io::ExtensionFsIo::write(
                 manifest_path,
                 serde_json::to_string_pretty(&manifest).map_err(|error| error.to_string())?,
             )
@@ -254,7 +267,8 @@ impl FileStore {
     fn validate_manifest_object(dir: &Path) -> Result<(), String> {
         let manifest_path = dir.join("manifest.json");
         let manifest: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?,
+            &crate::fs_io::ExtensionFsIo::read_to_string(&manifest_path)
+                .map_err(|error| error.to_string())?,
         )
         .map_err(|error| error.to_string())?;
         if !manifest.is_object() {
@@ -271,7 +285,9 @@ impl FileStore {
         for (relative, absolute) in files {
             hasher.update(relative.as_bytes());
             hasher.update([0]);
-            hasher.update(std::fs::read(absolute).map_err(|error| error.to_string())?);
+            hasher.update(
+                crate::fs_io::ExtensionFsIo::read(absolute).map_err(|error| error.to_string())?,
+            );
             hasher.update([0]);
         }
         Ok(format!("{:x}", hasher.finalize()))
@@ -282,7 +298,9 @@ impl FileStore {
         current: &Path,
         files: &mut Vec<(String, std::path::PathBuf)>,
     ) -> Result<(), String> {
-        for entry in std::fs::read_dir(current).map_err(|error| error.to_string())? {
+        for entry in
+            crate::fs_io::ExtensionFsIo::read_dir(current).map_err(|error| error.to_string())?
+        {
             let entry = entry.map_err(|error| error.to_string())?;
             let kind = entry.file_type().map_err(|error| error.to_string())?;
             let path = entry.path();
@@ -321,17 +339,20 @@ impl FileStore {
             if Self::source_hash(&destination)? != hash {
                 return Err("extension version already contains different source".into());
             }
-            std::fs::remove_dir_all(&source).map_err(|error| error.to_string())?;
-        } else {
-            std::fs::create_dir_all(destination.parent().unwrap())
+            crate::fs_io::ExtensionFsIo::remove_dir_all(&source)
                 .map_err(|error| error.to_string())?;
-            std::fs::rename(&source, &destination).map_err(|error| error.to_string())?;
+        } else {
+            crate::fs_io::ExtensionFsIo::create_dir_all(destination.parent().unwrap())
+                .map_err(|error| error.to_string())?;
+            crate::fs_io::ExtensionFsIo::rename(&source, &destination)
+                .map_err(|error| error.to_string())?;
         }
         Ok(entry.clone())
     }
 
     pub fn read(directory: &Path) -> Result<Index, String> {
-        let source = match std::fs::read_to_string(directory.join("index.json")) {
+        let source = match crate::fs_io::ExtensionFsIo::read_to_string(directory.join("index.json"))
+        {
             Ok(source) => source,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Index::default());
@@ -363,7 +384,8 @@ impl FileStore {
             .join(&request.profile)
             .join(&request.id);
         if runtime.exists() {
-            std::fs::remove_dir_all(runtime).map_err(|error| error.to_string())?;
+            crate::fs_io::ExtensionFsIo::remove_dir_all(runtime)
+                .map_err(|error| error.to_string())?;
         }
         if request.package {
             for path in [
@@ -371,7 +393,8 @@ impl FileStore {
                 directory.join("packages").join(&request.id),
             ] {
                 if path.exists() {
-                    std::fs::remove_dir_all(path).map_err(|error| error.to_string())?;
+                    crate::fs_io::ExtensionFsIo::remove_dir_all(path)
+                        .map_err(|error| error.to_string())?;
                 }
             }
         }

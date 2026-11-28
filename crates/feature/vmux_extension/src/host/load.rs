@@ -130,7 +130,7 @@ impl PreparedExtensions {
                     &entry.source_hash,
                 )?
             };
-            let text = std::fs::read_to_string(source.join("manifest.json"))
+            let text = crate::fs_io::ExtensionFsIo::read_to_string(source.join("manifest.json"))
                 .map_err(|error| error.to_string())?;
             let parsed = driver::ExtensionManifest::parse(&text)?;
             evidence.push(Evidence {

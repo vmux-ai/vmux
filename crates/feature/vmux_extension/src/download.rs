@@ -14,7 +14,8 @@ impl Downloader {
             return Err(format!("http {}", response.status()));
         }
         let total = response.content_length();
-        let mut file = std::fs::File::create(destination).map_err(|error| error.to_string())?;
+        let mut file =
+            crate::fs_io::ExtensionFsIo::create(destination).map_err(|error| error.to_string())?;
         let mut buffer = [0u8; 8192];
         let mut received = 0u64;
         loop {

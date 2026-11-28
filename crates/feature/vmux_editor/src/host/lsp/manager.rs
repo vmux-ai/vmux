@@ -81,7 +81,7 @@ impl LspLine {
     }
 
     pub(crate) fn read(path: &Path, line: u32) -> Self {
-        let Ok(content) = std::fs::read_to_string(path) else {
+        let Ok(content) = crate::host::fs_io::EditorFsIo::read_to_string(path) else {
             return Self::default();
         };
         Self(
@@ -437,11 +437,11 @@ impl LspManager<'_, '_> {
     }
 
     fn read_text(path: &Path) -> Option<String> {
-        let meta = std::fs::metadata(path).ok()?;
+        let meta = crate::host::fs_io::EditorFsIo::metadata(path).ok()?;
         if !meta.is_file() || meta.len() > Highlighter::MAX_HIGHLIGHT_BYTES {
             return None;
         }
-        std::fs::read_to_string(path).ok()
+        crate::host::fs_io::EditorFsIo::read_to_string(path).ok()
     }
 
     fn stamp_current(&self, owner: Entity, stamp: &RequestStamp) -> bool {
