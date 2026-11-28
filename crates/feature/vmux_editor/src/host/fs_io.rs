@@ -100,6 +100,10 @@ impl EditorFsIo {
         std::fs::set_permissions(path, perm)
     }
 
+    pub(crate) fn sync_all(file: &File) -> std::io::Result<()> {
+        file.sync_all()
+    }
+
     #[cfg(unix)]
     pub(crate) fn symlink(
         original: impl AsRef<Path>,

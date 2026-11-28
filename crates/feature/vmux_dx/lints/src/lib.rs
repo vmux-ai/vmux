@@ -60,7 +60,7 @@ rustc_session::declare_lint! {
 
 rustc_session::declare_lint! {
     pub VMUX_ECS_DRIVER_IO,
-    Warn,
+    Deny,
     "direct filesystem, process, or network IO must live in a driver or IO adapter file, not on ECS components or domain modules"
 }
 

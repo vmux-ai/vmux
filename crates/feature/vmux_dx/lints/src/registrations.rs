@@ -53,7 +53,7 @@ impl Fixture {
         let output = Command::new("cargo")
             .env(
                 "DYLINT_RUSTFLAGS",
-                "-A vmux_ecs_runtime -A vmux_ecs_ownership",
+                "-A vmux_ecs_runtime -A vmux_ecs_ownership -A vmux_ecs_driver_io",
             )
             .current_dir(self.directory.path())
             .args([
@@ -588,15 +588,15 @@ fn driver_io_isolates_direct_io_from_components_and_domain_modules() {
             "driver_isolation",
             include_str!("../ui/driver_isolation.rs"),
             &[
-                "canonical ECS component performs direct filesystem, process, or network IO; move IO into a driver or IO adapter file @ 12:5-12:50",
-                "direct filesystem, process, or network IO impl must live in a driver or IO adapter file (e.g. driver.rs, *_driver.rs, io.rs, *_io.rs, native.rs, *_native.rs) @ 22:5-22:50",
+                "canonical ECS component performs direct filesystem, process, or network IO; move IO into a driver or IO adapter file @ 10:5-10:50",
+                "direct filesystem, process, or network IO impl must live in a driver or IO adapter file (e.g. driver.rs, *_driver.rs, io.rs, *_io.rs, native.rs, *_native.rs) @ 20:5-20:50",
             ][..],
         ),
         (
             "asset_driver",
             include_str!("../ui/asset_driver.rs"),
             &[
-                "canonical ECS component performs direct filesystem, process, or network IO; move IO into a driver or IO adapter file @ 12:5-12:50",
+                "canonical ECS component performs direct filesystem, process, or network IO; move IO into a driver or IO adapter file @ 10:5-10:50",
             ][..],
         ),
     ] {

@@ -1,5 +1,3 @@
-#![deny(vmux_ecs_driver_io)]
-
 use std::path::PathBuf;
 
 use bevy_app::{App, Plugin, Update};
