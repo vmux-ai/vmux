@@ -68,12 +68,12 @@ impl PackageStore {
 
     pub fn write_receipt(&self, name: &PackageName, receipt: &Receipt) -> io::Result<()> {
         let directory = self.package_dir(name);
-        std::fs::create_dir_all(&directory)?;
+        crate::host::fs_io::EditorFsIo::create_dir_all(&directory)?;
         receipt.write_to(&directory)
     }
 
     pub fn read_receipt(&self, name: &PackageName) -> Option<Receipt> {
-        let file = std::fs::File::open(self.receipt_path(name)).ok()?;
+        let file = crate::host::fs_io::EditorFsIo::open(self.receipt_path(name)).ok()?;
         let mut bytes = Vec::new();
         file.take(Self::RECEIPT_MAX_BYTES + 1)
             .read_to_end(&mut bytes)
@@ -96,7 +96,7 @@ impl PackageStore {
         link_name: &PackageName,
     ) -> io::Result<()> {
         let bin = self.bin_dir();
-        std::fs::create_dir_all(&bin)?;
+        crate::host::fs_io::EditorFsIo::create_dir_all(&bin)?;
         let link = bin.join(link_name.as_str());
         let target = self.package_dir(name).join(file.as_path());
         if !target.is_file() {
@@ -110,16 +110,16 @@ impl PackageStore {
             link_name.as_str(),
             std::process::id()
         ));
-        let _ = std::fs::remove_file(&temporary);
+        let _ = crate::host::fs_io::EditorFsIo::remove_file(&temporary);
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(&target, &temporary)?;
+            crate::host::fs_io::EditorFsIo::symlink(&target, &temporary)?;
         }
         #[cfg(not(unix))]
         {
-            std::fs::copy(&target, &temporary)?;
+            crate::host::fs_io::EditorFsIo::copy(&target, &temporary)?;
         }
-        std::fs::rename(temporary, link)?;
+        crate::host::fs_io::EditorFsIo::rename(temporary, link)?;
         Ok(())
     }
 
@@ -133,7 +133,7 @@ impl PackageStore {
     pub fn remove_package_dir(&self, name: &PackageName) -> io::Result<()> {
         let directory = self.package_dir(name);
         if directory.exists() {
-            std::fs::remove_dir_all(directory)?;
+            crate::host::fs_io::EditorFsIo::remove_dir_all(directory)?;
         }
         Ok(())
     }

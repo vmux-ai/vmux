@@ -197,7 +197,7 @@ impl WorkspaceEdits<'_, '_> {
             ));
         }
         let source = if targets.is_empty() {
-            std::fs::read_to_string(document.path.as_path())
+            crate::host::fs_io::EditorFsIo::read_to_string(document.path.as_path())
                 .map_err(|_| format!("{} could not be read", document.path.as_path().display()))?
         } else {
             let mut texts = targets

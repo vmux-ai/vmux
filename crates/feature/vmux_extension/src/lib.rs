@@ -51,5 +51,8 @@ pub mod snapshot;
 
 mod core;
 
+#[cfg(any(feature = "filesystem", all(host, feature = "host")))]
+mod fs_io;
+
 #[cfg(feature = "filesystem")]
 pub mod filesystem;

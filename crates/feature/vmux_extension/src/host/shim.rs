@@ -31,7 +31,8 @@ impl ExtensionShim {
         runtime_file: &str,
     ) -> Result<String, String> {
         let manifest_path = directory.join("manifest.json");
-        let raw = std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?;
+        let raw = crate::fs_io::ExtensionFsIo::read_to_string(&manifest_path)
+            .map_err(|error| error.to_string())?;
         let mut manifest: Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
         let background = manifest
             .get_mut("background")
@@ -62,11 +63,12 @@ impl ExtensionShim {
                 Self::PATCH_FILE
             )
         };
-        std::fs::write(directory.join(Self::PATCH_FILE), patch_source)
+        crate::fs_io::ExtensionFsIo::write(directory.join(Self::PATCH_FILE), patch_source)
             .map_err(|error| error.to_string())?;
-        std::fs::write(directory.join(&loader_file), loader).map_err(|error| error.to_string())?;
+        crate::fs_io::ExtensionFsIo::write(directory.join(&loader_file), loader)
+            .map_err(|error| error.to_string())?;
         background.insert("service_worker".into(), Value::String(loader_file.clone()));
-        std::fs::write(
+        crate::fs_io::ExtensionFsIo::write(
             manifest_path,
             serde_json::to_string_pretty(&manifest).map_err(|error| error.to_string())?,
         )
@@ -83,7 +85,8 @@ impl ExtensionShim {
             return Err("manifest popup path is invalid".into());
         }
         let path = directory.join(popup);
-        let html = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        let html = crate::fs_io::ExtensionFsIo::read_to_string(&path)
+            .map_err(|error| error.to_string())?;
         if html.contains(Self::PAGE_LOADER) {
             return Ok(());
         }
@@ -93,7 +96,7 @@ impl ExtensionShim {
         } else {
             format!("{}{html}", Self::PAGE_LOADER)
         };
-        std::fs::write(path, patched).map_err(|error| error.to_string())
+        crate::fs_io::ExtensionFsIo::write(path, patched).map_err(|error| error.to_string())
     }
 }
 

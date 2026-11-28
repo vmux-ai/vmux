@@ -75,6 +75,7 @@ pub mod fold;
 mod fold_io;
 mod fold_preferences;
 mod fold_store;
+pub(crate) mod fs_io;
 pub(crate) mod highlight;
 pub mod keymap;
 pub mod lsp;

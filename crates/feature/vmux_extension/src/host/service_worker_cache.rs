@@ -27,16 +27,21 @@ impl ServiceWorkerCache {
         let marker = self
             .default_dir
             .join(ServiceWorkerCache::RUNTIME_FINGERPRINT);
-        if std::fs::read_to_string(&marker).ok().as_deref() == Some(fingerprint.as_str()) {
+        if crate::fs_io::ExtensionFsIo::read_to_string(&marker)
+            .ok()
+            .as_deref()
+            == Some(fingerprint.as_str())
+        {
             return Ok(());
         }
         self.clear()?;
-        std::fs::create_dir_all(&self.default_dir).map_err(|error| error.to_string())?;
-        let _ = std::fs::remove_file(
+        crate::fs_io::ExtensionFsIo::create_dir_all(&self.default_dir)
+            .map_err(|error| error.to_string())?;
+        let _ = crate::fs_io::ExtensionFsIo::remove_file(
             self.default_dir
                 .join(ServiceWorkerCache::LEGACY_RUNTIME_MARKER),
         );
-        std::fs::write(&marker, fingerprint).map_err(|error| error.to_string())
+        crate::fs_io::ExtensionFsIo::write(&marker, fingerprint).map_err(|error| error.to_string())
     }
 
     fn fingerprint(prepared: &[PreparedRuntime]) -> String {
@@ -60,11 +65,12 @@ impl ServiceWorkerCache {
             Self::SERVICE_WORKER_DIR,
             uuid::Uuid::new_v4()
         ));
-        std::fs::rename(&service_workers, &stale).map_err(|error| error.to_string())?;
+        crate::fs_io::ExtensionFsIo::rename(&service_workers, &stale)
+            .map_err(|error| error.to_string())?;
         let _ = std::thread::Builder::new()
             .name("extension-cache-cleanup".into())
             .spawn(move || {
-                let _ = std::fs::remove_dir_all(stale);
+                let _ = crate::fs_io::ExtensionFsIo::remove_dir_all(stale);
             });
         Ok(())
     }

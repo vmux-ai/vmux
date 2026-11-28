@@ -97,7 +97,7 @@ impl DecodedText {
     const BOM_UTF16BE: [u8; 2] = [0xFE, 0xFF];
 
     pub fn read(path: &std::path::Path) -> Option<Self> {
-        let bytes = std::fs::read(path).ok()?;
+        let bytes = crate::host::fs_io::EditorFsIo::read(path).ok()?;
         Self::decode(&bytes)
     }
 

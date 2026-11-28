@@ -35,7 +35,7 @@ impl PreviewBuilder {
         if path.is_dir() {
             return PreviewKind::Dir(FileDir::read(path));
         }
-        let metadata = match std::fs::metadata(path) {
+        let metadata = match crate::host::fs_io::EditorFsIo::metadata(path) {
             Ok(metadata) => metadata,
             Err(error) => return PreviewKind::Error(error.to_string()),
         };
@@ -43,7 +43,7 @@ impl PreviewBuilder {
             if metadata.len() > cap {
                 return Self::info(&metadata, "image (too large to preview)");
             }
-            return match std::fs::read(path) {
+            return match crate::host::fs_io::EditorFsIo::read(path) {
                 Ok(bytes) => PreviewKind::Image {
                     url: Self::image_url(mime, &bytes),
                 },

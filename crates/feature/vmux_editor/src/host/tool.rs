@@ -246,7 +246,8 @@ impl FileToolExecution {
             return Err("read_file.path must be an absolute path".to_string());
         }
         let path = Self::scoped_path(anchor, Path::new(&requested), "read_file").await?;
-        let metadata = std::fs::metadata(&path).map_err(|error| format!("read_file: {error}"))?;
+        let metadata = crate::host::fs_io::EditorFsIo::metadata(&path)
+            .map_err(|error| format!("read_file: {error}"))?;
         if !metadata.is_file() {
             return Err("read_file: not a regular file".to_string());
         }
@@ -443,7 +444,7 @@ impl FileToolExecution {
         search_matches: Vec<(String, u32, u32, u32, String)>,
     ) {
         if let Some(file) = order.first()
-            && let Ok(path) = std::fs::canonicalize(file)
+            && let Ok(path) = crate::host::fs_io::EditorFsIo::canonicalize(file)
             && let Ok(request) = AgentRequest::encode(&AgentFileTouched {
                 anchor,
                 path: path.to_string_lossy().into_owned(),
@@ -460,7 +461,7 @@ impl FileToolExecution {
         for (path, line, col, end_col, preview) in search_matches {
             let Some(canonical) = canonical_paths
                 .entry(path.clone())
-                .or_insert_with(|| std::fs::canonicalize(&path).ok())
+                .or_insert_with(|| crate::host::fs_io::EditorFsIo::canonicalize(&path).ok())
                 .clone()
             else {
                 continue;
@@ -493,7 +494,7 @@ impl FileToolExecution {
         offset: Option<u32>,
         limit: Option<usize>,
     ) -> std::io::Result<String> {
-        let reader = std::io::BufReader::new(std::fs::File::open(path)?);
+        let reader = std::io::BufReader::new(crate::host::fs_io::EditorFsIo::open(path)?);
         let start = offset
             .map(|offset| offset.saturating_sub(1) as usize)
             .unwrap_or(0);

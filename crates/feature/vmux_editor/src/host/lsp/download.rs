@@ -133,7 +133,8 @@ impl RemoteArtifact {
             return Err(format!("download exceeds {max_bytes} bytes"));
         }
         if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            crate::host::fs_io::EditorFsIo::create_dir_all(parent)
+                .map_err(|error| error.to_string())?;
         }
         let parent = destination.parent().unwrap_or_else(|| Path::new("."));
         let mut file =

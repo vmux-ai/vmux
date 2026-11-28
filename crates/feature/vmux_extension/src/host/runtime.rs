@@ -94,12 +94,12 @@ impl PreparedRuntime {
         let runtime_hash = Self::runtime_hash(&source_hash, &worker_source)
             .map_err(PrepareRuntimeError::Infrastructure)?;
         let runtime_root = FileStore::runtime_dir(runtime_store_root, profile, &entry.id);
-        std::fs::create_dir_all(&runtime_root)
+        crate::fs_io::ExtensionFsIo::create_dir_all(&runtime_root)
             .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
         let temp_dir = runtime_root.join(format!("current-{runtime_hash}.tmp"));
         let final_dir = runtime_root.join("current");
         if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir)
+            crate::fs_io::ExtensionFsIo::remove_dir_all(&temp_dir)
                 .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
         }
         Self::copy_tree(&source, &temp_dir).map_err(PrepareRuntimeError::Infrastructure)?;
@@ -107,9 +107,9 @@ impl PreparedRuntime {
             driver::ExtensionManifest::prepare_unpacked(&temp_dir, key, entry.popup.as_deref())
                 .map_err(PrepareRuntimeError::Infrastructure)?;
         }
-        std::fs::write(temp_dir.join("vmux_runtime.js"), worker_source)
+        crate::fs_io::ExtensionFsIo::write(temp_dir.join("vmux_runtime.js"), worker_source)
             .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
-        std::fs::write(temp_dir.join("vmux_bridge.html"), Self::BRIDGE_HTML)
+        crate::fs_io::ExtensionFsIo::write(temp_dir.join("vmux_bridge.html"), Self::BRIDGE_HTML)
             .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
         Self::install_content_script(&temp_dir).map_err(PrepareRuntimeError::Infrastructure)?;
         let loader = ExtensionShim::install_worker_loader(&temp_dir, "vmux_runtime.js")
@@ -120,10 +120,10 @@ impl PreparedRuntime {
         }
         Self::validate(&temp_dir, &loader).map_err(PrepareRuntimeError::Infrastructure)?;
         if final_dir.exists() {
-            std::fs::remove_dir_all(&final_dir)
+            crate::fs_io::ExtensionFsIo::remove_dir_all(&final_dir)
                 .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
         }
-        std::fs::rename(&temp_dir, &final_dir)
+        crate::fs_io::ExtensionFsIo::rename(&temp_dir, &final_dir)
             .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
         Self::remove_siblings(&runtime_root, &final_dir)
             .map_err(PrepareRuntimeError::Infrastructure)?;
@@ -159,7 +159,8 @@ impl PreparedRuntime {
     fn install_content_script(dir: &Path) -> Result<(), String> {
         let manifest_path = dir.join("manifest.json");
         let mut manifest: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?,
+            &crate::fs_io::ExtensionFsIo::read_to_string(&manifest_path)
+                .map_err(|error| error.to_string())?,
         )
         .map_err(|error| error.to_string())?;
         let Some(content_scripts) = manifest
@@ -191,9 +192,12 @@ impl PreparedRuntime {
         if !installed {
             return Ok(());
         }
-        std::fs::write(dir.join(Self::CONTENT_SCRIPT_FILE), Self::CONTENT_SCRIPT)
-            .map_err(|error| error.to_string())?;
-        std::fs::write(
+        crate::fs_io::ExtensionFsIo::write(
+            dir.join(Self::CONTENT_SCRIPT_FILE),
+            Self::CONTENT_SCRIPT,
+        )
+        .map_err(|error| error.to_string())?;
+        crate::fs_io::ExtensionFsIo::write(
             manifest_path,
             serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
         )
@@ -211,15 +215,19 @@ impl PreparedRuntime {
     }
 
     fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
-        std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
-        for entry in std::fs::read_dir(source).map_err(|error| error.to_string())? {
+        crate::fs_io::ExtensionFsIo::create_dir_all(destination)
+            .map_err(|error| error.to_string())?;
+        for entry in
+            crate::fs_io::ExtensionFsIo::read_dir(source).map_err(|error| error.to_string())?
+        {
             let entry = entry.map_err(|error| error.to_string())?;
             let file_type = entry.file_type().map_err(|error| error.to_string())?;
             let target = destination.join(entry.file_name());
             if file_type.is_dir() {
                 Self::copy_tree(&entry.path(), &target)?;
             } else if file_type.is_file() {
-                std::fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
+                crate::fs_io::ExtensionFsIo::copy(entry.path(), target)
+                    .map_err(|error| error.to_string())?;
             } else {
                 return Err(format!(
                     "unsupported extension source entry: {}",
@@ -232,7 +240,7 @@ impl PreparedRuntime {
 
     fn validate(dir: &Path, loader: &str) -> Result<(), String> {
         let manifest: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.join("manifest.json"))
+            &crate::fs_io::ExtensionFsIo::read_to_string(dir.join("manifest.json"))
                 .map_err(|error| error.to_string())?,
         )
         .map_err(|error| error.to_string())?;
@@ -260,16 +268,20 @@ impl PreparedRuntime {
     }
 
     fn remove_siblings(runtime_root: &Path, keep: &Path) -> Result<(), String> {
-        for entry in std::fs::read_dir(runtime_root).map_err(|error| error.to_string())? {
+        for entry in crate::fs_io::ExtensionFsIo::read_dir(runtime_root)
+            .map_err(|error| error.to_string())?
+        {
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
             if path == keep {
                 continue;
             }
             if path.is_dir() {
-                std::fs::remove_dir_all(path).map_err(|error| error.to_string())?;
+                crate::fs_io::ExtensionFsIo::remove_dir_all(path)
+                    .map_err(|error| error.to_string())?;
             } else {
-                std::fs::remove_file(path).map_err(|error| error.to_string())?;
+                crate::fs_io::ExtensionFsIo::remove_file(path)
+                    .map_err(|error| error.to_string())?;
             }
         }
         Ok(())

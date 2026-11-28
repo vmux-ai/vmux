@@ -25,13 +25,9 @@ impl ExplorerFs {
             return Err(format!("{} already exists", target.display()));
         }
         if is_dir {
-            std::fs::create_dir(&target)
+            crate::host::fs_io::EditorFsIo::create_dir(&target)
         } else {
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&target)
-                .map(|_| ())
+            crate::host::fs_io::EditorFsIo::create_new(&target)
         }
         .map_err(|error| format!("Cannot create {}: {error}", target.display()))?;
         Ok(target)
@@ -40,7 +36,7 @@ impl ExplorerFs {
     pub(super) fn rename(&self, path: &Path, name: &str) -> Result<(PathBuf, bool), String> {
         let name = Self::name(name)?;
         let source = self.source(path)?;
-        let metadata = std::fs::symlink_metadata(&source)
+        let metadata = crate::host::fs_io::EditorFsIo::symlink_metadata(&source)
             .map_err(|error| format!("Cannot access {}: {error}", source.display()))?;
         let target = source
             .parent()
@@ -52,20 +48,20 @@ impl ExplorerFs {
         if target.exists() {
             return Err(format!("{} already exists", target.display()));
         }
-        std::fs::rename(&source, &target)
+        crate::host::fs_io::EditorFsIo::rename(&source, &target)
             .map_err(|error| format!("Cannot rename {}: {error}", source.display()))?;
         Ok((target, metadata.is_dir()))
     }
 
     pub(super) fn delete(&self, path: &Path) -> Result<(PathBuf, bool), String> {
         let source = self.source(path)?;
-        let metadata = std::fs::symlink_metadata(&source)
+        let metadata = crate::host::fs_io::EditorFsIo::symlink_metadata(&source)
             .map_err(|error| format!("Cannot access {}: {error}", source.display()))?;
         let is_dir = metadata.is_dir() && !metadata.file_type().is_symlink();
         if is_dir {
-            std::fs::remove_dir_all(&source)
+            crate::host::fs_io::EditorFsIo::remove_dir_all(&source)
         } else {
-            std::fs::remove_file(&source)
+            crate::host::fs_io::EditorFsIo::remove_file(&source)
         }
         .map_err(|error| format!("Cannot delete {}: {error}", source.display()))?;
         Ok((
@@ -105,7 +101,7 @@ impl ExplorerFs {
             .file_name()
             .ok_or_else(|| "Explorer root cannot be changed".to_string())?;
         let source = parent.join(name);
-        std::fs::symlink_metadata(&source)
+        crate::host::fs_io::EditorFsIo::symlink_metadata(&source)
             .map_err(|error| format!("Cannot access {}: {error}", source.display()))?;
         Ok(source)
     }
