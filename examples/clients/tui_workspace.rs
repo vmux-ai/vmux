@@ -141,15 +141,21 @@ impl TuiPane {
 fn handle_commands(
     mut incoming: MessageReader<TuiCommand>,
     workspaces: Query<&TuiWorkspace>,
-    splits: Query<Entity, With<PaneSplit>>,
-    panes: Query<Entity, With<TuiPane>>,
+    splits: Query<(Entity, &Children), With<PaneSplit>>,
+    panes: Query<(), With<TuiPane>>,
     mut select: MessageWriter<PaneSelectRequest>,
     mut commands: Commands,
 ) {
     let Ok(workspace) = workspaces.single() else {
         return;
     };
-    let ordered: Vec<Entity> = panes.iter().collect();
+    let Ok((split, children)) = splits.single() else {
+        return;
+    };
+    let ordered: Vec<Entity> = children
+        .iter()
+        .filter(|entity| panes.contains(*entity))
+        .collect();
     if ordered.is_empty() {
         return;
     }
@@ -174,23 +180,21 @@ fn handle_commands(
                 });
             }
             TuiCommand::Split { title } => {
-                if let Ok(split) = splits.single() {
-                    let flex_node = commands
-                        .spawn((TuiPane::flex_node(), ChildOf(workspace.flex_row)))
-                        .id();
-                    let created = commands
-                        .spawn((
-                            Pane,
-                            PaneId(title.to_lowercase()),
-                            TuiPane::new(title, "live ECS pane", flex_node),
-                            ChildOf(split),
-                        ))
-                        .id();
-                    select.write(PaneSelectRequest {
-                        root: workspace.layout_root,
-                        pane: created,
-                    });
-                }
+                let flex_node = commands
+                    .spawn((TuiPane::flex_node(), ChildOf(workspace.flex_row)))
+                    .id();
+                let created = commands
+                    .spawn((
+                        Pane,
+                        PaneId(title.to_lowercase()),
+                        TuiPane::new(title, "live ECS pane", flex_node),
+                        ChildOf(split),
+                    ))
+                    .id();
+                select.write(PaneSelectRequest {
+                    root: workspace.layout_root,
+                    pane: created,
+                });
             }
         }
     }
@@ -323,7 +327,14 @@ fn main() {
         app.update();
         let after_split = app.world().resource::<RenderedFrame>().0.clone();
         assert!(after_split.contains("Logs*"));
-        println!("{after_split}");
+
+        app.world_mut().write_message(TuiCommand::FocusPrev);
+        app.update();
+        app.update();
+        let after_prev = app.world().resource::<RenderedFrame>().0.clone();
+        assert!(after_prev.contains("Terminal*"));
+
+        println!("{after_prev}");
         println!("tui headless smoke passed");
         return;
     }

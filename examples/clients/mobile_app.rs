@@ -73,6 +73,12 @@ fn spawn_mobile_screen(mut writer: UiStateWriter<MobileShellUiState>, mut comman
                 connected_host: String::from("workstation.local"),
                 session_count: 3,
             },
+            vmux_app::ecs::PageMetadata {
+                title: String::from("Mobile Shell"),
+                url: String::from("mobile://shell/"),
+                icon: vmux_app::api::PageIcon::None,
+                bg_color: None,
+            },
             UiEventPermissions {
                 url: "mobile://shell/",
                 owns_subtree: true,
