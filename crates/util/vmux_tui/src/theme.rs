@@ -603,6 +603,9 @@ impl Theme {
     }
 
     pub fn fit_title(text: &str, max_width: usize) -> String {
+        if max_width == 0 {
+            return String::new();
+        }
         if text.contains('/') {
             Self::truncate_start_ellipsis(text, max_width)
         } else {
@@ -660,6 +663,9 @@ impl Theme {
     }
 
     pub fn truncate_ellipsis(text: &str, max_width: usize) -> String {
+        if max_width == 0 {
+            return String::new();
+        }
         if Self::display_width(text) <= max_width {
             return text.to_owned();
         }
@@ -735,14 +741,16 @@ pub struct ThemeStore;
 
 impl ThemeStore {
     pub fn load() -> ThemePreset {
+        Self::load_explicit().unwrap_or_default()
+    }
+
+    pub fn load_explicit() -> Option<ThemePreset> {
         if let Some(name) = env::var_os("VMUX_TUI_THEME").and_then(|value| value.into_string().ok())
             && let Some(preset) = ThemePreset::parse(&name)
         {
-            return preset;
+            return Some(preset);
         }
-        Self::read_stored()
-            .and_then(|stored| ThemePreset::parse(&stored.theme))
-            .unwrap_or_default()
+        Self::read_stored().and_then(|stored| ThemePreset::parse(&stored.theme))
     }
 
     pub fn load_bar_position() -> BarPosition {
@@ -814,5 +822,7 @@ mod tests {
         assert!(fitted.ends_with("vmux-cloud"));
         assert!(Theme::display_width(&fitted) <= 20);
         assert_eq!(Theme::fit_title("short-name", 20), "short-name");
+        assert_eq!(Theme::fit_title("terminal", 0), "");
+        assert_eq!(Theme::fit_title("a/b", 0), "");
     }
 }

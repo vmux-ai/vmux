@@ -43,6 +43,13 @@ pub struct FrameSpec<'a> {
 pub struct TuiRenderer;
 
 impl TuiRenderer {
+    pub const MIN_COLS: u16 = 20;
+    pub const MIN_ROWS: u16 = 6;
+
+    pub fn is_too_small(cols: u16, rows: u16) -> bool {
+        cols < Self::MIN_COLS || rows < Self::MIN_ROWS
+    }
+
     pub fn layout_rects(
         cols: u16,
         rows: u16,
@@ -50,8 +57,8 @@ impl TuiRenderer {
         header_open: bool,
         bar_position: BarPosition,
     ) -> (Option<Rect>, Option<Rect>, Rect) {
-        let width = cols.max(56);
-        let height = rows.max(14);
+        let width = cols.max(1);
+        let height = rows.max(1);
         let show_sidebar = sidebar_open && width >= 78;
         let side_w = if show_sidebar {
             ((u32::from(width) * 20) / 100).clamp(20, 28) as u16
@@ -65,13 +72,13 @@ impl TuiRenderer {
             h: height,
         });
         let main_x = if show_sidebar { side_w + 1 } else { 1 };
-        let main_w = width.saturating_sub(main_x.saturating_sub(1)).max(20);
-        if !header_open {
+        let main_w = width.saturating_sub(main_x.saturating_sub(1)).max(1);
+        if !header_open || height < 3 {
             let workspace = Rect {
                 x: main_x,
                 y: 1,
                 w: main_w,
-                h: height.max(4),
+                h: height,
             };
             return (sidebar, None, workspace);
         }
@@ -89,7 +96,7 @@ impl TuiRenderer {
             x: main_x,
             y: ws_y,
             w: main_w,
-            h: height.saturating_sub(2).max(4),
+            h: height.saturating_sub(2).max(1),
         };
         (sidebar, Some(bar), workspace)
     }
@@ -99,6 +106,12 @@ impl TuiRenderer {
             Some(palette) => Theme::with_palette(spec.theme, palette, spec.color),
             None => Theme::new(spec.theme, spec.color),
         };
+        if Self::is_too_small(spec.cols, spec.rows) {
+            return (
+                Self::render_too_small(spec.cols, spec.rows, theme),
+                HitMap::default(),
+            );
+        }
         let sidebar_open = spec
             .ui
             .layout
@@ -126,7 +139,7 @@ impl TuiRenderer {
             Self::draw_tab_bar(&mut out, bar, spec, theme, &mut hits);
             let status_rect = Rect {
                 x: bar.x,
-                y: spec.rows,
+                y: spec.rows.max(1),
                 w: bar.w,
                 h: 1,
             };
@@ -142,6 +155,7 @@ impl TuiRenderer {
             }
             if pane.focused
                 && spec.space_picker.is_none()
+                && pane.scroll_top.is_none()
                 && let Some(viewport) = &pane.viewport
             {
                 cursor_pos = Self::cursor_coords(pane.rect, viewport, spec.pane_gap);
@@ -160,6 +174,24 @@ impl TuiRenderer {
             let _ = write!(out, "\x1b[{cy};{cx}H\x1b[?25h");
         }
         (out, hits)
+    }
+
+    fn render_too_small(cols: u16, rows: u16, theme: Theme) -> String {
+        let mut out = String::from("\x1b[?25l\x1b[0m");
+        let w = usize::from(cols.max(1));
+        let h = rows.max(1);
+        let msg = format!(
+            "Resize terminal ({cols}x{rows}; need {}x{})",
+            Self::MIN_COLS,
+            Self::MIN_ROWS
+        );
+        let mid = (h / 2).max(1);
+        for y in 1..=h {
+            let text = if y == mid { msg.as_str() } else { "" };
+            let row = theme.panel_row(&theme.muted(text), w);
+            let _ = write!(out, "\x1b[{y};1H{row}");
+        }
+        out
     }
 
     fn draw_sidebar(
@@ -484,10 +516,14 @@ impl TuiRenderer {
         selected: usize,
         theme: Theme,
     ) {
+        if ws.w < 6 || ws.h < 4 {
+            return;
+        }
         let spaces = &ui.spaces.spaces;
-        let box_w = ws.w.saturating_sub(4).clamp(32, 58);
+        let max_w = ws.w.saturating_sub(2).max(4);
+        let box_w = ws.w.saturating_sub(4).clamp(32, 58).min(max_w);
         let list_len = spaces.len().clamp(1, 10) as u16;
-        let box_h = (list_len + 4).min(ws.h.max(6));
+        let box_h = (list_len + 4).min(ws.h);
         let bx = ws.x + ws.w.saturating_sub(box_w) / 2;
         let by = ws.y + ws.h.saturating_sub(box_h) / 2;
         let inner = usize::from(box_w.saturating_sub(2));
@@ -558,11 +594,15 @@ impl TuiRenderer {
         viewport: &TerminalViewportState,
         screen_row: u16,
         pane_rows: u16,
+        scroll_top: Option<u32>,
     ) -> Option<&TermLine> {
-        let base = viewport
-            .total_rows
-            .saturating_sub(u32::from(pane_rows))
-            .max(viewport.first_row);
+        let base = match scroll_top {
+            Some(top) => top,
+            None => viewport
+                .total_rows
+                .saturating_sub(u32::from(pane_rows))
+                .max(viewport.first_row),
+        };
         let target = base + u32::from(screen_row);
         viewport
             .rows
@@ -605,7 +645,7 @@ impl TuiRenderer {
             let content = match pane
                 .viewport
                 .as_ref()
-                .and_then(|vp| Self::visible_line(vp, row_idx, pane.rect.h))
+                .and_then(|vp| Self::visible_line(vp, row_idx, pane.rect.h, pane.scroll_top))
             {
                 Some(line) => Self::render_term_line(line, cols, p, theme.color, paint_bg),
                 None => Self::blank_term_line(cols, p, paint_bg),
@@ -648,7 +688,7 @@ impl TuiRenderer {
             let content = match pane
                 .viewport
                 .as_ref()
-                .and_then(|vp| Self::visible_line(vp, row_idx, inner_h))
+                .and_then(|vp| Self::visible_line(vp, row_idx, inner_h, pane.scroll_top))
             {
                 Some(line) => Self::render_term_line(line, inner_w, p, theme.color, paint_bg),
                 None => Self::blank_term_line(inner_w, p, paint_bg),
@@ -849,5 +889,80 @@ impl TuiRenderer {
             TermColor::Indexed(index) => Some(palette.ansi(index)),
             TermColor::Rgb(r, g, b) => Some(Rgb(r, g, b)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vmux_api::terminal::TermSpan;
+
+    use super::*;
+
+    #[test]
+    fn small_terminal_fits_physical_bounds_and_shows_resize_message_when_tiny() {
+        let (side, bar, ws) = TuiRenderer::layout_rects(50, 13, true, true, BarPosition::Bottom);
+        assert!(side.is_none());
+        let bar = bar.unwrap();
+        assert!(bar.x + bar.w - 1 <= 50);
+        assert!(ws.x + ws.w - 1 <= 50);
+        assert!(ws.y + ws.h - 1 <= 13);
+        assert!(bar.y < 13);
+        let ui = LayoutUiState::default();
+        let spec = FrameSpec {
+            ui: &ui,
+            panes: &[],
+            dividers: &[],
+            bar_position: BarPosition::Bottom,
+            theme: ThemePreset::default(),
+            palette: None,
+            pane_gap: false,
+            zoomed: false,
+            color: false,
+            cols: 18,
+            rows: 5,
+            leader: false,
+            space_picker: None,
+        };
+        let (frame, _) = TuiRenderer::render(&spec);
+        assert!(frame.contains("Resize terminal"));
+    }
+
+    #[test]
+    fn visible_line_renders_scroll_top_history_when_scrolled_up() {
+        let line = |text: &str| TermLine {
+            spans: vec![TermSpan {
+                col: 0,
+                grid_cols: text.len() as u16,
+                text: text.to_owned(),
+                fg: TermColor::Default,
+                bg: TermColor::Default,
+                flags: 0,
+            }],
+            links: Vec::new(),
+        };
+        let viewport = TerminalViewportState {
+            total_rows: 100,
+            first_row: 10,
+            rows: vec![
+                (12, line("history-12")),
+                (98, line("tail-98")),
+                (99, line("tail-99")),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            TuiRenderer::visible_line(&viewport, 0, 2, None)
+                .unwrap()
+                .spans[0]
+                .text,
+            "tail-98"
+        );
+        assert_eq!(
+            TuiRenderer::visible_line(&viewport, 0, 2, Some(12))
+                .unwrap()
+                .spans[0]
+                .text,
+            "history-12"
+        );
     }
 }

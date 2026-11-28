@@ -76,8 +76,12 @@ vmux tui --theme tokyo-night
 ```
 
 Themes match the desktop app's built-in color schemes and persist between invocations
-(`VMUX_TUI_THEME` overrides per shell). Non-TTY sessions, `CI`, and `VMUX_NO_TUI=1`
-automatically fall back to concise single-line plain-text output without prompting.
+(`VMUX_TUI_THEME` overrides per shell). Bare `vmux tui` requires an interactive terminal (TTY)
+and exits with a terminal-required error in non-interactive sessions, while `--list-themes` and
+`--theme` work non-interactively. Other developer commands (`vmux build`, `vmux desktop`,
+`vmux cache clean`, and related workflows) automatically fall back to concise single-line
+plain-text output without prompting in non-TTY sessions, when `CI` is set, or when
+`VMUX_NO_TUI=1`.
 
 ## CLI updates
 

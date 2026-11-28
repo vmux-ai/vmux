@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::policy::GIB;
@@ -685,6 +685,21 @@ impl Theme {
         free_bytes: u64,
         cache_bytes: u64,
     ) -> String {
+        if self.width < 56 {
+            let choice = if apply_selected {
+                "[Apply]/Keep"
+            } else {
+                "Apply/[Keep]"
+            };
+            let line = format!(
+                "Clean {reclaimable_count} caches ({:.1} GiB)? {choice}",
+                Self::gib(cache_bytes)
+            );
+            return format!(
+                "{}\n",
+                Self::truncate_ellipsis(&line, usize::from(self.width).max(1))
+            );
+        }
         let p = self.palette();
         let gauge = self.storage_gauge(free_bytes, cache_bytes, 16);
         let apply_btn = if apply_selected {
@@ -800,6 +815,7 @@ impl Theme {
             "desktop" | "run" => "Vmux Desktop launched".into(),
             "build" => "Build packaged and ready".into(),
             "cache clean" => "Build caches cleaned".into(),
+            "cache clean preview" => "Cache preview complete (no caches deleted)".into(),
             "cache status" => "Storage check complete".into(),
             "doctor" => "Toolchain looks healthy".into(),
             "setup" => "Development tools ready".into(),
@@ -934,18 +950,41 @@ impl Theme {
     }
 
     fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+        let limit = max_width.max(1);
         let mut lines = Vec::new();
         for paragraph in text.lines() {
             let mut current = String::new();
+            let mut current_w = 0usize;
             for word in paragraph.split_whitespace() {
-                if current.is_empty() {
+                let word_w = Self::display_width(word);
+                if word_w > limit {
+                    if !current.is_empty() {
+                        lines.push(std::mem::take(&mut current));
+                    }
+                    let mut chunk = String::new();
+                    let mut chunk_w = 0usize;
+                    for ch in word.chars() {
+                        let cw = Self::char_width(ch).max(1);
+                        if chunk_w + cw > limit && !chunk.is_empty() {
+                            lines.push(std::mem::take(&mut chunk));
+                            chunk_w = 0;
+                        }
+                        chunk.push(ch);
+                        chunk_w += cw;
+                    }
+                    current = chunk;
+                    current_w = chunk_w;
+                } else if current.is_empty() {
                     current.push_str(word);
-                } else if current.chars().count() + 1 + word.chars().count() <= max_width {
+                    current_w = word_w;
+                } else if current_w + 1 + word_w <= limit {
                     current.push(' ');
                     current.push_str(word);
+                    current_w += 1 + word_w;
                 } else {
                     lines.push(current);
                     current = word.to_owned();
+                    current_w = word_w;
                 }
             }
             if !current.is_empty() || lines.is_empty() {
@@ -1273,9 +1312,17 @@ pub(crate) enum CockpitInput {
     ConfirmNo,
 }
 
+pub(crate) type CockpitSelection = (
+    CockpitAction,
+    Option<String>,
+    Option<PathBuf>,
+    CockpitProfile,
+    ThemePreset,
+);
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CockpitState {
-    pub worktrees: Vec<(String, Option<String>, String, bool, bool)>,
+    pub worktrees: Vec<(String, Option<String>, PathBuf, bool, bool)>,
     pub action_index: usize,
     pub worktree_index: usize,
     pub panel: CockpitPanel,
@@ -1286,11 +1333,12 @@ pub(crate) struct CockpitState {
     pub leader_active: bool,
     pub zoomed: bool,
     pub sidebar_open: bool,
+    pub status_notice: Option<String>,
 }
 
 impl CockpitState {
     pub(crate) fn new(
-        worktrees: Vec<(String, Option<String>, String, bool, bool)>,
+        worktrees: Vec<(String, Option<String>, PathBuf, bool, bool)>,
         free_bytes: Option<u64>,
         theme: ThemePreset,
     ) -> Self {
@@ -1307,6 +1355,7 @@ impl CockpitState {
             leader_active: false,
             zoomed: false,
             sidebar_open: true,
+            status_notice: None,
         }
     }
 
@@ -1320,10 +1369,19 @@ impl CockpitState {
             .and_then(|entry| entry.1.clone())
     }
 
-    pub(crate) fn apply(
-        &mut self,
-        input: CockpitInput,
-    ) -> Option<(CockpitAction, Option<String>, CockpitProfile, ThemePreset)> {
+    pub(crate) fn selected_path(&self) -> Option<PathBuf> {
+        self.worktrees
+            .get(self.worktree_index)
+            .map(|entry| entry.2.clone())
+    }
+
+    fn folder_name(path: &Path) -> &str {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("worktree")
+    }
+
+    pub(crate) fn apply(&mut self, input: CockpitInput) -> Option<CockpitSelection> {
         if self.leader_active {
             return self.apply_chord(input);
         }
@@ -1350,20 +1408,23 @@ impl CockpitState {
                     return None;
                 }
                 let action = self.selected_action();
-                return Some((action, self.selected_branch(), self.profile, self.theme));
+                return Some((
+                    action,
+                    self.selected_branch(),
+                    self.selected_path(),
+                    self.profile,
+                    self.theme,
+                ));
             }
             CockpitInput::Quit | CockpitInput::Escape => {
-                return Some((CockpitAction::Quit, None, self.profile, self.theme));
+                return Some((CockpitAction::Quit, None, None, self.profile, self.theme));
             }
             CockpitInput::FocusSpaces | CockpitInput::ConfirmYes | CockpitInput::ConfirmNo => {}
         }
         None
     }
 
-    fn apply_chord(
-        &mut self,
-        input: CockpitInput,
-    ) -> Option<(CockpitAction, Option<String>, CockpitProfile, ThemePreset)> {
+    fn apply_chord(&mut self, input: CockpitInput) -> Option<CockpitSelection> {
         self.leader_active = false;
         match input {
             CockpitInput::Left => self.cycle_pane(-1),
@@ -1381,7 +1442,7 @@ impl CockpitState {
             CockpitInput::ThemeNext => self.theme = self.theme.next(),
             CockpitInput::ThemePrev => self.theme = self.theme.prev(),
             CockpitInput::Quit => {
-                return Some((CockpitAction::Quit, None, self.profile, self.theme));
+                return Some((CockpitAction::Quit, None, None, self.profile, self.theme));
             }
             _ => {}
         }
@@ -1445,7 +1506,7 @@ impl CockpitState {
         } else {
             (0, usable)
         };
-        let main_lines = self.build_main_area(theme, main_w, body_h);
+        let main_lines = self.build_main_area(theme, main_w, body_h, show_sidebar);
         let composed = if show_sidebar {
             let side_lines = self.build_side_sheet(theme, side_w, body_h);
             Self::join_columns(&[side_lines, main_lines])
@@ -1463,29 +1524,88 @@ impl CockpitState {
         out
     }
 
-    fn build_main_area(&self, theme: Theme, width: usize, height: usize) -> Vec<String> {
+    fn build_main_area(
+        &self,
+        theme: Theme,
+        width: usize,
+        height: usize,
+        sidebar_visible: bool,
+    ) -> Vec<String> {
         let pane_h = height.saturating_sub(3).max(8);
         let mut out = vec![
             self.tab_strip(theme, width),
             self.url_bar(theme, width),
             String::new(),
         ];
-        let panes = if self.zoomed {
+        let panes = if self.zoomed || width < 66 {
             match self.panel {
                 CockpitPanel::Themes => self.build_inspector_pane(theme, width, pane_h),
+                CockpitPanel::Spaces if !sidebar_visible && !self.worktrees.is_empty() => {
+                    self.build_spaces_pane(theme, width, pane_h)
+                }
                 _ => self.build_actions_pane(theme, width, pane_h),
             }
-        } else if width >= 66 {
+        } else if !sidebar_visible
+            && self.panel == CockpitPanel::Spaces
+            && !self.worktrees.is_empty()
+        {
+            let w1 = (width.saturating_sub(1) * 48) / 100;
+            let w2 = width.saturating_sub(w1 + 1);
+            let p1 = self.build_spaces_pane(theme, w1, pane_h);
+            let p2 = self.build_actions_pane(theme, w2, pane_h);
+            Self::join_columns(&[p1, p2])
+        } else {
             let w1 = (width.saturating_sub(1) * 48) / 100;
             let w2 = width.saturating_sub(w1 + 1);
             let p1 = self.build_actions_pane(theme, w1, pane_h);
             let p2 = self.build_inspector_pane(theme, w2, pane_h);
             Self::join_columns(&[p1, p2])
-        } else {
-            self.build_actions_pane(theme, width, pane_h)
         };
         out.extend(panes);
         out
+    }
+
+    fn build_spaces_pane(&self, theme: Theme, width: usize, height: usize) -> Vec<String> {
+        let focused = self.panel == CockpitPanel::Spaces;
+        let inner = width.saturating_sub(2);
+        let mut rows = vec![String::new()];
+        let max_wt = height.saturating_sub(4).clamp(3, 16);
+        let start = self.worktree_index.saturating_sub(max_wt / 2);
+        let end = (start + max_wt).min(self.worktrees.len());
+        for index in start..end {
+            let (branch, _, path, current, dirty) = &self.worktrees[index];
+            let selected = index == self.worktree_index;
+            let cursor = if selected && focused {
+                theme.primary("›")
+            } else {
+                " ".into()
+            };
+            let dot = if *dirty {
+                theme.gold("●")
+            } else if selected {
+                theme.primary("●")
+            } else {
+                theme.muted("○")
+            };
+            let folder = Self::folder_name(path);
+            let suffix = if *current {
+                format!(" {}", theme.muted("· current"))
+            } else {
+                format!(" {}", theme.muted(folder))
+            };
+            let name = if selected {
+                theme.bold(branch)
+            } else {
+                theme.text(branch)
+            };
+            let line = format!(" {cursor} {dot} {name}{suffix}");
+            if selected {
+                rows.push(theme.surface_row(&line, inner));
+            } else {
+                rows.push(line);
+            }
+        }
+        theme.pane_box("Spaces", "1", focused, width, height, &rows)
     }
 
     fn tab_strip(&self, theme: Theme, width: usize) -> String {
@@ -1563,8 +1683,9 @@ impl CockpitState {
         let (space_name, space_meta) = self
             .worktrees
             .get(self.worktree_index)
-            .map(|(branch, _, folder, _, dirty)| {
+            .map(|(branch, _, path, _, dirty)| {
                 let state = if *dirty { "modified" } else { "clean" };
+                let folder = Self::folder_name(path);
                 (branch.as_str(), format!("{state} · {folder}"))
             })
             .unwrap_or(("workspace", "current checkout".into()));
@@ -1742,7 +1863,8 @@ impl CockpitState {
             String::new(),
             format!("  {}  {}", theme.muted("$"), theme.primary(&cmd)),
         ];
-        if let Some((display, _, folder, _, dirty)) = self.worktrees.get(self.worktree_index) {
+        if let Some((display, _, path, _, dirty)) = self.worktrees.get(self.worktree_index) {
+            let folder = Self::folder_name(path);
             let status = if *dirty {
                 theme.gold("modified")
             } else {
@@ -1800,6 +1922,8 @@ impl CockpitState {
                     "h/l pane · o next · z zoom · s sidebar · n/p tab · 1-3 jump · esc cancel"
                 )
             )
+        } else if let Some(notice) = &self.status_notice {
+            format!("{} {}", theme.gold("!"), theme.gold(notice))
         } else {
             format!(
                 "{} {}  {} {}  {} {}  {} {}  {} {}  {} {}",
@@ -1862,14 +1986,14 @@ mod tests {
                 (
                     "main".into(),
                     Some("main".into()),
-                    "vmux".into(),
+                    PathBuf::from("/repo/vmux"),
                     true,
                     false,
                 ),
                 (
                     "feat/tui".into(),
                     Some("feat/tui".into()),
-                    "vmx-293".into(),
+                    PathBuf::from("/repo/vmx-293"),
                     false,
                     true,
                 ),
@@ -1894,6 +2018,7 @@ mod tests {
             (
                 CockpitAction::Build,
                 Some("feat/tui".into()),
+                Some(PathBuf::from("/repo/vmx-293")),
                 CockpitProfile::Local,
                 ThemePreset::CatppuccinLatte,
             )
@@ -1909,12 +2034,37 @@ mod tests {
     }
 
     #[test]
+    fn compact_cockpit_renders_focused_pane_and_wraps_long_diagnostic_tokens() {
+        let mut state = CockpitState::new(
+            vec![(
+                "main".into(),
+                Some("main".into()),
+                PathBuf::from("/repo/vmux"),
+                true,
+                false,
+            )],
+            None,
+            ThemePreset::CatppuccinMocha,
+        );
+        state.panel = CockpitPanel::Themes;
+        let compact_themes = state.render(false, 80, 24);
+        assert!(compact_themes.contains("Appearance"));
+        state.panel = CockpitPanel::Spaces;
+        let compact_spaces = state.render(false, 60, 24);
+        assert!(compact_spaces.contains("Spaces"));
+        let long_path = "/very/long/workspace/path/that/exceeds/card/width/final_filename.rs";
+        let wrapped = Theme::wrap_text(long_path, 20);
+        assert!(wrapped.len() > 1);
+        assert_eq!(wrapped.concat(), long_path);
+    }
+
+    #[test]
     fn desktop_ctrl_b_chords_focus_panes_zoom_and_switch_profiles() {
         let mut state = CockpitState::new(
             vec![(
                 "main".into(),
                 Some("main".into()),
-                "vmux".into(),
+                PathBuf::from("/repo/vmux"),
                 true,
                 false,
             )],

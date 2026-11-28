@@ -3115,7 +3115,12 @@ fn publish_done(
         io.commands.write_message(crate::tui::Notice {
             root,
             tone: crate::tui::NoticeTone::Stdout,
-            text: format!("Debug build ready: {}\nRun: vmux run", debug.display()),
+            text: format!("Debug build ready: {}", debug.display()),
+        });
+        io.commands.write_message(crate::tui::Notice {
+            root,
+            tone: crate::tui::NoticeTone::Stdout,
+            text: "Run: vmux run".to_owned(),
         });
         let path = if cfg!(target_os = "macos") {
             let product = match settings.0.product(&checkout.root) {

@@ -167,6 +167,7 @@ pub(crate) struct CleanPreviewed {
     pub reclaimable_count: usize,
     pub free_bytes: u64,
     pub cache_bytes: u64,
+    pub targets: Vec<PathBuf>,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -180,7 +181,7 @@ pub(crate) struct ArtifactObserved {
 pub(crate) struct PassthroughStep;
 
 #[derive(Component)]
-pub(crate) struct CleanConfirming;
+pub(crate) struct CleanConfirming(pub Vec<PathBuf>);
 
 #[derive(Component)]
 pub(crate) struct FailedDiagnostic(pub String);
@@ -193,7 +194,9 @@ struct HudSession {
     profile: Option<String>,
     artifact: Option<PathBuf>,
     free_bytes: Option<u64>,
+    pending_check_storage: Option<String>,
     preflight_storage_reported: bool,
+    clean_applied: bool,
     last_step_detail: Option<String>,
     started: Instant,
     header_shown: bool,
@@ -201,15 +204,19 @@ struct HudSession {
 }
 
 impl HudSession {
-    fn from_invocation(invocation: &CliInvocation, has_dispatch: bool) -> Self {
-        let silent = has_dispatch
+    fn is_silent(invocation: &CliInvocation, has_dispatch: bool) -> bool {
+        has_dispatch
             || invocation.is("dx.internal")
             || invocation.is("dx.ci-scope")
             || invocation.is("dx.ci-native")
             || invocation.is("dx.help")
             || invocation.is("dx.update")
             || invocation.is("dx.tui")
-            || invocation.command.starts_with("dx.ci.");
+            || invocation.command.starts_with("dx.ci.")
+    }
+
+    fn from_invocation(invocation: &CliInvocation, has_dispatch: bool) -> Self {
+        let silent = Self::is_silent(invocation, has_dispatch);
         let command = Self::display_command(&invocation.command);
         let branch = invocation.value("branch").map(str::to_owned);
         let profile = invocation.value("profile").map(str::to_owned);
@@ -220,12 +227,22 @@ impl HudSession {
             profile,
             artifact: None,
             free_bytes: None,
+            pending_check_storage: None,
             preflight_storage_reported: false,
+            clean_applied: false,
             last_step_detail: None,
             started: Instant::now(),
             header_shown: false,
             silent,
         }
+    }
+
+    fn retarget(&mut self, invocation: &CliInvocation) {
+        self.command = Self::display_command(&invocation.command);
+        self.branch = invocation.value("branch").map(str::to_owned);
+        self.profile = invocation.value("profile").map(str::to_owned);
+        self.silent = Self::is_silent(invocation, false);
+        self.started = Instant::now();
     }
 
     fn display_command(id: &str) -> String {
@@ -436,14 +453,17 @@ fn cancel_cockpit(
 
 fn finish_cockpit(
     results: FinishedCockpits,
-    mut requests: Query<(&mut CliInvocation, &CockpitJob), Without<CliResult>>,
+    mut requests: Query<
+        (&mut CliInvocation, &CockpitJob, Option<&mut HudSession>),
+        Without<CliResult>,
+    >,
     mut mode: ResMut<TerminalMode>,
     mut hud: ResMut<Hud>,
     mut commands: Commands,
 ) {
     for (job_entity, result, owner, parent) in &results {
         let root = parent.parent();
-        let Ok((mut invocation, handle)) = requests.get_mut(root) else {
+        let Ok((mut invocation, handle, session)) = requests.get_mut(root) else {
             commands.entity(job_entity).despawn();
             continue;
         };
@@ -457,6 +477,10 @@ fn finish_cockpit(
             Ok(report) => match &report.result {
                 Ok(outcome) => outcome.clone(),
                 Err(error) => {
+                    let message = error.to_string();
+                    if !message.is_empty() {
+                        commands.entity(root).insert(FailedDiagnostic(message));
+                    }
                     commands
                         .entity(root)
                         .insert(CliResult(Ok(error.code() as u8)));
@@ -482,10 +506,17 @@ fn finish_cockpit(
             continue;
         };
         invocation.command = command_id.into();
+        if let Some(root_path) = outcome.root {
+            invocation
+                .arguments
+                .insert("root".into(), vec![root_path.into_os_string()]);
+        }
         if let Some(branch) = outcome.branch {
             invocation
                 .arguments
                 .insert("branch".into(), vec![OsString::from(branch)]);
+        } else {
+            invocation.arguments.remove("branch");
         }
         if outcome.action.uses_profile() {
             invocation.arguments.insert(
@@ -495,6 +526,9 @@ fn finish_cockpit(
         }
         if outcome.action == CockpitAction::Desktop {
             invocation.command = "dx.run".into();
+        }
+        if let Some(mut session) = session {
+            session.retarget(&invocation);
         }
     }
 }
@@ -533,7 +567,7 @@ fn prompt_clean(
             .id();
         commands
             .entity(preview.root)
-            .insert((CleanConfirming, PromptJob(child)));
+            .insert((CleanConfirming(preview.targets.clone()), PromptJob(child)));
         wake.0.wake_by_ref();
     }
 }
@@ -562,14 +596,14 @@ fn cancel_prompt(
 
 fn finish_prompt(
     results: FinishedPrompts,
-    mut roots: Query<(&mut Tail, &PromptJob), With<CleanConfirming>>,
+    mut roots: Query<(&mut Tail, &PromptJob, &CleanConfirming)>,
     mut hud: ResMut<Hud>,
     mode: Res<TerminalMode>,
     mut commands: Commands,
 ) {
     for (job_entity, result, owner, parent) in &results {
         let root = parent.parent();
-        let Ok((mut tail, handle)) = roots.get_mut(root) else {
+        let Ok((mut tail, handle, confirming)) = roots.get_mut(root) else {
             commands.entity(job_entity).despawn();
             continue;
         };
@@ -577,33 +611,53 @@ fn finish_prompt(
             commands.entity(job_entity).despawn();
             continue;
         }
+        let targets = confirming.0.clone();
         commands.entity(job_entity).despawn();
         commands
             .entity(root)
             .remove::<(CleanConfirming, PromptJob)>();
-        let confirmed = matches!(
-            &result.0,
-            Ok(report) if matches!(report.result, Ok(ConfirmOutcome(true)))
-        );
-        if confirmed {
-            let mut step = commands.spawn((
-                Step,
-                Name::new("Clean build cache"),
-                StorageCleanStep(true),
-                OperationState::Pending,
-                CreatedAt::now(),
-                ChildOf(root),
-                crate::Attempt(1),
-            ));
-            if let Some(previous) = tail.0 {
-                step.insert(Predecessor(previous));
+        match &result.0 {
+            Ok(report) => match &report.result {
+                Ok(ConfirmOutcome(true)) => {
+                    let mut step = commands.spawn((
+                        Step,
+                        Name::new("Clean build cache"),
+                        StorageCleanStep {
+                            apply: true,
+                            allowed_targets: Some(targets),
+                        },
+                        OperationState::Pending,
+                        CreatedAt::now(),
+                        ChildOf(root),
+                        crate::Attempt(1),
+                    ));
+                    if let Some(previous) = tail.0 {
+                        step.insert(Predecessor(previous));
+                    }
+                    tail.0 = Some(step.id());
+                }
+                Ok(ConfirmOutcome(false)) => {
+                    if mode.interactive {
+                        let line = mode.theme().notice_line(
+                            NoticeStyle::Detail,
+                            "Kept preview only; no caches deleted.",
+                        );
+                        hud.writer.write_block(&line);
+                    }
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    if !message.is_empty() {
+                        commands.entity(root).insert(FailedDiagnostic(message));
+                    }
+                    commands
+                        .entity(root)
+                        .insert(CliResult(Ok(error.code() as u8)));
+                }
+            },
+            Err(error) => {
+                commands.entity(root).insert(CliResult(Err(error.clone())));
             }
-            tail.0 = Some(step.id());
-        } else if mode.interactive {
-            let line = mode
-                .theme()
-                .notice_line(NoticeStyle::Detail, "Kept preview only; no caches deleted.");
-            hud.writer.write_block(&line);
         }
     }
 }
@@ -666,19 +720,41 @@ fn observe_artifacts(
 fn present_storage(
     mut reports: MessageReader<StorageReported>,
     mut sessions: Query<&mut HudSession>,
+    preflight_steps: Query<&ChildOf, With<crate::steps::StoragePreflightStep>>,
     mode: Res<TerminalMode>,
     mut hud: ResMut<Hud>,
 ) {
     for report in reports.read() {
         let free_label = format!("{:.1} GiB free", report.free_bytes as f64 / GIB as f64);
+        let has_preflight = preflight_steps
+            .iter()
+            .any(|parent| parent.parent() == report.root);
+        let mut defer_check = false;
         let mut duplicate = false;
         let mut silent = false;
         if let Ok(mut session) = sessions.get_mut(report.root) {
             session.free_bytes = Some(report.free_bytes);
             silent = session.silent;
-            if matches!(report.phase, StoragePhase::Check | StoragePhase::Preflight) {
-                duplicate = session.preflight_storage_reported;
-                session.preflight_storage_reported = true;
+            match report.phase {
+                StoragePhase::Check => {
+                    if has_preflight {
+                        session.pending_check_storage =
+                            Some(format!("Build storage: {free_label}\n"));
+                        defer_check = true;
+                    } else {
+                        duplicate = session.preflight_storage_reported;
+                        session.preflight_storage_reported = true;
+                    }
+                }
+                StoragePhase::Preflight => {
+                    session.pending_check_storage = None;
+                    duplicate = session.preflight_storage_reported;
+                    session.preflight_storage_reported = true;
+                }
+                StoragePhase::CleanApplied => {
+                    session.clean_applied = true;
+                }
+                _ => {}
             }
             session.last_step_detail = Some(match report.cache_bytes {
                 Some(cache) => format!("{free_label}, {:.1} GiB caches", cache as f64 / GIB as f64),
@@ -707,7 +783,13 @@ fn present_storage(
             continue;
         }
         match report.phase {
-            StoragePhase::Check | StoragePhase::Preflight => {
+            StoragePhase::Check => {
+                if !defer_check && !duplicate {
+                    hud.writer
+                        .write_stdout(&format!("Build storage: {free_label}\n"));
+                }
+            }
+            StoragePhase::Preflight => {
                 if !duplicate {
                     hud.writer
                         .write_stdout(&format!("Build storage: {free_label}\n"));
@@ -933,6 +1015,11 @@ fn present_results(
             }
         }
         if !mode.interactive || silent {
+            if let Some(session) = session
+                && let Some(line) = &session.pending_check_storage
+            {
+                hud.writer.write_stdout(line);
+            }
             match &result.0 {
                 Ok(0) => {
                     for path in &ready_artifacts {
@@ -960,8 +1047,14 @@ fn present_results(
                         .last()
                         .or(session.artifact.as_ref())
                         .map(PathBuf::as_path);
+                    let summary_command =
+                        if session.command == "cache clean" && !session.clean_applied {
+                            "cache clean preview"
+                        } else {
+                            session.command.as_str()
+                        };
                     let card = theme.summary_card(
-                        &session.command,
+                        summary_command,
                         (session.branch.as_deref(), session.commit.as_deref()),
                         session.profile.as_deref(),
                         artifact,
@@ -1021,6 +1114,8 @@ mod tests {
                 ),
             ))
             .id();
+        app.world_mut()
+            .spawn((crate::steps::StoragePreflightStep, ChildOf(root)));
         app.world_mut().write_message(StorageReported {
             root,
             free_bytes: 400 * GIB,
@@ -1030,12 +1125,9 @@ mod tests {
             profile: None,
         });
         app.update();
-        assert!(
-            app.world()
-                .get::<HudSession>(root)
-                .unwrap()
-                .preflight_storage_reported
-        );
+        let session = app.world().get::<HudSession>(root).unwrap();
+        assert!(session.pending_check_storage.is_some());
+        assert!(!session.preflight_storage_reported);
         app.world_mut().write_message(StorageReported {
             root,
             free_bytes: 399 * GIB,
@@ -1045,12 +1137,13 @@ mod tests {
             profile: None,
         });
         app.update();
-        assert_eq!(
-            app.world().get::<HudSession>(root).unwrap().free_bytes,
-            Some(399 * GIB)
-        );
+        let session = app.world().get::<HudSession>(root).unwrap();
+        assert!(session.pending_check_storage.is_none());
+        assert!(session.preflight_storage_reported);
+        assert_eq!(session.free_bytes, Some(399 * GIB));
     }
 
+    #[cfg(not(feature = "runtime-cli"))]
     #[test]
     fn non_interactive_tui_command_fails_fast_without_spawning_a_cockpit() {
         let mut app = App::new();

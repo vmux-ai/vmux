@@ -50,6 +50,7 @@ struct TuiSession {
     full_clear: bool,
     last_frame: String,
     seen_pane: bool,
+    pending_input: Vec<u8>,
 }
 
 impl TuiSession {
@@ -62,8 +63,9 @@ impl TuiSession {
             },
         };
         let config = DesktopConfig::load(&cwd);
-        let mut explicit_theme = env::var_os("VMUX_TUI_THEME").is_some();
-        let mut theme = ThemeStore::load();
+        let saved_theme = ThemeStore::load_explicit();
+        let mut explicit_theme = saved_theme.is_some();
+        let mut theme = saved_theme.unwrap_or_default();
         let color = io::stdout().is_terminal() && env::var_os("NO_COLOR").is_none();
         if invocation.flag("list-themes") {
             let output = Theme::new(theme, color).theme_list(theme);
@@ -99,12 +101,16 @@ impl TuiSession {
     }
 
     fn is_tty() -> bool {
-        let ci = env::var_os("CI")
-            .is_some_and(|value| value.eq_ignore_ascii_case("true") || value == "1");
+        let ci = env::var_os("CI").is_some_and(|value| !value.is_empty());
         let dumb = env::var_os("TERM").is_some_and(|value| value == "dumb");
         let disabled = env::var_os("VMUX_NO_TUI")
             .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
-        io::stdin().is_terminal() && io::stdout().is_terminal() && !ci && !dumb && !disabled
+        io::stdin().is_terminal()
+            && io::stdout().is_terminal()
+            && io::stderr().is_terminal()
+            && !ci
+            && !dumb
+            && !disabled
     }
 
     fn start(
@@ -139,6 +145,7 @@ impl TuiSession {
             full_clear: true,
             last_frame: String::new(),
             seen_pane: false,
+            pending_input: Vec::new(),
         })
     }
 
@@ -156,6 +163,10 @@ impl TuiSession {
                 self.full_clear = true;
             }
             self.world.tick();
+            if let Some(reason) = self.world.service_unavailable() {
+                TuiFs::remove_dir(&self.store_dir);
+                return Err(reason);
+            }
             if self.world.take_space_picker_requested() {
                 let ui = self.world.layout_ui().unwrap_or_default();
                 let active = ui
@@ -180,11 +191,24 @@ impl TuiSession {
                 self.render_frame();
                 last_render = Instant::now();
             }
-            let count = TerminalIo::poll_stdin(&mut buffer, 16);
+            let Some(count) = TerminalIo::poll_stdin(&mut buffer, 16) else {
+                break;
+            };
             if count == 0 {
+                if !self.pending_input.is_empty() {
+                    let buffered = std::mem::take(&mut self.pending_input);
+                    if self.process_input(&buffered, true) {
+                        break;
+                    }
+                    self.render_frame();
+                    last_render = Instant::now();
+                }
                 continue;
             }
-            if self.process_input(&buffer[..count]) {
+            let mut combined = std::mem::take(&mut self.pending_input);
+            let remaining = 4096usize.saturating_sub(combined.len());
+            combined.extend_from_slice(&buffer[..count.min(remaining)]);
+            if self.process_input(&combined, false) {
                 break;
             }
             self.render_frame();
@@ -209,8 +233,13 @@ impl TuiSession {
             self.bar_position,
         );
         let pane_gap = self.world.pane_gap();
-        let (panes, dividers, _) = self.world.pane_views(workspace, pane_gap);
-        self.world.sync_terminal_sizes(&panes, pane_gap);
+        let (panes, dividers, _) = if TuiRenderer::is_too_small(self.cols, self.rows) {
+            (Vec::new(), Vec::new(), None)
+        } else {
+            let result = self.world.pane_views(workspace, pane_gap);
+            self.world.sync_terminal_sizes(&result.0, pane_gap);
+            result
+        };
         let palette = (!self.explicit_theme)
             .then(|| self.world.terminal_palette())
             .flatten();
@@ -245,9 +274,13 @@ impl TuiSession {
         self.last_frame = frame;
     }
 
-    fn process_input(&mut self, bytes: &[u8]) -> bool {
+    fn process_input(&mut self, bytes: &[u8], flush: bool) -> bool {
         let mut idx = 0usize;
         while idx < bytes.len() {
+            if !flush && TerminalIo::incomplete_escape_tail(&bytes[idx..]).is_some() {
+                self.pending_input.extend_from_slice(&bytes[idx..]);
+                break;
+            }
             if let Some(mouse) = MouseEvent::parse(&bytes[idx..]) {
                 self.handle_mouse(&mouse);
                 idx += mouse.consumed;
@@ -271,15 +304,17 @@ impl TuiSession {
                     KeyOutcome::Forward => {
                         let pty = decoded.pty_bytes(slice);
                         if !pty.is_empty()
-                            && let Some((_, pid)) = self.world.focused_terminal()
+                            && let Some((terminal, pid)) = self.world.focused_terminal()
                         {
+                            self.world.clear_scroll(terminal);
                             self.world.send_terminal_input(pid, pty);
                         }
                     }
                 }
                 idx += decoded.consumed;
             } else {
-                if let Some((_, pid)) = self.world.focused_terminal() {
+                if let Some((terminal, pid)) = self.world.focused_terminal() {
+                    self.world.clear_scroll(terminal);
                     self.world
                         .send_terminal_input(pid, bytes[idx..idx + 1].to_vec());
                 }
@@ -367,11 +402,13 @@ impl TuiSession {
 
     fn handle_mouse(&mut self, mouse: &MouseEvent) {
         if mouse.button == 64 || mouse.button == 65 {
+            let pane_gap = self.world.pane_gap();
             if let Some(pane) = self.pane_at(mouse.col, mouse.row)
                 && let Some(terminal) = pane.terminal
             {
                 let delta = if mouse.button == 64 { -3 } else { 3 };
-                self.world.scroll_terminal(terminal, delta);
+                let pane_rows = pane.rect.pty_size(pane_gap).1;
+                self.world.scroll_terminal(terminal, delta, pane_rows);
             }
             return;
         }

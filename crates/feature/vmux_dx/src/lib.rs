@@ -1706,7 +1706,10 @@ fn plan_cache_clean(mut operations: Planning, mut plans: Plans) {
             entity,
             &mut tail,
             "Clean build cache",
-            StorageCleanStep(invocation.flag("apply")),
+            StorageCleanStep {
+                apply: invocation.flag("apply"),
+                allowed_targets: None,
+            },
         );
 
         plans.commands.entity(entity).insert(Planned);
@@ -2124,10 +2127,11 @@ fn dispatch_storage_clean(
         dispatcher.assign(
             entity,
             started,
-            storage_runtime::Request::clean(
-                step.0
+            storage_runtime::Request::clean_targets(
+                step.apply
                     || settings.0.get("VMUX_BUILD_STORAGE_APPLY")
                         == Some(std::ffi::OsStr::new("1")),
+                step.allowed_targets.clone(),
             ),
         );
     }

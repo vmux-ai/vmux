@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -24,14 +24,14 @@ pub(crate) struct Terminal;
 
 impl Terminal {
     pub(crate) fn probe() -> (bool, bool, u16, ThemePreset) {
+        let stdout_tty = io::stdout().is_terminal();
         let stderr_tty = io::stderr().is_terminal();
         let stdin_tty = io::stdin().is_terminal();
-        let ci = env::var_os("CI")
-            .is_some_and(|value| value.eq_ignore_ascii_case("true") || value == "1");
+        let ci = env::var_os("CI").is_some_and(|value| !value.is_empty());
         let dumb = env::var_os("TERM").is_some_and(|value| value == "dumb");
         let disabled = env::var_os("VMUX_NO_TUI")
             .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
-        let interactive = stderr_tty && stdin_tty && !ci && !dumb && !disabled;
+        let interactive = stdout_tty && stderr_tty && stdin_tty && !ci && !dumb && !disabled;
         let color = interactive && env::var_os("NO_COLOR").is_none();
         let width = if stderr_tty { Self::size().0 } else { 80 };
         let theme = ThemeStore::load();
@@ -46,7 +46,7 @@ impl Terminal {
             ws_ypixel: 0,
         };
         let status = unsafe { libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut size) };
-        if status == 0 && size.ws_col >= 40 && size.ws_row >= 12 {
+        if status == 0 && size.ws_col > 0 && size.ws_row > 0 {
             (size.ws_col, size.ws_row)
         } else {
             (80, 24)
@@ -262,50 +262,123 @@ impl Drop for RawTerminalGuard {
     }
 }
 
-struct KeyReader;
+struct KeyReader {
+    pending: Vec<u8>,
+}
 
 impl KeyReader {
-    fn poll(timeout_ms: i32) -> io::Result<Option<CockpitInput>> {
+    fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+        }
+    }
+
+    fn poll(&mut self, timeout_ms: i32) -> io::Result<Option<CockpitInput>> {
+        if let Some(input) = self.take_one(false) {
+            return Ok(Some(input));
+        }
+        let wait = if self.pending.is_empty() {
+            timeout_ms
+        } else {
+            timeout_ms.min(25)
+        };
         let mut pollfd = libc::pollfd {
             fd: libc::STDIN_FILENO,
             events: libc::POLLIN,
             revents: 0,
         };
-        let ready = unsafe { libc::poll(&mut pollfd, 1, timeout_ms) };
+        let ready = unsafe { libc::poll(&mut pollfd, 1, wait) };
         if ready <= 0 {
-            return Ok(None);
+            return Ok(self.take_one(true));
         }
-        let mut buffer = [0u8; 8];
-        let count = io::stdin().read(&mut buffer)?;
+        let mut buffer = [0u8; 64];
+        let count = unsafe {
+            libc::read(
+                libc::STDIN_FILENO,
+                buffer.as_mut_ptr().cast::<libc::c_void>(),
+                buffer.len(),
+            )
+        };
+        if count < 0 {
+            return Err(io::Error::last_os_error());
+        }
         if count == 0 {
-            return Ok(None);
+            return Ok(self.take_one(true));
         }
-        Ok(Self::decode(&buffer[..count]))
+        let remaining = 256usize.saturating_sub(self.pending.len());
+        self.pending
+            .extend_from_slice(&buffer[..(count as usize).min(remaining)]);
+        Ok(self.take_one(false))
     }
 
-    fn decode(bytes: &[u8]) -> Option<CockpitInput> {
+    fn is_incomplete_escape(bytes: &[u8]) -> bool {
+        if bytes.is_empty() || bytes[0] != 0x1b {
+            return false;
+        }
+        if bytes.len() == 1 {
+            return true;
+        }
+        if bytes[1] == b'O' {
+            return bytes.len() == 2;
+        }
+        if bytes[1] == b'[' {
+            if bytes.len() == 2 {
+                return true;
+            }
+            return !bytes[2..].iter().any(|&b| (0x40..=0x7e).contains(&b)) && bytes.len() < 32;
+        }
+        false
+    }
+
+    fn take_one(&mut self, flush: bool) -> Option<CockpitInput> {
+        while !self.pending.is_empty() {
+            if !flush && Self::is_incomplete_escape(&self.pending) {
+                return None;
+            }
+            let (consumed, decoded) = Self::decode_prefix(&self.pending);
+            self.pending.drain(..consumed);
+            if let Some(input) = decoded {
+                return Some(input);
+            }
+        }
+        None
+    }
+
+    fn decode_prefix(bytes: &[u8]) -> (usize, Option<CockpitInput>) {
         match bytes {
-            [0x02] => Some(CockpitInput::Leader),
-            [0x1b, b'[' | b'O', b'A', ..] | [b'k'] | [b'K'] => Some(CockpitInput::Up),
-            [0x1b, b'[' | b'O', b'B', ..] | [b'j'] | [b'J'] => Some(CockpitInput::Down),
-            [0x1b, b'[' | b'O', b'C', ..] | [b'l'] | [b'L'] => Some(CockpitInput::Right),
-            [0x1b, b'[' | b'O', b'D', ..] | [b'h'] | [b'H'] => Some(CockpitInput::Left),
-            [b'\t'] => Some(CockpitInput::Tab),
-            [b'o'] | [b'O'] => Some(CockpitInput::NextPane),
-            [b'z'] | [b'Z'] => Some(CockpitInput::ZoomPane),
-            [b's'] | [b'S'] => Some(CockpitInput::ToggleSidebar),
-            [b'1'] => Some(CockpitInput::FocusSpaces),
-            [b'2'] => Some(CockpitInput::FocusActions),
-            [b'3'] => Some(CockpitInput::FocusThemes),
-            [b'p'] | [b'P'] => Some(CockpitInput::Profile),
-            [b't'] => Some(CockpitInput::ThemeNext),
-            [b'T'] => Some(CockpitInput::ThemePrev),
-            [b'\r'] | [b'\n'] => Some(CockpitInput::Enter),
-            [b'y'] | [b'Y'] => Some(CockpitInput::ConfirmYes),
-            [b'n'] | [b'N'] => Some(CockpitInput::ConfirmNo),
-            [0x1b] => Some(CockpitInput::Escape),
-            [b'q'] | [b'Q'] | [0x03] => Some(CockpitInput::Quit),
-            _ => None,
+            [0x1b, b'[' | b'O', b'A', ..] => (3, Some(CockpitInput::Up)),
+            [0x1b, b'[' | b'O', b'B', ..] => (3, Some(CockpitInput::Down)),
+            [0x1b, b'[' | b'O', b'C', ..] => (3, Some(CockpitInput::Right)),
+            [0x1b, b'[' | b'O', b'D', ..] => (3, Some(CockpitInput::Left)),
+            [0x1b, b'[', rest @ ..] => {
+                let consumed = rest
+                    .iter()
+                    .position(|&b| (0x40..=0x7e).contains(&b))
+                    .map(|idx| idx + 3)
+                    .unwrap_or(bytes.len());
+                (consumed, None)
+            }
+            [0x02, ..] => (1, Some(CockpitInput::Leader)),
+            [b'k' | b'K', ..] => (1, Some(CockpitInput::Up)),
+            [b'j' | b'J', ..] => (1, Some(CockpitInput::Down)),
+            [b'l' | b'L', ..] => (1, Some(CockpitInput::Right)),
+            [b'h' | b'H', ..] => (1, Some(CockpitInput::Left)),
+            [b'\t', ..] => (1, Some(CockpitInput::Tab)),
+            [b'o' | b'O', ..] => (1, Some(CockpitInput::NextPane)),
+            [b'z' | b'Z', ..] => (1, Some(CockpitInput::ZoomPane)),
+            [b's' | b'S', ..] => (1, Some(CockpitInput::ToggleSidebar)),
+            [b'1', ..] => (1, Some(CockpitInput::FocusSpaces)),
+            [b'2', ..] => (1, Some(CockpitInput::FocusActions)),
+            [b'3', ..] => (1, Some(CockpitInput::FocusThemes)),
+            [b'p' | b'P', ..] => (1, Some(CockpitInput::Profile)),
+            [b't', ..] => (1, Some(CockpitInput::ThemeNext)),
+            [b'T', ..] => (1, Some(CockpitInput::ThemePrev)),
+            [b'\r' | b'\n', ..] => (1, Some(CockpitInput::Enter)),
+            [b'y' | b'Y', ..] => (1, Some(CockpitInput::ConfirmYes)),
+            [b'n' | b'N', ..] => (1, Some(CockpitInput::ConfirmNo)),
+            [0x1b, ..] => (1, Some(CockpitInput::Escape)),
+            [b'q' | b'Q' | 0x03, ..] => (1, Some(CockpitInput::Quit)),
+            _ => (1, None),
         }
     }
 }
@@ -321,6 +394,7 @@ pub(crate) struct RunCockpit {
 pub(crate) struct CockpitOutcome {
     pub action: CockpitAction,
     pub branch: Option<String>,
+    pub root: Option<PathBuf>,
     pub profile: CockpitProfile,
     pub theme: ThemePreset,
 }
@@ -339,6 +413,7 @@ impl Job for RunCockpit {
         let worktrees = Self::discover_worktrees(&self.root);
         let free_bytes = Self::free_bytes(&self.root);
         let mut state = CockpitState::new(worktrees, free_bytes, self.theme);
+        let mut reader = KeyReader::new();
         let _guard = RawTerminalGuard::enter(true)
             .map_err(|error| Failure::message(format!("Failed to initialize TUI: {error}")))?;
         loop {
@@ -362,17 +437,23 @@ impl Job for RunCockpit {
                 let _ = stderr.write_all(b"\x1b[J");
                 let _ = stderr.flush();
             }
-            match KeyReader::poll(100) {
+            match reader.poll(100) {
                 Ok(Some(input)) => {
                     let previous_theme = state.theme;
                     let result = state.apply(input);
                     if state.theme != previous_theme {
-                        let _ = ThemeStore::save(state.theme);
+                        if let Err(error) = ThemeStore::save(state.theme) {
+                            state.status_notice =
+                                Some(format!("Theme preview only (save failed: {error})"));
+                        } else {
+                            state.status_notice = None;
+                        }
                     }
-                    if let Some((action, branch, profile, theme)) = result {
+                    if let Some((action, branch, root, profile, theme)) = result {
                         return Ok(CockpitOutcome {
                             action,
                             branch,
+                            root,
                             profile,
                             theme,
                         });
@@ -390,7 +471,7 @@ impl Job for RunCockpit {
 }
 
 impl RunCockpit {
-    fn discover_worktrees(root: &Path) -> Vec<(String, Option<String>, String, bool, bool)> {
+    fn discover_worktrees(root: &Path) -> Vec<(String, Option<String>, PathBuf, bool, bool)> {
         let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         let output = match Command::new("git")
             .arg("-C")
@@ -416,7 +497,6 @@ impl RunCockpit {
                 && let Some(wt_path) = path.take()
             {
                 let wt_canon = wt_path.canonicalize().unwrap_or(wt_path);
-                let is_current = wt_canon == canonical;
                 let folder = wt_canon
                     .file_name()
                     .and_then(|name| name.to_str())
@@ -427,13 +507,33 @@ impl RunCockpit {
                     .clone()
                     .unwrap_or_else(|| format!("detached ({folder})"));
                 let dirty = Self::is_dirty(&wt_canon);
-                items.push((display, branch_arg, folder, is_current, dirty));
+                items.push((display, branch_arg, wt_canon, false, dirty));
                 if items.len() >= 32 {
                     break;
                 }
             }
         }
+        Self::mark_current_worktree(&mut items, &canonical);
         items
+    }
+
+    fn mark_current_worktree(
+        items: &mut [(String, Option<String>, PathBuf, bool, bool)],
+        canonical: &Path,
+    ) {
+        let mut best: Option<(usize, usize)> = None;
+        for (index, (_, _, wt_path, current, _)) in items.iter_mut().enumerate() {
+            *current = false;
+            if canonical.starts_with(wt_path.as_path()) {
+                let score = wt_path.as_os_str().len();
+                if best.is_none_or(|(_, best_score)| score > best_score) {
+                    best = Some((index, score));
+                }
+            }
+        }
+        if let Some((index, _)) = best {
+            items[index].3 = true;
+        }
     }
 
     fn is_dirty(path: &Path) -> bool {
@@ -483,6 +583,7 @@ impl Job for PromptConfirm {
         }
         let _guard = RawTerminalGuard::enter(false)
             .map_err(|error| Failure::message(format!("Failed to initialize prompt: {error}")))?;
+        let mut reader = KeyReader::new();
         let mut apply_selected = true;
         let mut frame = 0usize;
         let mut painted_lines = 0usize;
@@ -495,7 +596,8 @@ impl Job for PromptConfirm {
                 Self::erase_lines(painted_lines);
                 return Err(Failure::interrupted(15));
             }
-            let width = Terminal::size().0.max(self.width.min(60));
+            let measured = Terminal::size().0;
+            let width = if measured > 0 { measured } else { self.width };
             let theme = Theme::new(self.theme, self.color, width);
             let card = theme.clean_prompt(
                 frame,
@@ -513,7 +615,7 @@ impl Job for PromptConfirm {
                 let _ = stderr.flush();
             }
             painted_lines = card.lines().count();
-            match KeyReader::poll(100) {
+            match reader.poll(100) {
                 Ok(Some(
                     CockpitInput::Left
                     | CockpitInput::Right
@@ -576,24 +678,67 @@ mod tests {
 
     #[test]
     fn key_reader_decodes_arrow_vim_theme_and_action_sequences() {
-        assert_eq!(KeyReader::decode(b"\x1b[A"), Some(CockpitInput::Up));
-        assert_eq!(KeyReader::decode(b"\x1b[B"), Some(CockpitInput::Down));
-        assert_eq!(KeyReader::decode(b"\x1b[C"), Some(CockpitInput::Right));
-        assert_eq!(KeyReader::decode(b"\x1b[D"), Some(CockpitInput::Left));
-        assert_eq!(KeyReader::decode(b"k"), Some(CockpitInput::Up));
-        assert_eq!(KeyReader::decode(b"j"), Some(CockpitInput::Down));
-        assert_eq!(KeyReader::decode(b"\t"), Some(CockpitInput::Tab));
-        assert_eq!(KeyReader::decode(b"p"), Some(CockpitInput::Profile));
-        assert_eq!(KeyReader::decode(b"t"), Some(CockpitInput::ThemeNext));
-        assert_eq!(KeyReader::decode(b"T"), Some(CockpitInput::ThemePrev));
-        assert_eq!(KeyReader::decode(b"\r"), Some(CockpitInput::Enter));
-        assert_eq!(KeyReader::decode(b"\x02"), Some(CockpitInput::Leader));
-        assert_eq!(KeyReader::decode(b"o"), Some(CockpitInput::NextPane));
-        assert_eq!(KeyReader::decode(b"z"), Some(CockpitInput::ZoomPane));
-        assert_eq!(KeyReader::decode(b"\x1b"), Some(CockpitInput::Escape));
-        assert_eq!(KeyReader::decode(b"q"), Some(CockpitInput::Quit));
-        assert_eq!(KeyReader::decode(b"\x03"), Some(CockpitInput::Quit));
-        assert_eq!(KeyReader::decode(b"y"), Some(CockpitInput::ConfirmYes));
-        assert_eq!(KeyReader::decode(b"n"), Some(CockpitInput::ConfirmNo));
+        let mut reader = KeyReader::new();
+        reader
+            .pending
+            .extend_from_slice(b"\x1b[A\x1b[B\x1b[C\x1b[Dkj\tptT\r\x02oz\x1bq\x03yn");
+        let mut decoded = Vec::new();
+        while let Some(input) = reader.take_one(true) {
+            decoded.push(input);
+        }
+        assert_eq!(
+            decoded,
+            vec![
+                CockpitInput::Up,
+                CockpitInput::Down,
+                CockpitInput::Right,
+                CockpitInput::Left,
+                CockpitInput::Up,
+                CockpitInput::Down,
+                CockpitInput::Tab,
+                CockpitInput::Profile,
+                CockpitInput::ThemeNext,
+                CockpitInput::ThemePrev,
+                CockpitInput::Enter,
+                CockpitInput::Leader,
+                CockpitInput::NextPane,
+                CockpitInput::ZoomPane,
+                CockpitInput::Escape,
+                CockpitInput::Quit,
+                CockpitInput::Quit,
+                CockpitInput::ConfirmYes,
+                CockpitInput::ConfirmNo,
+            ]
+        );
+        reader.pending.extend_from_slice(b"\x1b[");
+        assert_eq!(reader.take_one(false), None);
+        reader.pending.extend_from_slice(b"A");
+        assert_eq!(reader.take_one(false), Some(CockpitInput::Up));
+    }
+
+    #[test]
+    fn mark_current_worktree_matches_longest_enclosing_root() {
+        let mut items = vec![
+            (
+                "main".into(),
+                Some("main".into()),
+                PathBuf::from("/repo"),
+                false,
+                false,
+            ),
+            (
+                "feat".into(),
+                Some("feat".into()),
+                PathBuf::from("/repo/worktrees/feat"),
+                false,
+                false,
+            ),
+        ];
+        RunCockpit::mark_current_worktree(
+            &mut items,
+            Path::new("/repo/worktrees/feat/crates/vmux_dx"),
+        );
+        assert!(!items[0].3);
+        assert!(items[1].3);
     }
 }

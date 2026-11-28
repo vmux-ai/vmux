@@ -109,6 +109,7 @@ pub(crate) struct Request {
     kind: RequestKind,
     profile: Option<String>,
     apply: bool,
+    allowed_targets: Option<Vec<PathBuf>>,
 }
 
 impl Request {
@@ -117,6 +118,7 @@ impl Request {
             kind,
             profile: None,
             apply: false,
+            allowed_targets: None,
         }
     }
 
@@ -125,14 +127,21 @@ impl Request {
             kind: RequestKind::Finish,
             profile: Some(profile),
             apply: false,
+            allowed_targets: None,
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn clean(apply: bool) -> Self {
+        Self::clean_targets(apply, None)
+    }
+
+    pub(crate) fn clean_targets(apply: bool, allowed_targets: Option<Vec<PathBuf>>) -> Self {
         Self {
             kind: RequestKind::Clean,
             profile: None,
             apply,
+            allowed_targets,
         }
     }
 }
@@ -2268,6 +2277,13 @@ fn remove(
                 continue;
             }
         }
+        if apply
+            && let Some(allowed) = &request.allowed_targets
+            && !allowed.iter().any(|candidate| candidate == &path.0)
+        {
+            io.commands.entity(target).insert(Queued);
+            continue;
+        }
         io.removal_notice(captured.root, &path.0, apply, artifact, dep_file);
         io.commands.entity(target).insert(Queued);
         if !apply {
@@ -2291,7 +2307,7 @@ struct ReportData<'w, 's> {
     usages: Query<'w, 's, &'static Usage>,
     dep_files: QueuedDepFiles<'w, 's>,
     paths: Query<'w, 's, &'static Cwd>,
-    queued: Query<'w, 's, &'static Root, With<Queued>>,
+    queued: Query<'w, 's, (&'static Root, &'static Cwd), With<Queued>>,
 }
 
 impl ReportData<'_, '_> {
@@ -2322,8 +2338,12 @@ impl ReportData<'_, '_> {
         out
     }
 
-    fn queued_count(&self, entity: Entity) -> usize {
-        self.queued.iter().filter(|root| root.0 == entity).count()
+    fn queued_paths(&self, entity: Entity) -> Vec<PathBuf> {
+        self.queued
+            .iter()
+            .filter(|(root, _)| root.0 == entity)
+            .map(|(_, path)| path.0.clone())
+            .collect()
     }
 }
 
@@ -2412,11 +2432,13 @@ fn report(requests: ReportRequests, facts: Facts, data: ReportData, mut commands
                     profile: None,
                 });
                 if matches!(request.kind, RequestKind::Clean) && !request.apply {
+                    let targets = data.queued_paths(entity);
                     commands.write_message(crate::tui::CleanPreviewed {
                         root: captured.root,
-                        reclaimable_count: data.queued_count(entity),
+                        reclaimable_count: targets.len(),
                         free_bytes: capacity.0,
                         cache_bytes: usage.0,
+                        targets,
                     });
                 }
             }
@@ -2731,7 +2753,10 @@ mod tests {
                 RequestKind::Clean => {
                     app.world_mut()
                         .entity_mut(step)
-                        .insert(crate::steps::StorageCleanStep(request.apply));
+                        .insert(crate::steps::StorageCleanStep {
+                            apply: request.apply,
+                            allowed_targets: request.allowed_targets.clone(),
+                        });
                 }
             }
             if guard {

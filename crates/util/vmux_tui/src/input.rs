@@ -1,4 +1,4 @@
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 
 use bevy::ecs::entity::Entity;
 use bevy::ecs::message::Messages;
@@ -366,17 +366,74 @@ impl TerminalIo {
         }
     }
 
-    pub fn poll_stdin(buffer: &mut [u8], timeout_ms: i32) -> usize {
+    pub fn poll_stdin(buffer: &mut [u8], timeout_ms: i32) -> Option<usize> {
         let mut pfd = libc::pollfd {
             fd: libc::STDIN_FILENO,
             events: libc::POLLIN,
             revents: 0,
         };
         let ready = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
-        if ready <= 0 || (pfd.revents & libc::POLLIN) == 0 {
-            return 0;
+        if ready < 0 {
+            return Some(0);
         }
-        io::stdin().read(buffer).unwrap_or(0)
+        if ready == 0 {
+            return Some(0);
+        }
+        if (pfd.revents & libc::POLLIN) == 0 {
+            if (pfd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL)) != 0 {
+                return None;
+            }
+            return Some(0);
+        }
+        let n = unsafe {
+            libc::read(
+                libc::STDIN_FILENO,
+                buffer.as_mut_ptr().cast::<libc::c_void>(),
+                buffer.len(),
+            )
+        };
+        if n > 0 {
+            Some(n as usize)
+        } else if n == 0 {
+            None
+        } else {
+            match io::Error::last_os_error().kind() {
+                io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock => Some(0),
+                _ => None,
+            }
+        }
+    }
+
+    pub fn incomplete_escape_tail(bytes: &[u8]) -> Option<usize> {
+        if bytes.is_empty() || bytes[0] != 0x1b {
+            return None;
+        }
+        if bytes.len() == 1 {
+            return Some(1);
+        }
+        if bytes[1] == b'O' {
+            if bytes.len() == 2 {
+                return Some(2);
+            }
+            return None;
+        }
+        if bytes[1] == b'[' {
+            if bytes.len() == 2 {
+                return Some(2);
+            }
+            if bytes[2] == b'<' {
+                let complete = bytes[3..].iter().any(|&b| b == b'M' || b == b'm');
+                if !complete && bytes.len() < 32 {
+                    return Some(bytes.len());
+                }
+                return None;
+            }
+            let complete = bytes[2..].iter().any(|&b| (0x40..=0x7e).contains(&b));
+            if !complete && bytes.len() < 32 {
+                return Some(bytes.len());
+            }
+        }
+        None
     }
 }
 

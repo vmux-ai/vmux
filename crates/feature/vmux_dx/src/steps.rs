@@ -23,7 +23,10 @@ pub(crate) struct StorageStatusStep;
 
 #[derive(Component, Clone)]
 #[require(Step)]
-pub(crate) struct StorageCleanStep(pub bool);
+pub(crate) struct StorageCleanStep {
+    pub apply: bool,
+    pub allowed_targets: Option<Vec<PathBuf>>,
+}
 
 #[derive(Component, Clone)]
 #[require(Step)]

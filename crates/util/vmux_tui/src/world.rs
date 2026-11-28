@@ -20,7 +20,7 @@ use vmux_command::{CommandBarOpenRequest, CommandInvocation, ReadCommandRequests
 use vmux_ecs::event::{TermResizeEvent, TermScrollEvent, TerminalUiState, TerminalViewportState};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::profile::{Profile, ProfileBootstrapSpec, ProfilePaths, ProjectsRoot};
-use vmux_ecs::service::ServiceRequest;
+use vmux_ecs::service::{ServiceRequest, ServiceUnavailable};
 use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::ui::{UiEmitEvent, UiIpcEpoch, UiIpcGeneration, UiIpcNavigationRevision, UiIpcReady};
 use vmux_ecs::{
@@ -109,6 +109,7 @@ pub struct PaneView {
     pub rect: Rect,
     pub focused: bool,
     pub viewport: Option<TerminalViewportState>,
+    pub scroll_top: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -597,6 +598,7 @@ pub struct TuiWorld {
     pub app: App,
     pub window: Entity,
     last_sizes: HashMap<Entity, (u16, u16)>,
+    scroll_top: HashMap<Entity, u32>,
 }
 
 impl TuiWorld {
@@ -697,6 +699,7 @@ impl TuiWorld {
             app,
             window,
             last_sizes: HashMap::new(),
+            scroll_top: HashMap::new(),
         }
     }
 
@@ -761,6 +764,11 @@ impl TuiWorld {
 
     pub fn exit_requested(&self) -> bool {
         self.app.world().resource::<CommandTracker>().exit_requested
+    }
+
+    pub fn service_unavailable(&mut self) -> Option<String> {
+        let mut query = self.app.world_mut().query::<&ServiceUnavailable>();
+        query.iter(self.app.world()).next().map(|u| u.0.clone())
     }
 
     pub fn is_light_mode(&mut self) -> bool {
@@ -832,8 +840,9 @@ impl TuiWorld {
     }
 
     pub fn is_zoomed(&mut self) -> bool {
-        let mut query = self.app.world_mut().query::<&Zoomed>();
-        query.iter(self.app.world()).next().is_some()
+        self.active_tab_entity()
+            .and_then(|tab| self.zoomed_leaf(tab))
+            .is_some()
     }
 
     pub fn pane_gap(&self) -> bool {
@@ -949,7 +958,7 @@ impl TuiWorld {
             }));
     }
 
-    pub fn scroll_terminal(&mut self, terminal: Entity, delta: i32) {
+    pub fn scroll_terminal(&mut self, terminal: Entity, delta: i32, pane_rows: u16) {
         let Some(ui) = self
             .app
             .world()
@@ -958,19 +967,44 @@ impl TuiWorld {
         else {
             return;
         };
-        let current = ui.viewport.first_row;
-        let max_top = ui.viewport.total_rows.saturating_sub(1);
+        let tail_top = ui.viewport.total_rows.saturating_sub(u32::from(pane_rows));
+        let current = self.scroll_top.get(&terminal).copied().unwrap_or(tail_top);
         let next = if delta < 0 {
             current.saturating_sub(delta.unsigned_abs())
         } else {
-            current.saturating_add(delta as u32).min(max_top)
+            current.saturating_add(delta as u32).min(tail_top)
         };
-        let follow = next >= max_top;
+        let follow = next >= tail_top;
+        if follow {
+            self.scroll_top.remove(&terminal);
+        } else {
+            self.scroll_top.insert(terminal, next);
+        }
         self.app.world_mut().trigger(UiInput {
             webview: terminal,
             payload: TermScrollEvent {
                 top_row: next,
                 follow,
+            },
+        });
+    }
+
+    pub fn clear_scroll(&mut self, terminal: Entity) {
+        if self.scroll_top.remove(&terminal).is_none() {
+            return;
+        }
+        let top_row = self
+            .app
+            .world()
+            .get::<UiState<TerminalUiState>>(terminal)
+            .and_then(UiState::current)
+            .map(|ui| ui.viewport.total_rows)
+            .unwrap_or(0);
+        self.app.world_mut().trigger(UiInput {
+            webview: terminal,
+            payload: TermScrollEvent {
+                top_row,
+                follow: true,
             },
         });
     }
@@ -1026,7 +1060,7 @@ impl TuiWorld {
             return (Vec::new(), Vec::new(), None);
         };
         let focused = self.focused_pane_in(tab);
-        if let Some(zoomed_leaf) = self.zoomed_leaf() {
+        if let Some(zoomed_leaf) = self.zoomed_leaf(tab) {
             let view = self.build_pane_view(zoomed_leaf, workspace, true);
             return (vec![view], Vec::new(), Some(zoomed_leaf));
         }
@@ -1055,6 +1089,7 @@ impl TuiWorld {
         });
         let title = self.terminal_title(terminal, stack);
         let url = self.terminal_url(terminal, stack);
+        let scroll_top = terminal.and_then(|t| self.scroll_top.get(&t).copied());
         PaneView {
             pane,
             terminal,
@@ -1063,6 +1098,7 @@ impl TuiWorld {
             rect,
             focused,
             viewport,
+            scroll_top,
         }
     }
 
@@ -1173,7 +1209,7 @@ impl TuiWorld {
             SplitAxis::Vertical => area.w,
             SplitAxis::Horizontal => area.h,
         };
-        let min_span = match axis {
+        let min_span: u16 = match axis {
             SplitAxis::Vertical => 2,
             SplitAxis::Horizontal => 1,
         };
@@ -1185,11 +1221,16 @@ impl TuiWorld {
         let mut remaining = avail;
         for (index, (&child, &weight)) in children.iter().zip(&weights).enumerate() {
             let is_last = index + 1 == children.len();
+            let rest = (children.len() - index - 1) as u16;
+            let proportional = (f32::from(avail) * (weight / total_weight)).round() as u16;
             let span = if is_last {
                 remaining.max(1)
+            } else if remaining >= min_span.saturating_mul(rest.saturating_add(1)) {
+                let max_span = remaining.saturating_sub(min_span.saturating_mul(rest));
+                proportional.clamp(min_span, max_span)
             } else {
-                ((f32::from(avail) * (weight / total_weight)).round() as u16)
-                    .clamp(min_span, remaining.saturating_sub(min_span).max(1))
+                let max_span = remaining.saturating_sub(rest).max(1);
+                proportional.clamp(1, max_span)
             };
             let child_rect = match axis {
                 SplitAxis::Vertical => Rect {
@@ -1309,9 +1350,8 @@ impl TuiWorld {
             .find(|&child| self.app.world().get::<Terminal>(child).is_some())
     }
 
-    fn zoomed_leaf(&mut self) -> Option<Entity> {
-        let mut query = self.app.world_mut().query::<&Zoomed>();
-        query.iter(self.app.world()).next().map(|z| z.leaf)
+    fn zoomed_leaf(&self, tab: Entity) -> Option<Entity> {
+        self.app.world().get::<Zoomed>(tab).map(|z| z.leaf)
     }
 }
 
@@ -1566,5 +1606,43 @@ mod tests {
             1,
             "closed retiring tab must be removed from tab_strip"
         );
+    }
+
+    #[test]
+    fn narrow_nested_vertical_split_does_not_panic_and_zoom_is_tab_scoped() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = DesktopConfig::for_test(dir.path());
+        let mut world = TuiWorld::boot(80, 24, dir.path().to_path_buf(), config, false);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while world.pane_count() == 0 && std::time::Instant::now() < deadline {
+            world.tick();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        world.press_key(DecodedKey::parse(b"\x02").unwrap());
+        world.press_key(DecodedKey::parse(b"%").unwrap());
+        for _ in 0..8 {
+            world.tick();
+        }
+        let narrow = Rect {
+            x: 1,
+            y: 1,
+            w: 3,
+            h: 10,
+        };
+        let (views, _, _) = world.pane_views(narrow, false);
+        assert_eq!(views.len(), 2);
+        assert!(views.iter().all(|view| view.rect.w >= 1));
+
+        world.press_key(DecodedKey::parse(b"\x02").unwrap());
+        world.press_key(DecodedKey::parse(b"z").unwrap());
+        for _ in 0..4 {
+            world.tick();
+        }
+        assert!(world.is_zoomed());
+        world.send_tab_create();
+        for _ in 0..8 {
+            world.tick();
+        }
+        assert!(!world.is_zoomed());
     }
 }

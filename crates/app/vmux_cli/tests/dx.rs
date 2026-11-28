@@ -2909,14 +2909,25 @@ fn tui_lists_and_persists_desktop_themes_and_refuses_non_tty_interactive_launch(
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
     assert_eq!(saved["theme"], "tokyo-night");
-    Command::cargo_bin("vmux")
+    let listed = Command::cargo_bin("vmux")
         .unwrap()
         .env("VMUX_CLI_TUI_CONFIG", &config)
         .env_remove("VMUX_TUI_THEME")
         .args(["tui", "--list-themes"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("★").and(predicate::str::contains("tokyo-night")));
+        .output()
+        .unwrap();
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    let listed_stdout = String::from_utf8_lossy(&listed.stdout);
+    assert!(
+        listed_stdout
+            .lines()
+            .any(|line| line.contains('★') && line.contains("tokyo-night")),
+        "expected star marker on tokyo-night line, got:\n{listed_stdout}"
+    );
     Command::cargo_bin("vmux")
         .unwrap()
         .env("VMUX_CLI_TUI_CONFIG", &config)

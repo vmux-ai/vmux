@@ -1,15 +1,17 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc as std_mpsc};
 use std::thread;
 use std::time::Duration;
 
 use bevy::prelude::*;
 use tokio::runtime::Runtime;
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc as tokio_mpsc;
 use vmux_api::ProcessId;
 use vmux_api::protocol::{ClientMessage, ServiceMessage};
 use vmux_ecs::service::{
-    ServiceConnected, ServiceInbound, ServiceMessageIngressSet, ServiceRequest,
+    ServiceConnected, ServiceInbound, ServiceMessageIngressSet, ServiceRequest, ServiceUnavailable,
 };
 use vmux_process::{ProcessLaunch, ProcessPlugin, ProcessRuntime};
 use vmux_transport::service::ServiceConnection;
@@ -41,15 +43,42 @@ impl Plugin for ServiceBridgePlugin {
 
 #[derive(Resource)]
 pub struct ServiceBridge {
-    cmd_tx: Mutex<std_mpsc::Sender<ClientMessage>>,
+    cmd_tx: Mutex<Option<std_mpsc::Sender<ClientMessage>>>,
     msg_rx: Mutex<std_mpsc::Receiver<ServiceMessage>>,
+    stop: Arc<AtomicBool>,
+    disconnected: Arc<AtomicBool>,
+    driver: Mutex<Option<thread::JoinHandle<()>>>,
+    worker: Mutex<Option<thread::JoinHandle<()>>>,
     _runtime: Arc<Runtime>,
+}
+
+impl Drop for ServiceBridge {
+    fn drop(&mut self) {
+        if let Ok(mut tx) = self.cmd_tx.lock() {
+            tx.take();
+        }
+        if let Ok(mut handle) = self.driver.lock()
+            && let Some(driver) = handle.take()
+        {
+            let _ = driver.join();
+        }
+        self.stop.store(true, Ordering::Release);
+        if let Ok(mut handle) = self.worker.lock()
+            && let Some(worker) = handle.take()
+        {
+            let _ = worker.join();
+        }
+    }
 }
 
 impl ServiceBridge {
     pub fn send(&self, message: ClientMessage) {
-        if let Ok(tx) = self.cmd_tx.lock() {
-            let _ = tx.send(message);
+        if let Ok(tx) = self.cmd_tx.lock()
+            && tx
+                .as_ref()
+                .is_none_or(|sender| sender.send(message).is_err())
+        {
+            self.disconnected.store(true, Ordering::Release);
         }
     }
 
@@ -82,8 +111,10 @@ impl ServiceBridge {
         };
         let (cmd_tx, cmd_rx) = std_mpsc::channel::<ClientMessage>();
         let (msg_tx, msg_rx) = std_mpsc::channel::<ServiceMessage>();
+        let disconnected = Arc::new(AtomicBool::new(false));
         let read_conn = Arc::clone(&connection);
         let read_rt = Arc::clone(&runtime);
+        let read_disconnected = Arc::clone(&disconnected);
         let _ = thread::Builder::new()
             .name("vmux-tui-read".into())
             .spawn(move || {
@@ -93,24 +124,31 @@ impl ServiceBridge {
                             break;
                         }
                     }
+                    read_disconnected.store(true, Ordering::Release);
                 });
             });
         let write_conn = Arc::clone(&connection);
         let write_rt = Arc::clone(&runtime);
+        let write_disconnected = Arc::clone(&disconnected);
         let _ = thread::Builder::new()
             .name("vmux-tui-write".into())
             .spawn(move || {
                 write_rt.block_on(async move {
                     while let Ok(message) = cmd_rx.recv() {
                         if write_conn.send(&message).await.is_err() {
+                            write_disconnected.store(true, Ordering::Release);
                             break;
                         }
                     }
                 });
             });
         Some(Self {
-            cmd_tx: Mutex::new(cmd_tx),
+            cmd_tx: Mutex::new(Some(cmd_tx)),
             msg_rx: Mutex::new(msg_rx),
+            stop: Arc::new(AtomicBool::new(false)),
+            disconnected,
+            driver: Mutex::new(None),
+            worker: Mutex::new(None),
             _runtime: runtime,
         })
     }
@@ -120,7 +158,9 @@ impl ServiceBridge {
         let (process_runtime, bundle) = ProcessRuntime::new(wake_tx);
         let (cmd_tx, cmd_rx) = std_mpsc::channel::<ClientMessage>();
         let (msg_tx, msg_rx) = std_mpsc::channel::<ServiceMessage>();
-        thread::Builder::new()
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = Arc::clone(&stop);
+        let worker = thread::Builder::new()
             .name("vmux-tui-process-ecs".into())
             .spawn(move || {
                 let mut app = App::new();
@@ -128,26 +168,41 @@ impl ServiceBridge {
                 app.world_mut().spawn(bundle);
                 app.finish();
                 app.cleanup();
-                loop {
+                while !worker_stop.load(Ordering::Acquire) {
                     app.update();
-                    if wake_rx.try_recv().is_ok() {
-                        while wake_rx.try_recv().is_ok() {}
-                        continue;
+                    match wake_rx.try_recv() {
+                        Ok(()) => {
+                            while wake_rx.try_recv().is_ok() {}
+                            continue;
+                        }
+                        Err(tokio_mpsc::error::TryRecvError::Disconnected) => break,
+                        Err(tokio_mpsc::error::TryRecvError::Empty) => {}
                     }
                     thread::sleep(Duration::from_millis(8));
                 }
             })
             .map_err(|error| error.to_string())?;
         let driver_rt = Arc::clone(&runtime);
-        thread::Builder::new()
+        let bridge_stop = Arc::clone(&stop);
+        let driver = match thread::Builder::new()
             .name("vmux-tui-embedded-bridge".into())
             .spawn(move || {
-                Self::run_embedded_bridge(driver_rt, process_runtime, cmd_rx, msg_tx);
-            })
-            .map_err(|error| error.to_string())?;
+                Self::run_embedded_bridge(driver_rt, process_runtime, cmd_rx, msg_tx, bridge_stop);
+            }) {
+            Ok(handle) => handle,
+            Err(error) => {
+                stop.store(true, Ordering::Release);
+                let _ = worker.join();
+                return Err(error.to_string());
+            }
+        };
         Ok(Self {
-            cmd_tx: Mutex::new(cmd_tx),
+            cmd_tx: Mutex::new(Some(cmd_tx)),
             msg_rx: Mutex::new(msg_rx),
+            stop,
+            disconnected: Arc::new(AtomicBool::new(false)),
+            driver: Mutex::new(Some(driver)),
+            worker: Mutex::new(Some(worker)),
             _runtime: runtime,
         })
     }
@@ -157,6 +212,7 @@ impl ServiceBridge {
         processes: ProcessRuntime,
         cmd_rx: std_mpsc::Receiver<ClientMessage>,
         msg_tx: std_mpsc::Sender<ServiceMessage>,
+        stop: Arc<AtomicBool>,
     ) {
         runtime.block_on(async move {
             let mut tasks: HashMap<ProcessId, tokio::task::JoinHandle<()>> = HashMap::new();
@@ -167,6 +223,7 @@ impl ServiceBridge {
                 handle.abort();
             }
             let _ = processes.shutdown().await;
+            stop.store(true, Ordering::Release);
         });
     }
 
@@ -208,9 +265,18 @@ impl ServiceBridge {
                         tasks.insert(
                             id,
                             tokio::spawn(async move {
-                                while let Ok(update) = updates.recv().await {
-                                    if forward.send(update.into_service_message(id)).is_err() {
-                                        break;
+                                loop {
+                                    match updates.recv().await {
+                                        Ok(update) => {
+                                            if forward
+                                                .send(update.into_service_message(id))
+                                                .is_err()
+                                            {
+                                                break;
+                                            }
+                                        }
+                                        Err(RecvError::Lagged(_)) => continue,
+                                        Err(RecvError::Closed) => break,
                                     }
                                 }
                             }),
@@ -269,12 +335,35 @@ fn connect(mut commands: Commands) {
     commands.spawn((Name::new("TUI service bridge"), ServiceConnected));
 }
 
-fn ingress(bridge: Res<ServiceBridge>, mut inbound: MessageWriter<ServiceInbound>) {
-    let Ok(rx) = bridge.msg_rx.lock() else {
-        return;
-    };
-    while let Ok(message) = rx.try_recv() {
-        inbound.write(ServiceInbound(message));
+fn ingress(
+    bridge: Res<ServiceBridge>,
+    connected: Query<Entity, With<ServiceConnected>>,
+    mut inbound: MessageWriter<ServiceInbound>,
+    mut commands: Commands,
+) {
+    let mut disconnected = bridge.disconnected.load(Ordering::Acquire);
+    if let Ok(rx) = bridge.msg_rx.lock() {
+        loop {
+            match rx.try_recv() {
+                Ok(message) => {
+                    inbound.write(ServiceInbound(message));
+                }
+                Err(std_mpsc::TryRecvError::Empty) => break,
+                Err(std_mpsc::TryRecvError::Disconnected) => {
+                    disconnected = true;
+                    break;
+                }
+            }
+        }
+    }
+    if disconnected {
+        bridge.disconnected.store(true, Ordering::Release);
+        for entity in &connected {
+            commands
+                .entity(entity)
+                .remove::<ServiceConnected>()
+                .insert(ServiceUnavailable("vmux service disconnected".into()));
+        }
     }
 }
 
