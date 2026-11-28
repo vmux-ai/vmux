@@ -1,5 +1,14 @@
+#[cfg(feature = "window")]
+pub use crate::DefaultPlugins;
+#[cfg(feature = "ecs")]
+pub use crate::MinimalPlugins;
+#[cfg(any(feature = "http-server", feature = "quic-server"))]
+pub use crate::ServerPlugins;
 pub use crate::{VmuxPlugin, VmuxPluginBuilder, VmuxPluginOptions};
-pub use bevy_app::{App, AppExit, Plugin, PostUpdate, PreStartup, PreUpdate, Startup, Update};
+pub use bevy_app::{
+    App, AppExit, Plugin, PluginGroup, PluginGroupBuilder, PostUpdate, PreStartup, PreUpdate,
+    Startup, Update,
+};
 
 #[cfg(feature = "ecs")]
 pub use crate::VmuxEcsPlugin;

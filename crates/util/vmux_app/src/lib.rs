@@ -1,3 +1,9 @@
+#[cfg(feature = "window")]
+pub use groups::DefaultPlugins;
+#[cfg(feature = "ecs")]
+pub use groups::MinimalPlugins;
+#[cfg(any(feature = "http-server", feature = "quic-server"))]
+pub use groups::ServerPlugins;
 #[cfg(feature = "daemon")]
 pub use host_runtime::SessionHostRuntimePlugin;
 #[cfg(feature = "mobile")]
@@ -56,6 +62,7 @@ pub mod bevy {
 
 #[cfg(feature = "release-flags")]
 mod feature_flags;
+mod groups;
 #[cfg(feature = "daemon")]
 mod host_runtime;
 #[cfg(feature = "menu")]
