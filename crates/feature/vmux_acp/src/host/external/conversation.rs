@@ -335,7 +335,7 @@ impl Files {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.to_string()),
         };
-        for entry in directories.into_iter().take(10_000) {
+        for entry in directories.take(10_000) {
             let entry = entry.map_err(|error| error.to_string())?;
             if !entry
                 .file_type()

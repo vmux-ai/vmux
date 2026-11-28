@@ -351,7 +351,7 @@ impl Reader {
             let Ok(entries) = super::fs_io::ExternalFsIo::read_dir(&directory) else {
                 continue;
             };
-            for entry in entries.into_iter().flatten() {
+            for entry in entries.flatten() {
                 entries_seen += 1;
                 if entries_seen > Self::MAX_SESSION_ENTRIES {
                     break 'walk;

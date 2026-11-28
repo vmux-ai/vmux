@@ -1,4 +1,4 @@
-use std::fs::{DirEntry, File, Metadata};
+use std::fs::{File, Metadata, ReadDir};
 use std::path::Path;
 
 pub(super) struct ExternalFsIo;
@@ -16,7 +16,7 @@ impl ExternalFsIo {
         std::fs::symlink_metadata(path)
     }
 
-    pub(super) fn read_dir(path: &Path) -> std::io::Result<Vec<std::io::Result<DirEntry>>> {
-        Ok(std::fs::read_dir(path)?.collect())
+    pub(super) fn read_dir(path: &Path) -> std::io::Result<ReadDir> {
+        std::fs::read_dir(path)
     }
 }

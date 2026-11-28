@@ -125,7 +125,7 @@ impl ProviderReader for Reader {
             Err(error) => return Err(error.to_string()),
         };
         let mut sessions = Vec::new();
-        for (index, entry) in entries.into_iter().flatten().enumerate() {
+        for (index, entry) in entries.flatten().enumerate() {
             if index >= Self::MAX_SESSIONS {
                 break;
             }
