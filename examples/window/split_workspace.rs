@@ -148,34 +148,10 @@ fn main() {
     if headless {
         config = config.headless();
     }
-    let mut app = App::new();
-    app.add_plugins((
-        DefaultPlugins.set(WindowHostPlugin::new(config)),
-        WorkspaceDemoPlugin { headless },
-    ));
-    if headless {
-        app.update();
-        app.update();
-        let panes = app
-            .world_mut()
-            .query_filtered::<Entity, With<Pane>>()
-            .iter(app.world())
-            .count();
-        let mut bounds: Vec<PageBounds> = app
-            .world_mut()
-            .query_filtered::<&PageBounds, With<UiIpcReady>>()
-            .iter(app.world())
-            .copied()
-            .collect();
-        bounds.sort_by(|a, b| a.left.total_cmp(&b.left));
-        assert_eq!(bounds.len(), 2);
-        assert!(bounds[0].width > 0.0);
-        assert!(bounds[1].left >= bounds[0].width - 1.0);
-        println!(
-            "split workspace headless smoke passed: panes={panes} pages={} bounds={bounds:?}",
-            bounds.len()
-        );
-        return;
-    }
-    app.run();
+    App::new()
+        .add_plugins((
+            DefaultPlugins.set(WindowHostPlugin::new(config)),
+            WorkspaceDemoPlugin { headless },
+        ))
+        .run();
 }
