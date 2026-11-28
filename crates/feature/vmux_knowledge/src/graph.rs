@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Component as PathComponent, Path, PathBuf};
 
-use bevy::ecs::system::SystemParam;
-use bevy::prelude::*;
-use bevy::prelude::{App, Commands, Plugin};
+use bevy_app::{App, Plugin};
+use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 use vmux_ecs::Order;
 use vmux_ecs::event::{MdBlock, MdInline, NoteBlock};
 use vmux_path::PathIdentity;
@@ -594,7 +594,7 @@ pub struct KnowledgeBrokenLink {
 }
 
 impl KnowledgeGraph<'_, '_> {
-    pub(crate) fn root(&self, owner: Entity) -> Option<&Path> {
+    pub fn root(&self, owner: Entity) -> Option<&Path> {
         self.resolver
             .roots
             .get(owner)
@@ -965,7 +965,7 @@ fn retire(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::system::RunSystemOnce;
+    use bevy_ecs::system::RunSystemOnce;
 
     struct GraphFixture {
         directory: tempfile::TempDir,

@@ -55,6 +55,10 @@ feature-session = [
     "window",
     "vmux_app/session-core",
 ]
+feature-knowledge = [
+    "window",
+    "vmux_app/knowledge-core",
+]
 
 [dependencies]
 bevy_app = { workspace = true }
@@ -200,3 +204,8 @@ required-features = ["feature-extension"]
 name = "feature_session"
 path = "features/session.rs"
 required-features = ["feature-session"]
+
+[[example]]
+name = "feature_knowledge"
+path = "features/knowledge.rs"
+required-features = ["feature-knowledge"]

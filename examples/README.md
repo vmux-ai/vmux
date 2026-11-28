@@ -51,6 +51,7 @@ Each feature example boots its own interactive CEF-free desktop app with `Defaul
 | Accounts & Profiles | [`features/account.rs`](features/account.rs) | `DefaultPlugins` + `AccountPlugin` + `local::LocalPlugin`: interactive SQLite-backed local profile creation and rename. | `cargo run -p vmux_examples --features feature-account --example feature_account` |
 | Extension Catalog | [`features/extension.rs`](features/extension.rs) | `DefaultPlugins` + `ExtensionPlugin`: interactive permission-approved enable/disable and pin toggles. | `cargo run -p vmux_examples --features feature-extension --example feature_extension` |
 | Sessions & Queue | [`features/session.rs`](features/session.rs) | `DefaultPlugins` + `SessionDomainPlugin` + `QueuePlugin`: interactive session creation, stage transitions, and FIFO prompt queue. | `cargo run -p vmux_examples --features feature-session --example feature_session` |
+| Knowledge Graph | [`features/knowledge.rs`](features/knowledge.rs) | `DefaultPlugins` + `KnowledgeGraphPlugin`: interactive Markdown vault search, wikilink resolution, backlinks, and broken links (zero CEF). | `cargo run -p vmux_examples --features feature-knowledge --example feature_knowledge` |
 
 ---
 

@@ -7,14 +7,14 @@ pub use graph::{
     KnowledgeReady, KnowledgeResolvedLink, KnowledgeSearchHit, LiveKnowledge, MaterializeKnowledge,
     RetireKnowledge,
 };
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub use host::KnowledgePlugin;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub use rename::{
     ApplyKnowledgeRename, KnowledgeRenameComplete, KnowledgeRenamePlugin, KnowledgeRenamePrepared,
     PrepareKnowledgeRename,
 };
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub use tool::KnowledgeToolPlugin;
 pub use vmux_api::knowledge::{KnowledgeProperty, KnowledgePropertyKind, KnowledgeReference};
 
@@ -25,14 +25,14 @@ impl vmux_feature::manifest::FeatureManifestSource for Feature {
 }
 
 mod driver;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 mod host;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 mod tool;
 
 #[cfg(host)]
 mod graph;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 mod rename;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 mod rename_io;

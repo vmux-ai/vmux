@@ -31,4 +31,5 @@ pub const FEATURE_EXAMPLES: &[(&str, &str)] = &[
     ("feature-account", "feature_account"),
     ("feature-extension", "feature_extension"),
     ("feature-session", "feature_session"),
+    ("feature-knowledge", "feature_knowledge"),
 ];
