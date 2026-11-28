@@ -161,6 +161,7 @@ mod profile_identity;
 pub mod record;
 mod rename;
 mod resource_path;
+mod resource_path_io;
 pub mod revision;
 pub mod scroll;
 #[cfg(all(host, feature = "headless-host"))]

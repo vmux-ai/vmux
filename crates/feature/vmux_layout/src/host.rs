@@ -51,6 +51,7 @@ mod window_buttons;
 pub mod workspace_snapshot;
 pub mod workspace_snapshot_publish;
 pub mod worktree;
+mod worktree_io;
 
 mod swap;
 mod webview_reveal;

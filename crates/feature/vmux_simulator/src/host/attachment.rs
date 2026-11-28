@@ -1,5 +1,5 @@
 use super::device::{Axe, SimulatorDevice};
-use super::hid::HidBroker;
+use super::hid_driver::HidBroker;
 use super::input::{DeviceTouchSession, SimulatorClipboard, SimulatorKeyboard};
 use super::stream::StreamServer;
 use super::{DevicePixels, DevicePoints};

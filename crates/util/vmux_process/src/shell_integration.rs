@@ -55,7 +55,11 @@ impl ProcessShell {
             None => Err("directory switching requires a supported shell".into()),
         }
     }
+}
 
+pub(crate) struct ShellIntegrationIo;
+
+impl ShellIntegrationIo {
     pub(crate) fn inject(
         command: &str,
         args: &mut Vec<String>,
@@ -403,7 +407,7 @@ mod tests {
         let dir = std::env::temp_dir().join("vmux-si-test-dashc");
         let mut args = vec!["-c".to_string(), "echo hi".to_string()];
         let mut env = vec![];
-        ShellIntegration::inject("/bin/bash", &mut args, &mut env, &dir);
+        ShellIntegrationIo::inject("/bin/bash", &mut args, &mut env, &dir);
         assert_eq!(args, vec!["-c".to_string(), "echo hi".to_string()]);
         assert!(env.is_empty());
     }
@@ -413,7 +417,7 @@ mod tests {
         let dir = std::env::temp_dir().join("vmux-si-test-unknown");
         let mut args: Vec<String> = vec![];
         let mut env = vec![];
-        ShellIntegration::inject("/bin/sh", &mut args, &mut env, &dir);
+        ShellIntegrationIo::inject("/bin/sh", &mut args, &mut env, &dir);
         assert!(args.is_empty());
         assert!(env.is_empty());
     }
@@ -423,7 +427,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("vmux-si-bash-{}", std::process::id()));
         let mut args: Vec<String> = vec![];
         let mut env = vec![];
-        ShellIntegration::inject("/bin/bash", &mut args, &mut env, &dir);
+        ShellIntegrationIo::inject("/bin/bash", &mut args, &mut env, &dir);
         assert_eq!(args.first().map(String::as_str), Some("--rcfile"));
         assert!(args[1].ends_with("bashrc"));
         assert!(
@@ -439,7 +443,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("vmux-si-zsh-{}", std::process::id()));
         let mut args: Vec<String> = vec![];
         let mut env = vec![("ZDOTDIR".to_string(), "/user/zdot".to_string())];
-        ShellIntegration::inject("/usr/bin/zsh", &mut args, &mut env, &dir);
+        ShellIntegrationIo::inject("/usr/bin/zsh", &mut args, &mut env, &dir);
         assert!(args.is_empty());
         let zdot = env.iter().find(|(k, _)| k == "ZDOTDIR").unwrap();
         assert!(zdot.1.ends_with("zsh"));
@@ -461,7 +465,7 @@ mod tests {
         let dir = std::env::temp_dir().join("vmux-si-fish");
         let mut args: Vec<String> = vec![];
         let mut env = vec![];
-        ShellIntegration::inject("/opt/homebrew/bin/fish", &mut args, &mut env, &dir);
+        ShellIntegrationIo::inject("/opt/homebrew/bin/fish", &mut args, &mut env, &dir);
         assert_eq!(args.first().map(String::as_str), Some("--init-command"));
         assert!(args[1].contains("fish_preexec"));
         assert!(args[1].contains("133;C"));
@@ -472,7 +476,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("vmux-si-nu-{}", std::process::id()));
         let mut args: Vec<String> = vec![];
         let mut env = vec![];
-        ShellIntegration::inject("/opt/homebrew/bin/nu", &mut args, &mut env, &dir);
+        ShellIntegrationIo::inject("/opt/homebrew/bin/nu", &mut args, &mut env, &dir);
         assert_eq!(args.first().map(String::as_str), Some("--config"));
         assert!(args[1].ends_with("config.nu"));
         assert!(

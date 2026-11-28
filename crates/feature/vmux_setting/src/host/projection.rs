@@ -701,7 +701,8 @@ fn project_schema(
     }
     schema.sections.sort_by_key(|section| section.order);
     let locales = profile.paths().map(|paths| paths.config().join("locales"));
-    schema.localize(&locale, locales.as_deref());
+    super::settings_io::SettingsFileIo::load_locale(&locale, locales.as_deref());
+    schema.localize(&locale);
     for mut current in &mut views {
         if *current != schema {
             current.clone_from(&schema);

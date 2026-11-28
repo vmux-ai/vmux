@@ -1,5 +1,5 @@
 use super::device::{Axe, SimulatorDevice};
-use super::hid::{HidBroker, HidRequest};
+use super::hid_driver::{HidBroker, HidRequest};
 use super::{
     ActiveSimulatorView, DevicePixels, DevicePoints, HardwareButtonRequest, SimulatorButton,
     SimulatorButtonPressRequest, SimulatorClipboardRequest, SimulatorControlResponse,

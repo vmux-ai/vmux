@@ -197,36 +197,9 @@ impl FileStore {
             paths.push(relative.to_path_buf());
         }
         let imports = root.join("imported");
-        let entries = match std::fs::read_dir(&imports) {
-            Ok(entries) => entries,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-                ) =>
-            {
-                return Ok(paths);
-            }
-            Err(error) => return Err(Error::Unavailable(error.to_string())),
-        };
-        for entry in entries {
-            let entry = entry.map_err(|error| Error::Unavailable(error.to_string()))?;
-            let path = entry.path();
-            let Ok(target) = std::fs::read_link(&path) else {
-                continue;
-            };
-            let target = if target.is_absolute() {
-                target
-            } else {
-                imports.join(target)
-            };
-            if vmux_path::PathIdentity::resolve(&target) != directory {
-                continue;
-            }
-            if let Ok(relative) = path.strip_prefix(root) {
-                paths.push(relative.to_path_buf());
-            }
-        }
+        paths.extend(crate::filesystem_io::FilesystemIo::imported_aliases(
+            root, &imports, &directory,
+        )?);
         Ok(paths)
     }
 }

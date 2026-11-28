@@ -129,12 +129,10 @@ impl Drop for Process {
 #[derive(Component)]
 pub(crate) struct Lease(File);
 
-impl Lease {
-    pub(crate) fn acquire(directory: &Path) -> io::Result<Self> {
-        Self::named(directory, "engine.lock")
-    }
+struct LeaseIo;
 
-    pub(crate) fn named(directory: &Path, name: &str) -> io::Result<Self> {
+impl LeaseIo {
+    fn open(directory: &Path, name: &str) -> io::Result<File> {
         let file = OpenOptions::new()
             .create(true)
             .read(true)
@@ -144,7 +142,17 @@ impl Lease {
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err(io::Error::last_os_error());
         }
-        Ok(Self(file))
+        Ok(file)
+    }
+}
+
+impl Lease {
+    pub(crate) fn acquire(directory: &Path) -> io::Result<Self> {
+        Self::named(directory, "engine.lock")
+    }
+
+    pub(crate) fn named(directory: &Path, name: &str) -> io::Result<Self> {
+        Ok(Self(LeaseIo::open(directory, name)?))
     }
 
     pub(crate) fn retired(directory: &Path) -> io::Result<()> {
@@ -244,21 +252,7 @@ impl Drop for Lease {
 
 impl Settings {
     pub(crate) fn clean_sockets(&self) -> io::Result<()> {
-        for path in [
-            self.socket(),
-            self.transport_socket(),
-            self.control_socket(),
-            self.guest_control(),
-            self.network_socket(),
-            self.network_api(),
-        ] {
-            match std::fs::remove_file(path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
-            }
-        }
-        Ok(())
+        crate::settings::SettingsIo::clean_sockets(self)
     }
 }
 

@@ -14,6 +14,8 @@ pub use vmux_ecs::Revision;
 pub mod contract;
 #[cfg(feature = "filesystem")]
 pub mod filesystem;
+#[cfg(feature = "filesystem")]
+mod filesystem_io;
 mod registration;
 mod route;
 mod snapshot;

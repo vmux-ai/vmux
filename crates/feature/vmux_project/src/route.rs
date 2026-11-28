@@ -113,7 +113,7 @@ impl ProjectRoute {
             }
         };
         let imported = path.parent() == Some(root.join("imported").as_path())
-            && std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_symlink());
+            && crate::filesystem_io::FilesystemIo::is_symlink(&path);
         if (!canonical.starts_with(&root) && !imported) || !path.is_dir() || !canonical.is_dir() {
             return Some(Err("project is unavailable".to_string()));
         }

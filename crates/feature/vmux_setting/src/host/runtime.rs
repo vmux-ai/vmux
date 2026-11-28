@@ -497,13 +497,13 @@ impl AppearanceSettings {
     }
 
     pub fn from_disk() -> Self {
-        let path = vmux_ecs::profile::ProfilePaths::current().settings();
-        let Ok(source) = std::fs::read_to_string(path) else {
-            return Self::default();
-        };
+        super::settings_io::SettingsFileIo::read_appearance()
+    }
+
+    pub(super) fn parse_ron(source: &str) -> Self {
         ron::Options::default()
             .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
-            .from_str::<PartialAppSettings>(&source)
+            .from_str::<PartialAppSettings>(source)
             .ok()
             .and_then(|settings| settings.appearance)
             .unwrap_or_default()
@@ -1434,7 +1434,7 @@ fn load_settings(
         migrate_projects = partial.needs_project_ids();
     }
     let (settings, config_path) = match config_path {
-        Some(path) => SettingsFileIo::read_and_path(&defaults.0, path),
+        Some(path) => super::settings_io::SettingsFileIo::read_and_path(&defaults.0, path),
         None => (defaults.0.clone(), None),
     };
     if migrate_projects {
@@ -1556,39 +1556,8 @@ fn sync_search_engine(
     }
 }
 
-struct SettingsFileIo;
-
-impl SettingsFileIo {
-    fn read_and_path(
-        defaults: &AppSettings,
-        path: std::path::PathBuf,
-    ) -> (AppSettings, Option<std::path::PathBuf>) {
-        let parent_ready = path
-            .parent()
-            .is_some_and(|parent| std::fs::create_dir_all(parent).is_ok());
-        if parent_ready {
-            let settings = match std::fs::read_to_string(&path) {
-                Ok(text) => match AppSettings::parse_with_defaults(&text, defaults) {
-                    Ok(settings) => settings,
-                    Err(error) => {
-                        bevy::log::warn!(
-                            "Ignoring invalid config {}: {error}; using feature defaults",
-                            path.display()
-                        );
-                        defaults.clone()
-                    }
-                },
-                Err(_) => defaults.clone(),
-            };
-            (settings, Some(path))
-        } else {
-            (defaults.clone(), None)
-        }
-    }
-}
-
 impl AppSettings {
-    fn parse_with_defaults(
+    pub(super) fn parse_with_defaults(
         text: &str,
         defaults: &AppSettings,
     ) -> Result<AppSettings, ron::error::SpannedError> {

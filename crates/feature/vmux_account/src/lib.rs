@@ -46,6 +46,8 @@ mod wire;
 
 #[cfg(feature = "local")]
 pub mod local;
+#[cfg(feature = "local")]
+mod local_io;
 
 #[cfg(feature = "cloud")]
 pub mod cloud;

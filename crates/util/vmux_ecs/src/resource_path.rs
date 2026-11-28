@@ -189,8 +189,7 @@ impl ContentDigest {
     }
 
     pub fn from_file(path: impl AsRef<Path>) -> std::io::Result<Self> {
-        let bytes = std::fs::read(path)?;
-        Ok(Self::sha256(&bytes))
+        crate::resource_path_io::ContentDigestIo::from_file(path)
     }
 
     pub fn parse(raw: &str) -> Result<Self, String> {
