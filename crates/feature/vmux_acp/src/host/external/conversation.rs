@@ -330,7 +330,7 @@ impl Files {
         if !Self::valid_id(sid) {
             return Err("invalid session history identifier".into());
         }
-        let directories = match std::fs::read_dir(root) {
+        let directories = match super::fs_io::ExternalFsIo::read_dir(root) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.to_string()),
@@ -347,10 +347,13 @@ impl Files {
             let directory = entry.path();
             if metadata {
                 let meta = directory.join("meta.json");
-                if !std::fs::symlink_metadata(&meta).is_ok_and(|meta| meta.file_type().is_file()) {
+                if !super::fs_io::ExternalFsIo::symlink_metadata(&meta)
+                    .is_ok_and(|meta| meta.file_type().is_file())
+                {
                     continue;
                 }
-                let file = File::open(meta).map_err(|error| error.to_string())?;
+                let file =
+                    super::fs_io::ExternalFsIo::open(&meta).map_err(|error| error.to_string())?;
                 let value: serde_json::Value = match serde_json::from_reader(file.take(1024 * 1024))
                 {
                     Ok(value) => value,
@@ -365,7 +368,9 @@ impl Files {
             } else {
                 format!("{sid}.jsonl")
             });
-            if std::fs::symlink_metadata(&file).is_ok_and(|meta| meta.file_type().is_file()) {
+            if super::fs_io::ExternalFsIo::symlink_metadata(&file)
+                .is_ok_and(|meta| meta.file_type().is_file())
+            {
                 return Ok(Some(file));
             }
         }
@@ -526,7 +531,7 @@ impl FileConversation {
         tail_bytes: u64,
         decoder: impl Decoder,
     ) -> Result<ReadResult, String> {
-        let mut file = File::open(path).map_err(|error| error.to_string())?;
+        let mut file = super::fs_io::ExternalFsIo::open(path).map_err(|error| error.to_string())?;
         let metadata = file.metadata().map_err(|error| error.to_string())?;
         let physical_length = metadata.len();
         let identity = Self::identity(path, &metadata)?;
@@ -694,7 +699,7 @@ impl FileConversation {
         known: Option<&FileFacts>,
         decoder: impl Decoder,
     ) -> Result<ReadResult, String> {
-        let mut file = File::open(path).map_err(|error| error.to_string())?;
+        let mut file = super::fs_io::ExternalFsIo::open(path).map_err(|error| error.to_string())?;
         let metadata = file.metadata().map_err(|error| error.to_string())?;
         let length = metadata.len();
         let identity = Self::identity(path, &metadata)?;

@@ -319,7 +319,10 @@ impl TrayHandle {
         let tag = locale.as_str();
         if let Some(source) = [tag, tag.split('-').next().unwrap_or(tag)]
             .into_iter()
-            .find_map(|tag| std::fs::read_to_string(directory.join(format!("{tag}.ftl"))).ok())
+            .find_map(|tag| {
+                crate::fs_io::DesktopFsIo::read_to_string(&directory.join(format!("{tag}.ftl")))
+                    .ok()
+            })
         {
             let _ = locale.register_catalog(&source);
         }

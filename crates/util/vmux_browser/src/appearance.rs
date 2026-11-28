@@ -40,9 +40,10 @@ impl BrowserLocale {
         let directory = vmux_ecs::profile::ProfilePaths::current()
             .config()
             .join("locales");
-        [self.0.as_str(), self.0.split('-').next().unwrap_or(&self.0)]
-            .into_iter()
-            .find_map(|tag| std::fs::read_to_string(directory.join(format!("{tag}.ftl"))).ok())
+        crate::appearance_io::AppearanceIo::read_catalog(
+            &directory,
+            [self.0.as_str(), self.0.split('-').next().unwrap_or(&self.0)],
+        )
     }
 }
 

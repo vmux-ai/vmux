@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -183,7 +182,7 @@ impl Reader {
     }
 
     fn state_database(&self) -> Result<Option<PathBuf>, String> {
-        let entries = match std::fs::read_dir(&self.root) {
+        let entries = match super::fs_io::ExternalFsIo::read_dir(&self.root) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.to_string()),
@@ -247,7 +246,7 @@ impl Reader {
                 .join(format!("{:04}", date.year()))
                 .join(format!("{:02}", date.month()))
                 .join(format!("{:02}", date.day()));
-            let metadata = match std::fs::symlink_metadata(&directory) {
+            let metadata = match super::fs_io::ExternalFsIo::symlink_metadata(&directory) {
                 Ok(metadata) => metadata,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error.to_string()),
@@ -255,7 +254,8 @@ impl Reader {
             if metadata.file_type().is_symlink() {
                 return Err("Codex rollout directory is a symlink".to_string());
             }
-            let entries = std::fs::read_dir(directory).map_err(|error| error.to_string())?;
+            let entries = super::fs_io::ExternalFsIo::read_dir(&directory)
+                .map_err(|error| error.to_string())?;
             for entry in entries {
                 let entry = entry.map_err(|error| error.to_string())?;
                 let kind = entry.file_type().map_err(|error| error.to_string())?;
@@ -270,7 +270,8 @@ impl Reader {
                 if !matches {
                     continue;
                 }
-                let file = File::open(&path).map_err(|error| error.to_string())?;
+                let file =
+                    super::fs_io::ExternalFsIo::open(&path).map_err(|error| error.to_string())?;
                 let Some(line) = BoundedLines::new(BufReader::new(file)).next() else {
                     continue;
                 };
@@ -286,7 +287,7 @@ impl Reader {
     }
 
     fn indexed(&self) -> Result<HashMap<String, CodexIndexed>, String> {
-        let file = match File::open(&self.index) {
+        let file = match super::fs_io::ExternalFsIo::open(&self.index) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(HashMap::new());
@@ -347,7 +348,7 @@ impl Reader {
         let mut entries_seen = 0usize;
         let mut files = 0usize;
         'walk: while let Some((directory, depth)) = directories.pop() {
-            let Ok(entries) = std::fs::read_dir(directory) else {
+            let Ok(entries) = super::fs_io::ExternalFsIo::read_dir(&directory) else {
                 continue;
             };
             for entry in entries.flatten() {
@@ -383,7 +384,7 @@ impl Reader {
                 if !missing.contains(&activity.sid) {
                     continue;
                 }
-                let Ok(file) = File::open(&path) else {
+                let Ok(file) = super::fs_io::ExternalFsIo::open(&path) else {
                     continue;
                 };
                 let Some(line) = BoundedLines::new(BufReader::new(file)).next() else {
@@ -450,7 +451,7 @@ impl Reader {
             if remaining == 0 {
                 continue;
             }
-            let metadata = match std::fs::symlink_metadata(&directory) {
+            let metadata = match super::fs_io::ExternalFsIo::symlink_metadata(&directory) {
                 Ok(metadata) => metadata,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error.to_string()),
@@ -461,7 +462,7 @@ impl Reader {
             if !metadata.file_type().is_dir() {
                 continue;
             }
-            let entries = match std::fs::read_dir(directory) {
+            let entries = match super::fs_io::ExternalFsIo::read_dir(&directory) {
                 Ok(entries) => entries,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error.to_string()),
@@ -542,7 +543,7 @@ pub(super) struct RolloutActivity {
 
 impl RolloutActivity {
     pub(super) fn read(path: &Path) -> Option<Self> {
-        let metadata = std::fs::symlink_metadata(path).ok()?;
+        let metadata = super::fs_io::ExternalFsIo::symlink_metadata(path).ok()?;
         if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
             return None;
         }
@@ -877,7 +878,7 @@ impl CodexImageTag {
             _ => "application/octet-stream",
         }
         .to_string();
-        let size = std::fs::metadata(&self.0)
+        let size = super::fs_io::ExternalFsIo::metadata(&self.0)
             .map(|metadata| metadata.len())
             .unwrap_or_default();
         AgentAttachment {

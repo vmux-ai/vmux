@@ -23,6 +23,7 @@ mod capture_output;
     not(feature = "updater")
 ))]
 mod disabled_features;
+mod fs_io;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
 mod log_forward;

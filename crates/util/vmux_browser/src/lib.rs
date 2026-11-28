@@ -39,6 +39,7 @@ impl vmux_feature::manifest::FeatureManifestSource for Feature {
 }
 
 mod appearance;
+mod appearance_io;
 mod command;
 mod dom_snapshot;
 mod frame_rate;

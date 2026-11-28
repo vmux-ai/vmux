@@ -610,29 +610,22 @@ impl ExpandedProjectDirs {
     }
 
     fn children_of(&self, dir: &std::path::Path, depth: u32) -> Vec<ProjectRow> {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return Vec::new();
-        };
         let mut rows = Vec::new();
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
+        for (name, entry_path, is_dir) in super::space_io::SpaceFsIo::read_dir_entries(dir) {
             if Self::UNLISTED_DIRS.contains(&name.as_str()) {
                 continue;
             }
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            let path = entry.path().to_string_lossy().into_owned();
+            let path = entry_path.to_string_lossy().into_owned();
             rows.push(ProjectRow {
                 label: name,
                 identity: String::new(),
                 display_path: path.clone(),
                 depth,
-                kind: match kind.is_dir() {
+                kind: match is_dir {
                     true => ProjectRowKind::Directory,
                     false => ProjectRowKind::File,
                 },
-                expanded: kind.is_dir() && self.holds(&path),
+                expanded: is_dir && self.holds(&path),
                 path,
                 is_active: false,
                 is_worktree: false,
