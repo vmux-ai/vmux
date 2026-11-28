@@ -34,4 +34,13 @@ Start with [Start with Vmux](ux/getting-things-done.md), written for someone com
 3. [Make a change](dx/feature-development.md): follow a screen into its callback and handler.
 4. [Test and share a build](dx/validation-and-release.md): check the result and share it.
 
-[Keep your own version](dx/customization.md) covers a personal fork. [Reuse features in another app](dx/framework.md) is optional reading for building a separate Rust application.
+[Keep your own version](dx/customization.md) covers a personal fork.
+
+## Vmux Framework: build another app
+
+- [Framework overview](dx/framework.md): examples, SDK validation, and version pinning.
+- [Framework quickstart](dx/framework/framework-quickstart.md): run a CEF-free desktop window or headless ECS app in minutes.
+- [Core concepts](dx/framework/framework-core-concepts.md): the eight primitives, entity vocabulary, operations, async, and autosave.
+- [Windows, pages, and menus](dx/framework/framework-windows-and-pages.md): `WindowHostPlugin`, `PageHostPlugin`, `UiState`/`UiEvent`, menus, and web hosting.
+- [Testing and plugin authoring](dx/framework/framework-testing-and-plugins.md): deterministic headless testing, `feature.ron` composition, and product namespaces.
+- [Crates and macros reference](dx/framework/framework-reference.md): `vmux_app` feature matrix, macro cheat sheet, and target support.
